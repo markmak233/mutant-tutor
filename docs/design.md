@@ -5,13 +5,15 @@ Living record of project decisions. Update it when a decision changes; note the 
 ## Goals
 
 1. Primary: portfolio project demonstrating LangGraph, RAG and LLM evaluation with real engineering judgment.
-2. Secondary: COMP9313 revision. The owner solves generated exercises himself; AI never writes the answers.
+2. Secondary: COMP9313 revision. The owner solves the generated exercises; AI never writes the answers.
 
 ## Roles of AI tools
 
 - Claude Code is the development assistant for building this system. It is not part of the runtime.
 - The system itself calls an LLM API (provider not yet decided).
-- The first exercises (golden set) are generated manually with web chat models, then reviewed and solved by the owner.
+- The first exercises (golden set) are drafted by Claude Code in chat from the materials the owner
+  picks, checked by the validator, then solved by the owner (decided 2026-10-24; replaces web chat
+  models, because Claude Code can run the validator while drafting).
 - In phases 1-2, Claude Code also acts as the tutor: the owner solves, runs the tests, and asks in
   chat when stuck. Rules live in CLAUDE.md ("Tutoring"): read the code and run the tests first,
   explain the first real error and its concept, direction before code, never touch `student.py`
@@ -113,7 +115,7 @@ smartcodereview-workspace/
     │   └── ass2/
     ├── batches/                         # one directory per generation run
     │   ├── 2026-10-27_p2-golden/
-    │   │   ├── manifest.json            # phase, date, method, model, git commit, exercise list
+    │   │   ├── manifest.json            # phase, date, mode, sources, method, model, git commit, exercises
     │   │   ├── exercises/               # the only place the owner looks while solving
     │   │   │   └── <exercise-id>/
     │   │   │       ├── student.py       # the one file to open: question in the module docstring,
@@ -141,6 +143,13 @@ smartcodereview-workspace/
 
 - Batch name: `YYYY-MM-DD_p<phase>-<label>`, suffix `-2`, `-3` for repeat runs on the same day.
 - The phase in the name is a hint only; `manifest.json` records the git commit that produced the batch.
+- Material selection (decided 2026-10-24): each batch is generated from materials the owner picks,
+  e.g. one week while learning it, or several weeks mixed for review. `manifest.json` `sources`
+  lists them (workspace-relative paths, optional page ranges); each exercise's metadata `source`
+  narrows it to pages. The label usually names the week: `2026-10-25_p2-w2-mapreduce`.
+- Generation takes exactly two inputs, a source list and a mode; any selection UI (terminal
+  checklist, tkinter, a local web page) only produces those, so the UI can change without
+  touching generation. No UI in phase 2: the owner names the materials in chat.
 - An exercise is identified by `<batch>/<exercise-id>`; the same id may recur across batches.
 
 ## Course coding materials
@@ -161,9 +170,8 @@ Decided 2026-10-24 after reading Labs 4-5 and Projects 1-2.
   vanish, inline math comes out one character per line); phase 4 parsing has to clean this.
 - A course expected output and the owner's own run look the same on disk, so which is which is
   asked when an exercise needs it.
-- Labs are practice material, so exercises may stay close to them. A project can be in an open
-  assessment window (Project 2 is due 2026-11-01): exercises built from a project are variants on
-  another domain and data, never the project itself, and the tutor does not write project code.
+- Labs and projects are references for what course tasks look like (input formats, parameters,
+  output rules, marking points); the owner has already submitted the projects.
 
 ## Exercise validation (deterministic, never LLM-judged)
 
@@ -273,8 +281,9 @@ Measured on `station-max-file` (2026-10-24):
 - File-level programs create and stop their own SparkContext, so each test pays the start-up:
   about 8-9 s for 4 tests. Keep file-level tests few and data-rich.
 - A program that crashes before `sc.stop()` leaves its context alive, and every later test then
-  fails with "Cannot run multiple SparkContexts" instead of its own error. File-level test files
-  have an autouse fixture that stops any leftover context after each test.
+  fails with "Cannot run multiple SparkContexts" instead of its own error. `testkit.run_program`
+  stops any leftover context or session after every run (it was an autouse fixture in each test
+  file before phase 2a).
 - Skeletons import what the student will need, so ruff's unused-import rule is switched off for
   `exercise/student.py` and `solution/skeleton.py` only.
 - File-level skeletons give the boilerplate assignments usually give: `SparkConf` /
@@ -288,9 +297,12 @@ Measured on `station-max-file` (2026-10-24):
   Spark workers use). `sample_output/` is git-ignored.
 
 Interface extensions (phase 2a; decided 2026-10-24 from Labs 4-5 and Projects 1-2). Most of this
-lands in the tests and metadata, not in the validator:
-- One exercise, one implementation. Metadata `api` is `rdd`, `dataframe`, `mrjob` or `python`,
-  and an MRJob exercise names one `runner`, `inline` or `hadoop`. A course task that wants an RDD
+lands in the tests, not in the validator. Comparison mode and parameters are written only in the
+test code: tests run where `solutions/` (and so metadata.json) is not available, and keeping them
+in two places would drift. Metadata keeps what the validator reads (constraints,
+`partition_check`, `mutant_partitions`) plus descriptive fields.
+- One exercise, one implementation. Metadata `framework` is `pyspark-rdd`, `pyspark-df`, `mrjob`
+  or `python`, and an MRJob exercise names one `runner`, `inline` or `hadoop`. A course task that wants an RDD
   and a DataFrame version (Project 2) becomes two exercises with the same question; each stays
   simpler to build and validate. `hadoop` only when the concept needs it (custom partitioner or
   comparator, order inversion, secondary sort), since every job costs 8-9 s.
@@ -301,24 +313,32 @@ lands in the tests and metadata, not in the validator:
   would need a second test harness.
 - Parameters, in the course's two forms: positional after input and output
   (`run(inputPath, outputPath, m, k)`, Project 2), or `--jobconf myjob.settings.<name>=<value>`
-  read with `jobconf_from_env` (Project 1, Lab 4 top-k). Metadata lists them; tests pass them;
-  rule 4 draws parameter values at random as well as inputs.
-- Output comparison modes (metadata `output`):
+  read with `jobconf_from_env` (Project 1, Lab 4 top-k). Tests pass them
+  (`run_program(Program, inp, out, m, k)`, as strings like `sys.argv`); rule 4 draws parameter
+  values at random as well as inputs.
+- Output comparison modes (`testkit.assert_output(..., order=...)`):
   - `any`: all lines of all `part-*` files as a multiset (the current behaviour, default);
   - `per_file`: each `part-*` file in order, the files as a multiset (secondary sort: a reducer's
     output is ordered only within itself, Project 1);
   - `total`: exactly one non-empty data file, fully in order (Project 2: Spark sort + `coalesce(1)`);
-  - options: float tolerance (both projects accept tiny float differences and `3.0` = `3.000`),
-    and MRJob's JSON quotes optional (`"zounds,a"` = `zounds,a`).
-- `src/tutor/testkit.py` holds this: run a Spark file-level program or an MRJob job (inline /
-  hadoop), read the `part-*` files, compare by mode. Each exercise's `test_student.py` and
-  `test_oracle.py` import it (the package is installed in the venv that runs the tests), so test
-  files stay short, which also leaves the phase 3 generator less boilerplate to get wrong.
-  `station-max-file` moves to it.
+  - options: `float_tol` (both projects accept tiny float differences and `3.0` = `3.000`; the
+    text around numbers must still match, and 0, the default, compares characters so a required
+    number format is checked), and `optional_quotes` for MRJob's JSON keys (`"zounds,a"` = `zounds,a`).
+  - `per_file` is checked without knowing which key went to which reducer: `expected` is the
+    fully sorted output and each part file must be a subsequence of it.
+  - Mismatch messages are for the learner, who sees them first: unexpected and missing lines
+    listed separately, or the file and line that is out of order.
+- `src/tutor/testkit.py` holds this: `write_inputs` (split lines into `TUTOR_PARTITIONS` files,
+  optional header per file), `run_program` (call `run(...)`, assert `_SUCCESS`, stop leftover
+  Spark), `read_output`, `assert_output`; `run_mrjob` follows with the MRJob step. Each
+  exercise's `test_student.py` and `test_oracle.py` import it (the package is installed in the
+  venv that runs the tests), so test files stay short, which also leaves the phase 3 generator
+  less boilerplate to get wrong. Cost: an exercise folder needs that venv to run. Done for
+  `station-max-file` (2026-10-24; validation unchanged, about 77 s).
 - API constraints gain `required_any` (one of several groups, e.g. `combiner` or
-  `mapper_init` + `mapper_final`, Project 1 accepts either) and use counts (exactly one `MRStep`
-  in Project 1, two in the Lab 4 top-k). "Do not buffer all values in the reducer" cannot be
-  checked statically and stays a point for review.
+  `mapper_init` + `mapper_final`, Project 1 accepts either). Use counts are reported, not
+  limited (e.g. "MRStep x2"; decided 2026-10-24). "Do not buffer all values in the reducer"
+  cannot be checked statically and stays a point for review.
 
 Runtime budget: the course does not test performance, so limits only need to be sane.
 - Every subprocess run (a student test run, or one validation step) times out at 30 s.
@@ -340,7 +360,7 @@ Runtime budget: the course does not test performance, so limits only need to be 
   `sys.executable`, and exercise test fixtures `setdefault` it so direct pytest runs work too.
 
 Mutants: the reference with one deliberate bug (e.g. `add` -> `max`, `>` -> `>=`, missing empty-input case).
-In phase 2 a web chat model drafts 3-5 per exercise and the owner reviews them, rejecting equivalent
+In phase 2 Claude Code drafts 3-5 per exercise and the validator plus the owner review them, rejecting equivalent
 mutants (unkillable) and ones that crash on import; any bug the owner makes while solving is added as
 a mutant. Phase 3 moves drafting to the LLM pipeline.
 
@@ -360,6 +380,8 @@ retrieve_context -> generate_exercise -> validate --pass--> save
 ## RAG
 
 - PyMuPDF parsing, chunking by section / code block, keep source file and page.
+- Retrieval filters by the batch's `sources` first, so a week-2 batch only draws on week-2
+  material; searching the whole course is the fallback, not the default.
 - Hybrid retrieval (BM25 + vectors): API names like `aggregateByKey` are exact-match problems
   that pure vector search handles poorly.
 - Evaluate with 20-30 hand-labelled queries: recall@k for vector-only vs BM25-only vs hybrid.
@@ -394,6 +416,18 @@ is killed). This is isolation, not a sandbox: the child can still touch other fi
   tiny runnable example on different data, so it teaches the tool without giving the answer.
   Examples are run once to check the shown output. Then levels 1-3.
 - Solve from `exercises/` only; `solutions/` is for the validator.
+- Two modes, chosen per batch at generation and stored in `manifest.json` `mode` (decided
+  2026-10-24). The lectures are dense and a single pass does not stick, so the system serves
+  both first learning and later review. Validation is identical in both; scaffolding and help differ:
+  - `learn`: one week's material, small steps close to the slides, the docstring names the slide
+    pages, a fuller skeleton. The tutor explains concepts proactively and gives a line-level fix
+    when asked.
+  - `review`: one or several weeks mixed, fuller tasks leaning file-level (closer to labs and
+    projects), a bare skeleton. The tutor helps only when asked, first naming just the kind of
+    error, and leaves the fix to the owner.
+- `attempts.jsonl` gets one line per test run (time, batch, exercise, mode, result, first error),
+  appended automatically by `testkit`. Nothing reads it in phase 2; it is kept so review batches
+  can later target weak topics, and as material for hint rules and mutants (roadmap 3b).
 
 ## Roadmap (reading week, in priority order)
 
@@ -416,7 +450,8 @@ is killed). This is isolation, not a sandbox: the child can still touch other fi
    steps: `testkit.py` with the output modes; parameters and the new API constraints; MRJob
    interface with a synthetic example; DataFrame with a synthetic example.
 2. Five golden exercises, solved by the owner. Run the whole loop by hand before automating it.
-   - First batch `batches/<date>_p2-golden/`: exercises drafted with web chat models, reviewed by the owner.
+   - Batches from materials the owner picks (see "Material selection"), drafted by Claude Code and
+     checked by the validator; the owner solves them in the batch's mode.
    - Coverage, each also exercising a different part of the validator (final topics picked from lectures):
 
      | # | Topic | Type | Interface | Validator path |
@@ -431,7 +466,8 @@ is killed). This is isolation, not a sandbox: the child can still touch other fi
      Order inversion and secondary sort go into a later batch: they need the Hadoop runner,
      which the golden set should not depend on.
 
-   - Done when: all five pass validation, the owner has solved them without AI help, attempts are in
+   - Done when: all five pass validation, the owner has solved them (review-mode ones without
+     asking for help), attempts are in
      `attempts.jsonl`, and the steps that felt repetitive are noted as input for phase 3.
      These five are the baseline set for phase 5.
 2b. Code tracing exercises (raised from "deferred" on 2026-10-24: the lectures ask many "what does

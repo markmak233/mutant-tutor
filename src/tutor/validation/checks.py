@@ -19,12 +19,11 @@ from enum import Enum
 from pathlib import Path
 
 from tutor.execution import DEFAULT_TIMEOUT_S, Outcome, RunResult, run_pytest
+from tutor.testkit import DEFAULT_PARTITIONS, PARTITIONS_ENV
 from tutor.validation.api import find_violations
 from tutor.validation.exercise import ExerciseFiles
 
-# Spark tests read this as their number of partitions / input files (design.md).
-PARTITIONS_ENV = "TUTOR_PARTITIONS"
-DEFAULT_PARTITIONS = 2
+# Spark tests read PARTITIONS_ENV as their number of partitions / input files (design.md).
 PARTITION_COUNTS = (1, 2, 4)
 
 
