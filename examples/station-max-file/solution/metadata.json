@@ -1,0 +1,16 @@
+{
+  "id": "station-max-file",
+  "title": "Maximum temperature per station from CSV files",
+  "topic": "pyspark-rdd/file-io-parsing",
+  "type": "implementation",
+  "interface": "file",
+  "difficulty": "easy",
+  "framework": "pyspark-rdd",
+  "entry_point": "StationMax.run",
+  "constraints": {
+    "forbidden_calls": ["groupByKey"],
+    "forbidden_imports": ["pyspark.sql"]
+  },
+  "partition_check": true,
+  "source": "synthetic"
+}

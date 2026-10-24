@@ -83,9 +83,10 @@ smartCodingReview/                       # public repo (the `tutor/` above), cod
 │   ├── rag/                             # P4
 │   └── eval/                            # P5
 ├── examples/                            # P1 synthetic only, same shape as a real exercise
-│   └── station-average-rdd/             # per-key average in PySpark RDD, own wording and data
-│       ├── exercise/
-│       └── solution/
+│   ├── station-average-rdd/             # function-level: per-key average in PySpark RDD
+│   │   ├── exercise/
+│   │   └── solution/
+│   └── station-max-file/                # file-level: CSV input dir with messy lines -> part-* output
 └── tests/
     ├── test_env.py                      # P1, runs envcheck for the current workspace
     └── test_validation.py               # P1, runs the validator on examples/
@@ -170,6 +171,35 @@ Exercise types validated this way: implementation, completion, debugging (the sk
 Code tracing / output prediction needs a different flow (run the snippet repeatedly and across
 partitions to prove the output is stable, then compare normalised answers) and is deferred.
 
+Exercise interfaces. Labs and projects are mostly "read input files, write an output directory",
+and projects lose marks on parsing and output format, which a function-level exercise skips.
+So there are two interfaces, and generated batches include both:
+- Function-level: the student writes `f(rdd) -> rdd` (or DataFrame / plain Python). Algorithm
+  only, quick to start; good for a single concept such as partitioning or combining.
+- File-level: the student writes a program in the course's shape: Spark
+  `run(inputPath, outputPath)` + `sys.argv` (L5 standalone code), MRJob a full job class run on
+  input files. Practises parsing (blank, malformed, padded lines), output format and output dirs.
+  Tests write input files into a temp dir, call the program, read every `part-*` file of the
+  output and compare lines exactly (format matters: `s1,20.0` is not `('s1', 20.0)`, cf. the
+  `saveAsTextFile` parentheses trap in L5) but as a multiset, since partition order is not
+  fixed. The question pins down number formatting so exact comparison is fair.
+Rule 5 stays one mechanism for both: the validator sets `TUTOR_PARTITIONS`; function-level tests
+use it as `numSlices`, file-level tests split the input into that many files (Spark makes at least
+one partition per file; MRJob gives each file its own map task), which also mirrors an HDFS
+input directory. The validator itself does not care which interface an exercise uses.
+
+Measured on `station-max-file` (2026-10-24):
+- `sc.textFile` asks for at least 2 partitions, so even a single small input file is split in
+  two; the per-partition-max mutant is caught at 1, 2 and 4 files. "N files" means at least N
+  partitions, not exactly N.
+- File-level programs create and stop their own SparkContext, so each test pays the start-up:
+  about 8-9 s for 4 tests. Keep file-level tests few and data-rich.
+- A program that crashes before `sc.stop()` leaves its context alive, and every later test then
+  fails with "Cannot run multiple SparkContexts" instead of its own error. File-level test files
+  have an autouse fixture that stops any leftover context after each test.
+- Skeletons import what the student will need, so ruff's unused-import rule is switched off for
+  `exercise/student.py` and `solution/skeleton.py` only.
+
 Runtime budget: the course does not test performance, so limits only need to be sane.
 - Every subprocess run (a student test run, or one validation step) times out at 30 s.
 - One SparkSession per validation process; `local[2]`, UI off, `spark.sql.shuffle.partitions=4`
@@ -202,6 +232,7 @@ retrieve_context -> generate_exercise -> validate --pass--> save
 
 - LLM output parsed into Pydantic models.
 - `validate` is pure Python and acts as the judge; repair receives the failure report.
+- Every generated batch mixes function-level and file-level exercises (see "Exercise interfaces").
 
 ## RAG
 
@@ -246,21 +277,23 @@ is killed). This is isolation, not a sandbox: the child can still touch other fi
 1. Environment + validation harness. No LLM involved.
    - `pyproject.toml`, `.gitignore`, `.env.example`, gitleaks pre-commit.
    - `config.py` (workspace checks), `envcheck.py`, `execution.py`, `validation/` (Spark partition check only).
-   - Synthetic `examples/station-average-rdd/`, plus one broken variant per rule, so each check is shown
-     to both pass and fail.
+   - Synthetic `examples/station-average-rdd/` (function-level, kept deliberately simple to start
+     with) and `examples/station-max-file/` (file-level: input files with messy lines, exact output
+     format, input split into `TUTOR_PARTITIONS` files), plus one broken variant per rule, so each
+     check is shown to both pass and fail.
    - Done when: `pytest` and `ruff check .` pass; the valid example passes all checks and every
      broken variant fails the check it targets; measured validation time recorded.
 2. Five golden exercises, solved by the owner. Run the whole loop by hand before automating it.
    - First batch `batches/<date>_p2-golden/`: exercises drafted with web chat models, reviewed by the owner.
    - Coverage, each also exercising a different part of the validator (final topics picked from lectures):
 
-     | # | Topic | Type | Validator path |
-     |---|---|---|---|
-     | 1 | RDD per-key average, no `groupByKey` (L5 practice 2) | implementation | partition check, forbidden-API check |
-     | 2 | DataFrame average word length per first letter, no `df.rdd` (L5 practice 3) | completion | DataFrame comparison, forbidden-API check |
-     | 3 | MRJob co-occurrence, pairs or stripes (L2.2, Lab 3) | implementation | MRJob runner, combiner check |
-     | 4 | MRJob in-mapper combining (L2.2, Lab 2) | implementation | required-API check (`mapper_init` / `mapper_final`) |
-     | 5 | MRJob mean with a broken combiner (L2.2 "Computing the Mean" v1-v4) | debugging | buggy skeleton must fail, combiner check |
+     | # | Topic | Type | Interface | Validator path |
+     |---|---|---|---|---|
+     | 1 | RDD per-key average, no `groupByKey` (L5 practice 2) | implementation | function | partition check, forbidden-API check |
+     | 2 | DataFrame average word length per first letter, no `df.rdd` (L5 practice 3) | completion | file (CSV out) | DataFrame comparison, forbidden-API check |
+     | 3 | MRJob co-occurrence, pairs or stripes (L2.2, Lab 3) | implementation | file | MRJob runner, combiner check |
+     | 4 | MRJob in-mapper combining (L2.2, Lab 2) | implementation | file | required-API check (`mapper_init` / `mapper_final`) |
+     | 5 | MRJob mean with a broken combiner (L2.2 "Computing the Mean" v1-v4) | debugging | file | buggy skeleton must fail, combiner check |
 
      `aggregateByKey` is listed but not taught (L4.1), so it is not in the golden set.
      Order inversion and secondary sort go into a later batch: they need the Hadoop runner,
