@@ -23,6 +23,7 @@ from tutor.config import load_env
 
 PARTITIONS_ENV = "TUTOR_PARTITIONS"
 DEFAULT_PARTITIONS = 2
+COMBINER_ENV = "TUTOR_COMBINER"  # "off": run MRJob jobs without their combiner (rule 5)
 ORDERS = ("any", "per_file", "total")
 
 os.environ.setdefault("PYSPARK_PYTHON", sys.executable)
@@ -98,6 +99,7 @@ def run_mrjob(
     *,
     runner: str = "inline",
     jobconf: dict | None = None,
+    combiner: bool = True,
 ) -> Output:
     """Run an MRJob job on every file in `input_dir`, the way the course runs it:
     `python job.py -r <runner> <input> -o <output> --jobconf myjob.settings.k=3 ...`.
@@ -106,10 +108,19 @@ def run_mrjob(
     and reducer count are honoured there, unlike inline. It sets mapreduce.job.reduces to
     partitions(), so rule 5 checks 1, 2 and 4 reducers; a reducer count written in an
     MRStep's own jobconf still wins for that step (verified 2026-10-25).
+
+    combiner=False, or TUTOR_COMBINER=off (set by the validator), runs the job without its
+    combiner: Hadoop may run a combiner zero, one or many times, so the result must not
+    depend on it (the lecture's "remove the combiner" check). Inline only: Hadoop runs the
+    job's own script, so a combiner removed here would still run there.
     """
     if runner not in ("inline", "hadoop"):
         raise ValueError(f"runner must be 'inline' or 'hadoop', not {runner!r}")
     _assert_entry_point(job_cls)
+    if not combiner or os.environ.get(COMBINER_ENV) == "off":
+        if runner == "hadoop":
+            raise ValueError("running without the combiner is supported on runner='inline' only")
+        job_cls = _without_combiner(job_cls)
     input_dir, output_dir = Path(input_dir), Path(output_dir)
     conf = dict(jobconf or {})
     if runner == "inline":
@@ -192,6 +203,32 @@ def _assert_entry_point(job_cls) -> None:
             f"{script.name or 'the job file'} needs an entry point at the end:\n"
             f'if __name__ == "__main__":\n    {job_cls.__name__}.run()'
         )
+
+
+def _without_combiner(job_cls):
+    """A subclass of job_cls whose steps have no combiner functions. Works for the default
+    single step and for an explicit steps() list alike."""
+    from mrjob.step import MRStep
+
+    class WithoutCombiner(job_cls):
+        def steps(self):
+            steps = []
+            for step in super().steps():
+                if isinstance(step, MRStep):
+                    # MRStep keeps its functions in _steps (mrjob 0.7.4); rebuild without
+                    # combiner, combiner_init, combiner_final, ...
+                    kept = {
+                        name: value for name, value in step._steps.items()
+                        if value is not None and not name.startswith("combiner")
+                    }
+                    step = MRStep(**kept)
+                steps.append(step)
+            return steps
+
+    # mrjob finds the job's script through the class's module: keep the student's.
+    WithoutCombiner.__module__ = job_cls.__module__
+    WithoutCombiner.__qualname__ = job_cls.__qualname__
+    return WithoutCombiner
 
 
 def _run_job(job_cls, args: list[str], conf: dict) -> None:

@@ -1,7 +1,7 @@
 """Validation rules 1-5 and the static API check.
 
 Unit tests build tiny pure-Python exercises in a temp dir, so they need no Spark. The
-`spark`-marked tests validate the real examples end to end (about 6 min): run them with
+`spark`-marked tests validate the real examples end to end (about 7.5 min): run them with
 `pytest -m spark`.
 """
 
@@ -269,6 +269,50 @@ def test_metadata_timeout_applies_to_every_run(tmp_path):
     assert "timeout" in report.result("1").detail
 
 
+# A tiny inline MRJob exercise for the combiner check.
+MR_TESTS = (
+    "from tutor.testkit import assert_output, run_mrjob, write_inputs\n"
+    "from student import Count\n\n"
+    "def test_count(tmp_path):\n"
+    "    inp = write_inputs(tmp_path / 'in', ['a b a', 'b a'])\n"
+    "    out = run_mrjob(Count, inp, tmp_path / 'out')\n"
+    "    assert_output(out, ['\"a\"\\t3', '\"b\"\\t2'])\n"
+)
+MR_JOB = (
+    "from mrjob.job import MRJob\n\n"
+    "class Count(MRJob):\n"
+    "    def mapper(self, _, line):\n"
+    "        for w in line.split():\n"
+    "            yield w, 1\n\n"
+    "    def combiner(self, w, counts):\n"
+    "        yield w, {COMBINE}\n\n"
+    "    def reducer(self, w, values):\n"
+    "        yield w, {REDUCE}\n\n"
+    "if __name__ == '__main__':\n"
+    "    Count.run()\n"
+)
+
+
+@pytest.mark.parametrize("combine, reduce, status", [
+    ("sum(counts)", "sum(values)", Status.OK),
+    # the reducer needs the combiner's [sum, 'partial'] lists: fine on, crashes off
+    ("[sum(counts), 'partial']", "sum(v[0] for v in values)", Status.FAIL),
+])
+def test_combiner_check(tmp_path, combine, reduce, status):
+    """Rule 5 with combiner_check reruns the reference with the combiner removed."""
+    reference = MR_JOB.format(COMBINE=combine, REDUCE=reduce)
+    report = run(make_exercise(
+        tmp_path, tests=MR_TESTS, reference=reference, metadata={"combiner_check": True},
+    ))
+
+    assert report.result("1").status is Status.OK
+    assert report.result("5").status is status
+    if status is Status.FAIL:
+        assert "with the combiner off" in report.result("5").detail
+    else:
+        assert report.result("5").detail == "reference passes with the combiner off"
+
+
 # --- static API constraints -------------------------------------------------------------
 
 
@@ -407,7 +451,8 @@ EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 
 @pytest.mark.spark
 @pytest.mark.parametrize(
-    "name", ["station-average-rdd", "station-max-file", "station-condition-share"]
+    "name",
+    ["station-average-rdd", "station-max-file", "station-monthly-df", "station-condition-share"],
 )
 def test_examples_are_valid(name):
     """End to end on the real examples. The MRJob one runs on Hadoop (about 4 min)."""

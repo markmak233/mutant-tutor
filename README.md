@@ -25,7 +25,7 @@ An exercise is valid only if all of these hold:
 | 2 | The skeleton *fails* the tests (fails, not crashes) | tests that check nothing; a skeleton that does not import |
 | 3 | Every planted mutant (one deliberate bug each) fails the tests | tests too weak to catch a known mistake |
 | 4 | The reference matches a plain-Python oracle on random inputs (hypothesis) | a reference that is only right on the inputs the tests list |
-| 5 | The reference passes with 1, 2 and 4 partitions / input files | code that depends on how data is distributed |
+| 5 | The reference passes with 1, 2 and 4 partitions / input files / reducers, and (MRJob) with the combiner off | code that depends on how data is distributed |
 | api | Static `ast` check of forbidden / required APIs (e.g. no `groupByKey`) | a solution that passes by breaking the exercise's constraints |
 
 ```
@@ -35,7 +35,7 @@ station-max-file
   ok    2    skeleton fails      3.9s  4 failed
   ok    3    mutants killed     30.3s  4/4 killed
   ok    4    matches oracle     14.8s  1 passed
-  ok    5    partition counts   16.9s  reference passes with 1, 2, 4 partitions
+  ok    5    distribution       16.9s  reference passes with 1, 2, 4 partitions
   ok    api  api constraints     0.0s  reference respects forbidden_calls=['groupByKey'], ...
 VALID
 ```
@@ -56,8 +56,9 @@ Two interfaces, mixed in every batch:
 - **File-level**: write a program in the shape course assignments use (`run(inputPath, outputPath)`),
   read messy input files, write `part-*` output in an exact format. Ships a `sample_input/`.
 
-Three synthetic examples live in [`examples/`](examples/): `station-average-rdd` (function-level),
-`station-max-file` (file-level Spark) and `station-condition-share` (MRJob on a local Hadoop:
+Four synthetic examples live in [`examples/`](examples/): `station-average-rdd` (function-level),
+`station-max-file` (file-level Spark RDD), `station-monthly-df` (DataFrame, one ordered output
+file, a command-line parameter) and `station-condition-share` (MRJob on a local Hadoop:
 order inversion, where a mutant that forgets the partitioner passes with one reducer and is
 caught with two).
 
@@ -72,7 +73,7 @@ pip install -e ".[comp9313,dev]"
 cp .env.example .env            # set JAVA_HOME (and WORKSPACE_DIR / HADOOP_HOME if used)
 
 pytest                          # fast unit tests (~20 s)
-pytest -m spark                 # validate every example end to end (~6.5 min; Hadoop optional)
+pytest -m spark                 # validate every example end to end (~7.5 min; Hadoop optional)
 python -m tutor.validation examples/station-average-rdd/exercise examples/station-average-rdd/solution
 ```
 

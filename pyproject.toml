@@ -23,6 +23,11 @@ dev = [
     "pre-commit>=3",
 ]
 
+# Loaded by every pytest run in this venv; it records only workspace exercise runs. The
+# name equals the module name, so an explicit `-p tutor.attempts` is not a second copy.
+[project.entry-points.pytest11]
+"tutor.attempts" = "tutor.attempts"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 

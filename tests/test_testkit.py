@@ -309,6 +309,58 @@ def test_mrjob_without_main_block_is_explained(tmp_path):
         run_mrjob(job, write_inputs(tmp_path / "in", TEXT), tmp_path / "out")
 
 
+# The combiner changes the value's shape and the reducer relies on it: right only when the
+# combiner runs, which Hadoop does not promise.
+NEEDS_COMBINER = '''
+from mrjob.job import MRJob
+
+
+class NeedsCombiner(MRJob):
+    def mapper(self, _, line):
+        for word in line.split():
+            yield word, 1
+
+    def combiner(self, word, counts):
+        yield word, [sum(counts), "partial"]
+
+    def reducer(self, word, partials):
+        yield word, sum(p[0] for p in partials)
+
+
+if __name__ == "__main__":
+    NeedsCombiner.run()
+'''
+
+
+def test_mrjob_without_combiner_exposes_a_reducer_that_relies_on_it(tmp_path):
+    job = load_job(tmp_path, NEEDS_COMBINER, "NeedsCombiner")
+    inp = write_inputs(tmp_path / "in", TEXT)
+
+    with_combiner = run_mrjob(job, inp, tmp_path / "out1")
+    assert_output(with_combiner, ['"a"\t6', '"b"\t5', '"c"\t4', '"d"\t2', '"e"\t2'])
+    with pytest.raises(TypeError):  # ints, not the combiner's lists
+        run_mrjob(job, inp, tmp_path / "out2", combiner=False)
+
+
+def test_mrjob_without_combiner_in_explicit_steps(tmp_path, monkeypatch):
+    """TopK passes its combiner as MRStep(combiner=...); TUTOR_COMBINER=off (what the
+    validator sets) removes it there too, and a safe combiner gives the same answer."""
+    monkeypatch.setenv("TUTOR_COMBINER", "off")
+    job = load_job(tmp_path, TOP_K, "TopK")
+    inp = write_inputs(tmp_path / "in", TEXT)
+
+    result = run_mrjob(job, inp, tmp_path / "out", jobconf={"myjob.settings.k": 2})
+
+    assert_output(result, ['"a"\t6', '"b"\t5'], order="total")
+
+
+def test_mrjob_without_combiner_is_inline_only(tmp_path):
+    """Hadoop runs the job's own script, so the combiner cannot be removed there."""
+    job = load_job(tmp_path, TOP_K, "TopK")
+    with pytest.raises(ValueError, match="inline"):
+        run_mrjob(job, tmp_path, tmp_path / "out", runner="hadoop", combiner=False)
+
+
 def test_mrjob_unknown_runner_is_an_error(tmp_path):
     with pytest.raises(ValueError):
         run_mrjob(object, tmp_path, tmp_path / "out", runner="local")

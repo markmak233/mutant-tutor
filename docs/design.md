@@ -86,6 +86,7 @@ smartCodingReview/                       # public repo (the `tutor/` above), cod
 │   ├── execution.py                     # P1 copy to temp dir -> subprocess pytest -> delete
 │   ├── validation/                      # P1 the five checks (internals designed before coding)
 │   ├── testkit.py                       # P2a run a file-level program, read part-*, compare output
+│   ├── attempts.py                      # P2a pytest plugin: one attempts.jsonl line per exercise run
 │   ├── schema.py                        # P3 Pydantic exercise models
 │   ├── llm.py                           # P3 thin LLM API client, no LangChain
 │   ├── graph/                           # P3 langgraph dependency added here
@@ -96,6 +97,7 @@ smartCodingReview/                       # public repo (the `tutor/` above), cod
 │   │   ├── exercise/
 │   │   └── solution/
 │   ├── station-max-file/                # file-level: CSV input dir with messy lines -> part-* output
+│   ├── station-monthly-df/              # DataFrame: groupBy/agg, orderBy, one CSV file, parameter
 │   └── station-condition-share/         # MRJob on Hadoop: order inversion, --jobconf tau
 └── tests/
     ├── test_env.py                      # P1, runs envcheck for the current workspace
@@ -185,10 +187,19 @@ An exercise is valid only if:
 5. Results do not depend on how the work is distributed. Implemented per framework:
    - PySpark RDD / DataFrame: identical across partition counts 1, 2, 4 (phase 1).
      Catches e.g. a wrong `combOp` in `aggregateByKey`, which never runs with one partition.
-   - MRJob: identical with the combiner on and off, since Hadoop may run it 0, 1 or many times
-     (phase 2, with the first MRJob exercise). The lecture uses the same test ("check the
-     correctness by removing the combiner", L2.2 p.38). Exercises on the `hadoop` runner also
-     pass with 1, 2 and 4 reducers (see "Interface extensions").
+   - MRJob: identical with the combiner on and off, since Hadoop may run it 0, 1 or many times.
+     The lecture uses the same test ("check the correctness by removing the combiner", L2.2
+     p.38). Exercises on the `hadoop` runner also pass with 1, 2 and 4 reducers (see
+     "Interface extensions").
+   Done 2026-10-25 as one rule, "distribution", switched on per exercise in metadata:
+   `partition_check` reruns the reference at 1 and 4 partitions / input files / reducers;
+   `combiner_check` (MRJob, inline runner) reruns it with `TUTOR_COMBINER=off`, under which
+   `testkit.run_mrjob` runs a subclass whose `MRStep`s have no combiner functions (explicit
+   `steps()` included). Not on `hadoop`: the task processes run the student's own script, so a
+   combiner removed in the test process would still run there; reducer counts cover those
+   exercises. Tests may also call `run_mrjob(..., combiner=False)` themselves, so a student's
+   reducer that relies on the combiner (the lecture's "mean v1") fails their own tests, not
+   only the reference check. Neither flag: "n/a".
    - Plain Python: not applicable.
 
 Rules 1-3 (phase 1f) live in `src/tutor/validation/`: `exercise.py` finds the files from an
@@ -231,7 +242,7 @@ Checked that it bites: the average-of-averages mutant is caught with the shrunk 
 Full validation (all rules), measured 2026-10-24: `station-average-rdd` about 36 s,
 `station-max-file` about 74 s.
 - Plain `pytest` excludes tests marked `spark`; `pytest -m spark` validates every example end
-  to end and runs the Hadoop testkit tests (about 6.5 min, 4 of them for the Hadoop example).
+  to end and runs the Hadoop testkit tests (about 7.5 min, 4 of them for the Hadoop example).
   Run it whenever validation, testkit or an example changes.
 
 Distributed output is compared by the modes under "Interface extensions" (multiset by default).
@@ -376,6 +387,21 @@ in two places would drift. Metadata keeps what the validator reads (constraints,
   rule 5 and the Hadoop runner are for. Rule 4: 4 hypothesis examples with random tau and
   reducer count, station names chosen to test prefix order (`s1` / `s10`, `n` / `north`).
   Full validation about 3 min 50 s (rule 3 alone 111 s); metadata `timeout_s` 150.
+- `examples/station-monthly-df/` (done 2026-10-25): the first DataFrame example. Monthly
+  average per station from CSV files with a header in each, `min_readings` as the third
+  positional argument, output ordered (station asc, average desc, month asc) in one file:
+  `order="total"` with `float_tol`. Constraints: `forbidden_calls` `sql`, `rdd`, `collect`,
+  `toPandas`, `sorted`; no pandas / numpy. Mutants: average ascending, tie-break month
+  descending, `>` for `>=`, `count("*")` counting non-numeric rows, month without the year.
+  Full validation about 70 s. "Forgot `coalesce(1)`" is not a mutant: on small data adaptive
+  query execution merges the shuffle partitions into one anyway, so it cannot be killed
+  reliably.
+  - Rule 4 lesson: with temperatures drawn from a wide range, equal averages almost never
+    occurred, and the reversed tie-break mutant passed the hypothesis test (rule 3 still
+    killed it with a hand-written tie). Drawing from a few multiples of 2.5 makes ties
+    common and keeps sums exact in binary, so Spark and Python averages are bit-identical;
+    rule 4 then kills 4 of 4 mutants tried on its own. Generators must make the edge cases
+    of the ordering (ties) likely, not merely possible.
   "Do not buffer all values in the reducer" cannot be checked statically and stays a point for review.
 
 Runtime budget: the course does not test performance, so limits only need to be sane.
@@ -454,6 +480,12 @@ is killed). This is isolation, not a sandbox: the child can still touch other fi
   tiny runnable example on different data, so it teaches the tool without giving the answer.
   Examples are run once to check the shown output. Then levels 1-3.
 - Solve from `exercises/` only; `solutions/` is for the validator.
+- `reference.py` doubles as the worked answer the owner reads after solving (decided
+  2026-10-25), so it is written in numbered steps, not one long chain: each `# Step N:`
+  comment says what the step does and why, and shows what a record looks like after it on
+  the question's example data (`#   ('s1', (30.0, 2))`, a small table for DataFrames, the
+  key / value flow for MRJob). Mutants are the reference with one change, so a diff against
+  the reference shows only the bug.
 - Two modes, chosen per batch at generation and stored in `manifest.json` `mode` (decided
   2026-10-24). The lectures are dense and a single pass does not stick, so the system serves
   both first learning and later review. Validation is identical in both; scaffolding and help differ:
@@ -463,9 +495,18 @@ is killed). This is isolation, not a sandbox: the child can still touch other fi
   - `review`: one or several weeks mixed, fuller tasks leaning file-level (closer to labs and
     projects), a bare skeleton. The tutor helps only when asked, first naming just the kind of
     error, and leaves the fix to the owner.
-- `attempts.jsonl` gets one line per test run (time, batch, exercise, mode, result, first error),
-  appended automatically by `testkit`. Nothing reads it in phase 2; it is kept so review batches
-  can later target weak topics, and as material for hint rules and mutants (roadmap 3b).
+- `attempts.jsonl` gets one line per exercise per test run (time, batch, exercise, mode,
+  result, pass / fail / error counts, first error, partitions, duration). Nothing reads it in
+  phase 2; it is kept so review batches can later target weak topics, and as material for
+  hint rules and mutants (roadmap 3b). Done 2026-10-25 as a pytest plugin, `tutor/attempts.py`,
+  registered through the `pytest11` entry point, so it loads in every pytest run of the venv
+  with no file in the workspace (a per-batch conftest.py was the alternative). It writes only
+  for test files under `$WORKSPACE_DIR/batches/<batch>/exercises/<exercise>/`, so validator
+  runs (temp dirs) and the repo's tests leave no trace; mode comes from the batch's
+  `manifest.json`; a student.py that does not import counts as "error", not "failed"; any
+  recording problem is a warning and never changes the test result. The entry point name
+  equals the module name, so an explicit `-p tutor.attempts` is not registered twice. Adding
+  the entry point needed one `pip install -e .`.
 
 ## Roadmap (reading week, in priority order)
 
@@ -486,10 +527,25 @@ is killed). This is isolation, not a sandbox: the child can still touch other fi
      broken variant fails the check it targets; measured validation time recorded; README updated.
 2a. Harness extensions from Labs 4-5 and Projects 1-2 (see "Interface extensions"), in small
    steps: `testkit.py` with the output modes; parameters and the new API constraints; MRJob
-   interface with a synthetic example; DataFrame with a synthetic example.
-2. Five golden exercises, solved by the owner. Run the whole loop by hand before automating it.
+   interface with a synthetic example; DataFrame with a synthetic example; rule 5's combiner
+   check; `attempts.jsonl`. **Done 2026-10-25.**
+2. Golden exercises, solved by the owner. Run the whole loop by hand before automating it.
    - Batches from materials the owner picks (see "Material selection"), drafted by Claude Code and
      checked by the validator; the owner solves them in the batch's mode.
+   - First batch (approved 2026-10-25): `2026-10-25_p2-w1w2-mapreduce`, mode `learn`, sources
+     L1.1, L1.2, L2.1, L2.2 (the only week 1-2 lab material is a zipped VM home with SSH keys,
+     never read). Sized to cover every codable knowledge point, 9 exercises, no Hadoop runner:
+     `hdfs-bookkeeping` (python: blocks, replication vs erasure coding, NameNode metadata,
+     heartbeats, under-replicated blocks), `mapreduce-by-hand` (python: map, per-map combine,
+     hash partition, sort, group, reduce into R parts), `streaming-reducer` (python: Hadoop
+     Streaming reducer over sorted lines without buffering), `word-count-mrjob`,
+     `max-temperature` (NCDC fixed-width parsing, max combiner), `in-mapper-combining`,
+     `mean-combiner-debug` (debugging: Mean v2 to v3, combiner check), `cooccurrence-pairs` and
+     `cooccurrence-stripes` (same question, two implementations). Slides that are images (Word
+     Count v1/v2, Mean v1-v4, stripes pseudocode) follow Lin & Dyer ch. 3, the textbook they cite.
+     Not codable, left for concept questions (2b): 3V/6V, Hadoop history and distributions,
+     YARN, HDFS design assumptions, data locality and split size, reducer-count heuristics,
+     NAS/SAN vs DFS, MRJob runners, RDBMS vs Hadoop. This batch replaces "five" as the size.
    - Coverage, each also exercising a different part of the validator (final topics picked from lectures):
 
      | # | Topic | Type | Interface | Validator path |

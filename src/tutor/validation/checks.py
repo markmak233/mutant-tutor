@@ -19,7 +19,7 @@ from enum import Enum
 from pathlib import Path
 
 from tutor.execution import DEFAULT_TIMEOUT_S, Outcome, RunResult, run_pytest
-from tutor.testkit import DEFAULT_PARTITIONS, PARTITIONS_ENV
+from tutor.testkit import COMBINER_ENV, DEFAULT_PARTITIONS, PARTITIONS_ENV
 from tutor.validation.api import count_uses, find_violations
 from tutor.validation.exercise import ExerciseFiles
 
@@ -72,7 +72,7 @@ def validate(ex: ExerciseFiles, timeout_s: float | None = None) -> ValidationRep
             RuleResult("2", "skeleton fails", Status.SKIPPED, reason, 0.0),
             RuleResult("3", "mutants killed", Status.SKIPPED, reason, 0.0),
             RuleResult("4", "matches oracle", Status.SKIPPED, reason, 0.0),
-            RuleResult("5", "partition counts", Status.SKIPPED, reason, 0.0),
+            RuleResult("5", "distribution", Status.SKIPPED, reason, 0.0),
             check_api_constraints(ex),
         ])
     return ValidationReport(ex.exercise_id, [
@@ -80,7 +80,7 @@ def validate(ex: ExerciseFiles, timeout_s: float | None = None) -> ValidationRep
         check_skeleton_fails(ex, timeout_s),
         check_mutants_killed(ex, timeout_s),
         check_matches_oracle(ex, timeout_s),
-        check_partition_counts(ex, timeout_s),
+        check_distribution(ex, timeout_s),
         check_api_constraints(ex),
     ])
 
@@ -168,23 +168,38 @@ def check_matches_oracle(ex: ExerciseFiles, timeout_s: float) -> RuleResult:
     return RuleResult("4", "matches oracle", Status.FAIL, detail, r.duration_s)
 
 
-def check_partition_counts(ex: ExerciseFiles, timeout_s: float) -> RuleResult:
-    """The reference passes at every partition count. Rule 1 already ran it at the
-    default, so only the other counts run here."""
-    if not ex.metadata.get("partition_check", False):
-        return RuleResult("5", "partition counts", Status.NOT_APPLICABLE,
-                          "no partition_check in metadata", 0.0)
+def check_distribution(ex: ExerciseFiles, timeout_s: float) -> RuleResult:
+    """The result must not depend on how the work is distributed. Two checks, each switched
+    on in metadata:
+    - partition_check: the reference passes at every partition count (rule 1 already ran
+      the default, so only the others run here);
+    - combiner_check (MRJob, inline runner): it passes with the combiner removed, since
+      Hadoop may run a combiner zero, one or many times."""
+    partition_check = ex.metadata.get("partition_check", False)
+    combiner_check = ex.metadata.get("combiner_check", False)
+    if not (partition_check or combiner_check):
+        return RuleResult("5", "distribution", Status.NOT_APPLICABLE,
+                          "no partition_check or combiner_check in metadata", 0.0)
+    runs = []  # (description, partitions, extra env)
+    if partition_check:
+        runs += [(f"with {n} partition(s)", n, {}) for n in PARTITION_COUNTS
+                 if n != DEFAULT_PARTITIONS]
+    if combiner_check:
+        runs.append(("with the combiner off", DEFAULT_PARTITIONS, {COMBINER_ENV: "off"}))
     duration = 0.0
-    for partitions in PARTITION_COUNTS:
-        if partitions == DEFAULT_PARTITIONS:
-            continue
-        r = _run(ex, ex.reference, timeout_s, partitions)
+    for description, partitions, env in runs:
+        r = _run(ex, ex.reference, timeout_s, partitions, env)
         duration += r.duration_s
         if r.outcome is not Outcome.PASSED:
-            detail = f"reference {r.outcome.value} with {partitions} partition(s): {_summary(r)}"
-            return RuleResult("5", "partition counts", Status.FAIL, detail, duration)
-    detail = f"reference passes with {', '.join(map(str, PARTITION_COUNTS))} partitions"
-    return RuleResult("5", "partition counts", Status.OK, detail, duration)
+            detail = f"reference {r.outcome.value} {description}: {_summary(r)}"
+            return RuleResult("5", "distribution", Status.FAIL, detail, duration)
+    passed = []
+    if partition_check:
+        passed.append(f"{', '.join(map(str, PARTITION_COUNTS))} partitions")
+    if combiner_check:
+        passed.append("the combiner off")
+    detail = f"reference passes with {' and with '.join(passed)}"
+    return RuleResult("5", "distribution", Status.OK, detail, duration)
 
 
 def check_api_constraints(ex: ExerciseFiles) -> RuleResult:
@@ -208,8 +223,11 @@ def check_api_constraints(ex: ExerciseFiles) -> RuleResult:
     return RuleResult("api", "api constraints", Status.OK, detail, 0.0)
 
 
-def _run(ex: ExerciseFiles, candidate: Path, timeout_s: float, partitions: int) -> RunResult:
-    env = {PARTITIONS_ENV: str(partitions)}
+def _run(
+    ex: ExerciseFiles, candidate: Path, timeout_s: float, partitions: int,
+    extra_env: dict[str, str] | None = None,
+) -> RunResult:
+    env = {PARTITIONS_ENV: str(partitions), **(extra_env or {})}
     return run_pytest(ex.run_files(candidate), timeout_s, env)
 
 
