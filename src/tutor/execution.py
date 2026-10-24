@@ -39,12 +39,17 @@ class RunResult:
     output: str  # pytest's stdout and stderr, interleaved
 
 
-def run_pytest(files: Mapping[str, Path], timeout_s: float = DEFAULT_TIMEOUT_S) -> RunResult:
+def run_pytest(
+    files: Mapping[str, Path],
+    timeout_s: float = DEFAULT_TIMEOUT_S,
+    env: Mapping[str, str] | None = None,
+) -> RunResult:
     """Copy `files` into a fresh temp dir and run pytest there.
 
     `files` maps the name inside the temp dir to a source file or directory, so the
     same tests can run against different code, e.g.
     {"student.py": mutant_path, "test_student.py": tests_path}.
+    `env` adds environment variables for this run only, e.g. {"TUTOR_PARTITIONS": "4"}.
     The temp dir, and anything the run leaves behind (spark-warehouse/, caches), is
     deleted afterwards; the source files are never modified.
     """
@@ -56,16 +61,21 @@ def run_pytest(files: Mapping[str, Path], timeout_s: float = DEFAULT_TIMEOUT_S) 
                 shutil.copytree(source, target)
             else:
                 shutil.copy2(source, target)
-        return _run_in(workdir, timeout_s)
+        return _run_in(workdir, timeout_s, env or {})
 
 
-def _run_in(workdir: Path, timeout_s: float) -> RunResult:
+def _run_in(workdir: Path, timeout_s: float, extra_env: Mapping[str, str]) -> RunResult:
     # sys.executable: the project venv, so student code can import pyspark and mrjob.
     # no:cacheprovider: no .pytest_cache; the temp dir is discarded anyway.
     cmd = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"]
     # PYSPARK_PYTHON: Spark workers otherwise start the `python3` on PATH, which may be a
     # different minor version than the driver (PYTHON_VERSION_MISMATCH).
-    env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1", "PYSPARK_PYTHON": sys.executable}
+    env = {
+        **os.environ,
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYSPARK_PYTHON": sys.executable,
+        **extra_env,
+    }
     start = time.monotonic()
     # New session = new process group, so a timeout can kill grandchildren too
     # (PySpark starts a JVM under pytest; killing only pytest would orphan it).

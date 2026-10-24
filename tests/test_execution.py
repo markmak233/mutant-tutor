@@ -43,6 +43,19 @@ def test_files_are_copied_under_the_given_names(tmp_path):
     assert result.outcome is Outcome.PASSED
 
 
+def test_extra_env_reaches_the_tests(tmp_path):
+    """`env` adds variables for one run only; this is how rule 5 sets TUTOR_PARTITIONS."""
+    test = write(
+        tmp_path / "test_env.py",
+        "import os\n\ndef test_env():\n    assert os.environ['TUTOR_PARTITIONS'] == '4'\n",
+    )
+
+    result = run_pytest({"test_env.py": test}, env={"TUTOR_PARTITIONS": "4"})
+
+    assert result.outcome is Outcome.PASSED
+    assert "TUTOR_PARTITIONS" not in os.environ
+
+
 def test_syntax_error_is_error_not_failed(tmp_path):
     """Code that cannot even be imported -> ERROR, kept apart from a genuine test failure."""
     broken = write(tmp_path / "broken.py", "def add(a, b)\n    return a + b\n")

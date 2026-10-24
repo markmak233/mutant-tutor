@@ -29,8 +29,9 @@ Living record of project decisions. Update it when a decision changes; note the 
 - Installation: Python deps as per-course extras, `pip install -e ".[comp9313]"`; system deps (Java,
   Hadoop) as a short per-course section in README. No install script: setup is one-off, and when it breaks,
   asking an AI is faster than maintaining a cross-platform script.
-- COMP9313: Python 3.11, Java 17 (`JAVA_HOME`), PySpark pinned to the course version.
-  If the course version is unknown, use 3.5.x. Spark 4.x enables ANSI SQL mode by default,
+- COMP9313: Python 3.11, Java 17 (`JAVA_HOME`), PySpark 3.5.x (decided 2026-10-24: the slides
+  name both 3.5.9 and 4.2.0, and the version is pinned per workspace in `workspace.toml`
+  anyway, so another course's materials can choose differently). Spark 4.x enables ANSI SQL mode by default,
   which changes DataFrame/SQL error behaviour (casts, overflow, divide by zero); RDD API is unaffected.
   mrjob is no longer actively maintained: works on 3.11, do not move past 3.12.
   (Confirmed: on Python 3.13 mrjob tasks fail with `No module named 'pipes'`.)
@@ -82,6 +83,7 @@ smartCodingReview/                       # public repo (the `tutor/` above), cod
 │   ├── envcheck.py                      # P1 checks the workspace's [requires]
 │   ├── execution.py                     # P1 copy to temp dir -> subprocess pytest -> delete
 │   ├── validation/                      # P1 the five checks (internals designed before coding)
+│   ├── testkit.py                       # P2a run a file-level program, read part-*, compare output
 │   ├── schema.py                        # P3 Pydantic exercise models
 │   ├── llm.py                           # P3 thin LLM API client, no LangChain
 │   ├── graph/                           # P3 langgraph dependency added here
@@ -106,6 +108,9 @@ smartcodereview-workspace/
 └── comp9313/                            # WORKSPACE_DIR points here; one workspace per course
     ├── workspace.toml                   # course name + [requires]; marks this as a workspace
     ├── lectures/                        # PDFs, read-only
+    ├── coding_materials/                # labs and projects as on Ed, read-only
+    │   ├── lab4/                        # one flat folder each: problem text, data, expected outputs
+    │   └── ass2/
     ├── batches/                         # one directory per generation run
     │   ├── 2026-10-27_p2-golden/
     │   │   ├── manifest.json            # phase, date, method, model, git commit, exercise list
@@ -122,6 +127,7 @@ smartcodereview-workspace/
     │   │           ├── skeleton.py      # pristine skeleton, so re-validation survives edits to student.py
     │   │           ├── reference.py
     │   │           ├── oracle.py
+    │   │           ├── test_oracle.py   # rule 4: hypothesis, reference vs oracle on random inputs
     │   │           ├── mutants/
     │   │           ├── pseudocode.md    # MRJob exercises: same solution in exam pseudocode
     │   │           └── validation.json  # result of the five checks
@@ -137,6 +143,28 @@ smartcodereview-workspace/
 - The phase in the name is a hint only; `manifest.json` records the git commit that produced the batch.
 - An exercise is identified by `<batch>/<exercise-id>`; the same id may recur across batches.
 
+## Course coding materials
+
+Decided 2026-10-24 after reading Labs 4-5 and Projects 1-2.
+- `coding_materials/<labN|assN>/` mirrors Ed: one flat folder per lab or project, no subfolders.
+  File names are arbitrary (`2.txt` is a problem statement, `pg100.txt` a book used as data), so
+  sorting files into `spec/` / `data/` folders by hand would not last. Copied: problem text (Ed
+  pages saved as text), data (CSV, book text), course-provided expected outputs. The owner's own
+  `.py` files are usually not copied.
+- Readers classify files by rule instead of by folder:
+  - never read: archives (`.zip`), SSH keys and `.ssh/`, `.venv/`, `__pycache__/`, hidden files,
+    output directories (`_SUCCESS`, `part-*`). Course folders can hold a zipped VM home directory
+    with SSH keys; these never enter the workspace, an index or an LLM prompt;
+  - data, not indexed as text: `.csv`, and text files over about 200 KB;
+  - text: other `.txt`, `.md`, `.py`.
+- Ed text copies carry UI noise ("Spaces: 4 (Auto)", "Terminal") and lose formulas (images
+  vanish, inline math comes out one character per line); phase 4 parsing has to clean this.
+- A course expected output and the owner's own run look the same on disk, so which is which is
+  asked when an exercise needs it.
+- Labs are practice material, so exercises may stay close to them. A project can be in an open
+  assessment window (Project 2 is due 2026-11-01): exercises built from a project are variants on
+  another domain and data, never the project itself, and the tutor does not write project code.
+
 ## Exercise validation (deterministic, never LLM-judged)
 
 An exercise is valid only if:
@@ -150,7 +178,8 @@ An exercise is valid only if:
      Catches e.g. a wrong `combOp` in `aggregateByKey`, which never runs with one partition.
    - MRJob: identical with the combiner on and off, since Hadoop may run it 0, 1 or many times
      (phase 2, with the first MRJob exercise). The lecture uses the same test ("check the
-     correctness by removing the combiner", L2.2 p.38).
+     correctness by removing the combiner", L2.2 p.38). Exercises on the `hadoop` runner also
+     pass with 1, 2 and 4 reducers (see "Interface extensions").
    - Plain Python: not applicable.
 
 Rules 1-3 (phase 1f) live in `src/tutor/validation/`: `exercise.py` finds the files from an
@@ -163,13 +192,43 @@ runs the exercise's own test file with reference, skeleton and each mutant copie
 - If rule 1 fails, rules 2-3 are SKIPPED: with a broken reference they would prove nothing.
 - Runs are sequential (each starts a JVM). Measured 2026-10-24 for rules 1-3:
   `station-average-rdd` about 19 s, `station-max-file` about 45 s.
+
+Rule 5 and the API check (phase 1g):
+- Every validation run sets `TUTOR_PARTITIONS` explicitly (`run_pytest(..., env=...)`), 2 by
+  default. Rule 5 (only if metadata has `"partition_check": true`, otherwise "n/a", which does
+  not affect validity) reruns the reference at 1 and 4; 2 is already covered by rule 1.
+- Rule 3 runs mutants at metadata `mutant_partitions`, default `[2]`; a mutant counts as killed
+  if it fails at any listed count. Most exercises keep the default; one or two per batch can
+  ask for `[2, 4]` to require bugs that only show at 4 partitions.
+- `validation/api.py` checks the reference against metadata `constraints` with `ast`:
+  `forbidden_calls` (any attribute access counts, so `g = rdd.groupByKey; g()` is caught),
+  `forbidden_imports` (submodules included; `from pyspark import sql` counts), and
+  `required_definitions`. Unknown keys are an error, so a typo cannot silently check nothing.
+  Only fully dynamic access (`getattr` with a built string) escapes. The same function can later
+  check student answers. It runs even when rule 1 fails, since it does not depend on the tests.
+- Measured 2026-10-24 for rules 1-3, 5 and api: `station-average-rdd` about 29 s,
+  `station-max-file` about 61 s.
+
+Rule 4 (phase 1g2): each exercise ships `solution/test_oracle.py`, a hypothesis test that imports
+`student` (the reference is copied in under that name) and `oracle`, and compares them on random
+inputs, with the partition count / number of input files also drawn at random. The validator
+runs it like any other test file, minus `test_student.py` (`ExerciseFiles.differential_files()`),
+so it still does not care whether an exercise is function-level or file-level. On failure the
+report quotes hypothesis' "Failing test case". Missing oracle files fail the rule. The point of
+rule 4: a reference that is right on every input the tests list but wrong elsewhere passes
+rule 1 and is caught here (unit test: correct below 1000, caught at exactly `a=1000`).
+Checked that it bites: the average-of-averages mutant is caught with the shrunk input
+`[('s1', 0.0), ('s1', 0.0), ('s1', 1.0)]` (0.5 instead of 0.333).
+Full validation (all rules), measured 2026-10-24: `station-average-rdd` about 36 s,
+`station-max-file` about 74 s.
 - Plain `pytest` excludes tests marked `spark`; `pytest -m spark` validates both examples end
   to end (about 1 min). Run it whenever validation or an example changes.
 
-Distributed output compared as sorted lists or `Counter`; floats with `pytest.approx`.
+Distributed output is compared by the modes under "Interface extensions" (multiset by default).
 API constraints checked statically with `ast`, both forbidden calls (e.g. `groupByKey`, `df.rdd`;
-the course itself bans `df.rdd` in the DataFrame project) and required ones (e.g. `mapper_init` /
-`mapper_final` for in-mapper combining).
+the course itself bans `df.rdd` in the DataFrame project, and `forbidden_calls` already catches
+it because any attribute access counts) and required ones (e.g. `mapper_init` / `mapper_final`
+for in-mapper combining).
 
 mrjob local runners (`-r inline`, `-r local`) ignore `mapreduce.job.reduces`, the key-field
 partitioner and the key comparator: they sort all map output as text and split it into reducer
@@ -228,13 +287,49 @@ Measured on `station-max-file` (2026-10-24):
   folder with the venv activated (an activated venv also puts its `python3` first on PATH, which
   Spark workers use). `sample_output/` is git-ignored.
 
+Interface extensions (phase 2a; decided 2026-10-24 from Labs 4-5 and Projects 1-2). Most of this
+lands in the tests and metadata, not in the validator:
+- One exercise, one implementation. Metadata `api` is `rdd`, `dataframe`, `mrjob` or `python`,
+  and an MRJob exercise names one `runner`, `inline` or `hadoop`. A course task that wants an RDD
+  and a DataFrame version (Project 2) becomes two exercises with the same question; each stays
+  simpler to build and validate. `hadoop` only when the concept needs it (custom partitioner or
+  comparator, order inversion, secondary sort), since every job costs 8-9 s.
+- MRJob file-level: the student writes the job class in the course template; tests run it on
+  input files with `-r inline` or `-r hadoop`. On `hadoop`, `TUTOR_PARTITIONS` also sets
+  `mapreduce.job.reduces`, so rule 5 checks 1, 2 and 4 reducers. Hadoop Streaming (separate
+  stdin mapper / reducer scripts) is not supported: it teaches the same concepts as mrjob and
+  would need a second test harness.
+- Parameters, in the course's two forms: positional after input and output
+  (`run(inputPath, outputPath, m, k)`, Project 2), or `--jobconf myjob.settings.<name>=<value>`
+  read with `jobconf_from_env` (Project 1, Lab 4 top-k). Metadata lists them; tests pass them;
+  rule 4 draws parameter values at random as well as inputs.
+- Output comparison modes (metadata `output`):
+  - `any`: all lines of all `part-*` files as a multiset (the current behaviour, default);
+  - `per_file`: each `part-*` file in order, the files as a multiset (secondary sort: a reducer's
+    output is ordered only within itself, Project 1);
+  - `total`: exactly one non-empty data file, fully in order (Project 2: Spark sort + `coalesce(1)`);
+  - options: float tolerance (both projects accept tiny float differences and `3.0` = `3.000`),
+    and MRJob's JSON quotes optional (`"zounds,a"` = `zounds,a`).
+- `src/tutor/testkit.py` holds this: run a Spark file-level program or an MRJob job (inline /
+  hadoop), read the `part-*` files, compare by mode. Each exercise's `test_student.py` and
+  `test_oracle.py` import it (the package is installed in the venv that runs the tests), so test
+  files stay short, which also leaves the phase 3 generator less boilerplate to get wrong.
+  `station-max-file` moves to it.
+- API constraints gain `required_any` (one of several groups, e.g. `combiner` or
+  `mapper_init` + `mapper_final`, Project 1 accepts either) and use counts (exactly one `MRStep`
+  in Project 1, two in the Lab 4 top-k). "Do not buffer all values in the reducer" cannot be
+  checked statically and stays a point for review.
+
 Runtime budget: the course does not test performance, so limits only need to be sane.
 - Every subprocess run (a student test run, or one validation step) times out at 30 s.
 - One SparkSession per validation process; `local[2]`, UI off, `spark.sql.shuffle.partitions=4`
   (the default 200 makes small DataFrame jobs slow).
-- `hypothesis` profile for Spark checks: `max_examples` 20-30, `deadline=None` (the default 200 ms
-  fails every Spark job), `derandomize=True` so validation is reproducible.
-  Starting values; tune against the phase 1 example.
+- `hypothesis` settings for Spark differential tests: `deadline=None` (the default 200 ms fails
+  every Spark job), `derandomize=True` so validation is reproducible. Function-level: one shared
+  SparkContext, `max_examples=25`, shrinking on (cheap, gives minimal counterexamples).
+  File-level: every example starts the program's own SparkContext (about 1.5 s), so
+  `max_examples=8` with large inputs (up to 40 mixed lines) and shrinking off: with it, a failing
+  mutant took over 120 s to report, without it 5-7 s. Measured 2026-10-24.
 - Spark tests read `TUTOR_PARTITIONS` (default 2) as the `numSlices` of their input, so rule 5
   reruns the same tests with 1, 2 and 4; passing at every count is stronger than "same result".
   Measured on `station-average-rdd`: the per-partition-average mutant passes at 1 and 4 partitions
@@ -302,15 +397,24 @@ is killed). This is isolation, not a sandbox: the child can still touch other fi
 
 ## Roadmap (reading week, in priority order)
 
-1. Environment + validation harness. No LLM involved.
+1. Environment + validation harness. No LLM involved. **Done 2026-10-24.** The "broken variant
+   per rule" lives in `tests/test_validation.py` as tiny pure-Python exercises built to fail
+   exactly one check each (broken reference, passing / crashing skeleton, surviving / unrunnable
+   mutant, reference wrong beyond the tested inputs, reference wrong at 4 partitions, API
+   violations), plus the examples' own mutants; timings are recorded under "Exercise validation".
    - `pyproject.toml`, `.gitignore`, `.env.example`, gitleaks pre-commit.
    - `config.py` (workspace checks), `envcheck.py`, `execution.py`, `validation/` (Spark partition check only).
    - Synthetic `examples/station-average-rdd/` (function-level, kept deliberately simple to start
      with) and `examples/station-max-file/` (file-level: input files with messy lines, exact output
      format, input split into `TUTOR_PARTITIONS` files), plus one broken variant per rule, so each
      check is shown to both pass and fail.
+   - README rewritten as the public repository introduction (what it is, how to set it up and
+     run the validator, the design in brief), replacing the original Codex-era planning brief.
    - Done when: `pytest` and `ruff check .` pass; the valid example passes all checks and every
-     broken variant fails the check it targets; measured validation time recorded.
+     broken variant fails the check it targets; measured validation time recorded; README updated.
+2a. Harness extensions from Labs 4-5 and Projects 1-2 (see "Interface extensions"), in small
+   steps: `testkit.py` with the output modes; parameters and the new API constraints; MRJob
+   interface with a synthetic example; DataFrame with a synthetic example.
 2. Five golden exercises, solved by the owner. Run the whole loop by hand before automating it.
    - First batch `batches/<date>_p2-golden/`: exercises drafted with web chat models, reviewed by the owner.
    - Coverage, each also exercising a different part of the validator (final topics picked from lectures):
@@ -330,6 +434,11 @@ is killed). This is isolation, not a sandbox: the child can still touch other fi
    - Done when: all five pass validation, the owner has solved them without AI help, attempts are in
      `attempts.jsonl`, and the steps that felt repetitive are noted as input for phase 3.
      These five are the baseline set for phase 5.
+2b. Code tracing exercises (raised from "deferred" on 2026-10-24: the lectures ask many "what does
+   this print and why" questions, e.g. an accumulator read as 0, closures over driver variables,
+   lazy evaluation, groupByKey vs reduceByKey). Design the tracing flow first (run the snippet
+   repeatedly and across partitions to prove its output is stable, then compare a normalised
+   answer), then a handful of exercises. Before phase 3 so the generator covers this type too.
 3. LangGraph generate-validate-repair loop.
 4. Hybrid RAG.
 5. Evaluation script + README results.
@@ -337,12 +446,10 @@ is killed). This is isolation, not a sandbox: the child can still touch other fi
 ## Deferred
 
 SQLite, CLI, adaptive learning, exam mode, Docker, error taxonomy
-(derive categories from real attempt data later), code tracing exercises (after the main loop works).
+(derive categories from real attempt data later).
 
 ## Open questions
 
-- Exact PySpark version used by the course. Slides say "current version: 3.5.9/4.2.0" (L4.1)
-  and link 3.3.0 docs; keep 3.5.x until the lab sheet or course VM confirms.
 - LLM provider and embedding model.
 
 ## Pseudocode

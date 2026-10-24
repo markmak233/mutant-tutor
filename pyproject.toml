@@ -45,5 +45,6 @@ select = ["E", "F", "I", "B", "UP"]
 "examples/*/solution/skeleton.py" = ["F401"]
 
 [tool.ruff.lint.isort]
-# Exercise tests import the code under test as a sibling module named `student`.
-known-local-folder = ["student"]
+# Exercise tests import sibling modules: the code under test as `student`, and the
+# plain-Python specification as `oracle` (differential tests).
+known-local-folder = ["student", "oracle"]

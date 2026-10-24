@@ -16,7 +16,7 @@ def format_report(report: ValidationReport) -> str:
     lines = [report.exercise_id]
     for r in report.results:
         lines.append(
-            f"  {r.status.value:<5} rule {r.rule}  {r.name:<17} {r.duration_s:5.1f}s  {r.detail}"
+            f"  {r.status.value:<5} {r.rule:<4} {r.name:<17} {r.duration_s:5.1f}s  {r.detail}"
         )
     lines.append("VALID" if report.valid else "INVALID")
     return "\n".join(lines)
