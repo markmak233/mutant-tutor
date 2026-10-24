@@ -35,3 +35,7 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
+
+[tool.ruff.lint.isort]
+# Exercise tests import the code under test as a sibling module named `student`.
+known-local-folder = ["student"]

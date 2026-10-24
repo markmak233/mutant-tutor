@@ -83,7 +83,7 @@ smartCodingReview/                       # public repo (the `tutor/` above), cod
 │   ├── rag/                             # P4
 │   └── eval/                            # P5
 ├── examples/                            # P1 synthetic only, same shape as a real exercise
-│   └── wordcount-rdd/
+│   └── station-average-rdd/             # per-key average in PySpark RDD, own wording and data
 │       ├── exercise/
 │       └── solution/
 └── tests/
@@ -105,13 +105,13 @@ smartcodereview-workspace/
     │   │   ├── manifest.json            # phase, date, method, model, git commit, exercise list
     │   │   ├── exercises/               # the only place the owner looks while solving
     │   │   │   └── <exercise-id>/
-    │   │   │       ├── question.md
-    │   │   │       ├── student.py       # owner writes the answer here
-    │   │   │       ├── test_student.py
-    │   │   │       ├── hints.md         # three levels
-    │   │   │       └── metadata.json    # topic, type, difficulty, source lecture + page
+    │   │   │       ├── student.py       # the one file to open: question in the module docstring,
+    │   │   │       │                    #   skeleton below; owner writes the answer here
+    │   │   │       ├── test_student.py  # run it, no need to read it
+    │   │   │       └── hints.md         # three levels; separate so it is opened only when stuck
     │   │   └── solutions/               # read by the validator only
     │   │       └── <exercise-id>/
+    │   │           ├── metadata.json    # topic, type, difficulty, forbidden calls, source
     │   │           ├── skeleton.py      # pristine skeleton, so re-validation survives edits to student.py
     │   │           ├── reference.py
     │   │           ├── oracle.py
@@ -176,7 +176,15 @@ Runtime budget: the course does not test performance, so limits only need to be 
   (the default 200 makes small DataFrame jobs slow).
 - `hypothesis` profile for Spark checks: `max_examples` 20-30, `deadline=None` (the default 200 ms
   fails every Spark job), `derandomize=True` so validation is reproducible.
-  Starting values; tune against the wordcount example in phase 1.
+  Starting values; tune against the phase 1 example.
+- Spark tests read `TUTOR_PARTITIONS` (default 2) as the `numSlices` of their input, so rule 5
+  reruns the same tests with 1, 2 and 4; passing at every count is stronger than "same result".
+  Measured on `station-average-rdd`: the per-partition-average mutant passes at 1 and 4 partitions
+  and is caught only at 2, so one partition count is not enough. One pytest run with Spark takes
+  about 4-5 s (SparkContext start included).
+- Spark workers start the `python3` on PATH unless `PYSPARK_PYTHON` is set, which fails with
+  PYTHON_VERSION_MISMATCH here (Anaconda 3.13 vs venv 3.11). The runner sets it to
+  `sys.executable`, and exercise test fixtures `setdefault` it so direct pytest runs work too.
 
 Mutants: the reference with one deliberate bug (e.g. `add` -> `max`, `>` -> `>=`, missing empty-input case).
 In phase 2 a web chat model drafts 3-5 per exercise and the owner reviews them, rejecting equivalent
@@ -215,10 +223,22 @@ retrieve_context -> generate_exercise -> validate --pass--> save
 Subprocess + timeout + temporary working directory. Docker only if environment reproducibility
 (Java/Spark) becomes a problem, not for isolation.
 
+`execution.run_pytest(files, timeout_s=30)` copies a name -> source mapping into a fresh temp
+dir (so the same tests can run against reference, skeleton or a mutant as `student.py`), runs
+`sys.executable -m pytest` there and deletes the dir. Results are PASSED (exit 0), FAILED (1),
+ERROR (2-5: import/syntax error, no tests) or TIMEOUT; validation relies on FAILED vs ERROR,
+since a skeleton must fail its tests, not crash. The child starts in its own session and the
+whole process group is killed on timeout and after every run, because PySpark starts a JVM
+under pytest that would otherwise be orphaned (a test covers this, and fails if only the parent
+is killed). This is isolation, not a sandbox: the child can still touch other files and the network.
+
 ## Learning rules
 
 - Editor AI inline completion is off when solving exercises.
 - Hints come from `hints.md` (three levels), never from reading `reference.py`.
+- `hints.md` starts with "Useful functions": each relevant API (and any forbidden one) with a
+  tiny runnable example on different data, so it teaches the tool without giving the answer.
+  Examples are run once to check the shown output. Then levels 1-3.
 - Solve from `exercises/` only; `solutions/` is for the validator.
 
 ## Roadmap (reading week, in priority order)
@@ -226,7 +246,7 @@ Subprocess + timeout + temporary working directory. Docker only if environment r
 1. Environment + validation harness. No LLM involved.
    - `pyproject.toml`, `.gitignore`, `.env.example`, gitleaks pre-commit.
    - `config.py` (workspace checks), `envcheck.py`, `execution.py`, `validation/` (Spark partition check only).
-   - Synthetic `examples/wordcount-rdd/`, plus one broken variant per rule, so each check is shown
+   - Synthetic `examples/station-average-rdd/`, plus one broken variant per rule, so each check is shown
      to both pass and fail.
    - Done when: `pytest` and `ruff check .` pass; the valid example passes all checks and every
      broken variant fails the check it targets; measured validation time recorded.
