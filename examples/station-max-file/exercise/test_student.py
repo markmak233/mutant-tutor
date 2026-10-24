@@ -42,6 +42,9 @@ def run_program(tmp_path, lines):
 
     output_dir = tmp_path / "output"  # must not exist before the run
     StationMax().run(str(input_dir), str(output_dir))
+    # Spark writes _SUCCESS when saving finished; without this check a program that
+    # writes nothing would pass the empty-output test.
+    assert (output_dir / "_SUCCESS").exists(), "no output was saved to outputPath"
 
     out = []
     for part in sorted(output_dir.glob("part-*")):

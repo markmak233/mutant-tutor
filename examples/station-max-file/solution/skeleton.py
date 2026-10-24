@@ -35,7 +35,9 @@ Constraints:
 - RDD API only (sc.textFile, saveAsTextFile); no DataFrames.
 - Do not use groupByKey.
 
-Run it yourself:  python student.py <input_dir> <output_dir>   (output_dir must not exist yet)
+Run it yourself (from this folder, venv activated):
+    rm -rf sample_output && python student.py sample_input sample_output && cat sample_output/part-*
+    sample_input/ holds the example above; Spark refuses to write into an existing output dir.
 Run the tests:    pytest test_student.py
 Stuck? hints.md has useful functions and three levels of hints.
 """
@@ -47,9 +49,14 @@ from pyspark import SparkConf, SparkContext
 
 class StationMax:
     def run(self, inputPath, outputPath):
-        # Create a SparkContext, read inputPath, keep the valid readings, find each
-        # station's maximum, save "station<TAB>max" lines to outputPath, stop the context.
+        conf = SparkConf().setAppName("station max")
+        sc = SparkContext(conf=conf)
+
+        # TODO: read inputPath, keep the valid readings, find each station's maximum,
+        #       and save "station<TAB>max" lines to outputPath. Then delete this raise.
         raise NotImplementedError
+
+        sc.stop()
 
 
 if __name__ == "__main__":

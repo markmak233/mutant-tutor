@@ -109,6 +109,7 @@ smartcodereview-workspace/
     │   │   │       ├── student.py       # the one file to open: question in the module docstring,
     │   │   │       │                    #   skeleton below; owner writes the answer here
     │   │   │       ├── test_student.py  # run it, no need to read it
+    │   │   │       ├── sample_input/    # file-level only: the docstring example as input files
     │   │   │       └── hints.md         # three levels; separate so it is opened only when stuck
     │   │   └── solutions/               # read by the validator only
     │   │       └── <exercise-id>/
@@ -199,6 +200,15 @@ Measured on `station-max-file` (2026-10-24):
   have an autouse fixture that stops any leftover context after each test.
 - Skeletons import what the student will need, so ruff's unused-import rule is switched off for
   `exercise/student.py` and `solution/skeleton.py` only.
+- File-level skeletons give the boilerplate assignments usually give: `SparkConf` /
+  `SparkContext` creation, `sc.stop()`, the `sys.argv` entry point. The student writes the
+  processing in between (a `raise NotImplementedError` marks the spot).
+- File-level tests assert `outputPath/_SUCCESS` exists, so a program that saves nothing cannot
+  pass the "empty output" case.
+- File-level exercises ship `exercise/sample_input/` (the docstring example as files), so the
+  program can be run by hand: `python student.py sample_input sample_output` from the exercise
+  folder with the venv activated (an activated venv also puts its `python3` first on PATH, which
+  Spark workers use). `sample_output/` is git-ignored.
 
 Runtime budget: the course does not test performance, so limits only need to be sane.
 - Every subprocess run (a student test run, or one validation step) times out at 30 s.
