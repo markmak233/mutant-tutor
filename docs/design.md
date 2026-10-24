@@ -1,0 +1,266 @@
+# Design Decisions
+
+Living record of project decisions. Update it when a decision changes; note the reason.
+
+## Goals
+
+1. Primary: portfolio project demonstrating LangGraph, RAG and LLM evaluation with real engineering judgment.
+2. Secondary: COMP9313 revision. The owner solves generated exercises himself; AI never writes the answers.
+
+## Roles of AI tools
+
+- Claude Code is the development assistant for building this system. It is not part of the runtime.
+- The system itself calls an LLM API (provider not yet decided).
+- The first exercises (golden set) are generated manually with web chat models, then reviewed and solved by the owner.
+
+## Environment
+
+- Requirements are per course, because courses differ (COMP9313 needs Java + Spark, others may not).
+  Each workspace declares them in `workspace.toml` (`course` plus a `[requires]` table);
+  the repo only holds the generic checker `tutor/envcheck.py`, so it stays course-agnostic.
+- Check, don't install. `python -m tutor.envcheck` checks the current workspace, and it also runs
+  once before validating a batch (not per exercise: importing pyspark alone takes a second or two).
+  `tests/test_env.py` runs the same checker.
+- Installation: Python deps as per-course extras, `pip install -e ".[comp9313]"`; system deps (Java,
+  Hadoop) as a short per-course section in README. No install script: setup is one-off, and when it breaks,
+  asking an AI is faster than maintaining a cross-platform script.
+- COMP9313: Python 3.11, Java 17 (`JAVA_HOME`), PySpark pinned to the course version.
+  If the course version is unknown, use 3.5.x. Spark 4.x enables ANSI SQL mode by default,
+  which changes DataFrame/SQL error behaviour (casts, overflow, divide by zero); RDD API is unaffected.
+  mrjob is no longer actively maintained: works on 3.11, do not move past 3.12.
+  (Confirmed: on Python 3.13 mrjob tasks fail with `No module named 'pipes'`.)
+- COMP9313 Hadoop: 3.3.6 standalone (same 3.3 line as the course VM's 3.3.2), Apache tarball
+  unpacked to `~/opt/hadoop-3.3.6`, located via `HADOOP_HOME` in `.env`. Not `brew install hadoop`:
+  its `yarn` binary clashes with the JavaScript `yarn`. Runs on Java 17, so one JDK serves
+  both Spark and Hadoop. Hadoop launches task scripts with the `python3` on `PATH`, so jobs must
+  pass `--python-bin` pointing at the project's Python 3.11.
+
+## Public repo vs private data
+
+- `tutor/` is the public repo and holds code only. Private material lives in per-course workspaces
+  under a sibling `smartcodereview-workspace/` directory (lectures, generated batches, attempts), located only via
+  env var `WORKSPACE_DIR`. `LECTURE_DIR` is an optional override, default `$WORKSPACE_DIR/lectures`.
+  Switching course = pointing `WORKSPACE_DIR` at another workspace.
+- `config.py` refuses a `WORKSPACE_DIR` that has no `workspace.toml` (wrong directory) or that sits
+  inside the git repo. This is stricter than relying on `.gitignore`.
+- Public demo corpus for RAG: Apache Spark documentation (Apache 2.0). Same code, different data source.
+- Exercises generated from lectures are private by default; only hand-written synthetic examples go in `examples/`.
+- Safety net: pre-commit + gitleaks, `.claude/settings.json` deny rules, project-only API key with usage limit.
+  Remember `.gitignore` does not remove files already in git history.
+
+## Repository layout
+
+Directories and dependencies are added only in the phase that needs them; no empty placeholders.
+LangChain / LangGraph do not appear before phase 3.
+
+```
+smartCodingReview/                       # public repo (the `tutor/` above), code only
+├── AGENTS.md
+├── CLAUDE.md
+├── README.md
+├── .claude/settings.json
+├── docs/design.md
+├── pyproject.toml                       # P1, per-course extras e.g. [comp9313]
+├── .gitignore                           # P1, includes *workspace*/ as a backstop
+├── .env.example                         # P1, WORKSPACE_DIR=..., HADOOP_HOME=...
+├── .pre-commit-config.yaml              # P1, gitleaks
+├── src/tutor/
+│   ├── __init__.py
+│   ├── config.py                        # P1 reads WORKSPACE_DIR, derives subpaths
+│   ├── envcheck.py                      # P1 checks the workspace's [requires]
+│   ├── execution.py                     # P1 copy to temp dir -> subprocess pytest -> delete
+│   ├── validation/                      # P1 the five checks (internals designed before coding)
+│   ├── schema.py                        # P3 Pydantic exercise models
+│   ├── llm.py                           # P3 thin LLM API client, no LangChain
+│   ├── graph/                           # P3 langgraph dependency added here
+│   ├── rag/                             # P4
+│   └── eval/                            # P5
+├── examples/                            # P1 synthetic only, same shape as a real exercise
+│   └── wordcount-rdd/
+│       ├── exercise/
+│       └── solution/
+└── tests/
+    ├── test_env.py                      # P1, runs envcheck for the current workspace
+    └── test_validation.py               # P1, runs the validator on examples/
+```
+
+`validation/` stays pure Python so the phase 3 `validate` node calls it unchanged.
+
+## Workspace layout (private, never in git)
+
+```
+smartcodereview-workspace/
+└── comp9313/                            # WORKSPACE_DIR points here; one workspace per course
+    ├── workspace.toml                   # course name + [requires]; marks this as a workspace
+    ├── lectures/                        # PDFs, read-only
+    ├── batches/                         # one directory per generation run
+    │   ├── 2026-10-27_p2-golden/
+    │   │   ├── manifest.json            # phase, date, method, model, git commit, exercise list
+    │   │   ├── exercises/               # the only place the owner looks while solving
+    │   │   │   └── <exercise-id>/
+    │   │   │       ├── question.md
+    │   │   │       ├── student.py       # owner writes the answer here
+    │   │   │       ├── test_student.py
+    │   │   │       ├── hints.md         # three levels
+    │   │   │       └── metadata.json    # topic, type, difficulty, source lecture + page
+    │   │   └── solutions/               # read by the validator only
+    │   │       └── <exercise-id>/
+    │   │           ├── skeleton.py      # pristine skeleton, so re-validation survives edits to student.py
+    │   │           ├── reference.py
+    │   │           ├── oracle.py
+    │   │           ├── mutants/
+    │   │           ├── pseudocode.md    # MRJob exercises: same solution in exam pseudocode
+    │   │           └── validation.json  # result of the five checks
+    │   ├── 2026-11-03_p3-graph/
+    │   │   └── discarded/               # also: exercises still failing after 3 repairs + log
+    │   └── 2026-11-10_p4-rag-2/         # second run on the same day
+    ├── attempts/attempts.jsonl          # one line per test run: batch, exercise, time, pass/fail, errors
+    ├── index/                           # P4 BM25 / vector index, rebuildable
+    └── runs/<date>_<label>/             # P5 evaluation outputs
+```
+
+- Batch name: `YYYY-MM-DD_p<phase>-<label>`, suffix `-2`, `-3` for repeat runs on the same day.
+- The phase in the name is a hint only; `manifest.json` records the git commit that produced the batch.
+- An exercise is identified by `<batch>/<exercise-id>`; the same id may recur across batches.
+
+## Exercise validation (deterministic, never LLM-judged)
+
+An exercise is valid only if:
+
+1. `reference.py` passes all tests.
+2. `skeleton.py` (the pristine skeleton) fails.
+3. Every mutant in `mutants/` fails.
+4. Reference output matches `oracle.py` (plain Python) on random inputs (differential testing, `hypothesis`).
+5. Results do not depend on how the work is distributed. Implemented per framework:
+   - PySpark RDD / DataFrame: identical across partition counts 1, 2, 4 (phase 1).
+     Catches e.g. a wrong `combOp` in `aggregateByKey`, which never runs with one partition.
+   - MRJob: identical with the combiner on and off, since Hadoop may run it 0, 1 or many times
+     (phase 2, with the first MRJob exercise). The lecture uses the same test ("check the
+     correctness by removing the combiner", L2.2 p.38).
+   - Plain Python: not applicable.
+
+Distributed output compared as sorted lists or `Counter`; floats with `pytest.approx`.
+API constraints checked statically with `ast`, both forbidden calls (e.g. `groupByKey`, `df.rdd`;
+the course itself bans `df.rdd` in the DataFrame project) and required ones (e.g. `mapper_init` /
+`mapper_final` for in-mapper combining).
+
+mrjob local runners (`-r inline`, `-r local`) ignore `mapreduce.job.reduces`, the key-field
+partitioner and the key comparator: they sort all map output as text and split it into reducer
+tasks by size (verified 2026-10-24 with mrjob 0.7.4, and in `mrjob/sim.py`). So patterns that rely
+on partitioning, custom sort order or reducer state across keys (order inversion, secondary sort)
+cannot be validated with these runners.
+
+Those exercises are validated with `-r hadoop` against the local standalone Hadoop instead
+(verified 2026-10-24, Hadoop 3.3.6: order inversion with 2 reducers and secondary sort with
+`-k2,2nr` both correct, about 8-9 s per job; the inline runner stays the default for every other
+MRJob exercise because it is much faster). Mutants for these patterns: in mrjob,
+`SORT_VALUES = True` is what switches on `KeyFieldBasedPartitioner` with `-k1,1`, and the
+`mapreduce.map.output.key.field.separator` line decides what "field 1" is. Removing either one
+was caught (59 of 123 output lines wrong). Removing `keypartitioner.options` was not caught,
+because `SORT_VALUES` already sets it, so it is not a valid mutant.
+
+Exercise types validated this way: implementation, completion, debugging (the skeleton is the buggy code).
+Code tracing / output prediction needs a different flow (run the snippet repeatedly and across
+partitions to prove the output is stable, then compare normalised answers) and is deferred.
+
+Runtime budget: the course does not test performance, so limits only need to be sane.
+- Every subprocess run (a student test run, or one validation step) times out at 30 s.
+- One SparkSession per validation process; `local[2]`, UI off, `spark.sql.shuffle.partitions=4`
+  (the default 200 makes small DataFrame jobs slow).
+- `hypothesis` profile for Spark checks: `max_examples` 20-30, `deadline=None` (the default 200 ms
+  fails every Spark job), `derandomize=True` so validation is reproducible.
+  Starting values; tune against the wordcount example in phase 1.
+
+Mutants: the reference with one deliberate bug (e.g. `add` -> `max`, `>` -> `>=`, missing empty-input case).
+In phase 2 a web chat model drafts 3-5 per exercise and the owner reviews them, rejecting equivalent
+mutants (unkillable) and ones that crash on import; any bug the owner makes while solving is added as
+a mutant. Phase 3 moves drafting to the LLM pipeline.
+
+## Generation pipeline (LangGraph)
+
+```
+retrieve_context -> generate_exercise -> validate --pass--> save
+                          ^                  |
+                          +---- repair <--fail (max 3)
+                                             +--over limit--> discard + log
+```
+
+- LLM output parsed into Pydantic models.
+- `validate` is pure Python and acts as the judge; repair receives the failure report.
+
+## RAG
+
+- PyMuPDF parsing, chunking by section / code block, keep source file and page.
+- Hybrid retrieval (BM25 + vectors): API names like `aggregateByKey` are exact-match problems
+  that pure vector search handles poorly.
+- Evaluate with 20-30 hand-labelled queries: recall@k for vector-only vs BM25-only vs hybrid.
+- Vector store and embedding model not yet decided (Chroma or FAISS candidates).
+
+## Evaluation metrics (README results table)
+
+- First-pass validity rate; validity after repair loop.
+- Mutant kill rate.
+- Tokens / cost per valid exercise.
+- With RAG vs without RAG; across models.
+
+## Code execution safety
+
+Subprocess + timeout + temporary working directory. Docker only if environment reproducibility
+(Java/Spark) becomes a problem, not for isolation.
+
+## Learning rules
+
+- Editor AI inline completion is off when solving exercises.
+- Hints come from `hints.md` (three levels), never from reading `reference.py`.
+- Solve from `exercises/` only; `solutions/` is for the validator.
+
+## Roadmap (reading week, in priority order)
+
+1. Environment + validation harness. No LLM involved.
+   - `pyproject.toml`, `.gitignore`, `.env.example`, gitleaks pre-commit.
+   - `config.py` (workspace checks), `envcheck.py`, `execution.py`, `validation/` (Spark partition check only).
+   - Synthetic `examples/wordcount-rdd/`, plus one broken variant per rule, so each check is shown
+     to both pass and fail.
+   - Done when: `pytest` and `ruff check .` pass; the valid example passes all checks and every
+     broken variant fails the check it targets; measured validation time recorded.
+2. Five golden exercises, solved by the owner. Run the whole loop by hand before automating it.
+   - First batch `batches/<date>_p2-golden/`: exercises drafted with web chat models, reviewed by the owner.
+   - Coverage, each also exercising a different part of the validator (final topics picked from lectures):
+
+     | # | Topic | Type | Validator path |
+     |---|---|---|---|
+     | 1 | RDD per-key average, no `groupByKey` (L5 practice 2) | implementation | partition check, forbidden-API check |
+     | 2 | DataFrame average word length per first letter, no `df.rdd` (L5 practice 3) | completion | DataFrame comparison, forbidden-API check |
+     | 3 | MRJob co-occurrence, pairs or stripes (L2.2, Lab 3) | implementation | MRJob runner, combiner check |
+     | 4 | MRJob in-mapper combining (L2.2, Lab 2) | implementation | required-API check (`mapper_init` / `mapper_final`) |
+     | 5 | MRJob mean with a broken combiner (L2.2 "Computing the Mean" v1-v4) | debugging | buggy skeleton must fail, combiner check |
+
+     `aggregateByKey` is listed but not taught (L4.1), so it is not in the golden set.
+     Order inversion and secondary sort go into a later batch: they need the Hadoop runner,
+     which the golden set should not depend on.
+
+   - Done when: all five pass validation, the owner has solved them without AI help, attempts are in
+     `attempts.jsonl`, and the steps that felt repetitive are noted as input for phase 3.
+     These five are the baseline set for phase 5.
+3. LangGraph generate-validate-repair loop.
+4. Hybrid RAG.
+5. Evaluation script + README results.
+
+## Deferred
+
+SQLite, CLI, adaptive learning, exam mode, Docker, error taxonomy
+(derive categories from real attempt data later), code tracing exercises (after the main loop works).
+
+## Open questions
+
+- Exact PySpark version used by the course. Slides say "current version: 3.5.9/4.2.0" (L4.1)
+  and link 3.3.0 docs; keep 3.5.x until the lab sheet or course VM confirms.
+- LLM provider and embedding model.
+
+## Pseudocode
+
+The final exam is a 2-hour offline written exam, so answers are written, not run. The course
+pseudocode (Lin & Dyer style: `class Mapper / method Map / Emit`) maps one-to-one onto MRJob
+`mapper` / `combiner` / `reducer`, so MRJob exercises double as pseudocode practice.
+Each MRJob exercise keeps `solutions/<id>/pseudocode.md`: the reference solution written in exam
+pseudocode, for comparison after solving.
