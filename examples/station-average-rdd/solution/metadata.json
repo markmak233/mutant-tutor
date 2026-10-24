@@ -1,0 +1,14 @@
+{
+  "id": "station-average-rdd",
+  "title": "Average temperature per station",
+  "topic": "pyspark-rdd/pair-rdd-aggregation",
+  "type": "implementation",
+  "difficulty": "easy",
+  "framework": "pyspark-rdd",
+  "function": "average_by_station",
+  "constraints": {
+    "forbidden_calls": ["groupByKey", "collect"]
+  },
+  "partition_check": true,
+  "source": "synthetic"
+}

@@ -1,0 +1,11 @@
+# gitleaks default rules (API keys, tokens, private keys) plus project rules.
+
+[extend]
+useDefault = true
+
+# AGENTS.md: no real absolute paths in the public repo. Home directories reveal
+# the machine layout and usually sit right next to private course material.
+[[rules]]
+id = "home-directory-path"
+description = "Absolute path into a home directory"
+regex = '''/(?:Users|home)/[A-Za-z0-9._-]+/'''
