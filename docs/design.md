@@ -16,7 +16,7 @@ Living record of project decisions. Update it when a decision changes; note the 
   chat when stuck. Rules live in CLAUDE.md ("Tutoring"): read the code and run the tests first,
   explain the first real error and its concept, direction before code, never touch `student.py`
   or quote `solution/`. Mistakes seen this way feed debugging exercises and mutants. A hint
-  command inside the system (LLM reads `student.py` + test output) is a later option.
+  command inside the system follows phase 3 (roadmap 3b).
 
 ## Environment
 
@@ -440,6 +440,19 @@ is killed). This is isolation, not a sandbox: the child can still touch other fi
    repeatedly and across partitions to prove its output is stable, then compare a normalised
    answer), then a handful of exercises. Before phase 3 so the generator covers this type too.
 3. LangGraph generate-validate-repair loop.
+3b. Hint command, `python -m tutor.hint <exercise>` (decided 2026-10-24, after phase 3 since it
+   needs the LLM client). Three layers, cheapest and most certain first:
+   - rules, no LLM: known low-level errors (syntax, full-width punctuation, `NotImplementedError`
+     left in, PYTHON_VERSION_MISMATCH, leftover SparkContext, tuple-formatted output) -> line and cause;
+   - mutant matching, no LLM: the same tests fail with the same values as a known mutant -> that
+     mutant's misconception note (each mutant gains one line: misconception + direction);
+   - LLM, only when both miss: gets `student.py`, the question, `hints.md`, constraints and the
+     first real error (Py4J / Java stack and home paths stripped), never `reference.py`. Direction
+     for concept errors, a line only for low-level ones, more specific on repeat requests. A
+     deterministic guard rejects replies with long code blocks or code too close to the reference.
+   - Evaluation: mutants act as simulated students with a known bug: diagnosis hit rate, leak
+     rate, share solved without the LLM, cost per hint. Real tutoring mistakes from phases 1-2
+     seed the rules and mutants. Hints only on request, logged in `attempts.jsonl`.
 4. Hybrid RAG.
 5. Evaluation script + README results.
 
