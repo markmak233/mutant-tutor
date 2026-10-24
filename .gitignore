@@ -1,0 +1,29 @@
+# Secrets and local config
+.env
+.env.*
+!.env.example
+.claude/settings.local.json
+
+# Private data: workspaces live outside the repo; this is a backstop
+*workspace*/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+
+# Tool caches
+.pytest_cache/
+.ruff_cache/
+.hypothesis/
+
+# Spark / Hadoop leftovers when something runs outside a temp dir
+spark-warehouse/
+metastore_db/
+derby.log
+
+# OS
+.DS_Store

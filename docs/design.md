@@ -42,7 +42,9 @@ Living record of project decisions. Update it when a decision changes; note the 
   env var `WORKSPACE_DIR`. `LECTURE_DIR` is an optional override, default `$WORKSPACE_DIR/lectures`.
   Switching course = pointing `WORKSPACE_DIR` at another workspace.
 - `config.py` refuses a `WORKSPACE_DIR` that has no `workspace.toml` (wrong directory) or that sits
-  inside the git repo. This is stricter than relying on `.gitignore`.
+  inside any git repository (same check for `LECTURE_DIR`). This is stricter than relying on `.gitignore`.
+- `.env` is read from the current directory by a ~10-line stdlib loader (no `python-dotenv`);
+  variables already exported in the shell win. Run commands from the repo root.
 - Public demo corpus for RAG: Apache Spark documentation (Apache 2.0). Same code, different data source.
 - Exercises generated from lectures are private by default; only hand-written synthetic examples go in `examples/`.
 - Safety net: pre-commit + gitleaks, `.claude/settings.json` deny rules, project-only API key with usage limit.
