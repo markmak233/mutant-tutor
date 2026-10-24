@@ -9,6 +9,8 @@ from tutor.envcheck import check_workspace
 
 
 def test_environment_matches_workspace():
+    """Every [requires] entry of the current workspace passes on this machine.
+    Skips only when no WORKSPACE_DIR is configured (e.g. a fresh public clone)."""
     load_env()
     if not os.environ.get("WORKSPACE_DIR"):
         pytest.skip("WORKSPACE_DIR not set (no .env); nothing to check on this machine")

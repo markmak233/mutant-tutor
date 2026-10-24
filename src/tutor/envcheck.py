@@ -20,13 +20,16 @@ from tutor.config import Workspace, WorkspaceError, load_env, load_workspace
 
 @dataclass(frozen=True)
 class CheckResult:
+    """Outcome of checking one [requires] entry, e.g. name="java", required="17"."""
+
     name: str
     required: str
     found: str | None  # None means not found at all
-    hint: str = ""
+    hint: str = ""  # what to do if the check fails
 
     @property
     def ok(self) -> bool:
+        """Derived, not stored, so it can never disagree with `found` and `required`."""
         return self.found is not None and version_matches(self.found, self.required)
 
 
@@ -57,10 +60,16 @@ def parse_hadoop_version(jar_names: list[str]) -> str | None:
 
 
 def check_workspace(ws: Workspace) -> list[CheckResult]:
+    """Check every [requires] entry of the workspace, in the order they are written."""
     return [_check(name, required, ws.course) for name, required in ws.requires.items()]
 
 
 def _check(name: str, required: str, course: str) -> CheckResult:
+    """Dispatch on the requirement name.
+
+    python, java and hadoop are special; any other name is a pip package, so a new
+    course can require a new library without changing this code.
+    """
     if name == "python":
         return CheckResult(
             name, required, platform.python_version(),
@@ -83,6 +92,8 @@ def _check(name: str, required: str, course: str) -> CheckResult:
 
 
 def _java_version() -> str | None:
+    """Ask $JAVA_HOME/bin/java for its version. JAVA_HOME, not PATH, because that is
+    the JDK Spark and Hadoop will actually use."""
     java_home = os.environ.get("JAVA_HOME")
     if not java_home:
         return None
@@ -93,10 +104,12 @@ def _java_version() -> str | None:
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
+    # `java -version` writes to stderr, not stdout.
     return parse_java_version(proc.stderr + proc.stdout)
 
 
 def _hadoop_version() -> str | None:
+    """Read the version of the Hadoop unpacked at $HADOOP_HOME from its jar names."""
     hadoop_home = os.environ.get("HADOOP_HOME")
     if not hadoop_home:
         return None
@@ -107,6 +120,7 @@ def _hadoop_version() -> str | None:
 
 
 def main() -> int:
+    """Print one line per requirement; exit code 0 only if everything is ok."""
     load_env()
     try:
         ws = load_workspace()

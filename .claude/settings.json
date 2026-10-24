@@ -22,7 +22,9 @@
       "Bash(git push *)",
       "Bash(git reset --hard *)",
       "Bash(git rebase *)",
-      "Bash(git filter-branch *)"
+      "Bash(git filter-branch *)",
+      "Edit(./.env.example)",
+      "Write(./.env.example)"
     ]
   }
 }

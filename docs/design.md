@@ -49,6 +49,11 @@ Living record of project decisions. Update it when a decision changes; note the 
 - Exercises generated from lectures are private by default; only hand-written synthetic examples go in `examples/`.
 - Safety net: pre-commit + gitleaks, `.claude/settings.json` deny rules, project-only API key with usage limit.
   Remember `.gitignore` does not remove files already in git history.
+- gitleaks runs as a pre-commit `local` / `system` hook on staged changes, using the brew-installed
+  binary (no Go build). `.gitleaks.toml` extends the default rules with `home-directory-path`
+  (`/Users/<name>/`, `/home/<name>/`), since default rules only know secrets. History was scanned
+  clean on 2026-10-24; rescan with `gitleaks git .` after any history-sensitive change.
+  `.env.example` is marked `skip-worktree` locally so filled-in values never get staged.
 
 ## Repository layout
 

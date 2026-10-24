@@ -21,17 +21,28 @@ class WorkspaceError(Exception):
 
 @dataclass(frozen=True)
 class Workspace:
+    """One course workspace, already validated by `load_workspace`.
+
+    root:        the workspace directory (WORKSPACE_DIR, resolved)
+    course:      course id from workspace.toml, e.g. "comp9313"
+    requires:    the [requires] table, name -> version prefix, e.g. {"java": "17"}
+    lecture_dir: LECTURE_DIR if set, else <root>/lectures
+    """
+
     root: Path
     course: str
     requires: dict[str, str]
     lecture_dir: Path
 
+    # Subfolders are only computed here; code that writes into them creates them on demand.
     @property
     def batches_dir(self) -> Path:
+        """One subfolder per generation run, e.g. batches/2026-10-27_p2-golden/."""
         return self.root / "batches"
 
     @property
     def attempts_dir(self) -> Path:
+        """Where attempts.jsonl (one line per test run) lives."""
         return self.root / "attempts"
 
 
@@ -48,10 +59,18 @@ def load_env(path: Path | None = None) -> None:
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, value = line.split("=", 1)
+        # setdefault: only fill in variables the shell has not set already.
         os.environ.setdefault(key.strip(), value.strip().strip("'\""))
 
 
 def load_workspace(environ: Mapping[str, str] | None = None) -> Workspace:
+    """Find, check and load the workspace named by WORKSPACE_DIR.
+
+    Checks, in order: variable set -> directory exists -> not inside a git repo ->
+    workspace.toml present -> it names a course. The first failure raises WorkspaceError.
+
+    `environ` defaults to os.environ; tests pass a plain dict instead.
+    """
     env = os.environ if environ is None else environ
 
     raw_root = env.get("WORKSPACE_DIR")
@@ -68,6 +87,7 @@ def load_workspace(environ: Mapping[str, str] | None = None) -> Workspace:
         data = tomllib.load(f)
     if "course" not in data:
         raise WorkspaceError(f"{toml_path} has no `course` entry.")
+    # str(): a version written unquoted in TOML (java = 17) would load as an int.
     requires = {name: str(version) for name, version in data.get("requires", {}).items()}
 
     raw_lectures = env.get("LECTURE_DIR")
@@ -92,6 +112,7 @@ def _private_dir(raw: str, var: str) -> Path:
 
 
 def _enclosing_git_repo(path: Path) -> Path | None:
+    """Return the nearest directory at or above `path` that contains .git, if any."""
     for candidate in (path, *path.parents):
         if (candidate / ".git").exists():
             return candidate
