@@ -56,8 +56,10 @@ Two interfaces, mixed in every batch:
 - **File-level**: write a program in the shape course assignments use (`run(inputPath, outputPath)`),
   read messy input files, write `part-*` output in an exact format. Ships a `sample_input/`.
 
-Two synthetic examples live in [`examples/`](examples/): `station-average-rdd` (function-level)
-and `station-max-file` (file-level).
+Three synthetic examples live in [`examples/`](examples/): `station-average-rdd` (function-level),
+`station-max-file` (file-level Spark) and `station-condition-share` (MRJob on a local Hadoop:
+order inversion, where a mutant that forgets the partitioner passes with one reducer and is
+caught with two).
 
 ## Quick start
 
@@ -70,7 +72,7 @@ pip install -e ".[comp9313,dev]"
 cp .env.example .env            # set JAVA_HOME (and WORKSPACE_DIR / HADOOP_HOME if used)
 
 pytest                          # fast unit tests (~20 s)
-pytest -m spark                 # validate both examples end to end with Spark (~2 min)
+pytest -m spark                 # validate every example end to end (~6.5 min; Hadoop optional)
 python -m tutor.validation examples/station-average-rdd/exercise examples/station-average-rdd/solution
 ```
 

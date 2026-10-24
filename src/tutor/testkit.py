@@ -127,10 +127,15 @@ def run_mrjob(
     ]
     from mrjob.step import StepFailedException  # only MRJob exercises need mrjob
 
+    failure = None
     try:
         _run_job(job_cls, args, conf)
     except StepFailedException as hadoop_error:
-        _explain_hadoop_failure(job_cls, input_dir, output_dir, conf, hadoop_error)
+        failure = hadoop_error
+    if failure is not None:
+        # Outside the except block, so the report does not start with the Hadoop command
+        # line (Python would chain it to whatever the rerun raises).
+        _explain_hadoop_failure(job_cls, input_dir, output_dir, conf, failure)
     return read_output(output_dir)
 
 
@@ -219,7 +224,8 @@ def _explain_hadoop_failure(job_cls, input_dir: Path, output_dir: Path, conf: di
     except Exception as inline_error:
         raise AssertionError(
             "the job failed on Hadoop; on the inline runner the same input raises "
-            f"{type(inline_error).__name__}: {inline_error} (traceback above)"
+            f"{type(inline_error).__name__}{f': {inline_error}' if str(inline_error) else ''} "
+            "(traceback above)"
         ) from inline_error
     raise AssertionError(
         "the job failed on Hadoop but runs on the inline runner, which ignores partitioning "

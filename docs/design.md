@@ -95,7 +95,8 @@ smartCodingReview/                       # public repo (the `tutor/` above), cod
 │   ├── station-average-rdd/             # function-level: per-key average in PySpark RDD
 │   │   ├── exercise/
 │   │   └── solution/
-│   └── station-max-file/                # file-level: CSV input dir with messy lines -> part-* output
+│   ├── station-max-file/                # file-level: CSV input dir with messy lines -> part-* output
+│   └── station-condition-share/         # MRJob on Hadoop: order inversion, --jobconf tau
 └── tests/
     ├── test_env.py                      # P1, runs envcheck for the current workspace
     └── test_validation.py               # P1, runs the validator on examples/
@@ -229,8 +230,9 @@ Checked that it bites: the average-of-averages mutant is caught with the shrunk 
 `[('s1', 0.0), ('s1', 0.0), ('s1', 1.0)]` (0.5 instead of 0.333).
 Full validation (all rules), measured 2026-10-24: `station-average-rdd` about 36 s,
 `station-max-file` about 74 s.
-- Plain `pytest` excludes tests marked `spark`; `pytest -m spark` validates both examples end
-  to end (about 1 min). Run it whenever validation or an example changes.
+- Plain `pytest` excludes tests marked `spark`; `pytest -m spark` validates every example end
+  to end and runs the Hadoop testkit tests (about 6.5 min, 4 of them for the Hadoop example).
+  Run it whenever validation, testkit or an example changes.
 
 Distributed output is compared by the modes under "Interface extensions" (multiset by default).
 API constraints checked statically with `ast`, both forbidden calls (e.g. `groupByKey`, `df.rdd`;
@@ -364,6 +366,16 @@ in two places would drift. Metadata keeps what the validator reads (constraints,
   A name counts as defined if a function has it or a call passes it as a keyword, since
   multi-step jobs write `MRStep(combiner=self.add_up)`; `required_definitions` uses the same
   rule. A flat `required_any` list is an error, not "each name is a group". Done 2026-10-25.
+- `examples/station-condition-share/` (done 2026-10-25): the first MRJob example, on Hadoop.
+  Share of each weather condition per station with order inversion (`(s, *)` total sorts
+  first; `SORT_VALUES` + key field separator `,` partition by station), tau as
+  `--jobconf myjob.settings.tau`, compared `per_file` with `float_tol` and `optional_quotes`;
+  ships `solution/pseudocode.md`. Three tests, each data-rich (every Hadoop run costs 7 s).
+  Mutants: no `SORT_VALUES`, no key separator, total key `~` (sorts last), `>` for `>=`, a
+  combiner that emits 1. The first two pass with one reducer and fail at 2, which is what
+  rule 5 and the Hadoop runner are for. Rule 4: 4 hypothesis examples with random tau and
+  reducer count, station names chosen to test prefix order (`s1` / `s10`, `n` / `north`).
+  Full validation about 3 min 50 s (rule 3 alone 111 s); metadata `timeout_s` 150.
   "Do not buffer all values in the reducer" cannot be checked statically and stays a point for review.
 
 Runtime budget: the course does not test performance, so limits only need to be sane.

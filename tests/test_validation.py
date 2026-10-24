@@ -1,11 +1,12 @@
 """Validation rules 1-5 and the static API check.
 
 Unit tests build tiny pure-Python exercises in a temp dir, so they need no Spark. The
-`spark`-marked tests validate the real examples end to end (about 1.5 min): run them with
+`spark`-marked tests validate the real examples end to end (about 6 min): run them with
 `pytest -m spark`.
 """
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -405,10 +406,14 @@ EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 
 
 @pytest.mark.spark
-@pytest.mark.parametrize("name", ["station-average-rdd", "station-max-file"])
+@pytest.mark.parametrize(
+    "name", ["station-average-rdd", "station-max-file", "station-condition-share"]
+)
 def test_examples_are_valid(name):
-    """End to end on the real examples."""
+    """End to end on the real examples. The MRJob one runs on Hadoop (about 4 min)."""
     load_env()
+    if name == "station-condition-share" and not os.environ.get("HADOOP_HOME"):
+        pytest.skip("needs HADOOP_HOME")
     exercise = load_exercise(EXAMPLES / name / "exercise", EXAMPLES / name / "solution")
 
     report = validate(exercise)
