@@ -1,8 +1,19 @@
+import importlib.util
+import os
+import sys
 from pathlib import Path
 
 import pytest
 
-from tutor.testkit import Output, assert_output, partitions, run_program, write_inputs
+from tutor.config import load_env
+from tutor.testkit import (
+    Output,
+    assert_output,
+    partitions,
+    run_mrjob,
+    run_program,
+    write_inputs,
+)
 
 
 def out(*parts: list[str]) -> Output:
@@ -177,3 +188,176 @@ def test_total_empty_output():
 def test_unknown_order_is_an_error():
     with pytest.raises(ValueError):
         assert_output(out([]), [], order="sorted")
+
+
+# --- run_mrjob ---------------------------------------------------------------------------
+# Jobs are written to files and imported, because the hadoop runner ships the job's own
+# script to the task processes.
+
+load_env()  # HADOOP_HOME / JAVA_HOME from the repo's .env, for the hadoop tests
+
+
+def needs_hadoop(test):
+    """Slow (each job starts Hadoop, about 7 s), so `spark`-marked; skipped without Hadoop."""
+    test = pytest.mark.skipif(not os.environ.get("HADOOP_HOME"), reason="no HADOOP_HOME")(test)
+    return pytest.mark.spark(test)
+
+WORD_COUNT = '''
+from mrjob.job import MRJob
+
+
+class WordCount(MRJob):
+    JOBCONF = {"mapreduce.job.reduces": 3}
+
+    def mapper(self, _, line):
+        for word in line.split():
+            yield word, 1
+
+    def reducer(self, word, counts):
+        yield word, sum(counts)
+
+
+if __name__ == "__main__":
+    WordCount.run()
+'''
+
+TOP_K = '''
+from mrjob.compat import jobconf_from_env
+from mrjob.job import MRJob
+from mrjob.step import MRStep
+
+
+class TopK(MRJob):
+    def steps(self):
+        return [
+            MRStep(mapper=self.words, combiner=self.add_up, reducer=self.add_up),
+            # the global top-k needs one reducer, whatever the command line says
+            MRStep(mapper=self.one_key, reducer=self.top_k,
+                   jobconf={"mapreduce.job.reduces": 1}),
+        ]
+
+    def words(self, _, line):
+        for word in line.split():
+            yield word, 1
+
+    def add_up(self, word, counts):
+        yield word, sum(counts)
+
+    def one_key(self, word, count):
+        yield None, (count, word)
+
+    def top_k(self, _, pairs):
+        k = int(jobconf_from_env("myjob.settings.k"))
+        for count, word in sorted(pairs, key=lambda p: (-p[0], p[1]))[:k]:
+            yield word, count
+
+
+if __name__ == "__main__":
+    TopK.run()
+'''
+
+BROKEN_MAPPER = '''
+from mrjob.job import MRJob
+
+
+class Broken(MRJob):
+    def mapper(self, _, line):
+        raise NotImplementedError("write the mapper")
+
+
+if __name__ == "__main__":
+    Broken.run()
+'''
+
+# A misspelt partitioner class: Hadoop rejects the job, inline ignores partitioners.
+BAD_PARTITIONER = WORD_COUNT.replace(
+    'JOBCONF = {"mapreduce.job.reduces": 3}',
+    'PARTITIONER = "org.apache.hadoop.mapred.lib.KeyFieldBasedPartitionr"',
+)
+
+TEXT = ["b a c a", "a b", "c c a b", "d a b c", "e d a", "b e"]
+
+
+def load_job(tmp_path: Path, source: str, name: str):
+    """Write `source` to <tmp>/<module>.py and return its job class `name`."""
+    module_name = f"job_{name.lower()}_{tmp_path.name}"
+    path = tmp_path / f"{module_name}.py"
+    path.write_text(source)
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module  # mrjob finds the job's script file through it
+    spec.loader.exec_module(module)
+    return getattr(module, name)
+
+
+def test_mrjob_inline_two_steps_with_jobconf_parameter(tmp_path):
+    """Several input files, two MRSteps, k passed as --jobconf myjob.settings.k."""
+    job = load_job(tmp_path, TOP_K, "TopK")
+    inp = write_inputs(tmp_path / "in", TEXT, files=3)
+
+    result = run_mrjob(job, inp, tmp_path / "out", jobconf={"myjob.settings.k": 2})
+
+    assert_output(result, ['"a"\t6', '"b"\t5'], order="total")
+
+
+def test_mrjob_without_main_block_is_explained(tmp_path):
+    """Hadoop starts the job as a script; without the entry point it silently outputs
+    nothing, so this is caught before running."""
+    source = TOP_K.replace('if __name__ == "__main__":\n    TopK.run()', "")
+    job = load_job(tmp_path, source, "TopK")
+    with pytest.raises(AssertionError, match=r"TopK\.run\(\)"):
+        run_mrjob(job, write_inputs(tmp_path / "in", TEXT), tmp_path / "out")
+
+
+def test_mrjob_unknown_runner_is_an_error(tmp_path):
+    with pytest.raises(ValueError):
+        run_mrjob(object, tmp_path, tmp_path / "out", runner="local")
+
+
+@needs_hadoop
+def test_hadoop_command_line_reducers_beat_class_jobconf(tmp_path, monkeypatch):
+    """JOBCONF asks for 3 reducers; run_mrjob passes TUTOR_PARTITIONS=2 on the command
+    line, which wins, so rule 5 can vary the count even in jobs that fix it."""
+    monkeypatch.setenv("TUTOR_PARTITIONS", "2")
+    job = load_job(tmp_path, WORD_COUNT, "WordCount")
+    inp = write_inputs(tmp_path / "in", TEXT)
+
+    result = run_mrjob(job, inp, tmp_path / "out", runner="hadoop")
+
+    assert len(result.parts) == 2
+    assert_output(result, ['"a"\t6', '"b"\t5', '"c"\t4', '"d"\t2', '"e"\t2'])
+
+
+@needs_hadoop
+def test_hadoop_step_jobconf_beats_command_line(tmp_path, monkeypatch):
+    """Four reducers from TUTOR_PARTITIONS, but the top-k step pins one: one output file."""
+    monkeypatch.setenv("TUTOR_PARTITIONS", "4")
+    job = load_job(tmp_path, TOP_K, "TopK")
+    inp = write_inputs(tmp_path / "in", TEXT)
+
+    result = run_mrjob(job, inp, tmp_path / "out", runner="hadoop",
+                       jobconf={"myjob.settings.k": 2})
+
+    assert len(result.parts) == 1
+    assert_output(result, ['"a"\t6', '"b"\t5'], order="total")
+
+
+@needs_hadoop
+def test_hadoop_failure_shows_the_python_error(tmp_path):
+    """Hadoop only says "subprocess failed"; the inline rerun names the real error."""
+    job = load_job(tmp_path, BROKEN_MAPPER, "Broken")
+    inp = write_inputs(tmp_path / "in", TEXT)
+
+    with pytest.raises(AssertionError, match="inline runner the same input raises "
+                                             "NotImplementedError: write the mapper"):
+        run_mrjob(job, inp, tmp_path / "out", runner="hadoop")
+
+
+@needs_hadoop
+def test_hadoop_only_failure_points_at_hadoop_settings(tmp_path):
+    """Fails on Hadoop, runs on inline (which ignores partitioners): the message says so."""
+    job = load_job(tmp_path, BAD_PARTITIONER, "WordCount")
+    inp = write_inputs(tmp_path / "in", TEXT)
+
+    with pytest.raises(AssertionError, match="runs on the inline runner"):
+        run_mrjob(job, inp, tmp_path / "out", runner="hadoop")

@@ -1,4 +1,5 @@
-"""Helpers for exercise tests: input files, running a file-level program, comparing output.
+"""Helpers for exercise tests: input files, running a file-level program or MRJob job,
+comparing output.
 
 Each exercise's test_student.py and test_oracle.py import this, so they stay short and the
 output rules live in one place (docs/design.md, "Interface extensions"). The comparison mode
@@ -17,6 +18,8 @@ import sys
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from tutor.config import load_env
 
 PARTITIONS_ENV = "TUTOR_PARTITIONS"
 DEFAULT_PARTITIONS = 2
@@ -88,6 +91,49 @@ def run_program(program, input_dir: Path | str, output_dir: Path | str, *params)
     return read_output(output_dir)
 
 
+def run_mrjob(
+    job_cls,
+    input_dir: Path | str,
+    output_dir: Path | str,
+    *,
+    runner: str = "inline",
+    jobconf: dict | None = None,
+) -> Output:
+    """Run an MRJob job on every file in `input_dir`, the way the course runs it:
+    `python job.py -r <runner> <input> -o <output> --jobconf myjob.settings.k=3 ...`.
+
+    runner="hadoop" uses the local standalone Hadoop (HADOOP_HOME): partitioner, comparator
+    and reducer count are honoured there, unlike inline. It sets mapreduce.job.reduces to
+    partitions(), so rule 5 checks 1, 2 and 4 reducers; a reducer count written in an
+    MRStep's own jobconf still wins for that step (verified 2026-10-25).
+    """
+    if runner not in ("inline", "hadoop"):
+        raise ValueError(f"runner must be 'inline' or 'hadoop', not {runner!r}")
+    _assert_entry_point(job_cls)
+    input_dir, output_dir = Path(input_dir), Path(output_dir)
+    conf = dict(jobconf or {})
+    if runner == "inline":
+        _run_job(job_cls, [str(input_dir), "-r", "inline", "-o", str(output_dir)], conf)
+        return read_output(output_dir)
+
+    hadoop = _hadoop_bin()
+    conf.setdefault("mapreduce.job.reduces", partitions())
+    # Fail on the first error: by default every failed task is retried 4 times.
+    conf.update({"mapreduce.map.maxattempts": 1, "mapreduce.reduce.maxattempts": 1})
+    args = [
+        input_dir.as_uri(), "-r", "hadoop", "-o", output_dir.as_uri(),
+        "--hadoop-bin", str(hadoop), "--python-bin", sys.executable,
+        "--hadoop-tmp-dir", (output_dir.parent / f"{output_dir.name}-hadoop-tmp").as_uri(),
+    ]
+    from mrjob.step import StepFailedException  # only MRJob exercises need mrjob
+
+    try:
+        _run_job(job_cls, args, conf)
+    except StepFailedException as hadoop_error:
+        _explain_hadoop_failure(job_cls, input_dir, output_dir, conf, hadoop_error)
+    return read_output(output_dir)
+
+
 def assert_output(
     actual: Output,
     expected: Iterable[str],
@@ -128,6 +174,58 @@ def assert_output(
     if order == "per_file":
         for name, lines in parts.items():
             _assert_in_expected_order(name, lines, expected, float_tol)
+
+
+def _assert_entry_point(job_cls) -> None:
+    """Hadoop (and the course's run command) start the job as a script. Without
+    `if __name__ == "__main__": Job.run()` the script defines the class and exits, and
+    the job silently writes nothing; inline would still work, which hides the mistake."""
+    script = Path(job_cls.mr_job_script() or "")
+    pattern = rf"__name__\s*==\s*['\"]__main__['\"]\s*:\s*\n\s*{job_cls.__name__}\.run\(\)"
+    if not script.is_file() or not re.search(pattern, script.read_text()):
+        raise AssertionError(
+            f"{script.name or 'the job file'} needs an entry point at the end:\n"
+            f'if __name__ == "__main__":\n    {job_cls.__name__}.run()'
+        )
+
+
+def _run_job(job_cls, args: list[str], conf: dict) -> None:
+    for key, value in conf.items():
+        args = [*args, "--jobconf", f"{key}={value}"]
+    job = job_cls(args)
+    with job.make_runner() as runner:
+        runner.run()
+
+
+def _hadoop_bin() -> Path:
+    # Exercise tests run from a workspace folder, where the repo's .env is not in the current
+    # directory, so load it from the repo; variables exported in the shell still win.
+    load_env(Path(__file__).resolve().parents[2] / ".env")
+    hadoop = Path(os.environ.get("HADOOP_HOME", "")) / "bin" / "hadoop"
+    if not os.environ.get("HADOOP_HOME") or not hadoop.is_file():
+        raise RuntimeError("runner='hadoop' needs HADOOP_HOME (a Hadoop 3.3 install) in .env")
+    if not os.environ.get("JAVA_HOME"):
+        raise RuntimeError("runner='hadoop' needs JAVA_HOME (Java 17) in .env")
+    return hadoop
+
+
+def _explain_hadoop_failure(job_cls, input_dir: Path, output_dir: Path, conf: dict, error):
+    """mrjob cannot read the Python traceback from local Hadoop task logs; it only reports
+    "subprocess failed with code 1". Rerun on the inline runner (about a second) so the
+    learner sees the real error and line."""
+    rerun_dir = output_dir.parent / f"{output_dir.name}-inline-rerun"
+    try:
+        _run_job(job_cls, [str(input_dir), "-r", "inline", "-o", str(rerun_dir)], conf)
+    except Exception as inline_error:
+        raise AssertionError(
+            "the job failed on Hadoop; on the inline runner the same input raises "
+            f"{type(inline_error).__name__}: {inline_error} (traceback above)"
+        ) from inline_error
+    raise AssertionError(
+        "the job failed on Hadoop but runs on the inline runner, which ignores partitioning "
+        "and sort settings: check the partitioner, the key field separator and the order in "
+        "which keys reach each reducer"
+    ) from error
 
 
 def _stop_leftover_spark() -> None:

@@ -13,7 +13,7 @@ import pytest
 from tutor.config import load_env
 from tutor.validation import ExerciseError, Status, load_exercise, validate
 from tutor.validation.__main__ import format_report, main
-from tutor.validation.api import find_violations
+from tutor.validation.api import count_uses, find_violations
 
 TESTS = (
     "from student import add\n\n"
@@ -259,6 +259,15 @@ def test_mutant_wrong_only_at_4_needs_mutant_partitions(tmp_path):
     assert "2/2 killed (partitions 2, 4)" in stricter.detail
 
 
+def test_metadata_timeout_applies_to_every_run(tmp_path):
+    """Hadoop exercises set `timeout_s` in metadata; here it is too short for pytest even to
+    start, so rule 1 times out."""
+    report = run(make_exercise(tmp_path, metadata={"timeout_s": 0.05}))
+
+    assert report.result("1").status is Status.FAIL
+    assert "timeout" in report.result("1").detail
+
+
 # --- static API constraints -------------------------------------------------------------
 
 
@@ -302,6 +311,58 @@ def test_required_definitions():
     source = "class J:\n    def mapper_init(self):\n        pass\n"
     constraints = {"required_definitions": ["mapper_init", "mapper_final"]}
     assert find_violations(source, constraints) == ["must define mapper_final"]
+
+
+COMBINE = {"required_any": [["combiner"], ["mapper_init", "mapper_final"]]}
+
+
+@pytest.mark.parametrize("source", [
+    "class J:\n    def combiner(self, k, v):\n        pass\n",
+    "class J:\n    def mapper_init(self):\n        pass\n"
+    "    def mapper_final(self):\n        pass\n",
+    # multi-step jobs name the combiner method freely and pass it as a keyword
+    "class J:\n    def steps(self):\n        return [MRStep(combiner=self.add_up)]\n",
+])
+def test_required_any_is_met_by_any_one_group(source):
+    """A combiner or in-mapper combining: Project 1 accepts either."""
+    assert find_violations(source, COMBINE) == []
+
+
+def test_required_any_needs_a_whole_group():
+    """mapper_init alone is half of in-mapper combining, and there is no combiner."""
+    source = "class J:\n    def mapper_init(self):\n        pass\n"
+    assert find_violations(source, COMBINE) == [
+        "must define one of: combiner | mapper_init + mapper_final"
+    ]
+
+
+def test_required_any_must_be_a_list_of_groups():
+    """A flat list would silently mean "every single name is its own group"."""
+    assert find_violations("x = 1\n", {"required_any": ["combiner", "mapper_init"]}) == [
+        'required_any must be a list of non-empty name lists, e.g. [["combiner"]]'
+    ]
+
+
+def test_count_uses_counts_both_spellings_but_not_the_import():
+    source = (
+        "import mrjob.step\nfrom mrjob.step import MRStep\n\n"
+        "def steps():\n    return [MRStep(), mrjob.step.MRStep()]\n"
+    )
+    assert count_uses(source, ["MRStep", "combiner"]) == {"MRStep": 2, "combiner": 0}
+
+
+def test_count_uses_is_reported_never_enforced(tmp_path):
+    """The api line shows the counts; any count passes."""
+    reference = (
+        "def MRStep():\n    return 0\n\n"
+        "def add(a, b):\n    return a + b + MRStep() + MRStep()\n"
+    )
+    report = run(make_exercise(
+        tmp_path, reference=reference, metadata={"constraints": {"count_uses": ["MRStep"]}},
+    ))
+
+    assert report.result("api").status is Status.OK
+    assert report.result("api").detail.endswith("; uses: MRStep x2")
 
 
 def test_unknown_constraint_key_is_reported():

@@ -20,7 +20,7 @@ from pathlib import Path
 
 from tutor.execution import DEFAULT_TIMEOUT_S, Outcome, RunResult, run_pytest
 from tutor.testkit import DEFAULT_PARTITIONS, PARTITIONS_ENV
-from tutor.validation.api import find_violations
+from tutor.validation.api import count_uses, find_violations
 from tutor.validation.exercise import ExerciseFiles
 
 # Spark tests read PARTITIONS_ENV as their number of partitions / input files (design.md).
@@ -56,7 +56,11 @@ class ValidationReport:
         return next(r for r in self.results if r.rule == rule)
 
 
-def validate(ex: ExerciseFiles, timeout_s: float = DEFAULT_TIMEOUT_S) -> ValidationReport:
+def validate(ex: ExerciseFiles, timeout_s: float | None = None) -> ValidationReport:
+    """timeout_s per pytest run: the argument, else metadata `timeout_s` (Hadoop exercises
+    need minutes, since every job costs 7-9 s), else DEFAULT_TIMEOUT_S."""
+    if timeout_s is None:
+        timeout_s = float(ex.metadata.get("timeout_s", DEFAULT_TIMEOUT_S))
     reference = check_reference_passes(ex, timeout_s)
     if reference.status is not Status.OK:
         # A failing reference means the tests or the exercise are wrong, so the rules that
@@ -188,12 +192,20 @@ def check_api_constraints(ex: ExerciseFiles) -> RuleResult:
     if not constraints:
         return RuleResult("api", "api constraints", Status.NOT_APPLICABLE,
                           "no constraints in metadata", 0.0)
-    violations = find_violations(ex.reference.read_text(), constraints)
+    source = ex.reference.read_text()
+    violations = find_violations(source, constraints)
     if violations:
         detail = "reference breaks its own constraints: " + "; ".join(violations)
         return RuleResult("api", "api constraints", Status.FAIL, detail, 0.0)
-    rules = ", ".join(f"{key}={values}" for key, values in constraints.items())
-    return RuleResult("api", "api constraints", Status.OK, f"reference respects {rules}", 0.0)
+    rules = ", ".join(
+        f"{key}={values}" for key, values in constraints.items() if key != "count_uses"
+    )
+    detail = f"reference respects {rules or 'all constraints'}"
+    if constraints.get("count_uses"):
+        # Information only (e.g. how many MRSteps); never a reason to fail.
+        counts = count_uses(source, constraints["count_uses"])
+        detail += "; uses: " + ", ".join(f"{name} x{n}" for name, n in counts.items())
+    return RuleResult("api", "api constraints", Status.OK, detail, 0.0)
 
 
 def _run(ex: ExerciseFiles, candidate: Path, timeout_s: float, partitions: int) -> RunResult:

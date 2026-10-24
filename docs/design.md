@@ -311,6 +311,29 @@ in two places would drift. Metadata keeps what the validator reads (constraints,
   `mapreduce.job.reduces`, so rule 5 checks 1, 2 and 4 reducers. Hadoop Streaming (separate
   stdin mapper / reducer scripts) is not supported: it teaches the same concepts as mrjob and
   would need a second test harness.
+- `testkit.run_mrjob(job_cls, input_dir, output_dir, runner=..., jobconf=...)` (done 2026-10-25)
+  runs the job in-process through `make_runner()`, as the course's command line would.
+  Measured with mrjob 0.7.4 and Hadoop 3.3.6 (2026-10-25), and kept as `spark`-marked tests:
+  - jobconf precedence: an `MRStep(jobconf=...)` beats the command line's `--jobconf`, which
+    beats the class `JOBCONF`. So rule 5's command-line reducer count overrides a count fixed
+    in `JOBCONF` (ass1 style), while a step that pins one reducer (a global top-k) keeps it.
+  - Multi-step jobs (`steps()` returning several `MRStep`s) run on both runners; each step is a
+    separate Hadoop job: about 7 s for one step, 12 s for two.
+  - Hadoop retries every failed task 4 times by default; `run_mrjob` sets map / reduce
+    `maxattempts=1` so skeletons and mutants fail in seconds.
+  - mrjob cannot read the Python traceback from local Hadoop task logs (only "subprocess
+    failed with code 1"), so on failure `run_mrjob` reruns the input on inline (about 1 s): if
+    that raises, the learner sees the real error and line; if it runs, the message points at
+    Hadoop-only settings (partitioner, key field separator, sort order).
+  - The inline runner's reducer task count is the CPU core count and it splits reducer input
+    by size, whatever `mapreduce.job.reduces` says, so reducer state across keys can break on
+    inline too; only Hadoop runs it as written.
+  - A job file without `if __name__ == "__main__": Job.run()` works inline but writes nothing,
+    silently, on Hadoop (the task processes start it as a script). `run_mrjob` checks for the
+    entry point first and says what to add.
+  - `HADOOP_HOME` / `JAVA_HOME` come from the shell or the repo's `.env` (loaded by path,
+    since tests run from a workspace folder); missing ones give a clear error.
+  - metadata `timeout_s` sets the per-run timeout for all rules (default 30 s).
 - Parameters, in the course's two forms: positional after input and output
   (`run(inputPath, outputPath, m, k)`, Project 2), or `--jobconf myjob.settings.<name>=<value>`
   read with `jobconf_from_env` (Project 1, Lab 4 top-k). Tests pass them
@@ -337,8 +360,11 @@ in two places would drift. Metadata keeps what the validator reads (constraints,
   `station-max-file` (2026-10-24; validation unchanged, about 77 s).
 - API constraints gain `required_any` (one of several groups, e.g. `combiner` or
   `mapper_init` + `mapper_final`, Project 1 accepts either). Use counts are reported, not
-  limited (e.g. "MRStep x2"; decided 2026-10-24). "Do not buffer all values in the reducer"
-  cannot be checked statically and stays a point for review.
+  limited (`count_uses: ["MRStep"]` -> "uses: MRStep x2" on the api line; decided 2026-10-24).
+  A name counts as defined if a function has it or a call passes it as a keyword, since
+  multi-step jobs write `MRStep(combiner=self.add_up)`; `required_definitions` uses the same
+  rule. A flat `required_any` list is an error, not "each name is a group". Done 2026-10-25.
+  "Do not buffer all values in the reducer" cannot be checked statically and stays a point for review.
 
 Runtime budget: the course does not test performance, so limits only need to be sane.
 - Every subprocess run (a student test run, or one validation step) times out at 30 s.
