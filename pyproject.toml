@@ -28,6 +28,9 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["spark: slow end-to-end runs that start Spark; run with `pytest -m spark`"]
+# Plain `pytest` stays fast; a later `-m spark` on the command line overrides this.
+addopts = "-m 'not spark'"
 
 [tool.ruff]
 line-length = 100

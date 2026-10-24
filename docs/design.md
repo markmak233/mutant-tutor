@@ -12,6 +12,11 @@ Living record of project decisions. Update it when a decision changes; note the 
 - Claude Code is the development assistant for building this system. It is not part of the runtime.
 - The system itself calls an LLM API (provider not yet decided).
 - The first exercises (golden set) are generated manually with web chat models, then reviewed and solved by the owner.
+- In phases 1-2, Claude Code also acts as the tutor: the owner solves, runs the tests, and asks in
+  chat when stuck. Rules live in CLAUDE.md ("Tutoring"): read the code and run the tests first,
+  explain the first real error and its concept, direction before code, never touch `student.py`
+  or quote `solution/`. Mistakes seen this way feed debugging exercises and mutants. A hint
+  command inside the system (LLM reads `student.py` + test output) is a later option.
 
 ## Environment
 
@@ -147,6 +152,19 @@ An exercise is valid only if:
      (phase 2, with the first MRJob exercise). The lecture uses the same test ("check the
      correctness by removing the combiner", L2.2 p.38).
    - Plain Python: not applicable.
+
+Rules 1-3 (phase 1f) live in `src/tutor/validation/`: `exercise.py` finds the files from an
+exercise dir + solution dir (examples and workspace batches name them differently), `checks.py`
+runs the exercise's own test file with reference, skeleton and each mutant copied in as
+`student.py`, `__main__.py` is `python -m tutor.validation <exercise_dir> <solution_dir>`.
+- Rule 2 needs FAILED: a skeleton that passes means the tests check nothing; one that ERRORs
+  never ran a test. Rule 3 names surviving mutants (tests miss that bug) and mutants that
+  ERROR (useless as mutants); a TIMEOUT counts as killed; zero mutants fails the rule.
+- If rule 1 fails, rules 2-3 are SKIPPED: with a broken reference they would prove nothing.
+- Runs are sequential (each starts a JVM). Measured 2026-10-24 for rules 1-3:
+  `station-average-rdd` about 19 s, `station-max-file` about 45 s.
+- Plain `pytest` excludes tests marked `spark`; `pytest -m spark` validates both examples end
+  to end (about 1 min). Run it whenever validation or an example changes.
 
 Distributed output compared as sorted lists or `Counter`; floats with `pytest.approx`.
 API constraints checked statically with `ast`, both forbidden calls (e.g. `groupByKey`, `df.rdd`;
