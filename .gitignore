@@ -23,6 +23,9 @@ dist/
 # Output of running a file-level exercise by hand on its sample_input/
 sample_output/
 
+# Written by `python -m tutor.validation` into each solution dir; changes on every run
+validation.json
+
 # Spark / Hadoop leftovers when something runs outside a temp dir
 spark-warehouse/
 metastore_db/

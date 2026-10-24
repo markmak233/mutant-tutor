@@ -341,6 +341,12 @@ in two places would drift. Metadata keeps what the validator reads (constraints,
   - The inline runner's reducer task count is the CPU core count and it splits reducer input
     by size, whatever `mapreduce.job.reduces` says, so reducer state across keys can break on
     inline too; only Hadoop runs it as written.
+  - Map tasks on inline: by default 2 x CPU cores, split by size, so on this 12-core machine
+    24 tiny tasks; a combiner rarely saw two values of one key, a max-temperature mutant
+    whose combiner took the minimum survived, and whether combiner bugs were caught depended
+    on the machine. `run_mrjob` now passes `--num-cores 1` to inline runs: every input file
+    is one map task (a single file is split in two), so `TUTOR_PARTITIONS` decides the map
+    tasks and the mutant is killed at 1, 2 and 4 files (found and fixed 2026-10-25).
   - A job file without `if __name__ == "__main__": Job.run()` works inline but writes nothing,
     silently, on Hadoop (the task processes start it as a script). `run_mrjob` checks for the
     entry point first and says what to add.
@@ -546,6 +552,16 @@ is killed). This is isolation, not a sandbox: the child can still touch other fi
      Not codable, left for concept questions (2b): 3V/6V, Hadoop history and distributions,
      YARN, HDFS design assumptions, data locality and split size, reducer-count heuristics,
      NAS/SAN vs DFS, MRJob runners, RDBMS vs Hadoop. This batch replaces "five" as the size.
+   - Generated 2026-10-25: all 9 VALID (2-6 s each; 5 mutants each, hints examples run).
+     Lessons for phase 3: tests twice let a mutant live because the data was too regular
+     (keys arriving already sorted; every station with equal counts per map task, where a
+     mean of means equals the mean), and one drafted mutant was equivalent to the reference.
+     Exercise data must break the regularities the bug relies on.
+   - `python -m tutor.validation` saves its report as `<solution_dir>/validation.json`
+     (2026-10-25): exercise id, valid, time, `tool_commit` (`git describe --always --dirty`
+     of the validator, the counterpart of manifest.json's generator commit) and every rule's
+     status, detail and duration. Only the CLI writes it; `validate()` stays side-effect
+     free for the phase 3 graph. Git-ignored, since it changes on every run.
    - Coverage, each also exercising a different part of the validator (final topics picked from lectures):
 
      | # | Topic | Type | Interface | Validator path |

@@ -7,7 +7,7 @@ and any parameters are written in the test itself, not in metadata.json: tests r
 solution folder is not available.
 
 Importing this module sets PYSPARK_PYTHON to the running interpreter (if not already set), so
-Spark workers use the same Python as the test.
+Spark workers use the same Python as the test, and silences mrjob's `pipes` warning.
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from __future__ import annotations
 import os
 import re
 import sys
+import warnings
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -27,6 +28,10 @@ COMBINER_ENV = "TUTOR_COMBINER"  # "off": run MRJob jobs without their combiner 
 ORDERS = ("any", "per_file", "total")
 
 os.environ.setdefault("PYSPARK_PYTHON", sys.executable)
+# mrjob 0.7.4 imports the stdlib `pipes` module; exercise tests import this module before
+# student.py, so the warning is silenced before mrjob loads (the repo's pytest config
+# does the same, but exercises run outside the repo).
+warnings.filterwarnings("ignore", message="'pipes' is deprecated", category=DeprecationWarning)
 
 # A number inside an output line: 3, -1.5, .5, 2.6666666666666665, 1e-05.
 _NUMBER = re.compile(r"[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?")
@@ -124,7 +129,7 @@ def run_mrjob(
     input_dir, output_dir = Path(input_dir), Path(output_dir)
     conf = dict(jobconf or {})
     if runner == "inline":
-        _run_job(job_cls, [str(input_dir), "-r", "inline", "-o", str(output_dir)], conf)
+        _run_job(job_cls, _inline_args(input_dir, output_dir), conf)
         return read_output(output_dir)
 
     hadoop = _hadoop_bin()
@@ -205,6 +210,14 @@ def _assert_entry_point(job_cls) -> None:
         )
 
 
+def _inline_args(input_dir: Path, output_dir: Path) -> list[str]:
+    """The inline runner splits input into 2 x num_cores map tasks by size: on a 12-core
+    machine 24 tiny tasks, so a combiner rarely saw two values of a key, combiner bugs
+    passed, and results depended on the machine. With one core every input file is one map
+    task (a single file is split in two), so TUTOR_PARTITIONS decides the map tasks."""
+    return [str(input_dir), "-r", "inline", "--num-cores", "1", "-o", str(output_dir)]
+
+
 def _without_combiner(job_cls):
     """A subclass of job_cls whose steps have no combiner functions. Works for the default
     single step and for an explicit steps() list alike."""
@@ -257,7 +270,7 @@ def _explain_hadoop_failure(job_cls, input_dir: Path, output_dir: Path, conf: di
     learner sees the real error and line."""
     rerun_dir = output_dir.parent / f"{output_dir.name}-inline-rerun"
     try:
-        _run_job(job_cls, [str(input_dir), "-r", "inline", "-o", str(rerun_dir)], conf)
+        _run_job(job_cls, _inline_args(input_dir, rerun_dir), conf)
     except Exception as inline_error:
         raise AssertionError(
             "the job failed on Hadoop; on the inline runner the same input raises "

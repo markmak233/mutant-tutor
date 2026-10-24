@@ -38,6 +38,7 @@ station-max-file
   ok    5    distribution       16.9s  reference passes with 1, 2, 4 partitions
   ok    api  api constraints     0.0s  reference respects forbidden_calls=['groupByKey'], ...
 VALID
+report saved to examples/station-max-file/solution/validation.json
 ```
 
 Each check is itself tested against an exercise built to fail it, e.g. a reference that is

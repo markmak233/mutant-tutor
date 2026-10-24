@@ -444,6 +444,24 @@ def test_cli_exit_codes(tmp_path, capsys):
     assert main([]) == 2
 
 
+def test_cli_saves_the_report_as_json(tmp_path):
+    """The same report the CLI prints, in <solution_dir>/validation.json; rerunning
+    overwrites it."""
+    exercise, solution = make_exercise(tmp_path, mutants={})
+    main([str(exercise), str(solution)])
+    data = json.loads((solution / "validation.json").read_text())
+
+    assert data["exercise_id"] == "demo"
+    assert data["valid"] is False
+    assert [r["rule"] for r in data["results"]] == ["1", "2", "3", "4", "5", "api"]
+    assert data["results"][2]["status"] == "FAIL"  # zero mutants fails rule 3
+    assert "validated_at" in data and "tool_commit" in data
+
+    (solution / "mutants" / "m01_sub.py").write_text(MUTANT_SUB)
+    main([str(exercise), str(solution)])
+    assert json.loads((solution / "validation.json").read_text())["valid"] is True
+
+
 # --- real examples, with Spark ----------------------------------------------------------
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
