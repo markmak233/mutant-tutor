@@ -112,6 +112,7 @@ smartCodingReview/                       # public repo (the `tutor/` above), cod
 smartcodereview-workspace/
 └── comp9313/                            # WORKSPACE_DIR points here; one workspace per course
     ├── workspace.toml                   # course name + [requires]; marks this as a workspace
+    ├── coverage.md                      # knowledge points per lecture -> exercise / design / not yet
     ├── lectures/                        # PDFs, read-only
     ├── coding_materials/                # labs and projects as on Ed, read-only
     │   ├── lab4/                        # one flat folder each: problem text, data, expected outputs
@@ -417,7 +418,19 @@ in two places would drift. Metadata keeps what the validator reads (constraints,
     of the ordering (ties) likely, not merely possible.
   "Do not buffer all values in the reducer" cannot be checked statically and stays a point for review.
 
-Runtime budget: the course does not test performance, so limits only need to be sane.
+Correctness vs algorithm quality (revised 2026-10-25, Codex review against the slides): the
+course does assess efficiency, not as seconds on a laptop but as algorithm design (L3.2 slide
+3.42: top-k "considering that you can utilize multiple reducers, and the efficiency of your
+method is evaluated"; Project 1 marks combiners, no buffering in the reducer, several
+reducers). So the two are judged separately:
+- correctness: the validator, deterministic, decides VALID / INVALID;
+- algorithm quality: a per-exercise checklist (all data into one reducer? a key's values
+  buffered in the reducer? an unnecessary global sort? does the combiner cut the shuffle?),
+  plus static warnings that never fail an exercise: `list()` / `sorted()` / `len(list())`
+  over a reducer's values, an `MRStep` pinned to one reducer. Warnings go on the api line of
+  the validation report, like `count_uses` (owner's choice). Backlog C2.
+
+Runtime budget: wall-clock limits only need to be sane.
 - Every subprocess run (a student test run, or one validation step) times out at 30 s.
 - One SparkSession per validation process; `local[2]`, UI off, `spark.sql.shuffle.partitions=4`
   (the default 200 makes small DataFrame jobs slow).
@@ -558,7 +571,8 @@ become a problem.
      checked by the validator; the owner solves them in the batch's mode.
    - First batch (approved 2026-10-25): `2026-10-25_p2-w1w2-mapreduce`, mode `learn`, sources
      L1.1, L1.2, L2.1, L2.2 (the only week 1-2 lab material is a zipped VM home with SSH keys,
-     never read). Sized to cover every codable knowledge point, 9 exercises, no Hadoop runner:
+     never read). Sized to cover every codable knowledge point, 9 exercises (10 since
+     `mean-in-mapper`, Mean v4, was added for the last gap), no Hadoop runner:
      `hdfs-bookkeeping` (python: blocks, replication vs erasure coding, NameNode metadata,
      heartbeats, under-replicated blocks), `mapreduce-by-hand` (python: map, per-map combine,
      hash partition, sort, group, reduce into R parts), `streaming-reducer` (python: Hadoop
@@ -566,7 +580,8 @@ become a problem.
      `max-temperature` (NCDC fixed-width parsing, max combiner), `in-mapper-combining`,
      `mean-combiner-debug` (debugging: Mean v2 to v3, combiner check), `cooccurrence-pairs` and
      `cooccurrence-stripes` (same question, two implementations). Slides that are images (Word
-     Count v1/v2, Mean v1-v4, stripes pseudocode) follow Lin & Dyer ch. 3, the textbook they cite.
+     Count v1/v2, Mean v1-v4, stripes pseudocode, streaming and MRJob code) were first taken from
+     Lin & Dyer ch. 3, then read as rendered page images (macOS PDFKit) on 2026-10-25.
      Not codable, left for concept questions (2b): 3V/6V, Hadoop history and distributions,
      YARN, HDFS design assumptions, data locality and split size, reducer-count heuristics,
      NAS/SAN vs DFS, MRJob runners, RDBMS vs Hadoop. This batch replaces "five" as the size.
@@ -575,6 +590,16 @@ become a problem.
      (keys arriving already sorted; every station with equal counts per map task, where a
      mean of means equals the mean), and one drafted mutant was equivalent to the reference.
      Exercise data must break the regularities the bug relies on.
+   - Revised 2026-10-25 after a second Codex review, against the slides (before the owner
+     started): page references mixed PDF page numbers with slide footers (2.26 for the
+     combiner-design slide 2.31; 1.17 for 1.18), so every reference now gives both; each
+     exercise lists its teaching assumptions in the question and in metadata `source`
+     (`slides`, `pdf_pages`, `lab`, `assumptions`), e.g. the simulator's fixed value order
+     (real Hadoop does not order values, L3.1 slide 3.27) and the three tokenizers the slides
+     use. Reading the image slides found a real conflict: slide 2.49 emits one stripe per
+     occurrence, which the stripes test had rejected (and a mutant enforced); the test now
+     accepts both forms and that mutant was dropped. Lesson for phase 3/4: image-only slides
+     must be read as images before generating, and sources need slide and PDF page numbers.
    - `python -m tutor.validation` saves its report as `<solution_dir>/validation.json`
      (2026-10-25): exercise id, valid, time, `tool_commit` (`git describe --always --dirty`
      of the validator, the counterpart of manifest.json's generator commit) and every rule's
@@ -598,12 +623,28 @@ become a problem.
      them (review-mode ones without asking for help), attempts are in `attempts.jsonl`, and
      the steps that felt repetitive are noted as input for phase 3. This batch is the
      baseline set for phase 5.
-2b. Code tracing exercises (raised from "deferred" on 2026-10-24: the lectures ask many "what does
-   this print and why" questions, e.g. an accumulator read as 0, closures over driver variables,
-   lazy evaluation, groupByKey vs reduceByKey). Design the tracing flow first (run the snippet
-   repeatedly and across partitions to prove its output is stable, then compare a normalised
-   answer), then a handful of exercises. Before phase 3 so the generator covers this type too.
-3. LangGraph generate-validate-repair loop.
+2b. Code tracing and design exercises (raised from "deferred" on 2026-10-24; scope revised
+   2026-10-25). The final exam is a 2-hour written exam (L1.1 slide 1.20), so beyond runnable
+   code two more types (concept questions are out of scope: the owner generates those in chat
+   for exam revision):
+   - Code tracing ("what does this print and why"). Answers are one of: an exact output (or
+     an unordered set of lines); an error and its type; "nothing has run yet" (lazy
+     evaluation); "not determined" (order or value depends on partitions or scheduling).
+     Each answer also asks for the reason. The validator proves the answer type by running
+     the snippet: the error type is raised; a determined output is the same over repeated
+     runs and partition counts; a "not determined" one is shown to differ. Lecture code that
+     is illustrative only (L4.2 slide 4.16: `lambda x: counter += x` is a syntax error, and
+     `"..." + counter` a TypeError) is rewritten as runnable code that shows the same point,
+     with the slide it comes from noted.
+   - Design exercises: a fixed template (intermediate keys and values, partitioning, sort
+     order, why the combiner is safe, memory needed, then pseudocode), checked against
+     rubric points and the exercise's `pseudocode.md`. A code exercise can gain a design
+     part after it is solved.
+   Before phase 3 so the generator covers these types too.
+3. LangGraph generate-validate-repair loop. Prerequisites (from the 2026-10-25 slide review):
+   image-only slides are read as images (a multimodal model or OCR) before anything is
+   generated from them, and every source records slide footer, PDF page and any lab or
+   textbook origin, with the exercise's teaching assumptions stated.
 3b. Hint command, `python -m tutor.hint <exercise>` (decided 2026-10-24, after phase 3 since it
    needs the LLM client). Three layers, cheapest and most certain first:
    - rules, no LLM: known low-level errors (syntax, full-width punctuation, `NotImplementedError`
@@ -619,6 +660,51 @@ become a problem.
      seed the rules and mutants. Hints only on request, logged in `attempts.jsonl`.
 4. Hybrid RAG.
 5. Evaluation script + README results.
+
+## Backlog (decided, not scheduled)
+
+- C1 value-order check: rule 5 also reruns with each key's values shuffled (a runtime
+  subclass, like the combiner switch), catching reducers that rely on value order, the
+  reason secondary sort exists. First verify that mrjob's inline runner delivers values
+  sorted (it sorts whole map-output lines), which would hide such bugs today.
+- C2 algorithm-quality warnings (see "Correctness vs algorithm quality"), later Hadoop
+  counters (map output records, combine input / output) to report how much a combiner cut.
+- C3 tokenizer: the course's labs hand out the tokenizing line
+  (`re.split(r"[ *$&#/\t\n\f\"\'\\,.:;?!\[\](){}<>~\-_]", line.lower())`, also L2.2 slide
+  2.43), so new exercises that split text give that line in the skeleton, as the labs do,
+  instead of defining their own word rule (owner, 2026-10-25). Existing exercises are not
+  converted (see "Decisions not to do").
+- Workspace `coverage.md`: before each batch, list the lectures' knowledge points with their
+  status; the next batch is chosen from the gaps (Codex's list: secondary sort, inverted
+  index / TF-DF, multi-step MRJob and top-k, Spark lineage / cache / repartition, SQL views
+  and UDFs; SQL is restricted per exercise, never globally).
+
+## Decisions not to do (and why)
+
+Deliberate omissions, listed so that a later review (human or model) does not report them as
+gaps. Each was decided by the owner; change one only with the owner.
+
+- No concept questions in the system (short answers such as "why is the Secondary NameNode not
+  a backup?"). The owner generates those in chat when revising for the exam. The system
+  spends its effort where deterministic validation adds value: runnable code exercises and
+  design exercises (2b). Decided 2026-10-25.
+- Existing exercises are not reworked when a later convention appears (e.g. the course
+  tokenizer, backlog C3). New practice comes as new exercises; old ones keep working, and
+  their differences from the course are stated as teaching assumptions in the question and
+  metadata `source.assumptions`. The owner prefers more exercises over edited ones, and
+  edits would mean re-validating and re-reading material already solved. Decided 2026-10-25.
+  (Exception: an exercise that teaches something wrong, as the stripes test did, is fixed.)
+- No LLM judges whether an exercise is valid; only the deterministic validator does (see
+  "Exercise validation"). LLM feedback on the learner's answers (hints, rubric feedback) is
+  a different thing and allowed.
+- No Hadoop Streaming interface: the course covers streaming for understanding only (L2.1
+  slide 2.29), and mrjob teaches the same concepts; streaming appears only as plain-Python
+  exercises (see "Interface extensions").
+- No timeout on the learner's own `pytest` runs: the isolated runner protects validation of
+  generated code; in the terminal Ctrl+C stops a loop (see "Code execution safety").
+- No wall-clock performance scoring: efficiency is judged as algorithm design, not seconds
+  on a laptop (see "Correctness vs algorithm quality").
+- No `aggregateByKey` in the first golden exercises: listed but not taught in L4.1.
 
 ## Deferred
 
