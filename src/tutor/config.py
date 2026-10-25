@@ -91,9 +91,14 @@ def load_workspace(environ: Mapping[str, str] | None = None) -> Workspace:
     requires = {name: str(version) for name, version in data.get("requires", {}).items()}
 
     raw_lectures = env.get("LECTURE_DIR")
-    lecture_dir = (
-        _private_dir(raw_lectures, "LECTURE_DIR") if raw_lectures else root / "lectures"
-    )
+    if raw_lectures:
+        lecture_dir = _private_dir(raw_lectures, "LECTURE_DIR")
+    elif (root / "lectures").exists():
+        # The default gets the same check: lectures/ may be a symlink into a git repository
+        # or a nested repository of its own, even though the workspace itself is not.
+        lecture_dir = _private_dir(str(root / "lectures"), "the workspace's lectures/")
+    else:
+        lecture_dir = root / "lectures"  # not created yet: nothing to check
     return Workspace(root=root, course=data["course"], requires=requires, lecture_dir=lecture_dir)
 
 

@@ -12,10 +12,17 @@ metadata.json "constraints" may contain:
     count_uses            names whose uses are counted and reported, never limited,
                           e.g. "MRStep" (see count_uses())
 
-Any attribute access counts, called or not, so `f = rdd.groupByKey; f()` is still found.
-Only fully dynamic access such as getattr(rdd, "group" + "ByKey") escapes; that is accepted.
-A name counts as defined if a function has that name or a call passes it as a keyword:
-multi-step jobs write `MRStep(combiner=self.combine_counts)` instead of a `combiner` method.
+forbidden_calls: any attribute access counts, called or not (`f = rdd.groupByKey; f()`),
+and so does any use of a bare name the code does not bind itself (`f = sorted; f(x)`); a
+local variable that happens to share the name (`count = 0`) is not a use.
+
+A name counts as defined if a function has that name, or an MRStep(...) call passes it as a
+keyword with a real value: multi-step jobs write `MRStep(combiner=self.combine_counts)`
+instead of a `combiner` method (`dict(combiner=None)` does not count).
+
+This is a static aid, not a proof: dynamic access (getattr with a built string, exec,
+importing a name under another module) can still get round it. Tests and mutants carry
+the real weight; the check catches the honest mistakes and the obvious shortcuts.
 """
 
 from __future__ import annotations
@@ -49,23 +56,28 @@ def find_violations(source: str, constraints: Mapping[str, list]) -> list[str]:
     violations: list[str] = []
     defined: set[str] = set()
 
+    bound = _bound_names(tree)
     for node in ast.walk(tree):
         if isinstance(node, ast.Attribute) and node.attr in forbidden_calls:
             violations.append(f"line {node.lineno}: uses {node.attr}")
         elif (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and node.func.id in forbidden_calls
+            isinstance(node, ast.Name)
+            and isinstance(node.ctx, ast.Load)
+            and node.id in forbidden_calls
+            and node.id not in bound
         ):
-            violations.append(f"line {node.lineno}: calls {node.func.id}")
+            violations.append(f"line {node.lineno}: uses {node.id}")
         elif isinstance(node, ast.Import | ast.ImportFrom):
             for module in _imported_modules(node):
                 if any(_is_within(module, banned) for banned in forbidden_imports):
                     violations.append(f"line {node.lineno}: imports {module}")
         elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
             defined.add(node.name)
-        if isinstance(node, ast.Call):
-            defined.update(k.arg for k in node.keywords if k.arg)
+        if isinstance(node, ast.Call) and _called_name(node) == "MRStep":
+            defined.update(
+                k.arg for k in node.keywords
+                if k.arg and not (isinstance(k.value, ast.Constant) and k.value.value is None)
+            )
 
     for name in constraints.get("required_definitions", []):
         if name not in defined:
@@ -86,6 +98,31 @@ def count_uses(source: str, names: list[str]) -> dict[str, int]:
         elif isinstance(node, ast.Attribute) and node.attr in counts:
             counts[node.attr] += 1
     return counts
+
+
+def _bound_names(tree: ast.AST) -> set[str]:
+    """Names the code binds itself: assignment and loop targets, parameters, functions,
+    classes and import aliases. A use of any other name refers to a builtin or a global."""
+    bound: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store | ast.Del):
+            bound.add(node.id)
+        elif isinstance(node, ast.arg):
+            bound.add(node.arg)
+        elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            bound.add(node.name)
+        elif isinstance(node, ast.Import | ast.ImportFrom):
+            bound.update((alias.asname or alias.name).split(".")[0] for alias in node.names)
+    return bound
+
+
+def _called_name(call: ast.Call) -> str | None:
+    """"MRStep" for both MRStep(...) and mrjob.step.MRStep(...)."""
+    if isinstance(call.func, ast.Name):
+        return call.func.id
+    if isinstance(call.func, ast.Attribute):
+        return call.func.attr
+    return None
 
 
 def _imported_modules(node: ast.Import | ast.ImportFrom) -> list[str]:

@@ -11,7 +11,9 @@ Input: every file in the input directory. Each line is
     station,date,condition            e.g.  s1,2024-01-05,rain
 Skip lines that do not have exactly 3 fields, or have an empty station or condition.
 Fields may have spaces around them: " s1 , 2024-01-05 , rain " counts for station "s1".
-There is no header line.
+There is no header line. Station names contain only letters and digits, and condition
+names only lowercase letters a-z (like the course projects, the input's character set is
+part of the specification).
 
 Parameter: tau, passed as --jobconf myjob.settings.tau=0.25 and read with
     from mrjob.compat import jobconf_from_env

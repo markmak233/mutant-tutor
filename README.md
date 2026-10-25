@@ -124,7 +124,8 @@ docs/design.md     every design decision, with the measurements behind it
 Phase numbers match `docs/design.md`.
 
 - **1** ✅ Environment + validation harness, two synthetic examples
-- **2** Five golden exercises from the course topics, solved by hand to run the full loop
+- **2** Golden exercises: a first batch of 9 covering course weeks 1-2, validated and solved by
+  hand to run the full loop
 - **2b** Code-tracing exercises ("what does this print and why")
 - **3** LLM generation: LangGraph generate → validate → repair loop, Pydantic-parsed output
 - **4** Hybrid RAG over course material (BM25 + vectors), evaluated with recall@k

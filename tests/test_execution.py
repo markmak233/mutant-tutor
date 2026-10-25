@@ -125,3 +125,57 @@ def _alive(pid: int) -> bool:
     except ProcessLookupError:
         return False
     return True
+
+
+def test_counts_come_from_the_junit_report(tmp_path):
+    """Passed / failed counts are read from pytest's report, not its text output."""
+    test = write(
+        tmp_path / "test_mix.py",
+        "def test_a():\n    pass\n\ndef test_b():\n    pass\n\ndef test_c():\n    assert 0\n",
+    )
+
+    result = run_pytest({"test_mix.py": test})
+
+    assert result.outcome is Outcome.FAILED
+    assert (result.counts.passed, result.counts.failed) == (2, 1)
+
+
+def test_all_skipped_is_an_error_not_a_pass(tmp_path):
+    """pytest exits 0 when every test is skipped; nothing was verified, so ERROR."""
+    test = write(
+        tmp_path / "test_skip.py",
+        "import pytest\n\n@pytest.mark.skip\ndef test_a():\n    assert False\n",
+    )
+
+    result = run_pytest({"test_skip.py": test})
+
+    assert result.returncode == 0
+    assert result.outcome is Outcome.ERROR
+    assert result.counts.skipped == 1
+
+
+def test_a_skipped_test_among_passing_ones_is_still_an_error(tmp_path):
+    """A reference must pass every test; one skipped test means one check never ran."""
+    test = write(
+        tmp_path / "test_some.py",
+        "import pytest\n\ndef test_a():\n    pass\n\n"
+        "def test_b():\n    pytest.skip('no Hadoop here')\n",
+    )
+
+    assert run_pytest({"test_some.py": test}).outcome is Outcome.ERROR
+
+
+def test_only_a_fixture_error_is_an_error_not_a_failure(tmp_path):
+    """pytest exits 1 when a fixture breaks, but no assertion ran: a mutant that only
+    breaks setup has not been caught by the tests."""
+    test = write(
+        tmp_path / "test_fixture.py",
+        "import pytest\n\n@pytest.fixture\ndef env():\n    raise RuntimeError('no JVM')\n\n"
+        "def test_b(env):\n    assert True\n",
+    )
+
+    result = run_pytest({"test_fixture.py": test})
+
+    assert result.returncode == 1
+    assert result.outcome is Outcome.ERROR
+    assert (result.counts.failed, result.counts.errors) == (0, 1)

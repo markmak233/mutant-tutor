@@ -224,7 +224,10 @@ Rule 5 and the API check (phase 1g):
   `forbidden_calls` (any attribute access counts, so `g = rdd.groupByKey; g()` is caught),
   `forbidden_imports` (submodules included; `from pyspark import sql` counts), and
   `required_definitions`. Unknown keys are an error, so a typo cannot silently check nothing.
-  Only fully dynamic access (`getattr` with a built string) escapes. The same function can later
+  Bare names count too when the code does not bind them itself (`f = sorted; f(x)`), and a
+  keyword only defines a name inside `MRStep(...)` with a real value (`dict(combiner=None)` does
+  not); both gaps were found by a Codex review on 2026-10-25. Still a static aid, not a proof:
+  `getattr` with a built string, `exec` and the like escape it. The same function can later
   check student answers. It runs even when rule 1 fails, since it does not depend on the tests.
 - Measured 2026-10-24 for rules 1-3, 5 and api: `station-average-rdd` about 29 s,
   `station-max-file` about 61 s.
@@ -363,9 +366,13 @@ in two places would drift. Metadata keeps what the validator reads (constraints,
   - `per_file`: each `part-*` file in order, the files as a multiset (secondary sort: a reducer's
     output is ordered only within itself, Project 1);
   - `total`: exactly one non-empty data file, fully in order (Project 2: Spark sort + `coalesce(1)`);
-  - options: `float_tol` (both projects accept tiny float differences and `3.0` = `3.000`; the
-    text around numbers must still match, and 0, the default, compares characters so a required
-    number format is checked), and `optional_quotes` for MRJob's JSON keys (`"zounds,a"` = `zounds,a`).
+  - options: `float_tol` (both projects accept tiny float differences and `3.0` = `3.000`),
+    and `optional_quotes` for MRJob's JSON keys (`"zounds,a"` = `zounds,a`). With `float_tol`
+    a line is split into fields at tabs and commas; only a field that is a number on both
+    sides gets the tolerance, every other field must match exactly. The first version
+    compared every number in the line by value, so `s01,2024-1` passed for `s1,2024-01`
+    (Codex review, 2026-10-25). 0, the default, compares characters, so a required number
+    format is checked.
   - `per_file` is checked without knowing which key went to which reducer: `expected` is the
     fully sorted output and each part file must be a subsequence of it.
   - Mismatch messages are for the learner, who sees them first: unexpected and missing lines
@@ -471,12 +478,23 @@ Subprocess + timeout + temporary working directory. Docker only if environment r
 
 `execution.run_pytest(files, timeout_s=30)` copies a name -> source mapping into a fresh temp
 dir (so the same tests can run against reference, skeleton or a mutant as `student.py`), runs
-`sys.executable -m pytest` there and deletes the dir. Results are PASSED (exit 0), FAILED (1),
-ERROR (2-5: import/syntax error, no tests) or TIMEOUT; validation relies on FAILED vs ERROR,
-since a skeleton must fail its tests, not crash. The child starts in its own session and the
+`sys.executable -m pytest` there and deletes the dir. Results are PASSED, FAILED, ERROR or
+TIMEOUT; validation relies on FAILED vs ERROR, since a skeleton must fail its tests, not crash.
+The exit code alone was not enough (Codex review, 2026-10-25): pytest exits 0 when every test
+is skipped and 1 when only a fixture breaks, so a skipping test file let a reference or oracle
+"pass" and a mutant that only broke setup counted as killed. Each run now writes pytest's JUnit
+XML in the temp dir and the counts decide: PASSED needs exit 0, at least one passed test and
+no skipped one; FAILED needs at least one failed assertion; everything else (import errors,
+no tests, skips, setup/teardown errors only) is ERROR. The child starts in its own session and the
 whole process group is killed on timeout and after every run, because PySpark starts a JVM
 under pytest that would otherwise be orphaned (a test covers this, and fails if only the parent
 is killed). This is isolation, not a sandbox: the child can still touch other files and the network.
+
+Scope: the runner protects validation, which runs generated code. A learner running
+`pytest test_student.py` runs their own code in the terminal, in-process and without a
+timeout: Ctrl+C stops an endless loop, and testkit stops a leftover SparkContext after each
+program. Accepted for now (raised in the same review); `pytest-timeout` is the fix if hangs
+become a problem.
 
 ## Learning rules
 
@@ -576,10 +594,10 @@ is killed). This is isolation, not a sandbox: the child can still touch other fi
      Order inversion and secondary sort go into a later batch: they need the Hadoop runner,
      which the golden set should not depend on.
 
-   - Done when: all five pass validation, the owner has solved them (review-mode ones without
-     asking for help), attempts are in
-     `attempts.jsonl`, and the steps that felt repetitive are noted as input for phase 3.
-     These five are the baseline set for phase 5.
+   - Done when: every exercise of the first batch passes validation, the owner has solved
+     them (review-mode ones without asking for help), attempts are in `attempts.jsonl`, and
+     the steps that felt repetitive are noted as input for phase 3. This batch is the
+     baseline set for phase 5.
 2b. Code tracing exercises (raised from "deferred" on 2026-10-24: the lectures ask many "what does
    this print and why" questions, e.g. an accumulator read as 0, closures over driver variables,
    lazy evaluation, groupByKey vs reduceByKey). Design the tracing flow first (run the snippet

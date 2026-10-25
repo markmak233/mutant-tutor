@@ -76,6 +76,26 @@ def test_refuses_lecture_dir_inside_git_repo(tmp_path):
         load_workspace({"WORKSPACE_DIR": str(root), "LECTURE_DIR": str(lectures)})
 
 
+def test_refuses_default_lectures_that_are_a_nested_repo(tmp_path):
+    """<workspace>/lectures with its own .git: the workspace is clean, its lectures are not."""
+    root = make_workspace(tmp_path / "ws")
+    (root / "lectures" / ".git").mkdir(parents=True)
+
+    with pytest.raises(WorkspaceError, match="lectures"):
+        load_workspace({"WORKSPACE_DIR": str(root)})
+
+
+def test_refuses_default_lectures_symlinked_into_a_repo(tmp_path):
+    root = make_workspace(tmp_path / "ws")
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    (repo / "slides").mkdir()
+    (root / "lectures").symlink_to(repo / "slides")
+
+    with pytest.raises(WorkspaceError, match="inside the git repository"):
+        load_workspace({"WORKSPACE_DIR": str(root)})
+
+
 def test_load_env_does_not_override_existing(tmp_path, monkeypatch):
     """.env fills in missing variables (comments skipped, quotes stripped) but never
     overrides a variable already exported in the shell."""

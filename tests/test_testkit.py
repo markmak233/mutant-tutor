@@ -131,6 +131,17 @@ def test_float_tol_still_rejects_wrong_values_and_text():
         assert_output(out(["b,1.5"]), ["a,1.5"], float_tol=1e-9)
 
 
+def test_float_tol_applies_only_to_whole_numeric_fields():
+    """Numbers inside text stay text: a wrong station id or month format is still wrong."""
+    with pytest.raises(AssertionError):
+        assert_output(out(["s01,2024-01,16.25"]), ["s1,2024-01,16.25"], float_tol=1e-9)
+    with pytest.raises(AssertionError):
+        assert_output(out(["s1,2024-1,16.25"]), ["s1,2024-01,16.25"], float_tol=1e-9)
+    with pytest.raises(AssertionError):  # a tab where a comma belongs
+        assert_output(out(["s1\t16.25"]), ["s1,16.25"], float_tol=1e-9)
+    assert_output(out(["s1,2024-01,16.250000000001"]), ["s1,2024-01,16.25"], float_tol=1e-9)
+
+
 def test_optional_quotes_for_mrjob_json_keys():
     """MRJob writes keys as JSON; with optional_quotes both forms are accepted."""
     assert_output(out(['"zounds,a"\t0.5']), ["zounds,a\t0.5"], optional_quotes=True)

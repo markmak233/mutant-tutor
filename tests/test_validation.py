@@ -260,6 +260,24 @@ def test_mutant_wrong_only_at_4_needs_mutant_partitions(tmp_path):
     assert "2/2 killed (partitions 2, 4)" in stricter.detail
 
 
+def test_skipped_tests_do_not_count_as_passing(tmp_path):
+    """A test file that skips its checks (say, a generated one with skipif) must not let
+    the reference "pass": pytest exits 0 then, but nothing was verified."""
+    skipping = "import pytest\n\npytestmark = pytest.mark.skip\n\n" + TESTS
+    report = run(make_exercise(tmp_path, tests=skipping))
+
+    assert report.result("1").status is Status.FAIL
+    assert "skipped" in report.result("1").detail
+
+
+def test_a_skipped_oracle_test_fails_rule_4(tmp_path):
+    skipping_oracle = "import pytest\n\npytestmark = pytest.mark.skip\n\n" + ORACLE_TEST
+    report = run(make_exercise(tmp_path, oracle_test=skipping_oracle))
+
+    assert report.result("1").status is Status.OK
+    assert report.result("4").status is Status.FAIL
+
+
 def test_metadata_timeout_applies_to_every_run(tmp_path):
     """Hadoop exercises set `timeout_s` in metadata; here it is too short for pytest even to
     start, so rule 1 times out."""
@@ -331,6 +349,18 @@ def test_forbidden_name_is_found_even_without_calling_it():
     ]
 
 
+def test_forbidden_builtin_is_found_through_an_alias():
+    """f = sorted; f(x) uses sorted without calling it by name."""
+    source = "f = sorted\ny = f([3, 1])\n"
+    assert find_violations(source, {"forbidden_calls": ["sorted"]}) == ["line 1: uses sorted"]
+
+
+def test_local_variable_with_a_forbidden_name_is_not_a_use():
+    """Forbidding the method count must not flag a counter variable called count."""
+    source = "count = 0\nfor x in [1, 2]:\n    count += x\n"
+    assert find_violations(source, {"forbidden_calls": ["count"]}) == []
+
+
 def test_allowed_code_has_no_violations():
     source = "def f(rdd):\n    return rdd.reduceByKey(max)\n"
     assert find_violations(source, {"forbidden_calls": ["groupByKey", "collect"]}) == []
@@ -371,6 +401,16 @@ COMBINE = {"required_any": [["combiner"], ["mapper_init", "mapper_final"]]}
 def test_required_any_is_met_by_any_one_group(source):
     """A combiner or in-mapper combining: Project 1 accepts either."""
     assert find_violations(source, COMBINE) == []
+
+
+@pytest.mark.parametrize("source", [
+    "x = dict(combiner=None)\n",                          # not an MRStep
+    "def steps(self):\n    return [MRStep(combiner=None)]\n",  # no real combiner
+])
+def test_required_any_ignores_keywords_outside_mrstep_or_set_to_none(source):
+    assert find_violations(source, COMBINE) == [
+        "must define one of: combiner | mapper_init + mapper_final"
+    ]
 
 
 def test_required_any_needs_a_whole_group():

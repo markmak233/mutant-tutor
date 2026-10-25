@@ -33,8 +33,9 @@ os.environ.setdefault("PYSPARK_PYTHON", sys.executable)
 # does the same, but exercises run outside the repo).
 warnings.filterwarnings("ignore", message="'pipes' is deprecated", category=DeprecationWarning)
 
-# A number inside an output line: 3, -1.5, .5, 2.6666666666666665, 1e-05.
+# A whole field that is a number: 3, -1.5, .5, 2.6666666666666665, 1e-05.
 _NUMBER = re.compile(r"[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?")
+_FIELD_SEPARATOR = re.compile(r"[\t,]")
 _SHOWN = 10  # lines listed per kind in a mismatch message
 
 
@@ -170,7 +171,9 @@ def assert_output(
                     output is sorted only within itself (secondary sort)
         "total"     exactly one non-empty part file, in the order of `expected`
     float_tol: 0 compares lines character by character, so `3.0` is not `3.000`. Above 0,
-        the text around numbers must match and the numbers may differ by up to float_tol.
+        lines are split into fields at tabs and commas; a field that is a number on both
+        sides may differ by up to float_tol (`3.0` = `3.000`), every other field must match
+        exactly, so `s01` is not `s1` and `2024-1` is not `2024-01`.
     optional_quotes: ignore double quotes, as MRJob writes keys as JSON ("zounds,a").
     """
     if order not in ORDERS:
@@ -300,20 +303,21 @@ def _strip_quotes(line: str, optional: bool) -> str:
     return line.replace('"', "") if optional else line
 
 
-def _split(line: str) -> tuple[str, list[float]]:
-    """'s1\\t20.50' -> ('s{}\\t{}', [1.0, 20.5]): the text around numbers, and the numbers."""
-    numbers = [float(m) for m in _NUMBER.findall(line)]
-    return _NUMBER.sub("{}", line), numbers
-
-
 def _same(a: str, b: str, float_tol: float) -> bool:
     if float_tol == 0:
         return a == b
-    (text_a, nums_a), (text_b, nums_b) = _split(a), _split(b)
-    # Same text means the same count of numbers, so strict zip holds.
-    return text_a == text_b and all(
-        abs(x - y) <= float_tol for x, y in zip(nums_a, nums_b, strict=True)
-    )
+    # Same separators in the same places, then field by field. Only whole numeric fields
+    # get the tolerance: numbers inside text (station "s01", month "2024-01") are text.
+    if _FIELD_SEPARATOR.findall(a) != _FIELD_SEPARATOR.findall(b):
+        return False
+    for field_a, field_b in zip(_FIELD_SEPARATOR.split(a), _FIELD_SEPARATOR.split(b),
+                                strict=True):
+        if _NUMBER.fullmatch(field_a) and _NUMBER.fullmatch(field_b):
+            if abs(float(field_a) - float(field_b)) > float_tol:
+                return False
+        elif field_a != field_b:
+            return False
+    return True
 
 
 def _assert_same_multiset(got: list[str], expected: list[str], float_tol: float) -> None:
