@@ -8,7 +8,9 @@ It started as revision for UNSW COMP9313 (Big Data Management) and is built as a
 engineering portfolio project: the next phases generate exercises with an LLM (LangGraph
 generate → validate → repair loop) and ground them in course material (hybrid RAG).
 
-**Status:** phase 1 (environment + validation harness) is complete. Generation and RAG are next.
+**Status:** phases 1 and 2a (validation harness, MRJob / DataFrame / Hadoop support) are
+complete, and a first batch of hand-checked course exercises is validated. Generation and RAG
+are next.
 
 ## Why validation comes first
 
@@ -65,15 +67,18 @@ caught with two).
 
 ## Quick start
 
+> **Setting up from scratch?** Follow [`docs/setup/comp9313.md`](docs/setup/comp9313.md):
+> installing Python, Java and Hadoop, filling in `.env`, checking it works, and common problems.
+
 Requirements: Python 3.11 or 3.12 (mrjob breaks on 3.13), Java 17. Optional: a standalone
 Hadoop 3.3 for MRJob exercises that need custom partitioning or sort order.
 
 ```bash
 python3.11 -m venv .venv && source .venv/bin/activate
 pip install -e ".[comp9313,dev]"
-cp .env.example .env            # set JAVA_HOME (and WORKSPACE_DIR / HADOOP_HOME if used)
+cp .env.example .env            # set JAVA_HOME; comment out WORKSPACE_DIR / HADOOP_HOME if unused
 
-pytest                          # fast unit tests (~20 s)
+pytest                          # fast unit tests (~30 s)
 pytest -m spark                 # validate every example end to end (~7.5 min; Hadoop optional)
 python -m tutor.validation examples/station-average-rdd/exercise examples/station-average-rdd/solution
 ```
@@ -124,8 +129,10 @@ docs/design.md     every design decision, with the measurements behind it
 Phase numbers match `docs/design.md`.
 
 - **1** ✅ Environment + validation harness, two synthetic examples
-- **2** Golden exercises: a first batch of 9 covering course weeks 1-2, validated and solved by
-  hand to run the full loop
+- **2a** ✅ Harness extensions: shared test helpers, MRJob (inline and local Hadoop),
+  DataFrame, combiner-off check, attempt log, two more synthetic examples
+- **2** Golden exercises: a first batch of 10 covering course weeks 1-2 (validated; being
+  solved by hand to run the full loop)
 - **2b** Code-tracing exercises ("what does this print and why")
 - **3** LLM generation: LangGraph generate → validate → repair loop, Pydantic-parsed output
 - **4** Hybrid RAG over course material (BM25 + vectors), evaluated with recall@k

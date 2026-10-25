@@ -29,7 +29,9 @@ Living record of project decisions. Update it when a decision changes; note the 
   once before validating a batch (not per exercise: importing pyspark alone takes a second or two).
   `tests/test_env.py` runs the same checker.
 - Installation: Python deps as per-course extras, `pip install -e ".[comp9313]"`; system deps (Java,
-  Hadoop) as a short per-course section in README. No install script: setup is one-off, and when it breaks,
+  Hadoop) in a per-course guide `docs/setup/<course>.md`, linked from README (decided 2026-10-25:
+  README stays course-agnostic, and each course's system deps and pitfalls differ; the guide
+  marks which platforms were actually tested). No install script: setup is one-off, and when it breaks,
   asking an AI is faster than maintaining a cross-platform script.
 - COMP9313: Python 3.11, Java 17 (`JAVA_HOME`), PySpark 3.5.x (decided 2026-10-24: the slides
   name both 3.5.9 and 4.2.0, and the version is pinned per workspace in `workspace.toml`
@@ -75,6 +77,7 @@ smartCodingReview/                       # public repo (the `tutor/` above), cod
 ├── README.md
 ├── .claude/settings.json
 ├── docs/design.md
+├── docs/setup/comp9313.md               # per-course install guide (system deps, .env, pitfalls)
 ├── pyproject.toml                       # P1, per-course extras e.g. [comp9313]
 ├── .gitignore                           # P1, includes *workspace*/ as a backstop
 ├── .env.example                         # P1, WORKSPACE_DIR=..., HADOOP_HOME=...
