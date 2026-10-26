@@ -54,7 +54,7 @@ Windows need extra binaries (`winutils.exe`) and are not supported here.
 ## 3. Python environment
 
 ```bash
-git clone <this repo> && cd smartCodingReview
+git clone https://github.com/markmak233/mutant-tutor.git && cd mutant-tutor
 python3.11 -m venv .venv && source .venv/bin/activate   # name the version: plain python3 may be 3.13
 pip install -e ".[bigdata,dev]"
 cp .env.example .env
