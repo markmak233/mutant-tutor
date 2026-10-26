@@ -79,7 +79,8 @@ caught with two).
 > **Setting up from scratch?** Follow [`docs/setup/bigdata.md`](docs/setup/bigdata.md):
 > installing Python, Java and Hadoop, filling in `.env`, checking it works, and common problems.
 
-Requirements: Python 3.11 or 3.12 (mrjob breaks on 3.13), Java 17. Optional: a standalone
+Requirements: Python 3.11 (tested in CI; 3.12 works after `pip install setuptools`, mrjob
+breaks on 3.13), Java 17. Optional: a standalone
 Hadoop 3.3 for MRJob exercises that need custom partitioning or sort order.
 
 ```bash

@@ -37,7 +37,10 @@ Living record of project decisions. Update it when a decision changes; note the 
   name both 3.5.9 and 4.2.0, and the version is pinned per workspace in `workspace.toml`
   anyway, so another course's materials can choose differently). Spark 4.x enables ANSI SQL mode by default,
   which changes DataFrame/SQL error behaviour (casts, overflow, divide by zero); RDD API is unaffected.
-  mrjob is no longer actively maintained: works on 3.11, do not move past 3.12.
+  mrjob is no longer actively maintained: works on 3.11, do not move past 3.12. On 3.12 it
+  also needs setuptools installed: mrjob imports `distutils`, removed in 3.12, and only
+  setuptools' shim provides it (3.12 venvs no longer include setuptools). Found by the first
+  CI run, 2026-10-26; with setuptools, fast and spark suites (Hadoop included) pass on 3.12.10.
   (Confirmed: on Python 3.13 mrjob tasks fail with `No module named 'pipes'`.)
 - Big data course Hadoop: 3.3.6 standalone (same 3.3 line as the course VM's 3.3.2), Apache tarball
   unpacked to `~/opt/hadoop-3.3.6`, located via `HADOOP_HOME` in `.env`. Not `brew install hadoop`:
@@ -79,7 +82,7 @@ smartCodingReview/                       # public repo (the `tutor/` above), cod
 ├── docs/design.md
 ├── docs/setup/bigdata.md                # per-course install guide (system deps, .env, pitfalls)
 ├── pyproject.toml                       # P1, per-course extras e.g. [bigdata]
-├── .github/workflows/ci.yml             # fast tests 3.11 / 3.12 + gitleaks on main; spark by hand
+├── .github/workflows/ci.yml             # fast tests 3.11 + gitleaks on main; spark by hand
 ├── .gitignore                           # P1, includes *workspace*/ as a backstop
 ├── .env.example                         # P1, WORKSPACE_DIR=..., HADOOP_HOME=...
 ├── .pre-commit-config.yaml              # P1, gitleaks
@@ -522,9 +525,12 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
   and by hand (`workflow_dispatch`), not on every `dev` push: each step is already checked
   locally with `pytest` and `ruff check .`, and the badge then shows the state of `main`,
   the branch visitors see.
-- `test`: Python 3.11 and 3.12 (the versions the README promises; 3.12 was never run
-  locally), `ruff check .` and the fast `pytest`. No JDK: run in a clean clone with a fake
-  `java` that logs every call, the fast suite started no JVM (2026-10-26).
+- `test`: Python 3.11, `ruff check .` and the fast `pytest`. The first run also had 3.12,
+  which failed on mrjob's `distutils` import (see "Environment"); the owner dropped it from
+  CI for now (2026-10-26), since 3.11 is what the project uses. To bring it back, add
+  `setuptools` to the `bigdata` extras and 3.12 to the matrix.
+  No JDK: run in a clean clone with a fake `java` that logs every call, the fast suite
+  started no JVM (2026-10-26).
 - `secrets`: gitleaks 8.30.1 (the local version) over the whole history with `.gitleaks.toml`,
   because GitHub's own secret scanning is not available while the repo is private, and a
   local pre-commit hook can be skipped.
