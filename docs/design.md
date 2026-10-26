@@ -442,6 +442,22 @@ buffering in the reducer, several reducers). So the two are judged separately:
   over a reducer's values, an `MRStep` pinned to one reducer. Warnings go on the api line of
   the validation report, like `count_uses` (owner's choice). Backlog C2.
 
+Validity vs teaching quality (decided 2026-10-26, Codex review 4). VALID says the tests,
+reference and mutants agree; it does not say the exercise is good to learn from. Teaching
+quality is a separate score that never replaces or overrides validity, on four points:
+- clear: one reading of the question, inputs and outputs fully specified;
+- fits the material: matches how the lectures and labs present the idea (the stripes
+  case below is a failure of this);
+- within what has been taught: no API or idea from later weeks; partly checkable
+  deterministically with a per-week list of allowed APIs (api check);
+- targets the concept: solving it needs the knowledge point it is filed under, not a
+  workaround.
+The owner rates the first batch after solving each exercise (one line per exercise, a few
+seconds; format fixed at the first rating). Those ratings are the labels an LLM judge is
+checked against before phase 3 trusts it. ContentGen (SIGCSE TS 2026) separates
+correctness from contextual fit in the same way, and found that a summary of recently
+covered material in the prompt improved generated questions (a [3] candidate).
+
 Runtime budget: wall-clock limits only need to be sane.
 - Every subprocess run (a student test run, or one validation step) times out at 30 s.
 - One SparkSession per validation process; `local[2]`, UI off, `spark.sql.shuffle.partitions=4`
@@ -465,6 +481,25 @@ Mutants: the reference with one deliberate bug (e.g. `add` -> `max`, `>` -> `>=`
 In phase 2 Claude Code drafts 3-5 per exercise and the validator plus the owner review them, rejecting equivalent
 mutants (unkillable) and ones that crash on import; any bug the owner makes while solving is added as
 a mutant. Phase 3 moves drafting to the LLM pipeline.
+
+Independent checks (decided in principle 2026-10-26, Codex review 4; built at phase 3
+start, design explained first since it touches `validation/`). When question, reference,
+tests, mutants and oracle come from one generation, they can agree with each other and
+still share one misreading of the requirement; killing every planted mutant only shows
+the planted bugs are caught. This already happened by hand: the stripes test rejected the
+lecture's per-occurrence stripes (slide 2.49) and a mutant enforced the same misreading,
+so the exercise was VALID and wrong until the slides were checked. So keep, per exercise
+or knowledge point, a held-out set that generation and repair never see:
+- other correct solutions (different style or the lecture's own form) must PASS: catches
+  tests that reject correct answers. Sources: the owner's passing `student.py` (free once
+  an exercise is solved), the lecture or lab version, a solution from another model;
+- independent wrong solutions must FAIL: catches weak tests beyond the planted mutants.
+  Sources: the owner's real mistakes (the tutoring rule already lists them), a catalogue
+  of common MapReduce / Spark mistakes, mutants written by another model;
+- in phase 3 the oracle is written by a different model or a separate context that never
+  sees the reference, so rule 4 compares two independent readings.
+The first batch seeds the set: the owner's solutions and mistakes, no extra work beyond
+solving.
 
 ## Generation pipeline (LangGraph)
 
@@ -513,6 +548,8 @@ deterministic judge, hybrid RAG with recall@k, the phase 5 metrics, the hint lea
     code go to that provider; a local model keeps them on the machine;
   - cost estimate before a batch is generated, and a budget cap that stops the run (the
     user pays), using the call log below.
+- [3] Summary of recently covered material in the generation prompt (ContentGen found it
+  improved generated questions); built from `coverage.md` and the batch's sources.
 - [3] Call log: one JSONL line per LLM call (node, model, input / output / cached tokens,
   latency, repair round, outcome, failure reason). The phase 5 cost metric needs it; same
   idea as `attempts.jsonl`. A tracing UI (e.g. Langfuse) only if the log is not enough.
@@ -527,6 +564,16 @@ deterministic judge, hybrid RAG with recall@k, the phase 5 metrics, the hint lea
 - [3] Human-in-the-loop: a LangGraph interrupt after a batch plan (knowledge points,
   exercise types, sources) so the owner approves before generation, as batches are approved
   now.
+- [3] Preference chat at generation (owner, 2026-10-26, in place of measuring manual edits):
+  a free-text box (a CLI prompt first, a GUI chat box later) where the user states
+  preferences before and during generation: focus topics, difficulty, interface mix, "more
+  combiner practice", "avoid X", or "make exercise 3 harder". Preferences feed the batch
+  plan and the repair / regenerate step and are stored in `manifest.json`, so a batch can
+  be explained and rerun. They steer content only: validity stays with the deterministic
+  validator, and a request outside what has been taught (e.g. an API from a later week) is
+  allowed only when the user asks for it explicitly, and is flagged in the manifest. The
+  number of follow-up requests per batch and per exercise is logged: a cheap proxy for the
+  manual effort the ablation below does not measure.
 - [3] Batch API for whole-batch generation: not interactive, usually much cheaper.
 - [3] Revisit isolation: phase 3 runs LLM-generated code, and the runner is not a sandbox
   (see "Code execution safety"). Decide whether validation of generated batches moves into
@@ -535,6 +582,11 @@ deterministic judge, hybrid RAG with recall@k, the phase 5 metrics, the hint lea
 - [3b] Calibrated LLM judge for hint quality only (leaks the answer? right direction?),
   checked against owner-labelled hints before its scores are trusted. Never for validity.
 - [4] Reranker after hybrid retrieval, as one more arm of the recall@k comparison.
+- [5] Personal workflow cost (Codex review 4): steps and minutes from adding lecture files
+  to the first exercise, owner minutes spent fixing each exercise, validation wait, and
+  whether a failed run can resume. The first batch is the hand-made baseline, taken from
+  this document's batch notes (fixes: page references, stripes, an equivalent mutant,
+  too-regular data) and `attempts.jsonl`, with no new logging for the owner.
 - [5] Local model as one more arm of the model comparison: validity, repair rounds and
   cost of a local model (run on the owner's Mac) against API models, judged by the same
   deterministic validator.
@@ -712,10 +764,17 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
    - Done when: every exercise of the first batch passes validation, the owner has solved
      them (review-mode ones without asking for help), attempts are in `attempts.jsonl`, and
      the steps that felt repetitive are noted as input for phase 3. This batch is the
-     baseline set for phase 5.
+     baseline set for phase 5. While solving, two light additions (see "Validity vs
+     teaching quality" and "Independent checks"): a one-line teaching-quality rating per
+     exercise, and the owner's solutions and mistakes kept as the first held-out set.
    - Then release `v0.1.0` (decided 2026-10-26, from a Codex review before going public):
      a `constraints.txt` with the dependency versions CI passed on, a short CHANGELOG, and
      a git tag. Not earlier: before phase 2 is solved, the whole loop has not run once.
+     README for the release: one positioning line (private lectures -> runnable exercises
+     -> pre-release checks on reference / skeleton / mutants / oracle -> distribution-
+     semantics checks -> local practice feedback; AI exercises, IDE practice, autograding
+     and no-answer hints alone all have precedents) and a built / planned table, so
+     generation, RAG and hints are never read as existing features (Codex review 4).
 2b. Code tracing and design exercises (raised from "deferred" on 2026-10-24; scope revised
    2026-10-25). The final exam is a 2-hour written exam (L1.1 slide 1.20), so beyond runnable
    code two more types (concept questions are out of scope: the owner generates those in chat
@@ -804,6 +863,14 @@ gaps. Each was decided by the owner; change one only with the owner.
 - No sharing of exercise banks (export / import between users, or a hub to download
   them). Generated exercises derive from course material, so sharing them distributes
   that material; and a hub contradicts "Local-first". Decided 2026-10-26.
+- No full ablation study (decided 2026-10-26; Codex review 4 suggested a ladder: one-shot
+  prompt + validator, then + repair, then + RAG, each with validity gain, manual edits
+  saved and cost). Too much for one person who still has the first batch to solve. Phase
+  5 keeps the arms already planned (first-pass validity, after repair, with / without RAG,
+  long-context baseline, models), which cover most of the ladder; no separate study of
+  manual edit time per arm. Instead, user effort shows up as preference / revision
+  requests in the generation chat (see the [3] preference-chat candidate), counted per
+  batch.
 - No CONTRIBUTING.md or SECURITY.md (decided 2026-10-26, before going public; a Codex review
   suggested both without knowing the repo's intent). This is a personal portfolio and
   revision tool, not a project seeking contributors: setup and checks are in README and
@@ -836,7 +903,8 @@ so it comes late; the adaptive review screens can be built with it.
   could share too, plus a light frontend), bound to `127.0.0.1` with a per-launch token or a
   Host header check so other web pages cannot drive it.
 - Manage, do not edit: drag lectures and lab files into the workspace, pick sources and start
-  generation (approving the batch plan there if phase 3 adopts the human-in-the-loop item),
+  generation with the preference chat box (approving the batch plan there if phase 3 adopts
+  the human-in-the-loop item),
   browse batches with status from `validation.json`, progress from `attempts.jsonl`, mode and
   sources from `manifest.json`, coverage from `coverage.md`.
 - Solving stays in the IDE: an "Open in IDE" button runs `code <exercise dir>` (or a
