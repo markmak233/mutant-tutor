@@ -24,7 +24,7 @@ class Workspace:
     """One course workspace, already validated by `load_workspace`.
 
     root:        the workspace directory (WORKSPACE_DIR, resolved)
-    course:      course id from workspace.toml, e.g. "comp9313"
+    course:      course id from workspace.toml, e.g. "bigdata"
     requires:    the [requires] table, name -> version prefix, e.g. {"java": "17"}
     lecture_dir: LECTURE_DIR if set, else <root>/lectures
     """

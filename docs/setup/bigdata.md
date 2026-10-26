@@ -1,6 +1,6 @@
-# Setup: COMP9313 (Big Data Management)
+# Setup: big data course (Spark, MRJob, Hadoop)
 
-Everything needed to run the tests, validate the examples and solve COMP9313 exercises on a
+Everything needed to run the tests, validate the examples and solve the big data course exercises on a
 fresh machine. Verified on macOS (Apple silicon, Homebrew). The Linux / WSL commands are
 the standard equivalents and have not been tested yet.
 
@@ -56,7 +56,7 @@ Windows need extra binaries (`winutils.exe`) and are not supported here.
 ```bash
 git clone <this repo> && cd smartCodingReview
 python3.11 -m venv .venv && source .venv/bin/activate   # name the version: plain python3 may be 3.13
-pip install -e ".[comp9313,dev]"
+pip install -e ".[bigdata,dev]"
 cp .env.example .env
 ```
 
@@ -100,13 +100,13 @@ Lectures, generated exercises and attempt logs live in a workspace **outside any
 repository** (the code refuses one inside a repo, so course material is never committed).
 
 ```bash
-mkdir -p ~/smartcodereview-workspace/comp9313/lectures   # put the lecture PDFs here
+mkdir -p ~/smartcodereview-workspace/bigdata/lectures   # put the lecture PDFs here
 ```
 
-Create `~/smartcodereview-workspace/comp9313/workspace.toml`:
+Create `~/smartcodereview-workspace/bigdata/workspace.toml`:
 
 ```toml
-course = "comp9313"
+course = "bigdata"
 
 [requires]
 python = "3.11"     # write the version you installed, e.g. "3.12"

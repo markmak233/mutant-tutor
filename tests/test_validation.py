@@ -399,7 +399,7 @@ COMBINE = {"required_any": [["combiner"], ["mapper_init", "mapper_final"]]}
     "class J:\n    def steps(self):\n        return [MRStep(combiner=self.add_up)]\n",
 ])
 def test_required_any_is_met_by_any_one_group(source):
-    """A combiner or in-mapper combining: Project 1 accepts either."""
+    """A combiner or in-mapper combining: course tasks accept either."""
     assert find_violations(source, COMBINE) == []
 
 

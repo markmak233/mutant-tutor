@@ -4,9 +4,10 @@ A coding-practice system for a big-data course: programming exercises (PySpark, 
 learner solves locally against automated tests, where **every exercise is validated by
 deterministic checks before anyone sees it**. No LLM judges whether an exercise is correct.
 
-It started as revision for UNSW COMP9313 (Big Data Management) and is built as an AI
-engineering portfolio project: the next phases generate exercises with an LLM (LangGraph
-generate → validate → repair loop) and ground them in course material (hybrid RAG).
+It started as revision for a big data management course, inspired by its course
+materials (none are included here), and is built as an AI engineering portfolio project:
+the next phases generate exercises with an LLM (LangGraph generate → validate → repair
+loop) and ground them in course material (hybrid RAG).
 
 **Status:** phases 1 and 2a (validation harness, MRJob / DataFrame / Hadoop support) are
 complete, and a first batch of hand-checked course exercises is validated. Generation and RAG
@@ -67,7 +68,7 @@ caught with two).
 
 ## Quick start
 
-> **Setting up from scratch?** Follow [`docs/setup/comp9313.md`](docs/setup/comp9313.md):
+> **Setting up from scratch?** Follow [`docs/setup/bigdata.md`](docs/setup/bigdata.md):
 > installing Python, Java and Hadoop, filling in `.env`, checking it works, and common problems.
 
 Requirements: Python 3.11 or 3.12 (mrjob breaks on 3.13), Java 17. Optional: a standalone
@@ -75,7 +76,7 @@ Hadoop 3.3 for MRJob exercises that need custom partitioning or sort order.
 
 ```bash
 python3.11 -m venv .venv && source .venv/bin/activate
-pip install -e ".[comp9313,dev]"
+pip install -e ".[bigdata,dev]"
 cp .env.example .env            # set JAVA_HOME; comment out WORKSPACE_DIR / HADOOP_HOME if unused
 
 pytest                          # fast unit tests (~30 s)
@@ -99,7 +100,7 @@ refuses a workspace that sits inside a git repo. A workspace is a folder with a 
 declaring the course and its environment, which `python -m tutor.envcheck` checks:
 
 ```toml
-course = "comp9313"
+course = "bigdata"
 
 [requires]
 python = "3.11"

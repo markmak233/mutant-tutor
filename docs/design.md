@@ -5,7 +5,7 @@ Living record of project decisions. Update it when a decision changes; note the 
 ## Goals
 
 1. Primary: portfolio project demonstrating LangGraph, RAG and LLM evaluation with real engineering judgment.
-2. Secondary: COMP9313 revision. The owner solves the generated exercises; AI never writes the answers.
+2. Secondary: revision for a big data management course. The owner solves the generated exercises; AI never writes the answers.
 
 ## Roles of AI tools
 
@@ -22,24 +22,24 @@ Living record of project decisions. Update it when a decision changes; note the 
 
 ## Environment
 
-- Requirements are per course, because courses differ (COMP9313 needs Java + Spark, others may not).
+- Requirements are per course, because courses differ (the big data course needs Java + Spark, others may not).
   Each workspace declares them in `workspace.toml` (`course` plus a `[requires]` table);
   the repo only holds the generic checker `tutor/envcheck.py`, so it stays course-agnostic.
 - Check, don't install. `python -m tutor.envcheck` checks the current workspace, and it also runs
   once before validating a batch (not per exercise: importing pyspark alone takes a second or two).
   `tests/test_env.py` runs the same checker.
-- Installation: Python deps as per-course extras, `pip install -e ".[comp9313]"`; system deps (Java,
+- Installation: Python deps as per-course extras, `pip install -e ".[bigdata]"`; system deps (Java,
   Hadoop) in a per-course guide `docs/setup/<course>.md`, linked from README (decided 2026-10-25:
   README stays course-agnostic, and each course's system deps and pitfalls differ; the guide
   marks which platforms were actually tested). No install script: setup is one-off, and when it breaks,
   asking an AI is faster than maintaining a cross-platform script.
-- COMP9313: Python 3.11, Java 17 (`JAVA_HOME`), PySpark 3.5.x (decided 2026-10-24: the slides
+- Big data course (`bigdata`): Python 3.11, Java 17 (`JAVA_HOME`), PySpark 3.5.x (decided 2026-10-24: the slides
   name both 3.5.9 and 4.2.0, and the version is pinned per workspace in `workspace.toml`
   anyway, so another course's materials can choose differently). Spark 4.x enables ANSI SQL mode by default,
   which changes DataFrame/SQL error behaviour (casts, overflow, divide by zero); RDD API is unaffected.
   mrjob is no longer actively maintained: works on 3.11, do not move past 3.12.
   (Confirmed: on Python 3.13 mrjob tasks fail with `No module named 'pipes'`.)
-- COMP9313 Hadoop: 3.3.6 standalone (same 3.3 line as the course VM's 3.3.2), Apache tarball
+- Big data course Hadoop: 3.3.6 standalone (same 3.3 line as the course VM's 3.3.2), Apache tarball
   unpacked to `~/opt/hadoop-3.3.6`, located via `HADOOP_HOME` in `.env`. Not `brew install hadoop`:
   its `yarn` binary clashes with the JavaScript `yarn`. Runs on Java 17, so one JDK serves
   both Spark and Hadoop. Hadoop launches task scripts with the `python3` on `PATH`, so jobs must
@@ -77,8 +77,8 @@ smartCodingReview/                       # public repo (the `tutor/` above), cod
 ├── README.md
 ├── .claude/settings.json
 ├── docs/design.md
-├── docs/setup/comp9313.md               # per-course install guide (system deps, .env, pitfalls)
-├── pyproject.toml                       # P1, per-course extras e.g. [comp9313]
+├── docs/setup/bigdata.md                # per-course install guide (system deps, .env, pitfalls)
+├── pyproject.toml                       # P1, per-course extras e.g. [bigdata]
 ├── .gitignore                           # P1, includes *workspace*/ as a backstop
 ├── .env.example                         # P1, WORKSPACE_DIR=..., HADOOP_HOME=...
 ├── .pre-commit-config.yaml              # P1, gitleaks
@@ -113,13 +113,13 @@ smartCodingReview/                       # public repo (the `tutor/` above), cod
 
 ```
 smartcodereview-workspace/
-└── comp9313/                            # WORKSPACE_DIR points here; one workspace per course
+└── bigdata/                             # WORKSPACE_DIR points here; one workspace per course
     ├── workspace.toml                   # course name + [requires]; marks this as a workspace
     ├── coverage.md                      # knowledge points per lecture -> exercise / design / not yet
     ├── lectures/                        # PDFs, read-only
     ├── coding_materials/                # labs and projects as on Ed, read-only
     │   ├── lab4/                        # one flat folder each: problem text, data, expected outputs
-    │   └── ass2/
+    │   └── proj2/
     ├── batches/                         # one directory per generation run
     │   ├── 2026-10-27_p2-golden/
     │   │   ├── manifest.json            # phase, date, mode, sources, method, model, git commit, exercises
@@ -161,8 +161,8 @@ smartcodereview-workspace/
 
 ## Course coding materials
 
-Decided 2026-10-24 after reading Labs 4-5 and Projects 1-2.
-- `coding_materials/<labN|assN>/` mirrors Ed: one flat folder per lab or project, no subfolders.
+Decided 2026-10-24 after reading Labs 4-5 and the two course projects.
+- `coding_materials/<labN|projN>/` mirrors Ed: one flat folder per lab or project, no subfolders.
   File names are arbitrary (`2.txt` is a problem statement, `pg100.txt` a book used as data), so
   sorting files into `spec/` / `data/` folders by hand would not last. Copied: problem text (Ed
   pages saved as text), data (CSV, book text), course-provided expected outputs. The owner's own
@@ -316,14 +316,14 @@ Measured on `station-max-file` (2026-10-24):
   folder with the venv activated (an activated venv also puts its `python3` first on PATH, which
   Spark workers use). `sample_output/` is git-ignored.
 
-Interface extensions (phase 2a; decided 2026-10-24 from Labs 4-5 and Projects 1-2). Most of this
+Interface extensions (phase 2a; decided 2026-10-24 from Labs 4-5 and the course projects). Most of this
 lands in the tests, not in the validator. Comparison mode and parameters are written only in the
 test code: tests run where `solutions/` (and so metadata.json) is not available, and keeping them
 in two places would drift. Metadata keeps what the validator reads (constraints,
 `partition_check`, `mutant_partitions`) plus descriptive fields.
 - One exercise, one implementation. Metadata `framework` is `pyspark-rdd`, `pyspark-df`, `mrjob`
   or `python`, and an MRJob exercise names one `runner`, `inline` or `hadoop`. A course task that wants an RDD
-  and a DataFrame version (Project 2) becomes two exercises with the same question; each stays
+  and a DataFrame version (as a Spark project can) becomes two exercises with the same question; each stays
   simpler to build and validate. `hadoop` only when the concept needs it (custom partitioner or
   comparator, order inversion, secondary sort), since every job costs 8-9 s.
 - MRJob file-level: the student writes the job class in the course template; tests run it on
@@ -336,7 +336,7 @@ in two places would drift. Metadata keeps what the validator reads (constraints,
   Measured with mrjob 0.7.4 and Hadoop 3.3.6 (2026-10-25), and kept as `spark`-marked tests:
   - jobconf precedence: an `MRStep(jobconf=...)` beats the command line's `--jobconf`, which
     beats the class `JOBCONF`. So rule 5's command-line reducer count overrides a count fixed
-    in `JOBCONF` (ass1 style), while a step that pins one reducer (a global top-k) keeps it.
+    in `JOBCONF` (as course templates often do), while a step that pins one reducer (a global top-k) keeps it.
   - Multi-step jobs (`steps()` returning several `MRStep`s) run on both runners; each step is a
     separate Hadoop job: about 7 s for one step, 12 s for two.
   - Hadoop retries every failed task 4 times by default; `run_mrjob` sets map / reduce
@@ -361,16 +361,16 @@ in two places would drift. Metadata keeps what the validator reads (constraints,
     since tests run from a workspace folder); missing ones give a clear error.
   - metadata `timeout_s` sets the per-run timeout for all rules (default 30 s).
 - Parameters, in the course's two forms: positional after input and output
-  (`run(inputPath, outputPath, m, k)`, Project 2), or `--jobconf myjob.settings.<name>=<value>`
-  read with `jobconf_from_env` (Project 1, Lab 4 top-k). Tests pass them
+  (`run(inputPath, outputPath, <params>)`, Spark programs), or
+  `--jobconf myjob.settings.<name>=<value>` read with `jobconf_from_env` (MRJob, Lab 4 top-k). Tests pass them
   (`run_program(Program, inp, out, m, k)`, as strings like `sys.argv`); rule 4 draws parameter
   values at random as well as inputs.
 - Output comparison modes (`testkit.assert_output(..., order=...)`):
   - `any`: all lines of all `part-*` files as a multiset (the current behaviour, default);
   - `per_file`: each `part-*` file in order, the files as a multiset (secondary sort: a reducer's
-    output is ordered only within itself, Project 1);
-  - `total`: exactly one non-empty data file, fully in order (Project 2: Spark sort + `coalesce(1)`);
-  - options: `float_tol` (both projects accept tiny float differences and `3.0` = `3.000`),
+    output is ordered only within itself);
+  - `total`: exactly one non-empty data file, fully in order (Spark sort + `coalesce(1)`);
+  - options: `float_tol` (course tasks accept tiny float differences and `3.0` = `3.000`),
     and `optional_quotes` for MRJob's JSON keys (`"zounds,a"` = `zounds,a`). With `float_tol`
     a line is split into fields at tabs and commas; only a field that is a number on both
     sides gets the tolerance, every other field must match exactly. The first version
@@ -389,7 +389,7 @@ in two places would drift. Metadata keeps what the validator reads (constraints,
   less boilerplate to get wrong. Cost: an exercise folder needs that venv to run. Done for
   `station-max-file` (2026-10-24; validation unchanged, about 77 s).
 - API constraints gain `required_any` (one of several groups, e.g. `combiner` or
-  `mapper_init` + `mapper_final`, Project 1 accepts either). Use counts are reported, not
+  `mapper_init` + `mapper_final`; course tasks accept either). Use counts are reported, not
   limited (`count_uses: ["MRStep"]` -> "uses: MRStep x2" on the api line; decided 2026-10-24).
   A name counts as defined if a function has it or a call passes it as a keyword, since
   multi-step jobs write `MRStep(combiner=self.add_up)`; `required_definitions` uses the same
@@ -423,9 +423,8 @@ in two places would drift. Metadata keeps what the validator reads (constraints,
 
 Correctness vs algorithm quality (revised 2026-10-25, Codex review against the slides): the
 course does assess efficiency, not as seconds on a laptop but as algorithm design (L3.2 slide
-3.42: top-k "considering that you can utilize multiple reducers, and the efficiency of your
-method is evaluated"; Project 1 marks combiners, no buffering in the reducer, several
-reducers). So the two are judged separately:
+3.42 asks for an efficient top-k over several reducers; the course values combiners, no
+buffering in the reducer, several reducers). So the two are judged separately:
 - correctness: the validator, deterministic, decides VALID / INVALID;
 - algorithm quality: a per-exercise checklist (all data into one reducer? a key's values
   buffered in the reducer? an unnecessary global sort? does the combiner cut the shuffle?),
@@ -565,7 +564,7 @@ become a problem.
      run the validator, the design in brief), replacing the original Codex-era planning brief.
    - Done when: `pytest` and `ruff check .` pass; the valid example passes all checks and every
      broken variant fails the check it targets; measured validation time recorded; README updated.
-2a. Harness extensions from Labs 4-5 and Projects 1-2 (see "Interface extensions"), in small
+2a. Harness extensions from Labs 4-5 and the course projects (see "Interface extensions"), in small
    steps: `testkit.py` with the output modes; parameters and the new API constraints; MRJob
    interface with a synthetic example; DataFrame with a synthetic example; rule 5's combiner
    check; `attempts.jsonl`. **Done 2026-10-25.**
