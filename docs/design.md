@@ -79,6 +79,7 @@ smartCodingReview/                       # public repo (the `tutor/` above), cod
 ├── docs/design.md
 ├── docs/setup/bigdata.md                # per-course install guide (system deps, .env, pitfalls)
 ├── pyproject.toml                       # P1, per-course extras e.g. [bigdata]
+├── .github/workflows/ci.yml             # fast tests 3.11 / 3.12 + gitleaks on main; spark by hand
 ├── .gitignore                           # P1, includes *workspace*/ as a backstop
 ├── .env.example                         # P1, WORKSPACE_DIR=..., HADOOP_HOME=...
 ├── .pre-commit-config.yaml              # P1, gitleaks
@@ -511,6 +512,31 @@ timeout: Ctrl+C stops an endless loop, and testkit stops a leftover SparkContext
 program. Accepted for now (raised in the same review); `pytest-timeout` is the fix if hangs
 become a problem.
 
+The README states this boundary too ("Running exercise code is not sandboxed", 2026-10-26),
+since anyone who clones the repo validates code on their own machine.
+
+## CI
+
+GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going public):
+- Runs when work reaches `main` (a push after merging `dev`, or a pull request into `main`)
+  and by hand (`workflow_dispatch`), not on every `dev` push: each step is already checked
+  locally with `pytest` and `ruff check .`, and the badge then shows the state of `main`,
+  the branch visitors see.
+- `test`: Python 3.11 and 3.12 (the versions the README promises; 3.12 was never run
+  locally), `ruff check .` and the fast `pytest`. No JDK: run in a clean clone with a fake
+  `java` that logs every call, the fast suite started no JVM (2026-10-26).
+- `secrets`: gitleaks 8.30.1 (the local version) over the whole history with `.gitleaks.toml`,
+  because GitHub's own secret scanning is not available while the repo is private, and a
+  local pre-commit hook can be skipped.
+- `spark`: `pytest -m spark` with Temurin JDK 17 on Python 3.11, only on a manual run
+  (added 2026-10-26 after a Codex review asked for integration tests apart from the fast
+  ones). About 3 min without Hadoop, measured in a fresh venv: 3 passed, the 5 Hadoop tests
+  skipped. Use it after changing the validator or testkit, or to show the examples validate
+  on a clean machine.
+- Not in CI: the Hadoop tests (Hadoop is a 700 MB download and each job starts a JVM for
+  about 7 s). Run `pytest -m spark` locally with `HADOOP_HOME` set before merging changes
+  to `run_mrjob`.
+
 ## Learning rules
 
 - Editor AI inline completion is off when solving exercises.
@@ -625,6 +651,9 @@ become a problem.
      them (review-mode ones without asking for help), attempts are in `attempts.jsonl`, and
      the steps that felt repetitive are noted as input for phase 3. This batch is the
      baseline set for phase 5.
+   - Then release `v0.1.0` (decided 2026-10-26, from a Codex review before going public):
+     a `constraints.txt` with the dependency versions CI passed on, a short CHANGELOG, and
+     a git tag. Not earlier: before phase 2 is solved, the whole loop has not run once.
 2b. Code tracing and design exercises (raised from "deferred" on 2026-10-24; scope revised
    2026-10-25). The final exam is a 2-hour written exam (L1.1 slide 1.20), so beyond runnable
    code two more types (concept questions are out of scope: the owner generates those in chat
@@ -707,6 +736,12 @@ gaps. Each was decided by the owner; change one only with the owner.
 - No wall-clock performance scoring: efficiency is judged as algorithm design, not seconds
   on a laptop (see "Correctness vs algorithm quality").
 - No `aggregateByKey` in the first golden exercises: listed but not taught in L4.1.
+- No CONTRIBUTING.md or SECURITY.md (decided 2026-10-26, before going public; a Codex review
+  suggested both without knowing the repo's intent). This is a personal portfolio and
+  revision tool, not a project seeking contributors: setup and checks are in README and
+  `docs/setup/`, the synthetic-data rule in AGENTS.md. Vulnerability reports go through
+  GitHub's private vulnerability reporting (repo settings, once public), which keeps them
+  out of public issues; nobody should post keys or course material in an issue anyway.
 
 ## Deferred
 

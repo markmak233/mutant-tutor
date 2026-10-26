@@ -77,8 +77,8 @@ Optional, before your first commit: `pre-commit install` (needs gitleaks).
 ```bash
 pytest                 # fast unit tests, about 30 s; all pass (test_env skips without WORKSPACE_DIR)
 ruff check .           # All checks passed!
-pytest -m spark        # validates every example end to end, about 8 min;
-                       # without HADOOP_HOME the Hadoop tests show as skipped
+pytest -m spark        # validates every example end to end: about 8 min with Hadoop;
+                       # without HADOOP_HOME about 3 min, and the 5 Hadoop tests show as skipped
 ```
 
 Validate one example and solve one yourself:

@@ -1,5 +1,6 @@
 [build-system]
-requires = ["setuptools>=68"]
+# 77+ reads the SPDX `license` string below.
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,6 +8,8 @@ name = "tutor"
 version = "0.1.0"
 description = "AI-assisted coding practice: generated exercises, deterministic validation"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 # mrjob is unmaintained and breaks on 3.13 (no `pipes` module); see docs/design.md.
 requires-python = ">=3.11,<3.13"
 dependencies = []

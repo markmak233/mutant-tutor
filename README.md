@@ -1,5 +1,7 @@
 # smartCodingReview
 
+[![CI](https://github.com/markmak233/smartCodingReview/actions/workflows/ci.yml/badge.svg)](https://github.com/markmak233/smartCodingReview/actions/workflows/ci.yml)
+
 A coding-practice system for a big-data course: programming exercises (PySpark, MRJob) that a
 learner solves locally against automated tests, where **every exercise is validated by
 deterministic checks before anyone sees it**. No LLM judges whether an exercise is correct.
@@ -47,6 +49,12 @@ report saved to examples/station-max-file/solution/validation.json
 Each check is itself tested against an exercise built to fail it, e.g. a reference that is
 correct below 1000 passes rule 1 and is caught by rule 4 at exactly `a=1000`.
 
+VALID means the exercise passed these checks, not that it is proven correct. Rule 4 compares
+against an oracle on random inputs, not all inputs; rule 3 only catches the mutants someone
+planted; the api check reads the source and can be dodged by dynamic code. Each rule removes
+a known way an exercise goes wrong, and the gaps that remain are listed in
+[`docs/design.md`](docs/design.md).
+
 ## What an exercise looks like
 
 The learner opens one file: `student.py`, with the question in its docstring and a skeleton
@@ -80,7 +88,7 @@ pip install -e ".[bigdata,dev]"
 cp .env.example .env            # set JAVA_HOME; comment out WORKSPACE_DIR / HADOOP_HOME if unused
 
 pytest                          # fast unit tests (~30 s)
-pytest -m spark                 # validate every example end to end (~7.5 min; Hadoop optional)
+pytest -m spark                 # validate every example end to end (~3 min, ~8 min with Hadoop)
 python -m tutor.validation examples/station-average-rdd/exercise examples/station-average-rdd/solution
 ```
 
@@ -111,6 +119,15 @@ mrjob = "0.7"
 
 A gitleaks pre-commit hook blocks secrets and absolute home-directory paths
 (`pre-commit install` once per clone; needs `gitleaks` installed).
+
+## Running exercise code is not sandboxed
+
+The validator runs exercise code (reference, skeleton, mutants, tests) in a subprocess with a
+timeout, in a temporary directory, and kills the whole process group afterwards. That keeps
+runs apart from each other and from the workspace, but it is **not a sandbox**: the code runs
+with your user's permissions and can read or write other files and use the network. Only
+validate exercises you wrote or reviewed. Phase 3 runs LLM-generated code the same way, so
+review it first or run the validator in a container or VM.
 
 ## Layout
 
