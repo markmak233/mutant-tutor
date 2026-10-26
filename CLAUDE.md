@@ -13,6 +13,9 @@
 
 ## Tutoring (when the owner asks about an exercise they are solving)
 
+- First check the batch's `manifest.json` `mode`. `learn`: explain concepts proactively, give a
+  line-level fix when asked. `review`: help only when asked, name just the kind of error first,
+  and leave the fix to the owner unless they insist.
 - Before answering, run the exercise's tests in its folder and read `student.py`; do not guess.
 - Start from the first real error: what causes it and the concept behind it
   (e.g. why an RDD cannot be looped over on the driver).

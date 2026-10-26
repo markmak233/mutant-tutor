@@ -1,14 +1,19 @@
 # smartCodingReview
 
+[![CI](https://github.com/markmak233/smartCodingReview/actions/workflows/ci.yml/badge.svg)](https://github.com/markmak233/smartCodingReview/actions/workflows/ci.yml)
+
 A coding-practice system for a big-data course: programming exercises (PySpark, MRJob) that a
 learner solves locally against automated tests, where **every exercise is validated by
 deterministic checks before anyone sees it**. No LLM judges whether an exercise is correct.
 
-It started as revision for UNSW COMP9313 (Big Data Management) and is built as an AI
-engineering portfolio project: the next phases generate exercises with an LLM (LangGraph
-generate → validate → repair loop) and ground them in course material (hybrid RAG).
+It started as revision for a big data management course, inspired by its course
+materials (none are included here), and is built as an AI engineering portfolio project:
+the next phases generate exercises with an LLM (LangGraph generate → validate → repair
+loop) and ground them in course material (hybrid RAG).
 
-**Status:** phase 1 (environment + validation harness) is complete. Generation and RAG are next.
+**Status:** phases 1 and 2a (validation harness, MRJob / DataFrame / Hadoop support) are
+complete, and a first batch of hand-checked course exercises is validated. Generation and RAG
+are next.
 
 ## Why validation comes first
 
@@ -25,7 +30,7 @@ An exercise is valid only if all of these hold:
 | 2 | The skeleton *fails* the tests (fails, not crashes) | tests that check nothing; a skeleton that does not import |
 | 3 | Every planted mutant (one deliberate bug each) fails the tests | tests too weak to catch a known mistake |
 | 4 | The reference matches a plain-Python oracle on random inputs (hypothesis) | a reference that is only right on the inputs the tests list |
-| 5 | The reference passes with 1, 2 and 4 partitions / input files | code that depends on how data is distributed |
+| 5 | The reference passes with 1, 2 and 4 partitions / input files / reducers, and (MRJob) with the combiner off | code that depends on how data is distributed |
 | api | Static `ast` check of forbidden / required APIs (e.g. no `groupByKey`) | a solution that passes by breaking the exercise's constraints |
 
 ```
@@ -35,13 +40,20 @@ station-max-file
   ok    2    skeleton fails      3.9s  4 failed
   ok    3    mutants killed     30.3s  4/4 killed
   ok    4    matches oracle     14.8s  1 passed
-  ok    5    partition counts   16.9s  reference passes with 1, 2, 4 partitions
+  ok    5    distribution       16.9s  reference passes with 1, 2, 4 partitions
   ok    api  api constraints     0.0s  reference respects forbidden_calls=['groupByKey'], ...
 VALID
+report saved to examples/station-max-file/solution/validation.json
 ```
 
 Each check is itself tested against an exercise built to fail it, e.g. a reference that is
 correct below 1000 passes rule 1 and is caught by rule 4 at exactly `a=1000`.
+
+VALID means the exercise passed these checks, not that it is proven correct. Rule 4 compares
+against an oracle on random inputs, not all inputs; rule 3 only catches the mutants someone
+planted; the api check reads the source and can be dodged by dynamic code. Each rule removes
+a known way an exercise goes wrong, and the gaps that remain are listed in
+[`docs/design.md`](docs/design.md).
 
 ## What an exercise looks like
 
@@ -56,21 +68,27 @@ Two interfaces, mixed in every batch:
 - **File-level**: write a program in the shape course assignments use (`run(inputPath, outputPath)`),
   read messy input files, write `part-*` output in an exact format. Ships a `sample_input/`.
 
-Two synthetic examples live in [`examples/`](examples/): `station-average-rdd` (function-level)
-and `station-max-file` (file-level).
+Four synthetic examples live in [`examples/`](examples/): `station-average-rdd` (function-level),
+`station-max-file` (file-level Spark RDD), `station-monthly-df` (DataFrame, one ordered output
+file, a command-line parameter) and `station-condition-share` (MRJob on a local Hadoop:
+order inversion, where a mutant that forgets the partitioner passes with one reducer and is
+caught with two).
 
 ## Quick start
+
+> **Setting up from scratch?** Follow [`docs/setup/bigdata.md`](docs/setup/bigdata.md):
+> installing Python, Java and Hadoop, filling in `.env`, checking it works, and common problems.
 
 Requirements: Python 3.11 or 3.12 (mrjob breaks on 3.13), Java 17. Optional: a standalone
 Hadoop 3.3 for MRJob exercises that need custom partitioning or sort order.
 
 ```bash
 python3.11 -m venv .venv && source .venv/bin/activate
-pip install -e ".[comp9313,dev]"
-cp .env.example .env            # set JAVA_HOME (and WORKSPACE_DIR / HADOOP_HOME if used)
+pip install -e ".[bigdata,dev]"
+cp .env.example .env            # set JAVA_HOME; comment out WORKSPACE_DIR / HADOOP_HOME if unused
 
-pytest                          # fast unit tests (~20 s)
-pytest -m spark                 # validate both examples end to end with Spark (~2 min)
+pytest                          # fast unit tests (~30 s)
+pytest -m spark                 # validate every example end to end (~3 min, ~8 min with Hadoop)
 python -m tutor.validation examples/station-average-rdd/exercise examples/station-average-rdd/solution
 ```
 
@@ -90,7 +108,7 @@ refuses a workspace that sits inside a git repo. A workspace is a folder with a 
 declaring the course and its environment, which `python -m tutor.envcheck` checks:
 
 ```toml
-course = "comp9313"
+course = "bigdata"
 
 [requires]
 python = "3.11"
@@ -101,6 +119,15 @@ mrjob = "0.7"
 
 A gitleaks pre-commit hook blocks secrets and absolute home-directory paths
 (`pre-commit install` once per clone; needs `gitleaks` installed).
+
+## Running exercise code is not sandboxed
+
+The validator runs exercise code (reference, skeleton, mutants, tests) in a subprocess with a
+timeout, in a temporary directory, and kills the whole process group afterwards. That keeps
+runs apart from each other and from the workspace, but it is **not a sandbox**: the code runs
+with your user's permissions and can read or write other files and use the network. Only
+validate exercises you wrote or reviewed. Phase 3 runs LLM-generated code the same way, so
+review it first or run the validator in a container or VM.
 
 ## Layout
 
@@ -120,7 +147,10 @@ docs/design.md     every design decision, with the measurements behind it
 Phase numbers match `docs/design.md`.
 
 - **1** ✅ Environment + validation harness, two synthetic examples
-- **2** Five golden exercises from the course topics, solved by hand to run the full loop
+- **2a** ✅ Harness extensions: shared test helpers, MRJob (inline and local Hadoop),
+  DataFrame, combiner-off check, attempt log, two more synthetic examples
+- **2** Golden exercises: a first batch of 10 covering course weeks 1-2 (validated; being
+  solved by hand to run the full loop)
 - **2b** Code-tracing exercises ("what does this print and why")
 - **3** LLM generation: LangGraph generate → validate → repair loop, Pydantic-parsed output
 - **4** Hybrid RAG over course material (BM25 + vectors), evaluated with recall@k

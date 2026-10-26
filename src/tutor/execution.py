@@ -13,22 +13,39 @@ import subprocess
 import sys
 import tempfile
 import time
+import xml.etree.ElementTree as ET
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
 DEFAULT_TIMEOUT_S = 30.0
+REPORT_FILE = "tutor-pytest-report.xml"  # pytest's JUnit XML, written inside the temp dir
 
 
 class Outcome(Enum):
     """What happened to one pytest run. Validation needs FAILED and ERROR kept apart:
-    a skeleton must fail its tests, not crash before any test runs."""
+    a skeleton must fail its tests, not crash before any test runs. The exit code alone is
+    not enough: pytest also exits 0 when every test was skipped, and 1 when only a
+    fixture broke, so the counts from the JUnit report decide (see _outcome)."""
 
-    PASSED = "passed"  # exit code 0: every test passed
-    FAILED = "failed"  # exit code 1: tests ran and at least one failed
-    ERROR = "error"  # exit codes 2-5: syntax/import error, usage error, no tests collected
+    PASSED = "passed"  # tests ran, every one passed, none skipped
+    FAILED = "failed"  # at least one test ran and failed an assertion
+    ERROR = "error"  # nothing was verified: import/syntax error, no tests, skipped tests,
+    #                  or only setup/teardown errors
     TIMEOUT = "timeout"  # killed after the time limit
+
+
+@dataclass(frozen=True)
+class TestCounts:
+    """From pytest's JUnit XML report. errors = setup/teardown/collection errors."""
+
+    __test__ = False  # not a pytest test class, despite the name
+
+    passed: int = 0
+    failed: int = 0
+    errors: int = 0
+    skipped: int = 0
 
 
 @dataclass(frozen=True)
@@ -37,6 +54,7 @@ class RunResult:
     returncode: int | None  # None when the run timed out
     duration_s: float
     output: str  # pytest's stdout and stderr, interleaved
+    counts: TestCounts | None = None  # None when pytest wrote no report (timeout, crash)
 
 
 def run_pytest(
@@ -67,7 +85,9 @@ def run_pytest(
 def _run_in(workdir: Path, timeout_s: float, extra_env: Mapping[str, str]) -> RunResult:
     # sys.executable: the project venv, so student code can import pyspark and mrjob.
     # no:cacheprovider: no .pytest_cache; the temp dir is discarded anyway.
-    cmd = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"]
+    # --junitxml: the counts that tell "all passed" from "all skipped" (see _outcome).
+    cmd = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
+           f"--junitxml={REPORT_FILE}"]
     # PYSPARK_PYTHON: Spark workers otherwise start the `python3` on PATH, which may be a
     # different minor version than the driver (PYTHON_VERSION_MISMATCH).
     env = {
@@ -91,7 +111,9 @@ def _run_in(workdir: Path, timeout_s: float, extra_env: Mapping[str, str]) -> Ru
         return RunResult(Outcome.TIMEOUT, None, time.monotonic() - start, output)
     duration = time.monotonic() - start
     _kill_group(proc.pid)  # leftovers such as a JVM that was never stopped
-    return RunResult(_outcome(proc.returncode), proc.returncode, duration, output)
+    counts = _read_counts(workdir / REPORT_FILE)
+    return RunResult(_outcome(proc.returncode, counts), proc.returncode, duration, output,
+                     counts)
 
 
 def _kill_group(pgid: int) -> None:
@@ -101,9 +123,34 @@ def _kill_group(pgid: int) -> None:
         pass  # the whole group has already exited
 
 
-def _outcome(returncode: int) -> Outcome:
+def _read_counts(report: Path) -> TestCounts | None:
+    """Totals over every <testsuite> in pytest's JUnit XML; None if it is missing or broken."""
+    try:
+        root = ET.parse(report).getroot()
+    except (OSError, ET.ParseError):
+        return None
+    suites = [root] if root.tag == "testsuite" else root.findall("testsuite")
+    tests = failed = errors = skipped = 0
+    for suite in suites:
+        tests += int(suite.get("tests", 0))
+        failed += int(suite.get("failures", 0))
+        errors += int(suite.get("errors", 0))
+        skipped += int(suite.get("skipped", 0))
+    passed = tests - failed - errors - skipped
+    return TestCounts(passed=passed, failed=failed, errors=errors, skipped=skipped)
+
+
+def _outcome(returncode: int, counts: TestCounts | None) -> Outcome:
+    """Exit code 0 counts as PASSED only if tests really ran and none was skipped: an
+    all-skipped run (exit 0) proves nothing, so a reference or oracle test must not pass
+    that way. Exit code 1 counts as FAILED only if an assertion failed: a run where only a
+    fixture broke never checked the code, so it must not count as killing a mutant."""
     if returncode == 0:
+        if counts is None or counts.passed == 0 or counts.skipped > 0:
+            return Outcome.ERROR
         return Outcome.PASSED
     if returncode == 1:
+        if counts is not None and counts.failed == 0:
+            return Outcome.ERROR
         return Outcome.FAILED
     return Outcome.ERROR

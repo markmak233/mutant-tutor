@@ -1,11 +1,12 @@
 """Validation rules 1-5 and the static API check.
 
 Unit tests build tiny pure-Python exercises in a temp dir, so they need no Spark. The
-`spark`-marked tests validate the real examples end to end (about 1.5 min): run them with
+`spark`-marked tests validate the real examples end to end (about 7.5 min): run them with
 `pytest -m spark`.
 """
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -13,7 +14,7 @@ import pytest
 from tutor.config import load_env
 from tutor.validation import ExerciseError, Status, load_exercise, validate
 from tutor.validation.__main__ import format_report, main
-from tutor.validation.api import find_violations
+from tutor.validation.api import count_uses, find_violations
 
 TESTS = (
     "from student import add\n\n"
@@ -259,6 +260,77 @@ def test_mutant_wrong_only_at_4_needs_mutant_partitions(tmp_path):
     assert "2/2 killed (partitions 2, 4)" in stricter.detail
 
 
+def test_skipped_tests_do_not_count_as_passing(tmp_path):
+    """A test file that skips its checks (say, a generated one with skipif) must not let
+    the reference "pass": pytest exits 0 then, but nothing was verified."""
+    skipping = "import pytest\n\npytestmark = pytest.mark.skip\n\n" + TESTS
+    report = run(make_exercise(tmp_path, tests=skipping))
+
+    assert report.result("1").status is Status.FAIL
+    assert "skipped" in report.result("1").detail
+
+
+def test_a_skipped_oracle_test_fails_rule_4(tmp_path):
+    skipping_oracle = "import pytest\n\npytestmark = pytest.mark.skip\n\n" + ORACLE_TEST
+    report = run(make_exercise(tmp_path, oracle_test=skipping_oracle))
+
+    assert report.result("1").status is Status.OK
+    assert report.result("4").status is Status.FAIL
+
+
+def test_metadata_timeout_applies_to_every_run(tmp_path):
+    """Hadoop exercises set `timeout_s` in metadata; here it is too short for pytest even to
+    start, so rule 1 times out."""
+    report = run(make_exercise(tmp_path, metadata={"timeout_s": 0.05}))
+
+    assert report.result("1").status is Status.FAIL
+    assert "timeout" in report.result("1").detail
+
+
+# A tiny inline MRJob exercise for the combiner check.
+MR_TESTS = (
+    "from tutor.testkit import assert_output, run_mrjob, write_inputs\n"
+    "from student import Count\n\n"
+    "def test_count(tmp_path):\n"
+    "    inp = write_inputs(tmp_path / 'in', ['a b a', 'b a'])\n"
+    "    out = run_mrjob(Count, inp, tmp_path / 'out')\n"
+    "    assert_output(out, ['\"a\"\\t3', '\"b\"\\t2'])\n"
+)
+MR_JOB = (
+    "from mrjob.job import MRJob\n\n"
+    "class Count(MRJob):\n"
+    "    def mapper(self, _, line):\n"
+    "        for w in line.split():\n"
+    "            yield w, 1\n\n"
+    "    def combiner(self, w, counts):\n"
+    "        yield w, {COMBINE}\n\n"
+    "    def reducer(self, w, values):\n"
+    "        yield w, {REDUCE}\n\n"
+    "if __name__ == '__main__':\n"
+    "    Count.run()\n"
+)
+
+
+@pytest.mark.parametrize("combine, reduce, status", [
+    ("sum(counts)", "sum(values)", Status.OK),
+    # the reducer needs the combiner's [sum, 'partial'] lists: fine on, crashes off
+    ("[sum(counts), 'partial']", "sum(v[0] for v in values)", Status.FAIL),
+])
+def test_combiner_check(tmp_path, combine, reduce, status):
+    """Rule 5 with combiner_check reruns the reference with the combiner removed."""
+    reference = MR_JOB.format(COMBINE=combine, REDUCE=reduce)
+    report = run(make_exercise(
+        tmp_path, tests=MR_TESTS, reference=reference, metadata={"combiner_check": True},
+    ))
+
+    assert report.result("1").status is Status.OK
+    assert report.result("5").status is status
+    if status is Status.FAIL:
+        assert "with the combiner off" in report.result("5").detail
+    else:
+        assert report.result("5").detail == "reference passes with the combiner off"
+
+
 # --- static API constraints -------------------------------------------------------------
 
 
@@ -275,6 +347,18 @@ def test_forbidden_name_is_found_even_without_calling_it():
     assert find_violations(source, {"forbidden_calls": ["groupByKey"]}) == [
         "line 2: uses groupByKey"
     ]
+
+
+def test_forbidden_builtin_is_found_through_an_alias():
+    """f = sorted; f(x) uses sorted without calling it by name."""
+    source = "f = sorted\ny = f([3, 1])\n"
+    assert find_violations(source, {"forbidden_calls": ["sorted"]}) == ["line 1: uses sorted"]
+
+
+def test_local_variable_with_a_forbidden_name_is_not_a_use():
+    """Forbidding the method count must not flag a counter variable called count."""
+    source = "count = 0\nfor x in [1, 2]:\n    count += x\n"
+    assert find_violations(source, {"forbidden_calls": ["count"]}) == []
 
 
 def test_allowed_code_has_no_violations():
@@ -302,6 +386,68 @@ def test_required_definitions():
     source = "class J:\n    def mapper_init(self):\n        pass\n"
     constraints = {"required_definitions": ["mapper_init", "mapper_final"]}
     assert find_violations(source, constraints) == ["must define mapper_final"]
+
+
+COMBINE = {"required_any": [["combiner"], ["mapper_init", "mapper_final"]]}
+
+
+@pytest.mark.parametrize("source", [
+    "class J:\n    def combiner(self, k, v):\n        pass\n",
+    "class J:\n    def mapper_init(self):\n        pass\n"
+    "    def mapper_final(self):\n        pass\n",
+    # multi-step jobs name the combiner method freely and pass it as a keyword
+    "class J:\n    def steps(self):\n        return [MRStep(combiner=self.add_up)]\n",
+])
+def test_required_any_is_met_by_any_one_group(source):
+    """A combiner or in-mapper combining: course tasks accept either."""
+    assert find_violations(source, COMBINE) == []
+
+
+@pytest.mark.parametrize("source", [
+    "x = dict(combiner=None)\n",                          # not an MRStep
+    "def steps(self):\n    return [MRStep(combiner=None)]\n",  # no real combiner
+])
+def test_required_any_ignores_keywords_outside_mrstep_or_set_to_none(source):
+    assert find_violations(source, COMBINE) == [
+        "must define one of: combiner | mapper_init + mapper_final"
+    ]
+
+
+def test_required_any_needs_a_whole_group():
+    """mapper_init alone is half of in-mapper combining, and there is no combiner."""
+    source = "class J:\n    def mapper_init(self):\n        pass\n"
+    assert find_violations(source, COMBINE) == [
+        "must define one of: combiner | mapper_init + mapper_final"
+    ]
+
+
+def test_required_any_must_be_a_list_of_groups():
+    """A flat list would silently mean "every single name is its own group"."""
+    assert find_violations("x = 1\n", {"required_any": ["combiner", "mapper_init"]}) == [
+        'required_any must be a list of non-empty name lists, e.g. [["combiner"]]'
+    ]
+
+
+def test_count_uses_counts_both_spellings_but_not_the_import():
+    source = (
+        "import mrjob.step\nfrom mrjob.step import MRStep\n\n"
+        "def steps():\n    return [MRStep(), mrjob.step.MRStep()]\n"
+    )
+    assert count_uses(source, ["MRStep", "combiner"]) == {"MRStep": 2, "combiner": 0}
+
+
+def test_count_uses_is_reported_never_enforced(tmp_path):
+    """The api line shows the counts; any count passes."""
+    reference = (
+        "def MRStep():\n    return 0\n\n"
+        "def add(a, b):\n    return a + b + MRStep() + MRStep()\n"
+    )
+    report = run(make_exercise(
+        tmp_path, reference=reference, metadata={"constraints": {"count_uses": ["MRStep"]}},
+    ))
+
+    assert report.result("api").status is Status.OK
+    assert report.result("api").detail.endswith("; uses: MRStep x2")
 
 
 def test_unknown_constraint_key_is_reported():
@@ -338,16 +484,39 @@ def test_cli_exit_codes(tmp_path, capsys):
     assert main([]) == 2
 
 
+def test_cli_saves_the_report_as_json(tmp_path):
+    """The same report the CLI prints, in <solution_dir>/validation.json; rerunning
+    overwrites it."""
+    exercise, solution = make_exercise(tmp_path, mutants={})
+    main([str(exercise), str(solution)])
+    data = json.loads((solution / "validation.json").read_text())
+
+    assert data["exercise_id"] == "demo"
+    assert data["valid"] is False
+    assert [r["rule"] for r in data["results"]] == ["1", "2", "3", "4", "5", "api"]
+    assert data["results"][2]["status"] == "FAIL"  # zero mutants fails rule 3
+    assert "validated_at" in data and "tool_commit" in data
+
+    (solution / "mutants" / "m01_sub.py").write_text(MUTANT_SUB)
+    main([str(exercise), str(solution)])
+    assert json.loads((solution / "validation.json").read_text())["valid"] is True
+
+
 # --- real examples, with Spark ----------------------------------------------------------
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 
 
 @pytest.mark.spark
-@pytest.mark.parametrize("name", ["station-average-rdd", "station-max-file"])
+@pytest.mark.parametrize(
+    "name",
+    ["station-average-rdd", "station-max-file", "station-monthly-df", "station-condition-share"],
+)
 def test_examples_are_valid(name):
-    """End to end on the real examples."""
+    """End to end on the real examples. The MRJob one runs on Hadoop (about 4 min)."""
     load_env()
+    if name == "station-condition-share" and not os.environ.get("HADOOP_HOME"):
+        pytest.skip("needs HADOOP_HOME")
     exercise = load_exercise(EXAMPLES / name / "exercise", EXAMPLES / name / "solution")
 
     report = validate(exercise)

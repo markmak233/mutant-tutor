@@ -1,6 +1,8 @@
 # Agent Rules
 
 Rules for any AI coding agent working in this repository. Design decisions live in `docs/design.md`.
+When reviewing, read its "Decisions not to do (and why)" section first: those omissions are
+deliberate, not gaps to report.
 
 ## Private data and secrets
 

@@ -1,5 +1,6 @@
 [build-system]
-requires = ["setuptools>=68"]
+# 77+ reads the SPDX `license` string below.
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,12 +8,14 @@ name = "tutor"
 version = "0.1.0"
 description = "AI-assisted coding practice: generated exercises, deterministic validation"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 # mrjob is unmaintained and breaks on 3.13 (no `pipes` module); see docs/design.md.
 requires-python = ">=3.11,<3.13"
 dependencies = []
 
 [project.optional-dependencies]
-comp9313 = [
+bigdata = [
     "pyspark>=3.5,<3.6",
     "mrjob==0.7.4",
 ]
@@ -23,14 +26,21 @@ dev = [
     "pre-commit>=3",
 ]
 
+# Loaded by every pytest run in this venv; it records only workspace exercise runs. The
+# name equals the module name, so an explicit `-p tutor.attempts` is not a second copy.
+[project.entry-points.pytest11]
+"tutor.attempts" = "tutor.attempts"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["spark: slow end-to-end runs that start Spark; run with `pytest -m spark`"]
+markers = ["spark: slow runs that start a JVM (Spark or Hadoop); run with `pytest -m spark`"]
 # Plain `pytest` stays fast; a later `-m spark` on the command line overrides this.
 addopts = "-m 'not spark'"
+# mrjob 0.7.4 imports the stdlib `pipes` module (the reason it stops at Python 3.12).
+filterwarnings = ["ignore:'pipes' is deprecated:DeprecationWarning"]
 
 [tool.ruff]
 line-length = 100

@@ -1,0 +1,16 @@
+{
+  "id": "station-monthly-df",
+  "title": "Monthly average temperature per station, ordered, one CSV file (DataFrame)",
+  "topic": "pyspark-df/groupby-orderby",
+  "type": "implementation",
+  "interface": "file",
+  "difficulty": "easy",
+  "framework": "pyspark-df",
+  "entry_point": "StationMonthly.run",
+  "constraints": {
+    "forbidden_calls": ["sql", "rdd", "collect", "toPandas", "sorted"],
+    "forbidden_imports": ["pandas", "numpy"]
+  },
+  "partition_check": true,
+  "source": "synthetic"
+}

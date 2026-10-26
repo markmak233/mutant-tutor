@@ -7,20 +7,16 @@ but each one is large, and shrinking is off: each shrink step would start Spark 
 failure would take minutes to report. The reported input is the unshrunk one.
 """
 
-import os
-import sys
 import tempfile
-from collections import Counter
 from pathlib import Path
 
 from hypothesis import Phase, given, settings
 from hypothesis import strategies as st
-from pyspark import SparkContext
+
+from tutor.testkit import assert_output, run_program, write_inputs
 
 from oracle import expected_output
 from student import StationMax
-
-os.environ.setdefault("PYSPARK_PYTHON", sys.executable)
 
 HEADER = "station,date,temperature"
 
@@ -48,28 +44,6 @@ lines_strategy = st.lists(st.one_of(valid_line, valid_line, bad_line), max_size=
 @given(lines=lines_strategy, files=st.sampled_from([1, 2, 4]))
 def test_matches_oracle(lines, files):
     with tempfile.TemporaryDirectory() as tmp:
-        input_dir = Path(tmp) / "input"
-        input_dir.mkdir()
-        size = -(-len(lines) // files) or 1
-        all_lines = []
-        for i in range(files):
-            chunk = [HEADER, *lines[i * size:(i + 1) * size]]
-            all_lines.extend(chunk)
-            (input_dir / f"part-{i}.csv").write_text("\n".join(chunk) + "\n")
-
-        output_dir = Path(tmp) / "output"
-        try:
-            StationMax().run(str(input_dir), str(output_dir))
-        finally:
-            # A crash before sc.stop() would make every later example fail on
-            # "Cannot run multiple SparkContexts" instead of showing the real error.
-            if SparkContext._active_spark_context is not None:
-                SparkContext._active_spark_context.stop()
-
-        got = Counter(
-            line
-            for part in sorted(output_dir.glob("part-*"))
-            for line in part.read_text().splitlines()
-        )
-
-    assert got == Counter(expected_output(all_lines))
+        input_dir = write_inputs(Path(tmp) / "input", lines, files=files, header=HEADER)
+        got = run_program(StationMax, input_dir, Path(tmp) / "output")
+    assert_output(got, expected_output(lines))
