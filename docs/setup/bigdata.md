@@ -8,7 +8,7 @@ the standard equivalents and have not been tested yet.
 
 | Tool | Version | Needed for | Required? |
 |---|---|---|---|
-| Python | 3.11 or 3.12 | everything | yes. Not 3.13: mrjob imports the removed `pipes` module |
+| Python | 3.11 (3.12: see below) | everything | yes. Not 3.13: mrjob imports the removed `pipes` module |
 | Java (JDK) | 17 | Spark, and Hadoop if installed; one JDK serves both | yes |
 | Hadoop | 3.3.x, standalone | MRJob exercises with a custom partitioner or sort order (e.g. `examples/station-condition-share`) | no. Without it those tests are skipped |
 | gitleaks | any | the pre-commit secret scan | only if you commit to the repo |
@@ -40,7 +40,7 @@ JAVA_HOME="$(brew --prefix openjdk@17)/libexec/openjdk.jdk/Contents/Home" \
 
 ```bash
 sudo apt install openjdk-17-jdk
-sudo apt install python3.11 python3.11-venv   # Ubuntu 22.04; on 24.04 the system 3.12 works
+sudo apt install python3.11 python3.11-venv   # Ubuntu 22.04; on 24.04 use the system 3.12 + setuptools
 ls /usr/lib/jvm/                              # JAVA_HOME is e.g. /usr/lib/jvm/java-17-openjdk-amd64
 ```
 
@@ -59,6 +59,11 @@ python3.11 -m venv .venv && source .venv/bin/activate   # name the version: plai
 pip install -e ".[bigdata,dev]"
 cp .env.example .env
 ```
+
+Python 3.12 works too, with one extra step: run `pip install setuptools` in the venv.
+mrjob 0.7.4 imports `distutils`, which 3.12 removed, and 3.12 venvs no longer come with
+setuptools, whose `distutils` shim fills the gap. Without it the mrjob tests fail with
+`No module named 'distutils'`. CI tests 3.11 only.
 
 Edit `.env`. Set only what you have, and **comment out the lines you do not use**: a variable
 left at its `/path/to/...` placeholder counts as set, so the checks that need it run and fail
@@ -130,6 +135,7 @@ they are drafted with Claude Code from the lectures and checked with `python -m 
 | Symptom | Cause | Fix |
 |---|---|---|
 | `No module named 'pipes'` | the venv or Hadoop task runs Python 3.13 | recreate the venv with `python3.11` (or 3.12) |
+| `No module named 'distutils'` | Python 3.12 venv without setuptools | `pip install setuptools` |
 | `Java gateway process exited` / `JAVA_HOME is not set` | Spark cannot find the JDK | set `JAVA_HOME` in `.env` to a JDK 17 |
 | `test_env` fails with `/path/to/...` | a placeholder left in `.env` | set the real path or comment the line out |
 | Hadoop tests fail although Hadoop is not installed | `HADOOP_HOME` placeholder left in `.env` | comment the line out |
