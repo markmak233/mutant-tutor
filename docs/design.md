@@ -6,6 +6,12 @@ Living record of project decisions. Update it when a decision changes; note the 
 
 1. Primary: portfolio project demonstrating LangGraph, RAG and LLM evaluation with real engineering judgment.
 2. Secondary: revision for a big data management course. The owner solves the generated exercises; AI never writes the answers.
+3. Long-term: general enough for other courses (see "Deferred", second course).
+
+Local-first (decided 2026-10-26): everything except the LLM calls runs on the user's own
+machine. No hosted service, no remote or multi-user access, no store or hub where people
+download each other's content. Users bring their own API key, or a local model. A local
+container for isolation is fine; deploying the tool as a service is not.
 
 ## Roles of AI tools
 
@@ -490,6 +496,56 @@ retrieve_context -> generate_exercise -> validate --pass--> save
 - Tokens / cost per valid exercise.
 - With RAG vs without RAG; across models.
 
+## LLM engineering candidates (review at the start of each phase)
+
+Proposed 2026-10-26 from a survey of current LLM application engineering, mapped onto this
+project. Not decided yet: at the start of the phase named in brackets, review each item with
+the owner and then move it into that phase's plan, the backlog, or "Decisions not to do".
+Already decided elsewhere and not repeated here: LangGraph loop, Pydantic parsing, the
+deterministic judge, hybrid RAG with recall@k, the phase 5 metrics, the hint leak guard.
+
+- [3] Model access, decided in principle 2026-10-26 (details reviewed at phase 3 start):
+  - one provider-agnostic client: Anthropic, OpenAI, and local models through an
+    OpenAI-compatible endpoint (Ollama, LM Studio, llama.cpp; Apple silicon runs them);
+  - bring your own key: from `.env` or the OS keychain, never logged, never written into
+    the workspace, an export or an error report;
+  - README states the data flow: with an API model, course material and the learner's
+    code go to that provider; a local model keeps them on the machine;
+  - cost estimate before a batch is generated, and a budget cap that stops the run (the
+    user pays), using the call log below.
+- [3] Call log: one JSONL line per LLM call (node, model, input / output / cached tokens,
+  latency, repair round, outcome, failure reason). The phase 5 cost metric needs it; same
+  idea as `attempts.jsonl`. A tracing UI (e.g. Langfuse) only if the log is not enough.
+- [3] Prompt caching: the generate prompt has a long stable prefix (exercise format spec,
+  example exercises, the week's material), resent on up to 3 repair rounds. Measure cost
+  with and without it.
+- [3, prerequisite] Image slides through a vision model, transcribed once and stored in the
+  workspace with slide footer and PDF page; the input side of RAG.
+- [3] Native structured output (JSON schema / tool use) instead of free text parsed after
+  the fact. Count format failures apart from validation failures, or the validity metric
+  mixes two causes.
+- [3] Human-in-the-loop: a LangGraph interrupt after a batch plan (knowledge points,
+  exercise types, sources) so the owner approves before generation, as batches are approved
+  now.
+- [3] Batch API for whole-batch generation: not interactive, usually much cheaper.
+- [3] Revisit isolation: phase 3 runs LLM-generated code, and the runner is not a sandbox
+  (see "Code execution safety"). Decide whether validation of generated batches moves into
+  a local container, which changes the "Docker only for reproducibility" decision there
+  (allowed by "Local-first": it stays on the machine).
+- [3b] Calibrated LLM judge for hint quality only (leaks the answer? right direction?),
+  checked against owner-labelled hints before its scores are trusted. Never for validity.
+- [4] Reranker after hybrid retrieval, as one more arm of the recall@k comparison.
+- [5] Local model as one more arm of the model comparison: validity, repair rounds and
+  cost of a local model (run on the owner's Mac) against API models, judged by the same
+  deterministic validator.
+- [5] Long-context baseline: "without RAG" means the whole week's material in the prompt
+  (with caching), not no material, so the comparison shows whether retrieval earns its keep.
+- [after 3, optional] MCP server exposing `validate` (and later `hint`) so any coding agent
+  can check the exercises it writes.
+- Not proposed: fine-tuning or RL (too little data; model + validator suffices), multi-agent
+  debate, GraphRAG, a hosted vector database (a few hundred pages fit local FAISS / Chroma),
+  an LLM judging validity (already in "Decisions not to do").
+
 ## Code execution safety
 
 Subprocess + timeout + temporary working directory. Docker only if environment reproducibility
@@ -678,12 +734,14 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
      rubric points and the exercise's `pseudocode.md`. A code exercise can gain a design
      part after it is solved.
    Before phase 3 so the generator covers these types too.
-3. LangGraph generate-validate-repair loop. Prerequisites (from the 2026-10-25 slide review):
+3. LangGraph generate-validate-repair loop. First review the [3] items of "LLM engineering
+   candidates". Prerequisites (from the 2026-10-25 slide review):
    image-only slides are read as images (a multimodal model or OCR) before anything is
    generated from them, and every source records slide footer, PDF page and any lab or
    textbook origin, with the exercise's teaching assumptions stated.
 3b. Hint command, `python -m tutor.hint <exercise>` (decided 2026-10-24, after phase 3 since it
-   needs the LLM client). Three layers, cheapest and most certain first:
+   needs the LLM client; first review the [3b] items of "LLM engineering candidates").
+   Three layers, cheapest and most certain first:
    - rules, no LLM: known low-level errors (syntax, full-width punctuation, `NotImplementedError`
      left in, PYTHON_VERSION_MISMATCH, leftover SparkContext, tuple-formatted output) -> line and cause;
    - mutant matching, no LLM: the same tests fail with the same values as a known mutant -> that
@@ -695,8 +753,9 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
    - Evaluation: mutants act as simulated students with a known bug: diagnosis hit rate, leak
      rate, share solved without the LLM, cost per hint. Real tutoring mistakes from phases 1-2
      seed the rules and mutants. Hints only on request, logged in `attempts.jsonl`.
-4. Hybrid RAG.
-5. Evaluation script + README results.
+4. Hybrid RAG. First review the [4] items of "LLM engineering candidates".
+5. Evaluation script + README results. First review the [5] items of "LLM engineering
+   candidates".
 
 ## Backlog (decided, not scheduled)
 
@@ -742,6 +801,9 @@ gaps. Each was decided by the owner; change one only with the owner.
 - No wall-clock performance scoring: efficiency is judged as algorithm design, not seconds
   on a laptop (see "Correctness vs algorithm quality").
 - No `aggregateByKey` in the first golden exercises: listed but not taught in L4.1.
+- No sharing of exercise banks (export / import between users, or a hub to download
+  them). Generated exercises derive from course material, so sharing them distributes
+  that material; and a hub contradicts "Local-first". Decided 2026-10-26.
 - No CONTRIBUTING.md or SECURITY.md (decided 2026-10-26, before going public; a Codex review
   suggested both without knowing the repo's intent). This is a personal portfolio and
   revision tool, not a project seeking contributors: setup and checks are in README and
@@ -751,12 +813,71 @@ gaps. Each was decided by the owner; change one only with the owner.
 
 ## Deferred
 
-SQLite, CLI, adaptive learning, exam mode, Docker, error taxonomy
-(derive categories from real attempt data later).
+SQLite, CLI, Docker, error taxonomy (derive categories from real attempt data later).
+Adaptive learning and exam mode are listed under the later phases below.
+
+Later phases, after phase 5. Order decided 2026-10-26: second course, then adaptive review
+(just before the GUI or built together with it), then the local GUI, then packaging and
+release; exam mode stays open.
+- Second course: use the tool for another course (other language or framework) to prove
+  workspace, testkit and setup recipes are not shaped around one course. A long-term goal.
+- Adaptive review: use `attempts.jsonl` (failures, run counts, hints used) and `coverage.md`
+  to find weak knowledge points and schedule `review`-mode batches with spaced repetition.
+- Packaging and release: `pipx install`, one command to start, CI on macOS and Windows
+  (WSL) as well, versioned releases after `v0.1.0`.
+- Exam mode (timed, no hints): not excluded, reconsider later. Practice batches stay free
+  of exam pressure (a write-everything-before-the-first-test-run rule was turned down,
+  2026-10-24).
+
+Local GUI (after the second course and adaptive review, just before packaging and release;
+discussed 2026-10-26). It sits on top of the files and functions the earlier phases build,
+so it comes late; the adaptive review screens can be built with it.
+- Shape: a local web app (FastAPI backend reusing the CLI functions, which a later MCP server
+  could share too, plus a light frontend), bound to `127.0.0.1` with a per-launch token or a
+  Host header check so other web pages cannot drive it.
+- Manage, do not edit: drag lectures and lab files into the workspace, pick sources and start
+  generation (approving the batch plan there if phase 3 adopts the human-in-the-loop item),
+  browse batches with status from `validation.json`, progress from `attempts.jsonl`, mode and
+  sources from `manifest.json`, coverage from `coverage.md`.
+- Solving stays in the IDE: an "Open in IDE" button runs `code <exercise dir>` (or a
+  `vscode://file/...` link; JetBrains has its own launcher). The GUI never runs the learner's
+  tests; the IDE's `pytest` and the attempts plugin stay the one record of attempts.
+- Shows only `exercises/`; `solutions/` (reference, pseudocode) at most after the exercise is
+  solved and on explicit request, matching the tutoring rule.
+- Files stay the source of truth; no database (SQLite remains deferred).
+- Local only, per "Local-first": no accounts, no hosting. A settings page picks the model
+  (API or local) and stores the user's own key in `.env` or the OS keychain, never shown
+  again in full, with the data-flow note next to it.
+- Environment page:
+  - Infer requirements from course material: an LLM reads lectures and labs for named tools
+    and versions and drafts `[requires]`; the owner confirms before `workspace.toml` is
+    written.
+  - Show `tutor.envcheck` results with a fix hint and a link to `docs/setup/<course>.md`.
+  - Installation is not only pip: a course may need a JDK, Hadoop, a database, Node, R or a
+    specific Python, and each can be installed several ways (brew, apt, winget, a tarball,
+    SDKMAN, conda, a container). The method is chosen per case from what the page detects:
+    OS and architecture, WSL or not, which package managers exist, conda vs venv, what is
+    already installed (e.g. a JDK 21 next to the wanted 17) and whether admin rights are
+    needed. Recipes are curated per component and platform, built from commands verified in
+    `docs/setup/`; the LLM only picks among them, and when several fit, the page shows the
+    options with their trade-offs instead of deciding silently.
+  - Every command is shown before it runs, with a "check before executing" reminder and,
+    for each one: what it does, where it installs, whether it needs sudo / admin, what it
+    changes outside the project (PATH, JAVA_HOME, shell profile), the download source, and
+    how to undo it.
+  - Python packages into the project venv: one click, after the same review (a broken venv
+    is deleted and rebuilt). Everything else, the user runs in their own terminal, then
+    clicks "Check again". The GUI never runs system installs, and never runs LLM-written
+    commands (arbitrary commands; hallucinated package names can be squatted). A component
+    or platform missing from the recipes is reported as needing a new recipe.
+  - This partly changes "Check, don't install" (see "Environment"): confirm with the owner
+    when the GUI phase starts. A per-course container image would avoid platform differences but
+    reopens "Docker deferred"; decide it together with the phase 3 isolation question.
 
 ## Open questions
 
-- LLM provider and embedding model.
+- Default LLM provider and model, and the embedding model (the client itself is
+  provider-agnostic, see "LLM engineering candidates").
 
 ## Pseudocode
 
