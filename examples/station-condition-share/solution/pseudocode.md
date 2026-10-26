@@ -1,6 +1,6 @@
 # station-condition-share in exam pseudocode
 
-Order inversion (Lin & Dyer style, as in Lecture 3.1). The special key `(s, *)` carries the
+Order inversion (Lin & Dyer style). The special key `(s, *)` carries the
 marginal; the partitioner sends all keys of station `s` to one reducer, and the sort order
 puts `(s, *)` before `(s, c)`.
 

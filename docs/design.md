@@ -39,16 +39,16 @@ container for isolation is fine; deploying the tool as a service is not.
   README stays course-agnostic, and each course's system deps and pitfalls differ; the guide
   marks which platforms were actually tested). No install script: setup is one-off, and when it breaks,
   asking an AI is faster than maintaining a cross-platform script.
-- Big data course (`bigdata`): Python 3.11, Java 17 (`JAVA_HOME`), PySpark 3.5.x (decided 2026-10-24: the slides
-  name both 3.5.9 and 4.2.0, and the version is pinned per workspace in `workspace.toml`
-  anyway, so another course's materials can choose differently). Spark 4.x enables ANSI SQL mode by default,
+- Big data course (`bigdata`): Python 3.11, Java 17 (`JAVA_HOME`), PySpark 3.5.x (decided 2026-10-24: the course
+  material names more than one Spark version, and the version is pinned per workspace in
+  `workspace.toml` anyway, so another course's materials can choose differently). Spark 4.x enables ANSI SQL mode by default,
   which changes DataFrame/SQL error behaviour (casts, overflow, divide by zero); RDD API is unaffected.
   mrjob is no longer actively maintained: works on 3.11, do not move past 3.12. On 3.12 it
   also needs setuptools installed: mrjob imports `distutils`, removed in 3.12, and only
   setuptools' shim provides it (3.12 venvs no longer include setuptools). Found by the first
   CI run, 2026-10-26; with setuptools, fast and spark suites (Hadoop included) pass on 3.12.10.
   (Confirmed: on Python 3.13 mrjob tasks fail with `No module named 'pipes'`.)
-- Big data course Hadoop: 3.3.6 standalone (same 3.3 line as the course VM's 3.3.2), Apache tarball
+- Big data course Hadoop: 3.3.6 standalone (the 3.3 line the course uses), Apache tarball
   unpacked to `~/opt/hadoop-3.3.6`, located via `HADOOP_HOME` in `.env`. Not `brew install hadoop`:
   its `yarn` binary clashes with the JavaScript `yarn`. Runs on Java 17, so one JDK serves
   both Spark and Hadoop. Hadoop launches task scripts with the `python3` on `PATH`, so jobs must
@@ -86,6 +86,7 @@ smartCodingReview/                       # public repo (the `tutor/` above), cod
 ├── README.md
 ├── .claude/settings.json
 ├── docs/design.md
+├── notes/                               # git-ignored local notes (course memory, research)
 ├── docs/setup/bigdata.md                # per-course install guide (system deps, .env, pitfalls)
 ├── pyproject.toml                       # P1, per-course extras e.g. [bigdata]
 ├── .github/workflows/ci.yml             # fast tests 3.11 + gitleaks on main; spark by hand
@@ -128,7 +129,7 @@ smartcodereview-workspace/
     ├── coverage.md                      # knowledge points per lecture -> exercise / design / not yet
     ├── lectures/                        # PDFs, read-only
     ├── coding_materials/                # labs and projects, read-only
-    │   ├── lab4/                        # one flat folder each: problem text, data, expected outputs
+    │   ├── labN/                        # one flat folder each: problem text, data, expected outputs
     │   └── proj2/
     ├── batches/                         # one directory per generation run
     │   ├── 2026-10-27_p2-golden/
@@ -171,7 +172,11 @@ smartcodereview-workspace/
 
 ## Course coding materials
 
-Decided 2026-10-24 after reading Labs 4-5 and the two course projects.
+Course-specific provenance (lecture and slide numbers, lab and project contents, the
+course's tool versions, batch sources) is kept out of this public file, in the private
+workspace's `course-notes.md`.
+
+Decided 2026-10-24 after reading the course's labs and projects.
 - `coding_materials/<labN|projN>/`: one flat folder per lab or project, no subfolders.
   File names are arbitrary (`2.txt` is a problem statement, `pg100.txt` a book used as data), so
   sorting files into `spec/` / `data/` folders by hand would not last. Copied: problem text (web
@@ -202,8 +207,8 @@ An exercise is valid only if:
    - PySpark RDD / DataFrame: identical across partition counts 1, 2, 4 (phase 1).
      Catches e.g. a wrong `combOp` in `aggregateByKey`, which never runs with one partition.
    - MRJob: identical with the combiner on and off, since Hadoop may run it 0, 1 or many times.
-     The lecture uses the same test ("check the correctness by removing the combiner", L2.2
-     p.38). Exercises on the `hadoop` runner also pass with 1, 2 and 4 reducers (see
+     The course material recommends the same test (check correctness by removing the
+     combiner). Exercises on the `hadoop` runner also pass with 1, 2 and 4 reducers (see
      "Interface extensions").
    Done 2026-10-25 as one rule, "distribution", switched on per exercise in metadata:
    `partition_check` reruns the reference at 1 and 4 partitions / input files / reducers;
@@ -212,7 +217,7 @@ An exercise is valid only if:
    `steps()` included). Not on `hadoop`: the task processes run the student's own script, so a
    combiner removed in the test process would still run there; reducer counts cover those
    exercises. Tests may also call `run_mrjob(..., combiner=False)` themselves, so a student's
-   reducer that relies on the combiner (the lecture's "mean v1") fails their own tests, not
+   reducer that relies on the combiner (the classic broken mean) fails their own tests, not
    only the reference check. Neither flag: "n/a".
    - Plain Python: not applicable.
 
@@ -293,11 +298,11 @@ So there are two interfaces, and generated batches include both:
 - Function-level: the student writes `f(rdd) -> rdd` (or DataFrame / plain Python). Algorithm
   only, quick to start; good for a single concept such as partitioning or combining.
 - File-level: the student writes a program in the course's shape: Spark
-  `run(inputPath, outputPath)` + `sys.argv` (L5 standalone code), MRJob a full job class run on
+  `run(inputPath, outputPath)` + `sys.argv` (standalone-program style), MRJob a full job class run on
   input files. Practises parsing (blank, malformed, padded lines), output format and output dirs.
   Tests write input files into a temp dir, call the program, read every `part-*` file of the
   output and compare lines exactly (format matters: `s1,20.0` is not `('s1', 20.0)`, cf. the
-  `saveAsTextFile` parentheses trap in L5) but as a multiset, since partition order is not
+  `saveAsTextFile` parentheses trap) but as a multiset, since partition order is not
   fixed. The question pins down number formatting so exact comparison is fair.
 Rule 5 stays one mechanism for both: the validator sets `TUTOR_PARTITIONS`; function-level tests
 use it as `numSlices`, file-level tests split the input into that many files (Spark makes at least
@@ -326,7 +331,7 @@ Measured on `station-max-file` (2026-10-24):
   folder with the venv activated (an activated venv also puts its `python3` first on PATH, which
   Spark workers use). `sample_output/` is git-ignored.
 
-Interface extensions (phase 2a; decided 2026-10-24 from Labs 4-5 and the course projects). Most of this
+Interface extensions (phase 2a; decided 2026-10-24 from the course's labs and projects). Most of this
 lands in the tests, not in the validator. Comparison mode and parameters are written only in the
 test code: tests run where `solutions/` (and so metadata.json) is not available, and keeping them
 in two places would drift. Metadata keeps what the validator reads (constraints,
@@ -372,7 +377,7 @@ in two places would drift. Metadata keeps what the validator reads (constraints,
   - metadata `timeout_s` sets the per-run timeout for all rules (default 30 s).
 - Parameters, in the course's two forms: positional after input and output
   (`run(inputPath, outputPath, <params>)`, Spark programs), or
-  `--jobconf myjob.settings.<name>=<value>` read with `jobconf_from_env` (MRJob, Lab 4 top-k). Tests pass them
+  `--jobconf myjob.settings.<name>=<value>` read with `jobconf_from_env` (MRJob, e.g. a top-k job). Tests pass them
   (`run_program(Program, inp, out, m, k)`, as strings like `sys.argv`); rule 4 draws parameter
   values at random as well as inputs.
 - Output comparison modes (`testkit.assert_output(..., order=...)`):
@@ -432,9 +437,8 @@ in two places would drift. Metadata keeps what the validator reads (constraints,
   "Do not buffer all values in the reducer" cannot be checked statically and stays a point for review.
 
 Correctness vs algorithm quality (revised 2026-10-25, Codex review against the slides): the
-course does assess efficiency, not as seconds on a laptop but as algorithm design (L3.2 slide
-3.42 asks for an efficient top-k over several reducers; the course values combiners, no
-buffering in the reducer, several reducers). So the two are judged separately:
+course does assess efficiency, not as seconds on a laptop but as algorithm design (an efficient top-k over several reducers; combiners, no buffering in
+the reducer, several reducers). So the two are judged separately:
 - correctness: the validator, deterministic, decides VALID / INVALID;
 - algorithm quality: a per-exercise checklist (all data into one reducer? a key's values
   buffered in the reducer? an unnecessary global sort? does the combiner cut the shuffle?),
@@ -487,7 +491,7 @@ start, design explained first since it touches `validation/`). When question, re
 tests, mutants and oracle come from one generation, they can agree with each other and
 still share one misreading of the requirement; killing every planted mutant only shows
 the planted bugs are caught. This already happened by hand: the stripes test rejected the
-lecture's per-occurrence stripes (slide 2.49) and a mutant enforced the same misreading,
+lecture's per-occurrence stripes and a mutant enforced the same misreading,
 so the exercise was VALID and wrong until the slides were checked. So keep, per exercise
 or knowledge point, a held-out set that generation and repair never see:
 - other correct solutions (different style or the lecture's own form) must PASS: catches
@@ -687,7 +691,7 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
   equals the module name, so an explicit `-p tutor.attempts` is not registered twice. Adding
   the entry point needed one `pip install -e .`.
 
-## Roadmap (reading week, in priority order)
+## Roadmap (in priority order)
 
 1. Environment + validation harness. No LLM involved. **Done 2026-10-24.** The "broken variant
    per rule" lives in `tests/test_validation.py` as tiny pure-Python exercises built to fail
@@ -704,7 +708,7 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
      run the validator, the design in brief), replacing the original Codex-era planning brief.
    - Done when: `pytest` and `ruff check .` pass; the valid example passes all checks and every
      broken variant fails the check it targets; measured validation time recorded; README updated.
-2a. Harness extensions from Labs 4-5 and the course projects (see "Interface extensions"), in small
+2a. Harness extensions from the course's labs and projects (see "Interface extensions"), in small
    steps: `testkit.py` with the output modes; parameters and the new API constraints; MRJob
    interface with a synthetic example; DataFrame with a synthetic example; rule 5's combiner
    check; `attempts.jsonl`. **Done 2026-10-25.**
@@ -712,33 +716,31 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
    - Batches from materials the owner picks (see "Material selection"), drafted by Claude Code and
      checked by the validator; the owner solves them in the batch's mode.
    - First batch (approved 2026-10-25): `2026-10-25_p2-w1w2-mapreduce`, mode `learn`, sources
-     L1.1, L1.2, L2.1, L2.2. Sized to cover every codable knowledge point, 9 exercises (10 since
-     `mean-in-mapper`, Mean v4, was added for the last gap), no Hadoop runner:
+     the first two weeks' lectures. Sized to cover every codable knowledge point, 9 exercises (10 since
+     `mean-in-mapper` was added for the last gap), no Hadoop runner:
      `hdfs-bookkeeping` (python: blocks, replication vs erasure coding, NameNode metadata,
      heartbeats, under-replicated blocks), `mapreduce-by-hand` (python: map, per-map combine,
      hash partition, sort, group, reduce into R parts), `streaming-reducer` (python: Hadoop
      Streaming reducer over sorted lines without buffering), `word-count-mrjob`,
      `max-temperature` (NCDC fixed-width parsing, max combiner), `in-mapper-combining`,
-     `mean-combiner-debug` (debugging: Mean v2 to v3, combiner check), `cooccurrence-pairs` and
-     `cooccurrence-stripes` (same question, two implementations). Slides that are images (Word
-     Count v1/v2, Mean v1-v4, stripes pseudocode, streaming and MRJob code) were first taken from
-     Lin & Dyer ch. 3, then read as rendered page images (macOS PDFKit) on 2026-10-25.
-     Not codable, left for concept questions (2b): 3V/6V, Hadoop history and distributions,
-     YARN, HDFS design assumptions, data locality and split size, reducer-count heuristics,
-     NAS/SAN vs DFS, MRJob runners, RDBMS vs Hadoop. This batch replaces "five" as the size.
+     `mean-combiner-debug` (debugging: a broken mean combiner, combiner check), `cooccurrence-pairs` and
+     `cooccurrence-stripes` (same question, two implementations). Slides that are images (code and
+     pseudocode) were first taken from Lin & Dyer ch. 3, then read as rendered page images
+     (macOS PDFKit) on 2026-10-25.
+     Points that cannot be coded (history, definitions, architecture and design trade-offs)
+     are left for concept questions. This batch replaces "five" as the size.
    - Generated 2026-10-25: all 9 VALID (2-6 s each; 5 mutants each, hints examples run).
      Lessons for phase 3: tests twice let a mutant live because the data was too regular
      (keys arriving already sorted; every station with equal counts per map task, where a
      mean of means equals the mean), and one drafted mutant was equivalent to the reference.
      Exercise data must break the regularities the bug relies on.
    - Revised 2026-10-25 after a second Codex review, against the slides (before the owner
-     started): page references mixed PDF page numbers with slide footers (2.26 for the
-     combiner-design slide 2.31; 1.17 for 1.18), so every reference now gives both; each
+     started): page references mixed PDF page numbers with slide footers, so every
+     reference now gives both; each
      exercise lists its teaching assumptions in the question and in metadata `source`
      (`slides`, `pdf_pages`, `lab`, `assumptions`), e.g. the simulator's fixed value order
-     (real Hadoop does not order values, L3.1 slide 3.27) and the three tokenizers the slides
-     use. Reading the image slides found a real conflict: slide 2.49 emits one stripe per
-     occurrence, which the stripes test had rejected (and a mutant enforced); the test now
+     (real Hadoop does not order values) and the three tokenizers the slides use. Reading the
+     image slides found a real conflict: a slide emits one stripe per occurrence, which the stripes test had rejected (and a mutant enforced); the test now
      accepts both forms and that mutant was dropped. Lesson for phase 3/4: image-only slides
      must be read as images before generating, and sources need slide and PDF page numbers.
    - `python -m tutor.validation` saves its report as `<solution_dir>/validation.json`
@@ -750,13 +752,13 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
 
      | # | Topic | Type | Interface | Validator path |
      |---|---|---|---|---|
-     | 1 | RDD per-key average, no `groupByKey` (L5 practice 2) | implementation | function | partition check, forbidden-API check |
-     | 2 | DataFrame average word length per first letter, no `df.rdd` (L5 practice 3) | completion | file (CSV out) | DataFrame comparison, forbidden-API check |
-     | 3 | MRJob co-occurrence, pairs or stripes (L2.2, Lab 3) | implementation | file | MRJob runner, combiner check |
-     | 4 | MRJob in-mapper combining (L2.2, Lab 2) | implementation | file | required-API check (`mapper_init` / `mapper_final`) |
-     | 5 | MRJob mean with a broken combiner (L2.2 "Computing the Mean" v1-v4) | debugging | file | buggy skeleton must fail, combiner check |
+     | 1 | RDD per-key average, no `groupByKey` | implementation | function | partition check, forbidden-API check |
+     | 2 | DataFrame average word length per first letter, no `df.rdd` | completion | file (CSV out) | DataFrame comparison, forbidden-API check |
+     | 3 | MRJob co-occurrence, pairs or stripes | implementation | file | MRJob runner, combiner check |
+     | 4 | MRJob in-mapper combining | implementation | file | required-API check (`mapper_init` / `mapper_final`) |
+     | 5 | MRJob mean with a broken combiner | debugging | file | buggy skeleton must fail, combiner check |
 
-     `aggregateByKey` is listed but not taught (L4.1), so it is not in the golden set.
+     `aggregateByKey` is listed but not taught, so it is not in the golden set.
      Order inversion and secondary sort go into a later batch: they need the Hadoop runner,
      which the golden set should not depend on.
 
@@ -784,9 +786,9 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
      Each answer also asks for the reason. The validator proves the answer type by running
      the snippet: the error type is raised; a determined output is the same over repeated
      runs and partition counts; a "not determined" one is shown to differ. Lecture code that
-     is illustrative only (L4.2 slide 4.16: `lambda x: counter += x` is a syntax error, and
-     `"..." + counter` a TypeError) is rewritten as runnable code that shows the same point,
-     with the slide it comes from noted.
+     is illustrative only (e.g. a lambda containing an assignment, a syntax error) is
+     rewritten as runnable code that shows the same point, with the slide it comes from
+     noted in the exercise's private metadata.
    - Design exercises: a fixed template (intermediate keys and values, partitioning, sort
      order, why the combiner is safe, memory needed, then pseudocode), checked against
      rubric points and the exercise's `pseudocode.md`. A code exercise can gain a design
@@ -823,9 +825,8 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
   sorted (it sorts whole map-output lines), which would hide such bugs today.
 - C2 algorithm-quality warnings (see "Correctness vs algorithm quality"), later Hadoop
   counters (map output records, combine input / output) to report how much a combiner cut.
-- C3 tokenizer: the course's labs hand out the tokenizing line
-  (`re.split(r"[ *$&#/\t\n\f\"\'\\,.:;?!\[\](){}<>~\-_]", line.lower())`, also L2.2 slide
-  2.43), so new exercises that split text give that line in the skeleton, as the labs do,
+- C3 tokenizer: the course's labs hand out a fixed tokenizing line (a `re.split` over
+  punctuation, recorded in the workspace's `course-notes.md`), so new exercises that split text give that line in the skeleton, as the labs do,
   instead of defining their own word rule (owner, 2026-10-25). Existing exercises are not
   converted (see "Decisions not to do").
 - Workspace `coverage.md`: before each batch, list the lectures' knowledge points with their
@@ -851,14 +852,13 @@ gaps. Each was decided by the owner; change one only with the owner.
 - No LLM judges whether an exercise is valid; only the deterministic validator does (see
   "Exercise validation"). LLM feedback on the learner's answers (hints, rubric feedback) is
   a different thing and allowed.
-- No Hadoop Streaming interface: the course covers streaming for understanding only (L2.1
-  slide 2.29), and mrjob teaches the same concepts; streaming appears only as plain-Python
+- No Hadoop Streaming interface: the course covers streaming for understanding only, and mrjob teaches the same concepts; streaming appears only as plain-Python
   exercises (see "Interface extensions").
 - No timeout on the learner's own `pytest` runs: the isolated runner protects validation of
   generated code; in the terminal Ctrl+C stops a loop (see "Code execution safety").
 - No wall-clock performance scoring: efficiency is judged as algorithm design, not seconds
   on a laptop (see "Correctness vs algorithm quality").
-- No `aggregateByKey` in the first golden exercises: listed but not taught in L4.1.
+- No `aggregateByKey` in the first golden exercises: listed but not taught yet.
 - No sharing of exercise banks (export / import between users, or a hub to download
   them). Generated exercises derive from course material, so sharing them distributes
   that material; and a hub contradicts "Local-first". Decided 2026-10-26.

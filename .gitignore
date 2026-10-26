@@ -6,6 +6,8 @@
 
 # Private data: workspaces live outside the repo; this is a backstop
 *workspace*/
+# Local private notes (course memory, research); never committed
+notes/
 
 # Python
 __pycache__/
