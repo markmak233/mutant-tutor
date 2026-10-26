@@ -1,6 +1,6 @@
-# smartCodingReview
+# mutant-tutor
 
-[![CI](https://github.com/markmak233/smartCodingReview/actions/workflows/ci.yml/badge.svg)](https://github.com/markmak233/smartCodingReview/actions/workflows/ci.yml)
+[![CI](https://github.com/markmak233/mutant-tutor/actions/workflows/ci.yml/badge.svg)](https://github.com/markmak233/mutant-tutor/actions/workflows/ci.yml)
 
 A coding-practice system for a big-data course: programming exercises (PySpark, MRJob) that a
 learner solves locally against automated tests, where **every exercise is validated by
