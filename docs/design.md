@@ -168,6 +168,12 @@ smartcodereview-workspace/
 - Generation takes exactly two inputs, a source list and a mode; any selection UI (terminal
   checklist, tkinter, a local web page) only produces those, so the UI can change without
   touching generation. No UI in phase 2: the owner names the materials in chat.
+- Which kinds of material may be sources (decided 2026-10-26): the user chooses per batch,
+  with one option in the selection step (a checkbox in the GUI): lectures only, or lectures
+  plus other material (labs, project specs, notes). Labs and projects are allowed as
+  sources, not only as shape references. No attempt is made to keep graded-task specs out:
+  what users do with their exercises is theirs to decide, and any LLM chat can already
+  turn a spec into a solution. The choice is recorded in `manifest.json`.
 - An exercise is identified by `<batch>/<exercise-id>`; the same id may recur across batches.
 
 ## Course coding materials
@@ -193,7 +199,8 @@ Decided 2026-10-24 after reading the course's labs and projects.
 - A course expected output and the owner's own run look the same on disk, so which is which is
   asked when an exercise needs it.
 - Labs and projects are references for what course tasks look like (input formats, parameters,
-  output rules, marking points).
+  output rules, marking points), and can also be generation sources when the user includes
+  them (see "Material selection").
 
 ## Exercise validation (deterministic, never LLM-judged)
 
@@ -582,7 +589,9 @@ deterministic judge, hybrid RAG with recall@k, the phase 5 metrics, the hint lea
 - [3] Revisit isolation: phase 3 runs LLM-generated code, and the runner is not a sandbox
   (see "Code execution safety"). Decide whether validation of generated batches moves into
   a local container, which changes the "Docker only for reproducibility" decision there
-  (allowed by "Local-first": it stays on the machine).
+  (allowed by "Local-first": it stays on the machine). Main reason, see the phase 3 note on
+  malicious material. Also consider a static check on generated code that rejects network
+  access, subprocesses and reads or writes outside the exercise directory.
 - [3b] Calibrated LLM judge for hint quality only (leaks the answer? right direction?),
   checked against owner-labelled hints before its scores are trusted. Never for validity.
 - [4] Reranker after hybrid retrieval, as one more arm of the recall@k comparison.
@@ -799,6 +808,13 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
    image-only slides are read as images (a multimodal model or OCR) before anything is
    generated from them, and every source records slide footer, PDF page and any lab or
    textbook origin, with the exercise's teaching assumptions stated.
+   Note, malicious material (2026-10-26): phase 3 feeds document text to the LLM and then
+   runs the code it writes. A crafted PDF or web page can carry instructions (prompt
+   injection) that make the generated reference, tests or mutants read files such as
+   `~/.ssh` or send data out, and the validator would execute them with the user's rights.
+   Before phase 3 ships: validate generated batches isolated from the user's files and
+   without network (see the [3] isolation item), and tell users to generate only from
+   material they trust.
 3b. Hint command, `python -m tutor.hint <exercise>` (decided 2026-10-24, after phase 3 since it
    needs the LLM client; first review the [3b] items of "LLM engineering candidates").
    Three layers, cheapest and most certain first:
@@ -870,6 +886,13 @@ gaps. Each was decided by the owner; change one only with the owner.
   manual edit time per arm. Instead, user effort shows up as preference / revision
   requests in the generation chat (see the [3] preference-chat candidate), counted per
   batch.
+- No license change and no closed generator (decided 2026-10-26, misuse discussion). The
+  license stays MIT: commercial reuse is legal anyway, and AGPL would put off some readers
+  of a portfolio. The phase 3 generator stays public too: hiding it would remove half of
+  the project's point, and an LLM chat can do the misuse it would prevent. Misuse is
+  handled by describing the intended use positively (README "Intended use", no
+  prohibitions), by MIT's as-is clause, and by protecting users (phase 3 note on malicious
+  material).
 - No CONTRIBUTING.md or SECURITY.md (decided 2026-10-26, before going public; a Codex review
   suggested both without knowing the repo's intent). This is a personal portfolio and
   revision tool, not a project seeking contributors: setup and checks are in README and

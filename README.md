@@ -121,6 +121,15 @@ mrjob = "0.7"
 A gitleaks pre-commit hook blocks secrets and absolute home-directory paths
 (`pre-commit install` once per clone; needs `gitleaks` installed).
 
+## Intended use
+
+The aim is to help students understand their course topics better: turn the lecture
+material you study from into exercises you can run, check and learn from at your own
+pace (automatic generation is phase 3; today exercises are drafted with an AI assistant
+and checked by the validator). The material and the exercises stay on your own machine;
+only LLM calls leave it. This is a personal project, not affiliated with any university or course, and
+it is provided as is (see [LICENSE](LICENSE)).
+
 ## Running exercise code is not sandboxed
 
 The validator runs exercise code (reference, skeleton, mutants, tests) in a subprocess with a
