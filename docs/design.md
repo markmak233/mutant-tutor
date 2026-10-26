@@ -127,7 +127,7 @@ smartcodereview-workspace/
     ├── workspace.toml                   # course name + [requires]; marks this as a workspace
     ├── coverage.md                      # knowledge points per lecture -> exercise / design / not yet
     ├── lectures/                        # PDFs, read-only
-    ├── coding_materials/                # labs and projects as on Ed, read-only
+    ├── coding_materials/                # labs and projects, read-only
     │   ├── lab4/                        # one flat folder each: problem text, data, expected outputs
     │   └── proj2/
     ├── batches/                         # one directory per generation run
@@ -172,23 +172,23 @@ smartcodereview-workspace/
 ## Course coding materials
 
 Decided 2026-10-24 after reading Labs 4-5 and the two course projects.
-- `coding_materials/<labN|projN>/` mirrors Ed: one flat folder per lab or project, no subfolders.
+- `coding_materials/<labN|projN>/`: one flat folder per lab or project, no subfolders.
   File names are arbitrary (`2.txt` is a problem statement, `pg100.txt` a book used as data), so
-  sorting files into `spec/` / `data/` folders by hand would not last. Copied: problem text (Ed
+  sorting files into `spec/` / `data/` folders by hand would not last. Copied: problem text (web
   pages saved as text), data (CSV, book text), course-provided expected outputs. The owner's own
   `.py` files are usually not copied.
 - Readers classify files by rule instead of by folder:
   - never read: archives (`.zip`), SSH keys and `.ssh/`, `.venv/`, `__pycache__/`, hidden files,
-    output directories (`_SUCCESS`, `part-*`). Course folders can hold a zipped VM home directory
-    with SSH keys; these never enter the workspace, an index or an LLM prompt;
+    output directories (`_SUCCESS`, `part-*`); none of these enter the workspace, an index or
+    an LLM prompt;
   - data, not indexed as text: `.csv`, and text files over about 200 KB;
   - text: other `.txt`, `.md`, `.py`.
-- Ed text copies carry UI noise ("Spaces: 4 (Auto)", "Terminal") and lose formulas (images
+- Web pages saved as text carry UI noise ("Spaces: 4 (Auto)", "Terminal") and lose formulas (images
   vanish, inline math comes out one character per line); phase 4 parsing has to clean this.
 - A course expected output and the owner's own run look the same on disk, so which is which is
   asked when an exercise needs it.
 - Labs and projects are references for what course tasks look like (input formats, parameters,
-  output rules, marking points); the owner has already submitted the projects.
+  output rules, marking points).
 
 ## Exercise validation (deterministic, never LLM-judged)
 
@@ -712,8 +712,7 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
    - Batches from materials the owner picks (see "Material selection"), drafted by Claude Code and
      checked by the validator; the owner solves them in the batch's mode.
    - First batch (approved 2026-10-25): `2026-10-25_p2-w1w2-mapreduce`, mode `learn`, sources
-     L1.1, L1.2, L2.1, L2.2 (the only week 1-2 lab material is a zipped VM home with SSH keys,
-     never read). Sized to cover every codable knowledge point, 9 exercises (10 since
+     L1.1, L1.2, L2.1, L2.2. Sized to cover every codable knowledge point, 9 exercises (10 since
      `mean-in-mapper`, Mean v4, was added for the last gap), no Hadoop runner:
      `hdfs-bookkeeping` (python: blocks, replication vs erasure coding, NameNode metadata,
      heartbeats, under-replicated blocks), `mapreduce-by-hand` (python: map, per-map combine,
@@ -776,7 +775,7 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
      and no-answer hints alone all have precedents) and a built / planned table, so
      generation, RAG and hints are never read as existing features (Codex review 4).
 2b. Code tracing and design exercises (raised from "deferred" on 2026-10-24; scope revised
-   2026-10-25). The final exam is a 2-hour written exam (L1.1 slide 1.20), so beyond runnable
+   2026-10-25). The course is examined in writing, so beyond runnable
    code two more types (concept questions are out of scope: the owner generates those in chat
    for exam revision):
    - Code tracing ("what does this print and why"). Answers are one of: an exact output (or
@@ -949,7 +948,7 @@ so it comes late; the adaptive review screens can be built with it.
 
 ## Pseudocode
 
-The final exam is a 2-hour offline written exam, so answers are written, not run. The course
+The course is examined in writing, so exam answers are written, not run. The course
 pseudocode (Lin & Dyer style: `class Mapper / method Map / Emit`) maps one-to-one onto MRJob
 `mapper` / `combiner` / `reducer`, so MRJob exercises double as pseudocode practice.
 Each MRJob exercise keeps `solutions/<id>/pseudocode.md`: the reference solution written in exam
