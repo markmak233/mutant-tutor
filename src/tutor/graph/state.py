@@ -60,9 +60,19 @@ class ExerciseDraft(_Strict):
     hints_md: str
     data_files: dict[str, str] = {}  # path inside the exercise folder -> content
     reference_py: str
+    # With an `oracle` role: only the interface (signatures, a docstring saying what goes in
+    # and out, `raise NotImplementedError`); the oracle model writes the bodies. Without
+    # one: the whole oracle, as hand drafting does.
     oracle_py: str
     test_oracle_py: str
     mutants: Annotated[list[MutantDraft], Field(min_length=MIN_MUTANTS, max_length=6)]
+
+
+class OracleDraft(_Strict):
+    """The oracle model's answer: oracle.py, written from the question alone."""
+
+    oracle_py: str = Field(description=(
+        "The whole oracle.py: the given interface with every function body written."))
 
 
 class Attempt(TypedDict):
@@ -86,6 +96,11 @@ class ItemState(TypedDict, total=False):
     attempts: list[Attempt]
     tokens: int  # input + output tokens spent on this item
     outcome: Literal["saved", "discarded"]
+    # The independent oracle (nodes.write_oracle): what it was written from (a hash of the
+    # question, the interface and the sample data), its code, and what the node did.
+    oracle_key: str
+    oracle_py: str
+    oracle_status: Literal["written", "kept", "failed", "skipped"]
 
 
 class BatchState(TypedDict, total=False):

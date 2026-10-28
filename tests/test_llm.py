@@ -74,6 +74,9 @@ def test_roles_pick_profiles_and_providers_fill_in_the_rest(tmp_path):
     assert SECRET not in repr(generate)
 
     assert config_for("vision", "glm-flash", ws, env).name == "glm-flash"  # --profile wins
+    assert llm.roles(ws) == {"vision": "gemma-local", "generate": "glm-flash"}
+    (tmp_path / "bare").mkdir()
+    assert llm.roles(workspace(tmp_path / "bare", llm="")) == {}
 
 
 @pytest.mark.parametrize(

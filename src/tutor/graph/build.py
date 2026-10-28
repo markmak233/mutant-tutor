@@ -1,12 +1,13 @@
 """Wire the nodes into LangGraph graphs. The only module that imports langgraph.
 
-One item:
+One item (`oracle` passes the draft through when no `oracle` role is set, and goes
+straight to repair or discard when the oracle model could not write the oracle):
 
-    retrieve_context -> generate -> validate --VALID--> save
-                                      ^   |
-                                      |   +--fail, rounds left--> repair --+
-                                      +-------------------------------------+
-                                          +--fail, no rounds left--> discard
+    retrieve_context -> generate -> oracle -> validate --VALID--> save
+                                      ^          |
+                                      |          +--fail, rounds left--> repair --+
+                                      +--------------------------------------------+
+                                                 +--fail, no rounds left--> discard
 
 A batch:
 
@@ -30,16 +31,19 @@ def build_item(deps: Deps):
     graph = StateGraph(ItemState)
     graph.add_node("retrieve_context", lambda s: nodes.retrieve_context(s, deps))
     graph.add_node("generate", lambda s: nodes.generate(s, deps))
+    graph.add_node("oracle", lambda s: nodes.write_oracle(s, deps))
     graph.add_node("validate", lambda s: nodes.validate_draft(s, deps))
     graph.add_node("repair", lambda s: nodes.repair(s, deps))
     graph.add_node("save", lambda s: nodes.save(s, deps))
     graph.add_node("discard", lambda s: nodes.discard(s, deps))
     graph.add_edge(START, "retrieve_context")
     graph.add_edge("retrieve_context", "generate")
-    graph.add_edge("generate", "validate")
+    graph.add_edge("generate", "oracle")
+    graph.add_conditional_edges("oracle", lambda s: nodes.after_oracle(s, deps),
+                                ["validate", "repair", "discard"])
     graph.add_conditional_edges("validate", lambda s: nodes.route(s, deps),
                                 ["save", "repair", "discard"])
-    graph.add_edge("repair", "validate")
+    graph.add_edge("repair", "oracle")
     graph.add_edge("save", END)
     graph.add_edge("discard", END)
     # checkpointer=False: run inside a batch, it must not inherit the batch's checkpointer

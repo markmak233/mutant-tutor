@@ -13,6 +13,9 @@ items are generated in parallel (--parallel, default from the CPU count) into
 `batches/<today>_p3-<LABEL>/`; each round's files and report stay in
 `batches/.drafts/<batch>/<id>/round-N/`; outcomes go to the batch's generation.jsonl, and
 coverage-proposal.md lists the coverage.md changes for the owner to apply.
+
+With an `oracle` role (or --oracle-profile), that model writes each exercise's oracle.py
+from the question alone; it must be another provider than the generating model.
 """
 
 from __future__ import annotations
@@ -29,7 +32,7 @@ from pydantic import ValidationError
 from tutor.config import WorkspaceError, load_env, load_workspace
 from tutor.graph.nodes import Deps, write_manifest
 from tutor.graph.state import BatchPlan, PlanItem
-from tutor.llm import LLMError, config_for
+from tutor.llm import LLMError, config_for, roles
 
 _CONTINUE = object()  # resume a run that stopped midway (nothing new to send)
 
@@ -55,12 +58,15 @@ def main(argv: list[str] | None = None) -> int:
     resume.add_argument("--approve", action="store_true")
     resume.add_argument("--feedback")
     resume.add_argument("--profile", help="generate the remaining items with this profile")
+    resume.add_argument("--oracle-profile", help="write their oracles with this profile")
     item = sub.add_parser("item", help="generate one item from a JSON file")
     item.add_argument("item_file", type=Path)
     for p in (plan, resume, item):
         p.add_argument("--batch", required=True, help="batch label, e.g. w4-spark")
     for p in (plan, item):
         p.add_argument("--profile", help="profile for generating (default: generate role)")
+        p.add_argument("--oracle-profile",
+                       help="profile writing the oracle (default: oracle role, if set)")
         p.add_argument("--thinking", choices=["low", "on"], default="low",
                        help="on: the model reasons at length (slower; GLM gets cut off)")
         p.add_argument("--mode", choices=["learn", "review"], default="learn")
@@ -84,13 +90,25 @@ def main(argv: list[str] | None = None) -> int:
 
 def _deps(workspace: Path, batch_dir: Path, settings: dict) -> Deps:
     config = config_for("generate", settings.get("profile"), workspace)
-    try:
-        plan_config = config_for("plan", None, workspace)
-    except LLMError:
-        plan_config = None
+    plan_config = _optional_role("plan", None, workspace)
+    oracle_config = _optional_role("oracle", settings.get("oracle_profile"), workspace)
+    if oracle_config and (oracle_config.provider, oracle_config.base_url) == (
+            config.provider, config.base_url):
+        # One provider's models share training data and habits: not an independent reading.
+        raise ValueError(f"the oracle ({oracle_config.name}) and the generating model "
+                         f"({config.name}) come from one provider; choose another oracle")
     return Deps(workspace=workspace, batch_dir=batch_dir, config=config,
-                plan_config=plan_config, thinking=settings.get("thinking") == "on",
+                plan_config=plan_config, oracle_config=oracle_config,
+                thinking=settings.get("thinking") == "on",
                 mode=settings.get("mode", "learn"), on_update=_progress)
+
+
+def _optional_role(role: str, profile: str | None, workspace: Path):
+    """The role's model, or None when [llm.roles] does not name it and no profile is given
+    (config_for would fall back to the LLM_* variables, i.e. the generating model)."""
+    if not profile and role not in roles(workspace):
+        return None
+    return config_for(role, profile, workspace)
 
 
 def _item(args, workspace: Path, build) -> int:
@@ -99,8 +117,9 @@ def _item(args, workspace: Path, build) -> int:
     batch_dir = (existing[-1] if existing
                  else workspace / "batches" / f"{date.today()}_p3-{args.batch}")
     deps = _deps(workspace, batch_dir, vars(args))
-    print(f"{item.id}: {deps.config.name} ({deps.config.model}, thinking {args.thinking}) -> "
-          f"{batch_dir.relative_to(workspace)}", flush=True)
+    oracle = f", oracle {deps.oracle_config.name}" if deps.oracle_config else ""
+    print(f"{item.id}: {deps.config.name} ({deps.config.model}, thinking {args.thinking}"
+          f"{oracle}) -> {batch_dir.relative_to(workspace)}", flush=True)
     final: dict = {}
     for update in build.build_item(deps).stream({"item": item}, stream_mode="updates"):
         for node, change in update.items():
@@ -123,7 +142,8 @@ def _batch(args, workspace: Path, build) -> int:
             raise ValueError(f"a batch labelled {args.batch} exists: resume it or choose "
                              "another label")
         batch_dir = workspace / "batches" / f"{date.today()}_p3-{args.batch}"
-        settings = {k: getattr(args, k) for k in ("profile", "thinking", "mode", "parallel")}
+        settings = {k: getattr(args, k)
+                    for k in ("profile", "oracle_profile", "thinking", "mode", "parallel")}
         (drafts / batch_dir.name).mkdir(parents=True)
         (drafts / batch_dir.name / "run.json").write_text(json.dumps(settings, indent=1))
         pending = {"lectures": args.lectures, "preferences": args.prefs,
@@ -134,8 +154,10 @@ def _batch(args, workspace: Path, build) -> int:
             raise ValueError(f"no planned batch labelled {args.batch}")
         batch_dir = workspace / "batches" / found[-1].parent.name
         settings = json.loads((found[-1].parent / "run.json").read_text())
-        if args.profile:  # e.g. finish a batch with another model; kept for later resumes
-            settings["profile"] = args.profile
+        # e.g. finish a batch with another model; kept for later resumes
+        changed = {k: getattr(args, k) for k in ("profile", "oracle_profile") if getattr(args, k)}
+        if changed:
+            settings.update(changed)
             (found[-1].parent / "run.json").write_text(json.dumps(settings, indent=1))
         pending = None  # set by the owner's decision below
     deps = _deps(workspace, batch_dir, settings)
@@ -212,6 +234,12 @@ def _progress(exercise: str, node: str, change: dict) -> None:
     elif node in ("generate", "repair"):
         state = "format error" if change.get("format_error") else "draft ready"
         text = f"{node} (round {change['round']}): {state}, {change['tokens']:,} tokens so far"
+    elif node == "oracle":
+        if not change:
+            return  # no oracle role: the generating model wrote it
+        text = f"oracle: {change['oracle_status']}" + (
+            " (" + change["failure"].removeprefix("format: ")[:140] + ")"
+            if change.get("oracle_status") == "failed" else "")
     elif node == "validate":
         failure = change.get("failure")
         text = ("validate: VALID" if failure is None

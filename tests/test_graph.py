@@ -450,3 +450,121 @@ def test_the_progress_line_names_mutants_left_out(capsys):
         {"round": 0, "failure": None, "format_error": False, "dropped": ["m04_invented"]}]})
     assert capsys.readouterr().out == (
         "  [sum-list] validate: VALID (left out, could not be applied: m04_invented)\n")
+
+
+# --- the oracle, written by another model from the question alone -----------------------
+
+ORACLE = LLMConfig("gpt-terra", "openai", "https://api.openai.com/v1", "gpt-6.1-terra")
+INTERFACE = ('"""Oracle for total."""\n\n\n'
+             'def total(xs: list[int]) -> int:\n    """The sum of xs."""\n'
+             "    raise NotImplementedError\n")
+FILLED = ('"""Oracle for total."""\n\n\n'
+          'def total(xs: list[int]) -> int:\n    """The sum of xs."""\n'
+          "    t = 0\n    for x in xs:\n        t += x\n    return t\n")
+
+
+def with_interface(**changes) -> str:
+    return json.dumps(draft(oracle_py=INTERFACE, **changes))
+
+
+def test_without_an_oracle_role_the_generating_model_writes_the_whole_oracle(workspace):
+    model = FakeModel()
+    assert nodes.write_oracle({"draft": ExerciseDraft.model_validate(draft())},
+                              deps(workspace, model)) == {}
+    assert "only the interface" not in prompts.system_prompt(ITEM, "")
+    assert "only the interface" in prompts.system_prompt(ITEM, "", oracle_interface=True)
+
+
+def test_the_oracle_model_sees_the_question_and_interface_never_the_reference(workspace):
+    pytest.importorskip("langgraph")
+    from tutor.graph.build import build_item
+
+    model = FakeModel(with_interface(), json.dumps({"oracle_py": FILLED}))
+    d = deps(workspace, model, checks=[report()], oracle_config=ORACLE)
+    final = build_item(d).invoke({"item": ITEM})
+
+    assert final["outcome"] == "saved" and final["oracle_status"] == "written"
+    assert [purpose for purpose, _, _ in model.calls] == ["generate", "oracle"]
+    asked = model.calls[1][1][1]["content"]
+    assert "Sum a list." in asked and "raise NotImplementedError" in asked
+    assert "Reference" not in asked and "sum(xs)" not in asked and "m01_wrong" not in asked
+    assert "only the interface" in model.calls[0][1][0]["content"]  # the generating model
+    saved = d.batch_dir / "solutions" / "sum-list" / "oracle.py"
+    assert saved.read_text() == FILLED
+    log = json.loads((d.batch_dir / "generation.jsonl").read_text())
+    assert log["oracle_model"] == "gpt-terra: gpt-6.1-terra"
+
+
+def test_a_repair_that_keeps_the_question_keeps_the_oracle(workspace):
+    pytest.importorskip("langgraph")
+    from tutor.graph.build import build_item
+
+    model = FakeModel(with_interface(), json.dumps({"oracle_py": FILLED}), with_interface())
+    d = deps(workspace, model, checks=[report("3"), report()], oracle_config=ORACLE)
+    final = build_item(d).invoke({"item": ITEM})
+
+    assert final["outcome"] == "saved" and final["oracle_status"] == "kept"
+    assert [purpose for purpose, _, _ in model.calls] == ["generate", "oracle", "repair"]
+
+
+def test_when_the_oracle_disagrees_the_repair_is_told_the_question_may_be_unclear(workspace):
+    pytest.importorskip("langgraph")
+    from tutor.graph.build import build_item
+
+    asked_again = with_interface(student_py='"""Sum a list of ints; [] gives 0."""\n')
+    model = FakeModel(with_interface(), json.dumps({"oracle_py": FILLED}), asked_again,
+                      json.dumps({"oracle_py": FILLED}))
+    d = deps(workspace, model, checks=[report("4"), report()], oracle_config=ORACLE)
+    final = build_item(d).invoke({"item": ITEM})
+
+    repair = model.calls[2][1][1]["content"]
+    assert "it never saw your reference" in repair and "t += x" in repair
+    # The question changed, so the oracle was written again from the new one.
+    assert [purpose for purpose, _, _ in model.calls] == ["generate", "oracle", "repair",
+                                                          "oracle"]
+    assert final["outcome"] == "saved" and final["oracle_status"] == "written"
+
+
+def test_an_oracle_interface_with_a_body_goes_back_without_asking_the_oracle(workspace):
+    pytest.importorskip("langgraph")
+    from tutor.graph.build import build_item
+
+    model = FakeModel(json.dumps(draft()), with_interface(), json.dumps({"oracle_py": FILLED}))
+    d = deps(workspace, model, checks=[report()], oracle_config=ORACLE)
+    final = build_item(d).invoke({"item": ITEM})
+
+    assert [purpose for purpose, _, _ in model.calls] == ["generate", "repair", "oracle"]
+    assert "total has a body" in model.calls[1][1][1]["content"]
+    assert final["outcome"] == "saved"
+    assert final["attempts"][0]["format_error"] is True
+
+
+def test_an_oracle_left_unwritten_is_a_failure_of_the_round(workspace):
+    d = deps(workspace, FakeModel(json.dumps({"oracle_py": INTERFACE})), oracle_config=ORACLE)
+    state = {"item": ITEM, "draft": ExerciseDraft.model_validate_json(with_interface())}
+    update = nodes.write_oracle(state, d)
+    assert update["oracle_status"] == "failed" and update["format_error"] is True
+    assert "it left total unwritten" in update["failure"]
+    assert nodes.after_oracle({**state, **update, "round": 0}, d) == "repair"
+
+
+def test_the_oracle_must_come_from_another_provider(workspace):
+    from tutor.graph.__main__ import _deps
+
+    (workspace / "workspace.toml").write_text(
+        'course = "demo"\n[llm.profiles.glm-flash]\nprovider = "glm"\nmodel = "glm-5.3-flash"\n'
+        '[llm.profiles.glm-full]\nprovider = "glm"\nmodel = "glm-5.3"\n'
+        '[llm.profiles.gpt]\nprovider = "openai"\nmodel = "gpt-6.1-terra"\n'
+        '[llm.roles]\ngenerate = "glm-flash"\noracle = "glm-full"\n')
+    with pytest.raises(ValueError, match="come from one provider"):
+        _deps(workspace, workspace / "batches" / "b", {})
+    d = _deps(workspace, workspace / "batches" / "b", {"oracle_profile": "gpt"})
+    assert d.oracle_config.name == "gpt"
+
+
+def test_the_progress_line_says_what_the_oracle_node_did(capsys):
+    from tutor.graph.__main__ import _progress
+
+    _progress("sum-list", "oracle", {})  # no oracle role: nothing to say
+    _progress("sum-list", "oracle", {"oracle_status": "kept"})
+    assert capsys.readouterr().out == "  [sum-list] oracle: kept\n"

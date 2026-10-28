@@ -2,14 +2,15 @@
 
 Nothing here imports langgraph (build.py wires the nodes and owns the interrupt), so every
 node is tested and usable on its own. Only `plan_batch`, `generate` and `repair` call a
-model; `validate` is the existing validator, unchanged, and is the only judge of whether an
-exercise is good enough to save.
+model, and `write_oracle` calls a second one; `validate` is the existing validator,
+unchanged, and is the only judge of whether an exercise is good enough to save.
 """
 
 from __future__ import annotations
 
 import ast
 import difflib
+import hashlib
 import json
 import re
 import shutil
@@ -31,6 +32,7 @@ from tutor.graph.state import (
     ExerciseDraft,
     ItemState,
     MutantDraft,
+    OracleDraft,
     PlanItem,
 )
 from tutor.materials import cache
@@ -40,6 +42,7 @@ from tutor.validation.exercise import load_exercise
 
 DRAFT_SCHEMA = ExerciseDraft.model_json_schema()
 PLAN_SCHEMA = BatchPlan.model_json_schema()
+ORACLE_SCHEMA = OracleDraft.model_json_schema()
 # Files of the exercise folder that data_files must not replace.
 OWN_FILES = {"student.py", "test_student.py", "hints.md"}
 REPO = Path(__file__).resolve().parents[3]
@@ -69,6 +72,9 @@ class Deps:
     thinking: bool = False
     mode: str = "learn"  # the batch's mode: how much a question may explain
     plan_config: llm.LLMConfig | None = None  # the `plan` role; default: config
+    # The `oracle` role: another model family writes oracle.py from the question alone.
+    # None: the generating model writes the whole oracle, as hand drafting does.
+    oracle_config: llm.LLMConfig | None = None
     chat: Callable = llm.chat
     check: Callable[[Path, Path], ValidationReport] = field(
         default=lambda exercise, solution: validate(load_exercise(exercise, solution)))
@@ -143,7 +149,8 @@ def _ask(state: ItemState, deps: Deps, user: str, purpose: str, round_: int) -> 
     conventions = deps.workspace / "conventions.md"
     messages = [
         {"role": "system", "content": prompts.system_prompt(
-            item, conventions.read_text() if conventions.is_file() else "")},
+            item, conventions.read_text() if conventions.is_file() else "",
+            oracle_interface=deps.oracle_config is not None)},
         {"role": "user", "content": user},
     ]
     reply = deps.chat(deps.config, messages, purpose=purpose, log_path=deps.llm_log,
@@ -165,6 +172,110 @@ def _ask(state: ItemState, deps: Deps, user: str, purpose: str, round_: int) -> 
 def _describe(err: dict) -> str:
     where = ".".join(str(part) for part in err["loc"]) or "(top level)"
     return f"{where}: {err['msg']}"
+
+
+# --- write_oracle -----------------------------------------------------------------------
+
+def write_oracle(state: ItemState, deps: Deps) -> ItemState:
+    """Fill in the draft's oracle interface with the oracle model, which sees the question,
+    the interface and the sample data, never the reference, tests or mutants. It is written
+    again only when one of those changed, so a repair that fixes something else keeps it.
+    A problem goes to repair like a validation failure: the question or the interface did
+    not tell the oracle model enough, and the generating model can fix either."""
+    draft = state.get("draft")
+    if deps.oracle_config is None:
+        return {}
+    if draft is None:  # the reply could not be read; repair asks again
+        return {"oracle_status": "skipped"}
+    question = _docstring(draft.student_py)
+    problems = _interface_problems(draft.oracle_py)
+    if not question:
+        problems.insert(0, "student.py has no module docstring: the question goes there")
+    if problems:
+        return _oracle_failed(state, "oracle_py must be an interface for another model to "
+                              "fill in: " + "; ".join(problems))
+    key = hashlib.sha256(json.dumps(
+        [question, draft.oracle_py, draft.data_files], sort_keys=True).encode()).hexdigest()
+    if key == state.get("oracle_key") and state.get("oracle_py"):
+        return {"draft": draft.model_copy(update={"oracle_py": state["oracle_py"]}),
+                "oracle_status": "kept"}
+    messages = [{"role": "system", "content": prompts.ORACLE_SPEC},
+                {"role": "user", "content": prompts.oracle_prompt(
+                    question, draft.oracle_py, draft.data_files)}]
+    reply = deps.chat(deps.oracle_config, messages, purpose="oracle", log_path=deps.llm_log,
+                      max_tokens=deps.max_tokens, response_schema=ORACLE_SCHEMA,
+                      thinking=deps.thinking)
+    tokens = state.get("tokens", 0) + (reply.input_tokens or 0) + (reply.output_tokens or 0)
+    try:
+        code = OracleDraft.model_validate_json(reply.text).oracle_py
+    except ValidationError as e:
+        problem = "its reply does not fit the JSON schema: " + "; ".join(
+            _describe(err) for err in e.errors()[:5])
+    else:
+        problem = _filled_problems(draft.oracle_py, code)
+        if not problem:
+            return {"draft": draft.model_copy(update={"oracle_py": code}), "tokens": tokens,
+                    "oracle_key": key, "oracle_py": code, "oracle_status": "written"}
+    return {**_oracle_failed(state, f"the oracle model could not implement oracle_py: "
+                             f"{problem}. Make the interface's docstrings and the question "
+                             "say exactly what each function takes and returns."),
+            "tokens": tokens}
+
+
+def after_oracle(state: ItemState, deps: Deps) -> str:
+    """Validate the draft, unless the oracle could not be written: then the round already
+    failed, and validating the unfilled interface would only replace that failure."""
+    return route(state, deps) if state.get("oracle_status") == "failed" else "validate"
+
+
+def _oracle_failed(state: ItemState, failure: str) -> ItemState:
+    """Not written: shown to repair as a format failure of this round."""
+    attempts = [*state.get("attempts", []), {
+        "round": state.get("round", 0), "failure": f"format: {failure}",
+        "format_error": True, "dropped": []}]
+    return {"failure": f"format: {failure}", "format_error": True, "attempts": attempts,
+            "oracle_status": "failed"}
+
+
+def _docstring(code: str) -> str:
+    try:
+        return ast.get_docstring(ast.parse(code)) or ""
+    except SyntaxError:
+        return ""
+
+
+def _functions(tree: ast.Module) -> dict[str, ast.FunctionDef]:
+    return {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
+
+
+def _is_stub(func: ast.FunctionDef) -> bool:
+    body = func.body[1:] if ast.get_docstring(func) is not None else func.body
+    return (len(body) == 1 and isinstance(body[0], ast.Raise)
+            and "NotImplementedError" in ast.unparse(body[0]))
+
+
+def _interface_problems(code: str) -> list[str]:
+    try:
+        functions = _functions(ast.parse(code))
+    except SyntaxError as e:
+        return [f"it does not parse: {e.msg} (line {e.lineno})"]
+    if not functions:
+        return ["it defines no top-level function"]
+    return [f"{name} has a body; give only its docstring and raise NotImplementedError"
+            for name, func in functions.items() if not _is_stub(func)]
+
+
+def _filled_problems(interface: str, code: str) -> str:
+    try:
+        written = _functions(ast.parse(code))
+    except SyntaxError as e:
+        return f"its oracle.py does not parse: {e.msg} (line {e.lineno})"
+    wanted = _functions(ast.parse(interface))
+    missing = sorted(set(wanted) - set(written))
+    if missing:
+        return "its oracle.py lacks " + ", ".join(missing)
+    stubs = sorted(name for name in wanted if _is_stub(written[name]))
+    return f"it left {', '.join(stubs)} unwritten" if stubs else ""
 
 
 # --- validate ---------------------------------------------------------------------------
@@ -189,6 +300,9 @@ def validate_draft(state: ItemState, deps: Deps) -> ItemState:
             failure = None if report.valid else "\n".join(
                 f"rule {r.rule} ({r.name}) FAIL: {r.detail}"
                 for r in report.results if r.status is Status.FAIL)
+            if deps.oracle_config is not None and any(
+                    r.rule == "4" and r.status is Status.FAIL for r in report.results):
+                failure += ORACLE_DISAGREES + state["draft"].oracle_py
             if failure and dropped:
                 # Not a failure by itself (a VALID draft is saved without them), but a
                 # repair round may as well fix them.
@@ -198,6 +312,14 @@ def validate_draft(state: ItemState, deps: Deps) -> ItemState:
                      "dropped": sorted(dropped)})
     return {"failure": failure, "format_error": format_error, "attempts": attempts,
             "round_dir": round_dir}
+
+
+ORACLE_DISAGREES = (
+    "\nAbout rule 4: oracle.py was written by another model from your question, oracle "
+    "interface and sample data alone; it never saw your reference. If the reference is "
+    "right, the question is ambiguous or incomplete there: make it say exactly what it "
+    "means (the oracle is then written again). If the reference is wrong, fix it. The "
+    "oracle it wrote:\n")
 
 
 def _report_text(report: ValidationReport) -> str:
@@ -339,7 +461,7 @@ def write_manifest(deps: Deps, items: list[PlanItem], notes: str | None = None,
                    model: str | None = None) -> None:
     """List `items` (saved exercises) in the batch manifest, creating it or adding to it.
     `model`: who generated them (default: the generate model)."""
-    model = model or f"{deps.config.name}: {deps.config.model}"
+    model = model or _model_names(deps)
     if not items:
         return
     path = deps.batch_dir / "manifest.json"
@@ -457,8 +579,18 @@ def _models_of(deps: Deps, ids: set[str]) -> str | None:
     if not deps.generation_log.is_file():
         return None
     lines = [json.loads(line) for line in deps.generation_log.read_text().splitlines()]
-    models = [x["model"] for x in lines if x["exercise"] in ids and x["outcome"] == "saved"]
+    saved = [x for x in lines if x["exercise"] in ids and x["outcome"] == "saved"]
+    models = [x["model"] for x in saved] + [f"oracle {x['oracle_model']}" for x in saved
+                                            if x.get("oracle_model")]
     return "; ".join(dict.fromkeys(models)) or None
+
+
+def _model_names(deps: Deps) -> str:
+    """e.g. "deepseek: deepseek-v4-flash; oracle gpt-terra: gpt-6.1-terra"."""
+    names = f"{deps.config.name}: {deps.config.model}"
+    if deps.oracle_config:
+        names += f"; oracle {deps.oracle_config.name}: {deps.oracle_config.model}"
+    return names
 
 
 def page_titles(workspace: Path, lecture: str) -> str:
@@ -502,6 +634,8 @@ def _log(state: ItemState, deps: Deps, outcome: str, error: str | None = None) -
         "tokens": state.get("tokens", 0),
         "model": f"{deps.config.name}: {deps.config.model}",
     }
+    if deps.oracle_config:
+        line["oracle_model"] = f"{deps.oracle_config.name}: {deps.oracle_config.model}"
     if error:
         line["error"] = error
     with _LOG_LOCK:

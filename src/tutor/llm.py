@@ -107,6 +107,11 @@ def config_for(role: str, profile: str | None = None, workspace: Path | None = N
     return _from_profile(name, profiles[name], env)
 
 
+def roles(workspace: Path | None = None) -> dict[str, str]:
+    """The workspace's [llm.roles]: role -> profile name ({} without an [llm] section)."""
+    return dict(_llm_section(workspace).get("roles", {}))
+
+
 def _llm_section(workspace: Path | None) -> dict:
     if workspace is None or not (workspace / "workspace.toml").is_file():
         return {}

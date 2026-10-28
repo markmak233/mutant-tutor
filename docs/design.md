@@ -700,10 +700,11 @@ Design approved 2026-10-28 (owner):
   course pages, then, when repairing, the last reply and the failures.
 - Stops: 3 repair rounds per item, a token budget per batch, an LLM error stops the current
   item and keeps the finished ones.
-- Roles in `[llm.roles]`: `plan` and `generate` = GLM-5.3-Flash with thinking low (see the
-  experiment below); `oracle` = a different model family (GPT, decided 2026-10-28 in place
-  of local Gemma), since the same model writing reference and oracle is not an independent
-  check.
+- Roles in `[llm.roles]`: `plan` = GLM-5.3-Flash with thinking low (see the experiment
+  below); `generate` = DeepSeek since 2026-10-29 (the week 4 rerun below); `oracle` = a
+  different model family (GPT, decided 2026-10-28 in place of local Gemma; GLM-5.3-Flash
+  once the OpenAI key expires), since the same model writing reference and oracle is not
+  an independent check. The CLI refuses an oracle from the generating model's provider.
 - Experiment 2026-10-28, one item (a closure / accumulator debugging exercise from the
   week 4 slides), same validator:
 
@@ -775,7 +776,25 @@ Design approved 2026-10-28 (owner):
   (item, rounds, outcome, failure reasons).
 - Built in three steps: one item generate -> validate -> repair -> save (done); then plan
   with the interrupt, preferences and parallel items (done); then the oracle in its own
-  context (until then `generate` writes the oracle too, as hand drafting does now).
+  context (done 2026-10-29, below; without an `oracle` role `generate` writes the whole
+  oracle, as hand drafting does).
+- The independent oracle (approved 2026-10-29). The generating model still writes
+  `test_oracle.py` (how random inputs are built and fed to the program, which is tied to
+  Spark and the file format), but `oracle.py` only as an interface: signatures, a
+  docstring per function saying what goes in and out, `raise NotImplementedError`. A
+  `write_oracle` node between generate / repair and validate gives the oracle model the
+  question (student.py's docstring), that interface and the sample data, never the
+  reference, tests, mutants or hints, and puts its oracle.py into the draft. It is written
+  again only when one of its inputs changes (a hash), so most items cost one extra short
+  call. When rule 4 fails, repair is told that the oracle is an independent reading of
+  the question and gets its code: if the reference is right, the question is ambiguous
+  there and is the thing to fix, which is what an independent reader is for. An
+  interface with bodies, or an oracle the model could not write (missing or unwritten
+  functions, a reply that does not fit), is a failure of the round that goes to repair
+  without validating. Considered: the oracle model also writing `test_oracle.py`;
+  rejected because Spark and file-level harnesses are where generation fails most, and
+  the independence that matters is in the oracle's logic. The manifest and
+  `generation.jsonl` name the oracle model.
 - The LLM never touches the disk or runs code: nodes read the cache and write files, and
   generated code reaches `batches/` only after `validate` (including `safe`).
 - LLM output parsed into Pydantic models, the same `schema.py` models that rule 0 checks;

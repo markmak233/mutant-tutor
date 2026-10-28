@@ -64,9 +64,8 @@ Files (fields of the JSON you return):
 - reference_py: the worked solution, as numbered steps (`# Step N: what and why`), each with a
   comment showing a record after that step on the question's example data. Never one long
   chain.
-- oracle_py: a plain-Python specification of the same result, written independently of the
-  reference (no Spark / MRJob), and test_oracle_py: a hypothesis test comparing student.py
-  with oracle.py (`@settings(deadline=None, derandomize=True)`, a moderate max_examples).
+{oracle}test_oracle_py: a hypothesis test comparing student.py with oracle.py
+  (`@settings(deadline=None, derandomize=True)`, a moderate max_examples).
 - mutants: 3 to 6 mistakes, each named m01_ to m06_ plus a short snake_case description
   (e.g. m01_average_of_averages), each given as replacements of exact text in reference_py
   (`old` must occur exactly once in it, copied character for character, quotes and
@@ -92,6 +91,22 @@ no dunder tricks; no literal absolute or `~` paths and no `..`; no RDD.pipe or M
 *_cmd options; no conftest.py or pytest.ini.
 
 Return only the JSON object."""
+
+
+# The two ways oracle_py is written (SPEC's {oracle}): whole, by the generating model, or
+# as an interface whose bodies another model writes from the question alone, so rule 4
+# compares two independent readings of the question (docs/design.md, "Independent checks").
+ORACLE_WHOLE = (
+    "- oracle_py: a plain-Python specification of the same result, written independently of\n"
+    "  the reference (no Spark / MRJob), and ")
+ORACLE_INTERFACE = (
+    "- oracle_py: only the interface of a plain-Python specification of the same result (no\n"
+    "  Spark / MRJob): imports, the functions test_oracle_py calls, each with type hints, a\n"
+    "  docstring saying exactly what goes in and what comes out, and the body\n"
+    "  `raise NotImplementedError`. Another model writes the bodies from the question in\n"
+    "  student.py's docstring, this interface and the sample data alone; it never sees your\n"
+    "  reference. So the question must say everything the result depends on. Then\n"
+    "  ")
 
 
 def testkit_api() -> str:
@@ -126,10 +141,13 @@ def example(framework: str, interface: str) -> str:
     return "\n\n".join(parts)
 
 
-def system_prompt(item: PlanItem, conventions: str) -> str:
+def system_prompt(item: PlanItem, conventions: str, oracle_interface: bool = False) -> str:
+    """`oracle_interface`: another model writes the oracle (the `oracle` role is set)."""
     imports = ", ".join(sorted(m for m in CORE_IMPORTS if not m.startswith("_")))
+    spec = SPEC.replace("{imports}", imports).replace(
+        "{oracle}", ORACLE_INTERFACE if oracle_interface else ORACLE_WHOLE)
     return "\n\n".join([
-        SPEC.replace("{imports}", imports),
+        spec,
         "tutor.testkit API:\n" + testkit_api(),
         example(item.framework, item.interface),
         "Course conventions (facts about this course every exercise must respect):\n"
@@ -177,6 +195,32 @@ def retry_prompt(item: PlanItem, context: str, failure: str, mode: str = "learn"
         + "\n\nA previous attempt gave no usable answer: " + failure
         + "\nAnswer again from the start. Keep your reasoning short and spend the output on "
         "the JSON."
+    )
+
+
+ORACLE_SPEC = """You write the plain-Python specification (oracle) of a programming exercise:
+the obviously correct, slow-but-simple result that a Spark or MapReduce solution is
+compared against on random inputs. You get the exercise's question, the interface to
+implement and its sample data, nothing else.
+- Read the question literally: its input format, edge cases, rounding, ordering and output
+  format decide the result. Where it is silent, follow the interface's docstrings.
+- Write every function body of the interface; keep its names, signatures and imports.
+- Plain Python only: the standard library (no Spark, MRJob, numpy or pandas), no files,
+  no network, no randomness. Clear loops over clever code.
+- No absolute or `~` paths, no eval / exec / __import__, no dunder tricks.
+
+Return only the JSON object."""
+
+
+def oracle_prompt(question: str, interface: str, data_files: dict[str, str],
+                  sample_chars: int = 2000) -> str:
+    samples = "\n\n".join(
+        f"=== {name} ===\n{text[:sample_chars]}" + ("\n..." if len(text) > sample_chars else "")
+        for name, text in sorted(data_files.items()))
+    return (
+        "The question (student.py's docstring):\n" + question
+        + "\n\nThe interface to implement (oracle.py):\n" + interface
+        + ("\n\nSample data:\n" + samples if samples else "")
     )
 
 
