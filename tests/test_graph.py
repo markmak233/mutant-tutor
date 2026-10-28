@@ -1,0 +1,371 @@
+"""The generation graph with a fake model and a fake validator: no network, no Spark."""
+
+import json
+
+import pytest
+
+from tutor.graph import nodes, prompts
+from tutor.graph.nodes import Deps, DraftError, apply_mutant, write_draft
+from tutor.graph.state import ExerciseDraft, MutantDraft, PlanItem
+from tutor.llm import LLMConfig, Reply
+from tutor.materials import cache
+from tutor.schema import Manifest
+from tutor.validation.checks import RuleResult, Status, ValidationReport
+
+ITEM = PlanItem(id="sum-list", knowledge_point="summing a list", lecture="L1",
+                slides="1.3-1.4", type="implementation", interface="function",
+                framework="python")
+REFERENCE = ('"""Reference: total of a list."""\n\n\n'
+             "def total(xs):\n    # Step 1: add up.\n    return sum(xs)\n")
+
+
+def draft(**changes) -> dict:
+    data = {
+        "metadata": {"id": "sum-list", "title": "Sum a list", "topic": "python/sum",
+                     "type": "implementation", "interface": "function", "difficulty": "easy",
+                     "framework": "python", "entry_point": ["total"],
+                     "source": {"lecture": "L1", "slides": "1.3-1.4", "pdf_pages": "3-4"}},
+        "student_py": '"""Sum a list."""\n\n\ndef total(xs):\n    raise NotImplementedError\n',
+        "test_student_py": ("from student import total\n\n\n"
+                            "def test_total():\n    assert total([1, 2]) == 3\n"),
+        "hints_md": "## Useful functions\n",
+        "data_files": {},
+        "reference_py": REFERENCE,
+        "oracle_py": "def total(xs):\n    t = 0\n    for x in xs:\n        t += x\n    return t\n",
+        "test_oracle_py": "def test_same():\n    pass\n",
+        "mutants": [
+            {"name": f"m0{i}_wrong", "bug": f"bug {i}, wrong total",
+             "replacements": [{"old": "sum(xs)", "new": f"sum(xs) + {i}"}]}
+            for i in (1, 2, 3)
+        ],
+    }
+    data.update(changes)
+    return data
+
+
+def report(*failing: str) -> ValidationReport:
+    rules = ["0", "safe", "1", "2", "3", "4", "5", "api"]
+    return ValidationReport("sum-list", [
+        RuleResult(r, f"rule {r}", Status.FAIL if r in failing else Status.OK,
+                   "3 of 3 mutants survived" if r in failing else "", 0.0)
+        for r in rules])
+
+
+class FakeModel:
+    """Answers each call with the next reply; remembers what it was asked."""
+
+    def __init__(self, *texts: str, finish_reason: str | None = None):
+        self.texts, self.calls, self.finish_reason = list(texts), [], finish_reason
+
+    def __call__(self, config, messages, *, purpose, log_path, max_tokens, response_schema,
+                 thinking):
+        self.calls.append((purpose, messages, response_schema))
+        self.thinking = thinking
+        return Reply(self.texts.pop(0), 1000, 500, 0.1, self.finish_reason)
+
+
+@pytest.fixture
+def workspace(tmp_path):
+    entries = [cache.Entry(n, f"1.{n}", "text", f"h{n}", f"page {n} text") for n in range(1, 7)]
+    path = cache.cache_path(tmp_path, tmp_path / "lectures" / "L1.pdf")
+    cache.save(path, cache.render("L1.pdf", entries))
+    (tmp_path / "conventions.md").write_text("- Tokenizer: re.split on spaces.\n")
+    return tmp_path
+
+
+def deps(workspace, model, checks=(), **kw) -> Deps:
+    results = list(checks)
+    return Deps(workspace=workspace, batch_dir=workspace / "batches" / "2026-10-28_p3-test",
+                config=LLMConfig("glm-flash", "glm", "http://x/v1", "glm-5.3-flash"),
+                chat=model, check=lambda exercise, solution: results.pop(0), **kw)
+
+
+def test_a_mutant_is_the_reference_with_one_change_and_its_bug_as_docstring():
+    mutant = MutantDraft(name="m01_off_by_one", bug="adds one, every total is too big",
+                         replacements=[{"old": "sum(xs)", "new": "sum(xs) + 1"}])
+    code = apply_mutant(REFERENCE, mutant)
+    assert code.startswith('"""Mutant: adds one, every total is too big."""\n')
+    assert "return sum(xs) + 1" in code and "Reference" not in code
+    assert code.count("\n") == REFERENCE.count("\n")  # a diff shows only the bug
+
+
+@pytest.mark.parametrize(
+    ("old", "expected"),
+    [("xs", "occurs 2 times"), ("product(xs)", "occurs 0 times"), ("sum(xs)", "changes nothing")],
+)
+def test_a_mutant_that_cannot_be_applied_is_a_format_error(old, expected):
+    new = old  # for the last case: a replacement that changes nothing
+    mutant = MutantDraft(name="m01_x", bug="b", replacements=[{"old": old, "new": new}])
+    with pytest.raises(DraftError, match=expected):
+        apply_mutant(REFERENCE, mutant)
+
+
+def test_write_draft_lays_out_a_batch_and_derives_the_skeleton(tmp_path):
+    d = ExerciseDraft.model_validate(draft(data_files={"sample_input/a.txt": "1\n2"}))
+    exercise, solution = write_draft(d, "sum-list", tmp_path / "round-0")
+    assert (solution / "skeleton.py").read_text() == (exercise / "student.py").read_text()
+    assert (exercise / "sample_input" / "a.txt").read_text() == "1\n2\n"
+    assert sorted(p.name for p in (solution / "mutants").iterdir()) == [
+        "m01_wrong.py", "m02_wrong.py", "m03_wrong.py"]
+    assert json.loads((solution / "metadata.json").read_text())["id"] == "sum-list"
+
+
+def test_a_generated_exercise_must_cite_its_course_pages(tmp_path):
+    synthetic = draft()
+    synthetic["metadata"]["source"] = "synthetic"  # copied from the example exercise
+    with pytest.raises(DraftError, match="give the lecture, slides and PDF pages"):
+        write_draft(ExerciseDraft.model_validate(synthetic), "sum-list", tmp_path / "r")
+
+
+def test_the_batch_mode_sets_how_much_a_debugging_question_explains():
+    assert "may name the cause" in prompts.item_prompt(ITEM, "", "learn")
+    assert "symptom only" in prompts.item_prompt(ITEM, "", "review")
+
+
+@pytest.mark.parametrize("name", ["../escape.txt", "/etc/x", "~/x", "student.py", "run.py",
+                                  ".hidden/x"])
+def test_data_files_stay_inside_the_exercise(tmp_path, name):
+    d = ExerciseDraft.model_validate(draft(data_files={name: "x"}))
+    with pytest.raises(DraftError, match="relative path inside the exercise"):
+        write_draft(d, "sum-list", tmp_path / "round-0")
+
+
+def test_retrieve_context_takes_the_whole_lecture_or_the_item_slides(workspace):
+    whole = nodes.retrieve_context({"item": ITEM}, deps(workspace, None))["context"]
+    assert whole.startswith("## p.1 · slide 1.1\npage 1 text") and "page 6" in whole
+    sliced = nodes.retrieve_context({"item": ITEM}, deps(workspace, None, context_chars=10))
+    assert [line for line in sliced["context"].splitlines() if line.startswith("##")] == [
+        "## p.3 · slide 1.3", "## p.4 · slide 1.4"]
+
+
+def test_the_model_gets_the_rules_conventions_pages_and_the_schema(workspace):
+    model = FakeModel(json.dumps(draft()))
+    update = nodes.generate({"item": ITEM, "context": "## p.3 · slide 1.3\npage 3 text"},
+                            deps(workspace, model, thinking=False))
+    purpose, messages, schema = model.calls[0]
+    assert purpose == "generate" and schema == nodes.DRAFT_SCHEMA and model.thinking is False
+    assert "Tokenizer: re.split on spaces." in messages[0]["content"]
+    assert "testkit.run_mrjob(" in messages[0]["content"]
+    assert "page 3 text" in messages[1]["content"]
+    assert (update["round"], update["tokens"], update["failure"]) == (0, 1500, None)
+
+
+def test_a_reply_that_does_not_parse_is_a_format_failure(workspace):
+    model = FakeModel('{"metadata": {', finish_reason="length")
+    update = nodes.generate({"item": ITEM, "context": ""}, deps(workspace, model))
+    assert update["draft"] is None and update["format_error"]
+    assert update["failure"].startswith("format:") and "cut off at max_tokens" in update["failure"]
+
+
+def test_the_graph_repairs_a_failing_draft_then_saves_it(workspace):
+    pytest.importorskip("langgraph")
+    from tutor.graph.build import build_item
+
+    model = FakeModel(json.dumps(draft()), json.dumps(draft()))
+    d = deps(workspace, model, checks=[report("3"), report()])
+    final = build_item(d).invoke({"item": ITEM})
+
+    assert final["outcome"] == "saved" and final["round"] == 1
+    assert [purpose for purpose, _, _ in model.calls] == ["generate", "repair"]
+    assert "rule 3 (rule 3) FAIL: 3 of 3 mutants survived" in model.calls[1][1][1]["content"]
+    assert (d.batch_dir / "exercises" / "sum-list" / "student.py").is_file()
+    assert not (d.batch_dir / "manifest.json").exists()  # written once per batch
+    log = json.loads((d.batch_dir / "generation.jsonl").read_text())
+    assert (log["outcome"], log["rounds"], log["tokens"]) == ("saved", 1, 3000)
+    assert (d.drafts / "sum-list" / "round-0" / "report.txt").read_text().endswith("INVALID\n")
+
+
+def test_the_graph_discards_after_the_last_repair_round(workspace):
+    pytest.importorskip("langgraph")
+    from tutor.graph.build import build_item
+
+    model = FakeModel(*[json.dumps(draft())] * 2)
+    d = deps(workspace, model, checks=[report("3")] * 2, max_rounds=1)
+    final = build_item(d).invoke({"item": ITEM})
+
+    assert final["outcome"] == "discarded"
+    assert not (d.batch_dir / "exercises").exists()
+    assert (d.drafts / "sum-list" / "round-1").is_dir()  # kept for a look at why
+
+
+def test_the_system_prompt_lists_the_allowed_imports_from_the_safety_check():
+    text = prompts.system_prompt(ITEM, "")
+    assert "collections" in text and "{imports}" not in text and "(none recorded)" in text
+
+
+# --- the batch: plan, approve, parallel items, collect -----------------------------------
+
+def plan_json(*ids: str, lecture: str = "L1") -> str:
+    return json.dumps({"items": [
+        {"id": i, "knowledge_point": f"point {i}", "lecture": lecture, "slides": "1.3-1.4",
+         "type": "implementation", "interface": "function", "framework": "python",
+         "reason": "a gap"} for i in ids]})
+
+
+class BatchModel:
+    """Plans come from a queue; an exercise draft is made for whichever id is asked."""
+
+    def __init__(self, *plans: str):
+        self.plans, self.purposes = list(plans), []
+
+    def __call__(self, config, messages, *, purpose, log_path, max_tokens, response_schema,
+                 thinking):
+        self.purposes.append(purpose)
+        if purpose == "plan":
+            self.last_plan_request = messages[1]["content"]
+            return Reply(self.plans.pop(0), 800, 200, 0.1, "stop")
+        exercise_id = messages[1]["content"].split("`")[1]
+        data = draft()
+        data["metadata"]["id"] = exercise_id
+        return Reply(json.dumps(data), 1000, 500, 0.1, "stop")
+
+
+def test_plan_problems_are_found_by_code():
+    items = [PlanItem.model_validate(i) for i in json.loads(
+        plan_json("a", "a", "old-one", lecture="L9"))["items"]]
+    found = nodes.plan_problems(items, ["L1"], 2, ["old-one"])
+    assert "3 items, 2 asked for" in found
+    assert "id 'a' is used twice" in found
+    assert "id 'old-one' already exists in another batch" in found
+    assert "a: lecture 'L9' is not one of ['L1']" in found
+
+
+def test_a_plan_breaking_the_rules_is_asked_for_again_with_the_problems(workspace):
+    model = BatchModel(plan_json("a", lecture="L9"), plan_json("a"))
+    update = nodes.plan_batch({"lectures": ["L1"], "count": 1}, deps(workspace, model))
+    assert model.purposes == ["plan", "plan"]
+    assert "lecture 'L9' is not one of ['L1']" in model.last_plan_request
+    assert (update["plan"][0]["lecture"], update["plan_problems"]) == ("L1", [])
+
+
+def test_page_titles_skip_the_footer_line(workspace):
+    entries = [cache.Entry(13, "4.15", "text", "h", "4.15\nPassing Functions to RDD\n❖ Spark")]
+    cache.save(cache.cache_path(workspace, workspace / "lectures" / "L4.pdf"),
+               cache.render("L4.pdf", entries))
+    assert nodes.page_titles(workspace, "L4").splitlines()[1] == (
+        "  p.13 · slide 4.15: Passing Functions to RDD")
+
+
+def test_the_owner_may_edit_the_plan_before_approving():
+    plan = json.loads(plan_json("a"))["items"]
+    edited = [{**plan[0], "id": "a-better-name"}]
+    assert nodes.apply_decision({"plan": plan}, {"action": "approve", "plan": edited}) == {
+        "plan": edited, "approved": True}
+    assert nodes.apply_decision({"plan": plan}, {"action": "revise", "feedback": "harder"}) == {
+        "feedback": "harder", "approved": False}
+
+
+def test_a_batch_is_planned_sent_back_approved_later_and_generated_in_parallel(workspace):
+    pytest.importorskip("langgraph")
+    sqlite = pytest.importorskip("langgraph.checkpoint.sqlite")
+    from langgraph.types import Command
+
+    from tutor.graph.build import build_batch
+
+    model = BatchModel(plan_json("first-a", "first-b"), plan_json("sum-list", "sum-squares"))
+    d = Deps(workspace=workspace, batch_dir=workspace / "batches" / "2026-10-28_p3-w1",
+             config=LLMConfig("glm-flash", "glm", "http://x/v1", "glm-5.3-flash"),
+             chat=model, max_rounds=1,
+             check=lambda exercise, solution: report() if exercise.name == "sum-list"
+             else report("3"))
+    config = {"configurable": {"thread_id": "w1"}, "max_concurrency": 2}
+    checkpoint = str(workspace / "checkpoint.sqlite")
+
+    with sqlite.SqliteSaver.from_conn_string(checkpoint) as saver:
+        app = build_batch(d, saver)
+        app.invoke({"lectures": ["L1"], "count": 2, "preferences": "more debugging"}, config)
+        assert app.get_state(config).next == ("approve",)  # paused for the owner
+        app.invoke(Command(resume={"action": "revise", "feedback": "two items"}), config)
+        assert "two items" in model.last_plan_request
+
+    with sqlite.SqliteSaver.from_conn_string(checkpoint) as saver:  # another day
+        app = build_batch(d, saver)
+        plan = app.get_state(config).values["plan"]
+        final = app.invoke(Command(resume={"action": "approve", "plan": plan}), config)
+
+    outcomes = {r["id"]: r["outcome"] for r in final["results"]}
+    assert outcomes == {"sum-list": "saved", "sum-squares": "discarded"}
+    manifest = Manifest.model_validate_json((d.batch_dir / "manifest.json").read_text())
+    assert manifest.exercises == ["sum-list"] and "more debugging" in manifest.notes
+    proposal = (d.batch_dir / "coverage-proposal.md").read_text()
+    assert "gap-code -> ex:sum-list (p3-w1)" in proposal and "sum-squares" not in proposal
+
+
+def test_without_a_count_the_plan_chooses_up_to_the_maximum():
+    items = [PlanItem.model_validate(i) for i in json.loads(
+        plan_json("a", "b", "c"))["items"]]
+    assert nodes.plan_problems(items, ["L1"], None, [], max_count=3) == []
+    assert nodes.plan_problems(items, ["L1"], None, [], max_count=2) == [
+        "3 items, at most 2: merge or drop the least important"]
+    assert "at most 4" in prompts.plan_prompt(["L1"], "", "", [], "", None, max_count=4)
+
+
+def test_a_run_stopped_midway_continues_without_redoing_finished_items(workspace):
+    pytest.importorskip("langgraph")
+    sqlite = pytest.importorskip("langgraph.checkpoint.sqlite")
+    from langgraph.types import Command
+
+    from tutor.graph.build import build_batch
+
+    checked: list[str] = []
+    stop = {"once": True}
+
+    def check(exercise, solution):
+        checked.append(exercise.name)
+        if exercise.name == "sum-squares" and stop.pop("once", False):
+            raise KeyboardInterrupt  # not an Exception: it stops the whole run
+        return report()
+
+    model = BatchModel(plan_json("sum-list", "sum-squares"))
+    d = Deps(workspace=workspace, batch_dir=workspace / "batches" / "2026-10-28_p3-w1",
+             config=LLMConfig("glm-flash", "glm", "http://x/v1", "glm-5.3-flash"),
+             chat=model, check=check)
+    config = {"configurable": {"thread_id": "w1"}, "max_concurrency": 1}
+    with sqlite.SqliteSaver.from_conn_string(str(workspace / "c.sqlite")) as saver:
+        app = build_batch(d, saver)
+        app.invoke({"lectures": ["L1"], "count": 2}, config)
+        plan = app.get_state(config).values["plan"]
+        with pytest.raises(KeyboardInterrupt):
+            app.invoke(Command(resume={"action": "approve", "plan": plan}), config)
+        assert app.get_state(config).next  # stopped, not finished
+        final = app.invoke(None, config)  # what `resume` does for a stopped run
+
+    assert {r["id"]: r["outcome"] for r in final["results"]} == {
+        "sum-list": "saved", "sum-squares": "saved"}
+    assert checked.count("sum-list") == 1  # finished before the stop, not run again
+
+
+def test_an_exception_in_one_item_is_reported_and_the_others_finish(workspace):
+    pytest.importorskip("langgraph")
+    from langgraph.checkpoint.memory import MemorySaver
+    from langgraph.types import Command
+
+    from tutor.graph.build import build_batch
+
+    def check(exercise, solution):
+        if exercise.name == "sum-squares":
+            raise UnicodeDecodeError("utf-8", b"\x80", 0, 1, "invalid start byte")
+        return report()
+
+    model = BatchModel(plan_json("sum-list", "sum-squares"))
+    d = Deps(workspace=workspace, batch_dir=workspace / "batches" / "2026-10-28_p3-w1",
+             config=LLMConfig("glm-flash", "glm", "http://x/v1", "glm-5.3-flash"),
+             chat=model, check=check)
+    config = {"configurable": {"thread_id": "w1"}}
+    app = build_batch(d, MemorySaver())
+    app.invoke({"lectures": ["L1"], "count": 2}, config)
+    final = app.invoke(Command(resume={"action": "approve",
+                                       "plan": app.get_state(config).values["plan"]}), config)
+    outcomes = {r["id"]: r["outcome"] for r in final["results"]}
+    assert outcomes == {"sum-list": "saved", "sum-squares": "error"}
+    assert (d.batch_dir / "manifest.json").is_file()  # collect still ran
+    log = [json.loads(x) for x in d.generation_log.read_text().splitlines()]
+    assert any(x["outcome"] == "error" and "UnicodeDecodeError" in x["error"] for x in log)
+
+
+def test_a_mutant_that_misses_the_reference_is_shown_the_closest_line():
+    mutant = MutantDraft(name="m01_x", bug="b",
+                         replacements=[{"old": "return  sum(xs)", "new": "return 0"}])
+    with pytest.raises(DraftError, match=r"closest line in reference.py is, exactly: "
+                                         r"'    return sum\(xs\)'"):
+        apply_mutant(REFERENCE, mutant)

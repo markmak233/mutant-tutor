@@ -21,6 +21,13 @@ bigdata = [
     "pyspark>=3.5,<3.6",
     "mrjob==0.7.4",
 ]
+# The phase 3 generation pipeline (python -m tutor.graph); only tutor/graph/build.py and
+# its CLI import it. It pulls in langchain-core, which the project does not use. The
+# SQLite checkpointer keeps a planned batch waiting for the owner's approval.
+gen = [
+    "langgraph>=1.2,<2",
+    "langgraph-checkpoint-sqlite>=3,<4",
+]
 dev = [
     "pytest>=8",
     "hypothesis>=6",

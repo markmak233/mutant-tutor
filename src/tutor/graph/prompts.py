@@ -1,0 +1,215 @@
+"""Prompts of the generation graph.
+
+The system prompt is the same for every item of a course (format rules, an example
+exercise, the testkit API, the course conventions), so a provider can cache it; the item,
+its course pages and, when repairing, the failed draft come after it. The course
+conventions come from the workspace's conventions.md, never from this file: everything
+here holds for any course.
+"""
+
+from __future__ import annotations
+
+import inspect
+from pathlib import Path
+
+from tutor import testkit
+from tutor.graph.state import PlanItem
+from tutor.validation.safety import CORE_IMPORTS
+
+EXAMPLES = Path(__file__).resolve().parents[3] / "examples"
+# The example shown for each (framework, interface): the closest hand-made, validated
+# exercise. There is no plain-Python example yet; those items get the function-level one.
+EXAMPLE_FOR = {
+    ("pyspark-rdd", "function"): "station-average-rdd",
+    ("pyspark-rdd", "file"): "station-max-file",
+    ("pyspark-df", "file"): "station-monthly-df",
+    ("mrjob", "file"): "station-condition-share",
+}
+DEFAULT_EXAMPLE = "station-average-rdd"
+
+SPEC = """You write programming exercises for a university course, one exercise at a time.
+Each exercise is checked by an automatic validator before anyone sees it; write it so that
+it passes:
+- rule 0: metadata fits the format below;
+- safe: a static check rejects unsafe code (see "Code rules");
+- 1: the reference passes test_student.py;
+- 2: the skeleton (student.py as given to the student) fails test_student.py by failing
+  tests, not by crashing before they run;
+- 3: every mutant fails test_student.py (the tests catch each bug);
+- 4: the reference agrees with oracle.py on random inputs (test_oracle.py, hypothesis);
+- 5: Spark: the result does not depend on the number of partitions (TUTOR_PARTITIONS);
+- api: constraints in metadata (forbidden calls / imports, required definitions) hold.
+
+Files (fields of the JSON you return):
+- metadata: the exercise's metadata. `source` is an object naming the lecture, the slide
+  footers and the PDF pages it comes from (the PDF page is the `p.N` of a section heading
+  below, the footer its `slide S`), and the teaching assumptions (choices of this
+  exercise, not rules of the framework). Never "synthetic": that is only for the example,
+  which is not from a course.
+- student_py: the question in the module docstring (task; input and output format with a
+  small example; constraints; the slides and PDF pages; teaching assumptions; how to run it
+  and its tests), then the skeleton: imports, the function or class signatures, and
+  `raise NotImplementedError` (or `pass` with a TODO) where the student writes code. For a
+  debugging exercise the skeleton is the buggy program, and the docstring says it is wrong
+  and how it shows (the symptom); whether it also names the cause depends on the batch's
+  mode (below).
+- test_student_py: pytest tests importing `student`, using tutor.testkit (API below). Spark
+  tests read the partition count with testkit.partitions(); file-level tests split their
+  input into that many files.
+- hints_md: "## Useful functions" first (each relevant API, and any forbidden one, with a
+  tiny example on different data and its exact output), then "## Hint 1", "## Hint 2",
+  "## Hint 3", each more specific. Never the answer.
+- data_files: sample input for file-level exercises, e.g. {"sample_input/readings.csv": ...}.
+  Paths are relative to the exercise folder.
+- reference_py: the worked solution, as numbered steps (`# Step N: what and why`), each with a
+  comment showing a record after that step on the question's example data. Never one long
+  chain.
+- oracle_py: a plain-Python specification of the same result, written independently of the
+  reference (no Spark / MRJob), and test_oracle_py: a hypothesis test comparing student.py
+  with oracle.py (`@settings(deadline=None, derandomize=True)`, a moderate max_examples).
+- mutants: 3 to 6 mistakes, each given as replacements of exact text in reference_py
+  (`old` must occur exactly once in it). Most must be misconceptions of this knowledge
+  point: the code a student writes who has a wrong idea of how the concept works (for
+  example, for lazy evaluation: an accumulator updated in a transformation that no action
+  ever runs). At most one may be a plain slip such as > for >=; never arbitrary edits such
+  as doubling a value. Each mutant must really be wrong on the tests' data (no equivalent
+  mutants). `bug` reads "<the bug>, <what goes wrong>".
+
+Test data must break the regularities a bug relies on: keys not already sorted, unequal
+record counts per map task or partition (a mean of means then differs), ties when there is
+a tie-break rule, values that make integer division and rounding visible.
+
+Making "how" testable, not only the output: count reads of an input with an accumulator
+(persist); a dict that can be pickled only inside a spied broadcast; monkeypatch a method to
+count calls (DataFrame vs SQL); check module-level constants directly.
+
+Code rules (the "safe" check): imports only from {imports} and the exercise's framework
+(mrjob; pyspark); `os` only for os.environ / os.path, `sys` only for
+argv / exit / stdin / stdout / stderr / executable; no eval / exec / compile / __import__;
+no dunder tricks; no literal absolute or `~` paths and no `..`; no RDD.pipe or MRJob
+*_cmd options; no conftest.py or pytest.ini.
+
+Return only the JSON object."""
+
+
+def testkit_api() -> str:
+    """The public functions of tutor.testkit with their signatures and docs, read from the
+    module itself so the prompt never drifts from the code."""
+    lines = []
+    for name, func in inspect.getmembers(testkit, inspect.isfunction):
+        if func.__module__ == testkit.__name__ and not name.startswith("_"):
+            doc = inspect.getdoc(func) or ""
+            lines.append(f"testkit.{name}{inspect.signature(func)}\n    "
+                         + doc.replace("\n", "\n    "))
+    return "\n".join(lines)
+
+
+def example(framework: str, interface: str) -> str:
+    """The example exercise closest to the item, as its files."""
+    root = EXAMPLES / EXAMPLE_FOR.get((framework, interface), DEFAULT_EXAMPLE)
+    parts = [f"Example exercise ({root.name}), as files; your answer gives the same content "
+             "as JSON fields, with mutants as replacements:"]
+    for path in sorted(root.rglob("*")):
+        if path.is_file() and "__pycache__" not in path.parts and path.name != "validation.json":
+            parts.append(f"=== {path.relative_to(root)} ===\n{path.read_text()}")
+    return "\n\n".join(parts)
+
+
+def system_prompt(item: PlanItem, conventions: str) -> str:
+    imports = ", ".join(sorted(m for m in CORE_IMPORTS if not m.startswith("_")))
+    return "\n\n".join([
+        SPEC.replace("{imports}", imports),
+        "tutor.testkit API:\n" + testkit_api(),
+        example(item.framework, item.interface),
+        "Course conventions (facts about this course every exercise must respect):\n"
+        + (conventions.strip() or "(none recorded)"),
+    ])
+
+
+MODES = {
+    "learn": "learn: the student is meeting the topic. Questions may explain the concept; a "
+             "debugging question may name the cause of the bug, not the fix.",
+    "review": "review: the student has learnt the topic. A debugging question gives the "
+              "symptom only, never the cause.",
+}
+
+
+def item_prompt(item: PlanItem, context: str, mode: str = "learn") -> str:
+    return (
+        f"Write the exercise `{item.id}`.\n"
+        f"Knowledge point: {item.knowledge_point}\n"
+        f"From: {item.lecture}, slides {item.slides}\n"
+        f"Type: {item.type}; interface: {item.interface}; framework: {item.framework}\n"
+        f"Batch mode: {MODES[mode]}\n"
+        + (f"Notes: {item.notes}\n" if item.notes else "")
+        + "\nThe course pages (one section per PDF page, `## p.N · slide S`; image slides "
+        "were transcribed, so code there is as on the slide):\n\n" + context
+    )
+
+
+def repair_prompt(item: PlanItem, context: str, draft_json: str, failure: str,
+                  mode: str = "learn") -> str:
+    return (
+        item_prompt(item, context, mode)
+        + "\n\nYour previous answer:\n" + draft_json
+        + "\n\nThe validator rejected it:\n" + failure
+        + "\n\nFix the cause and return the whole exercise again. Change only what the fix "
+        "needs; keep everything that already worked."
+    )
+
+
+def retry_prompt(item: PlanItem, context: str, failure: str, mode: str = "learn") -> str:
+    """After a reply that could not be read at all (cut off, or not JSON): there is no draft
+    to repair, so the item is asked again, with what went wrong."""
+    return (
+        item_prompt(item, context, mode)
+        + "\n\nA previous attempt gave no usable answer: " + failure
+        + "\nAnswer again from the start. Keep your reasoning short and spend the output on "
+        "the JSON."
+    )
+
+
+PLAN_SPEC = """You plan a batch of programming exercises for a university course. Choose
+what to practise; another step writes each exercise.
+
+Rules:
+- Pick knowledge points from the coverage table rows marked `gap-code` for the lectures
+  given (`gap-tracing`, `gap-design` and `concept` rows are not code exercises). The
+  text in brackets after gap-code says what an exercise there could check.
+- One exercise per knowledge point; the batch covers different points, and none repeats
+  an existing exercise (ids listed below).
+- Use the page list to choose the slide range each exercise draws on; `slides` is a range
+  of slide footers such as "4.15-4.24", and `lecture` is one of the lecture names given.
+- type: implementation (write it), completion (fill in parts), debugging (fix a given
+  program that is wrong); interface: function (a function on an RDD / DataFrame / list)
+  or file (a program reading input files, writing output); framework: one of python,
+  mrjob, pyspark-rdd, pyspark-df, the one the slides use.
+- `notes` says what the exercise must check (the concept, edge cases, how the "how" is
+  tested); `reason` says in one sentence why it was chosen.
+- Follow the owner's preferences; they override these rules where they conflict.
+- ids are short kebab-case names of what the exercise does.
+
+Return only the JSON object."""
+
+
+def plan_prompt(lectures: list[str], coverage: str, pages: str, existing: list[str],
+                preferences: str, count: int | None, max_count: int = 6, feedback: str = "",
+                previous: str = "", problems: list[str] | None = None) -> str:
+    how_many = (f"Plan {count} exercises" if count else
+                "Plan one exercise per knowledge point that deserves its own exercise "
+                "(merge small related points into one; leave out what the existing "
+                f"exercises already practise), at most {max_count}")
+    parts = [
+        f"{how_many} from: {', '.join(lectures)}.",
+        "Owner's preferences: " + (preferences.strip() or "(none)"),
+        "Existing exercise ids (do not reuse): " + (", ".join(existing) or "(none)"),
+        "Coverage table:\n" + coverage,
+        "Pages of the lectures (PDF page, slide footer, title):\n" + pages,
+    ]
+    if previous:
+        parts.append("Your previous plan:\n" + previous)
+    if feedback:
+        parts.append("The owner sent it back with this feedback; follow it:\n" + feedback)
+    if problems:
+        parts.append("It also had these problems; fix them:\n- " + "\n- ".join(problems))
+    return "\n\n".join(parts)
