@@ -221,6 +221,20 @@ def test_a_response_schema_asks_for_structured_output(sent):
     assert "response_format" not in json.loads(sent[1][0].data)
 
 
+def test_deepseek_gets_json_mode_with_the_schema_in_the_prompt(sent):
+    schema = {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}
+    question = {"role": "user", "content": "write it"}
+    chat(LLMConfig("p", "deepseek", "https://api.deepseek.com", "deepseek-v4-flash",
+                   thinking_off=llm.PROVIDERS["deepseek"][1]), [question],
+         purpose="generate", response_schema=schema, thinking=False)
+    body = json.loads(sent[0][0].data)
+    assert sent[0][0].full_url == "https://api.deepseek.com/chat/completions"
+    assert body["response_format"] == {"type": "json_object"}
+    assert body["thinking"] == {"type": "disabled"}
+    assert body["messages"][0] == question
+    assert json.dumps(schema) in body["messages"][-1]["content"]
+
+
 def test_lm_studio_turns_thinking_off_with_reasoning_effort_none(sent):
     chat(LLMConfig("p", "lmstudio", "http://x/v1", "gemma",
                    thinking_off=({"reasoning_effort": "none"},)), [], purpose="vision",

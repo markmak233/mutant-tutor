@@ -195,6 +195,9 @@ plan = "glm-flash"
 ```
 
 OpenAI is `provider = "openai"` with `api_key_env = "OPENAI_API_KEY"` (the key in `.env`).
+DeepSeek is `provider = "deepseek"` (e.g. `model = "deepseek-v4-flash"`,
+`api_key_env = "DEEPSEEK_API_KEY"`); its API has only JSON mode, so the schema goes into the
+prompt and the validator still checks the reply.
 
 ```bash
 python -m tutor.graph plan --lectures Lecture_4.1-Spark_I Lecture_4.2-Spark_II --batch w4 \

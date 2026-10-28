@@ -49,6 +49,9 @@ PROVIDERS = {
     "openai": ("https://api.openai.com/v1",
                ({"reasoning_effort": "none"}, {"reasoning_effort": "minimal"},
                 {"reasoning_effort": "low"})),
+    # One model per size (e.g. deepseek-v4-flash) with thinking on by default (2026).
+    "deepseek": ("https://api.deepseek.com",
+                 ({"thinking": {"type": "disabled"}}, {"reasoning_effort": "none"})),
     "custom": (None, ()),  # any other OpenAI-compatible server; base_url required
 }
 PROFILE_FIELDS = {"provider", "model", "base_url", "api_key_env", "reasoning_effort",
@@ -180,7 +183,14 @@ def chat(config: LLMConfig, messages: list[dict], *, purpose: str,
     if max_tokens is not None:
         # OpenAI reasoning models refuse max_tokens; the limit there includes reasoning.
         body["max_completion_tokens" if openai else "max_tokens"] = max_tokens
-    if response_schema is not None:
+    if response_schema is not None and config.provider == "deepseek":
+        # DeepSeek's chat API documents only JSON mode, and only with thinking off: the
+        # schema goes into the prompt instead, and the caller's validation still decides.
+        body["response_format"] = {"type": "json_object"}
+        body["messages"] = [*messages, {"role": "user", "content": (
+            "Reply with one JSON object that fits this JSON Schema:\n"
+            + json.dumps(response_schema))}]
+    elif response_schema is not None:
         # OpenAI's strict mode needs every field required, which a schema with defaults
         # (optional fields) is not; without it the schema still guides the reply, and the
         # caller's validation catches what does not fit.
