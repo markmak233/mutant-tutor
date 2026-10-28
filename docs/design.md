@@ -757,6 +757,15 @@ Design approved 2026-10-28 (owner):
     fields now carry descriptions, which reach the model in the draft's JSON Schema, and
     the api messages say the names are defined, not called. There is still no "must call"
     constraint: what an exercise must use is checked by its tests and `forbidden_calls`.
+- What repair is told (2026-10-29). A week 4 item came back word for word through all
+  three repairs: rule 1 said only pytest's last line ("2 failed, 3 passed"), so the model
+  could not see what to fix, and at temperature 0 an unchanged prompt returned the same
+  reply. Now: a failing rule 1, 2 (crash), 4 or 5 carries `failure_excerpt` of pytest's
+  output (each failing test, its line in the test file and the `E` lines, at most 2500
+  characters, absolute paths cut to the file name since the text goes to a model; the CLI
+  report still shows the one-line detail); repair round N asks at temperature 0.2 * N; and
+  a reply identical to the previous one is recorded (`unchanged` in the attempts) and the
+  next repair is told so.
 - Batch (step 2, approved 2026-10-28): `plan` (LLM) reads coverage.md, one line per cached
   page (PDF page, footer, title), the existing exercise ids and the owner's preferences,
   and returns `count` PlanItems with a reason each; code checks the count, unique and new

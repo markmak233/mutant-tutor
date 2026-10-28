@@ -58,9 +58,10 @@ class FakeModel:
         self.texts, self.calls, self.finish_reason = list(texts), [], finish_reason
 
     def __call__(self, config, messages, *, purpose, log_path, max_tokens, response_schema,
-                 thinking):
+                 thinking, temperature=0.0):
         self.calls.append((purpose, messages, response_schema))
         self.thinking = thinking
+        self.temperatures = [*getattr(self, "temperatures", []), temperature]
         return Reply(self.texts.pop(0), 1000, 500, 0.1, self.finish_reason)
 
 
@@ -253,7 +254,7 @@ class BatchModel:
         self.plans, self.purposes = list(plans), []
 
     def __call__(self, config, messages, *, purpose, log_path, max_tokens, response_schema,
-                 thinking):
+                 thinking, temperature=0.0):
         self.purposes.append(purpose)
         if purpose == "plan":
             self.last_plan_request = messages[1]["content"]
@@ -568,3 +569,28 @@ def test_the_progress_line_says_what_the_oracle_node_did(capsys):
     _progress("sum-list", "oracle", {})  # no oracle role: nothing to say
     _progress("sum-list", "oracle", {"oracle_status": "kept"})
     assert capsys.readouterr().out == "  [sum-list] oracle: kept\n"
+
+
+# --- what a repair round is told ---------------------------------------------------------
+
+def test_repair_sees_the_failing_tests_and_asks_a_little_warmer_each_round(workspace):
+    pytest.importorskip("langgraph")
+    from tutor.graph.build import build_item
+
+    failing = report("1")
+    failing = ValidationReport("sum-list", [
+        RuleResult(r.rule, r.name, r.status, r.detail, 0.0,
+                   "test_total\ntest_student.py:5:\nE   assert 4 == 3" if r.rule == "1" else "")
+        for r in failing.results])
+    model = FakeModel(json.dumps(draft()), json.dumps(draft()), json.dumps(draft()))
+    d = deps(workspace, model, checks=[failing, failing, report()])
+    final = build_item(d).invoke({"item": ITEM})
+
+    first_repair = model.calls[1][1][1]["content"]
+    assert "rule 1 (rule 1) FAIL: 3 of 3 mutants survived\n    test_total\n" in first_repair
+    assert "    E   assert 4 == 3" in first_repair
+    assert model.temperatures == [0.0, 0.2, 0.4]
+    # The first repair repeated the draft word for word: the second is told so.
+    assert "identical to the one before" not in first_repair
+    assert "identical to the one before" in model.calls[2][1][1]["content"]
+    assert [a["unchanged"] for a in final["attempts"]] == [False, True, True]

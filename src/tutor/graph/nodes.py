@@ -15,6 +15,7 @@ import json
 import re
 import shutil
 import subprocess
+import textwrap
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -71,6 +72,9 @@ class Deps:
     # docs/design.md); thinking low passed in one round in about a minute.
     thinking: bool = False
     mode: str = "learn"  # the batch's mode: how much a question may explain
+    # Repair round N asks at temperature N * step (at most 0.8; generate asks at 0): at 0 an
+    # unchanged prompt got the identical draft back, round after round (2026-10-29).
+    repair_temperature_step: float = 0.2
     plan_config: llm.LLMConfig | None = None  # the `plan` role; default: config
     # The `oracle` role: another model family writes oracle.py from the question alone.
     # None: the generating model writes the whole oracle, as hand drafting does.
@@ -140,7 +144,8 @@ def repair(state: ItemState, deps: Deps) -> ItemState:
         user = prompts.retry_prompt(item, state["context"], state["failure"] or "", deps.mode)
     else:
         user = prompts.repair_prompt(item, state["context"], state.get("draft_json", ""),
-                                     state["failure"] or "", deps.mode)
+                                     state["failure"] or "", deps.mode,
+                                     unchanged=state.get("unchanged", False))
     return _ask(state, deps, user, "repair", state.get("round", 0) + 1)
 
 
@@ -155,9 +160,12 @@ def _ask(state: ItemState, deps: Deps, user: str, purpose: str, round_: int) -> 
     ]
     reply = deps.chat(deps.config, messages, purpose=purpose, log_path=deps.llm_log,
                       max_tokens=deps.max_tokens, response_schema=DRAFT_SCHEMA,
-                      thinking=deps.thinking)
+                      thinking=deps.thinking,
+                      temperature=min(round_ * deps.repair_temperature_step, 0.8))
     tokens = state.get("tokens", 0) + (reply.input_tokens or 0) + (reply.output_tokens or 0)
-    update: ItemState = {"round": round_, "tokens": tokens, "draft_json": reply.text}
+    update: ItemState = {"round": round_, "tokens": tokens, "draft_json": reply.text,
+                         "unchanged": round_ > 0 and reply.text.strip()
+                         == state.get("draft_json", "").strip()}
     try:
         update.update(draft=ExerciseDraft.model_validate_json(reply.text), failure=None,
                       format_error=False)
@@ -232,7 +240,7 @@ def _oracle_failed(state: ItemState, failure: str) -> ItemState:
     """Not written: shown to repair as a format failure of this round."""
     attempts = [*state.get("attempts", []), {
         "round": state.get("round", 0), "failure": f"format: {failure}",
-        "format_error": True, "dropped": []}]
+        "format_error": True, "dropped": [], "unchanged": state.get("unchanged", False)}]
     return {"failure": f"format: {failure}", "format_error": True, "attempts": attempts,
             "oracle_status": "failed"}
 
@@ -299,6 +307,7 @@ def validate_draft(state: ItemState, deps: Deps) -> ItemState:
             (round_dir_path / "report.txt").write_text(_report_text(report))
             failure = None if report.valid else "\n".join(
                 f"rule {r.rule} ({r.name}) FAIL: {r.detail}"
+                + ("\n" + textwrap.indent(r.excerpt, "    ") if r.excerpt else "")
                 for r in report.results if r.status is Status.FAIL)
             if deps.oracle_config is not None and any(
                     r.rule == "4" and r.status is Status.FAIL for r in report.results):
@@ -309,7 +318,7 @@ def validate_draft(state: ItemState, deps: Deps) -> ItemState:
                 failure += ("\nLeft out, could not be applied (fix them too):\n"
                             + "\n".join(dropped.values()))
     attempts.append({"round": round_, "failure": failure, "format_error": format_error,
-                     "dropped": sorted(dropped)})
+                     "dropped": sorted(dropped), "unchanged": state.get("unchanged", False)})
     return {"failure": failure, "format_error": format_error, "attempts": attempts,
             "round_dir": round_dir}
 

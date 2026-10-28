@@ -80,6 +80,7 @@ class Attempt(TypedDict):
     failure: str | None  # the first failing rule, or a format error; None when VALID
     format_error: bool  # the reply did not parse or could not be written out
     dropped: list[str]  # mutants left out because they could not be applied
+    unchanged: bool  # the repair reply repeated the previous draft word for word
 
 
 class ItemState(TypedDict, total=False):
@@ -89,6 +90,7 @@ class ItemState(TypedDict, total=False):
     context: str  # the course pages the model sees
     draft: ExerciseDraft | None  # None after a format error
     draft_json: str  # the last reply, shown to repair
+    unchanged: bool  # that reply repeated the one before it (repair says so next time)
     round_dir: str  # where the current round's files were written
     failure: str | None  # what repair is asked to fix; None when VALID
     format_error: bool

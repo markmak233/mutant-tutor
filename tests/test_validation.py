@@ -599,3 +599,48 @@ def test_examples_are_valid(name):
     report = validate(exercise)
 
     assert report.valid, format_report(report)
+
+
+PYTEST_OUTPUT = """\
+FF.                                                                      [100%]
+=================================== FAILURES ===================================
+__________________________ test_example_from_question __________________________
+
+    def test_example_from_question(tmp_path):
+>       assert_output(out, expected)
+
+test_student.py:30: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+/srv/someone/project/src/tutor/testkit.py:197: in assert_output
+    _compare(got, want)
+E           AssertionError: got 5 lines, expected 5
+E             unexpected: ['RECORDS\t4']
+E             missing:    ['RECORDS\t5']
+
+/srv/someone/project/src/tutor/testkit.py:333: AssertionError
+----------------------------- Captured stderr call -----------------------------
+/srv/someone/.venv/lib/python3.11/site-packages/pyspark/shuffle.py:65: UserWarning: x
+_____________________________ test_bad_lines ___________________________________
+E       ValueError: could not convert string to float: '/srv/someone/data/x.csv'
+test_student.py:57: ValueError
+=========================== short test summary info ============================
+FAILED test_student.py::test_example_from_question - AssertionError: got 5 li...
+FAILED test_student.py::test_bad_lines - ValueError: could not...
+2 failed, 1 passed in 12.92s
+"""
+
+
+def test_the_failure_excerpt_keeps_what_a_fix_needs_and_no_home_paths():
+    from tutor.validation.checks import failure_excerpt
+
+    assert failure_excerpt(PYTEST_OUTPUT) == (
+        "test_example_from_question\n"
+        "test_student.py:30:\n"
+        "E           AssertionError: got 5 lines, expected 5\n"
+        "E             unexpected: ['RECORDS\t4']\n"
+        "E             missing:    ['RECORDS\t5']\n"
+        "test_bad_lines\n"
+        "E       ValueError: could not convert string to float: 'x.csv'\n"
+        "test_student.py:57: ValueError")
+    assert "someone" not in failure_excerpt(PYTEST_OUTPUT)
+    assert len(failure_excerpt(PYTEST_OUTPUT, limit=40)) == 40 + len("\n...")

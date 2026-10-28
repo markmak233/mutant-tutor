@@ -177,11 +177,15 @@ def item_prompt(item: PlanItem, context: str, mode: str = "learn") -> str:
 
 
 def repair_prompt(item: PlanItem, context: str, draft_json: str, failure: str,
-                  mode: str = "learn") -> str:
+                  mode: str = "learn", unchanged: bool = False) -> str:
+    """`unchanged`: that answer repeated the one before it, which failed the same way."""
     return (
         item_prompt(item, context, mode)
         + "\n\nYour previous answer:\n" + draft_json
         + "\n\nThe validator rejected it:\n" + failure
+        + ("\n\nThat answer was identical to the one before it, which failed in the same "
+           "way: returning it again cannot pass. Find what the failure points at and "
+           "change it." if unchanged else "")
         + "\n\nFix the cause and return the whole exercise again. Change only what the fix "
         "needs; keep everything that already worked."
     )

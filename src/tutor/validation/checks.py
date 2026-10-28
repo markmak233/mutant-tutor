@@ -18,6 +18,7 @@ exercise is function-level or file-level: that lives in the exercise's test file
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -52,6 +53,9 @@ class RuleResult:
     status: Status
     detail: str
     duration_s: float
+    # What failed, from pytest's output (failure_excerpt), for whoever must fix it: the
+    # generation pipeline's repair round. The CLI report shows `detail` only.
+    excerpt: str = ""
 
 
 @dataclass(frozen=True)
@@ -164,7 +168,8 @@ def check_reference_passes(ex: ExerciseFiles, timeout_s: float) -> RuleResult:
     if r.outcome is Outcome.PASSED:
         return RuleResult("1", "reference passes", Status.OK, _summary(r), r.duration_s)
     detail = f"reference {r.outcome.value}: {_summary(r)}"
-    return RuleResult("1", "reference passes", Status.FAIL, detail, r.duration_s)
+    return RuleResult("1", "reference passes", Status.FAIL, detail, r.duration_s,
+                      failure_excerpt(r.output))
 
 
 def check_skeleton_fails(ex: ExerciseFiles, timeout_s: float) -> RuleResult:
@@ -177,7 +182,8 @@ def check_skeleton_fails(ex: ExerciseFiles, timeout_s: float) -> RuleResult:
         detail = f"skeleton errors before any test runs (import/syntax?): {_summary(r)}"
     else:
         detail = "skeleton timed out"
-    return RuleResult("2", "skeleton fails", Status.FAIL, detail, r.duration_s)
+    excerpt = failure_excerpt(r.output) if r.outcome is Outcome.ERROR else ""
+    return RuleResult("2", "skeleton fails", Status.FAIL, detail, r.duration_s, excerpt)
 
 
 def check_mutants_killed(ex: ExerciseFiles, timeout_s: float) -> RuleResult:
@@ -239,7 +245,8 @@ def check_matches_oracle(ex: ExerciseFiles, timeout_s: float) -> RuleResult:
         detail = f"differential test cannot run: {_summary(r)}"
     else:
         detail = "differential test timed out: lower max_examples in test_oracle.py"
-    return RuleResult("4", "matches oracle", Status.FAIL, detail, r.duration_s)
+    return RuleResult("4", "matches oracle", Status.FAIL, detail, r.duration_s,
+                      failure_excerpt(r.output))
 
 
 def check_distribution(ex: ExerciseFiles, timeout_s: float) -> RuleResult:
@@ -266,7 +273,8 @@ def check_distribution(ex: ExerciseFiles, timeout_s: float) -> RuleResult:
         duration += r.duration_s
         if r.outcome is not Outcome.PASSED:
             detail = f"reference {r.outcome.value} {description}: {_summary(r)}"
-            return RuleResult("5", "distribution", Status.FAIL, detail, duration)
+            return RuleResult("5", "distribution", Status.FAIL, detail, duration,
+                              failure_excerpt(r.output))
     passed = []
     if partition_check:
         passed.append(f"{', '.join(map(str, PARTITION_COUNTS))} partitions")
@@ -309,6 +317,32 @@ def _summary(r: RunResult) -> str:
     """pytest's last line, e.g. "4 passed in 8.7s"."""
     lines = [line.strip("= ") for line in r.output.splitlines() if line.strip()]
     return lines[-1] if lines else "(no output)"
+
+
+_SECTION = re.compile(r"^_{3,} (.+?) _{3,}$")
+_TEST_LOCATION = re.compile(r"^test_\w+\.py:\d+")
+_ABSOLUTE_PATH = re.compile(r"(?:/[^\s/'\"]+)+/([^\s/'\"]+)")
+
+
+def failure_excerpt(output: str, per_test: int = 12, limit: int = 2500) -> str:
+    """Each failing test's name, its line in the test file and pytest's `E` lines (the
+    assertion and what differed), from `pytest -q` output: what a fix needs, without
+    pytest's tracebacks through testkit or Spark and their warnings. Absolute paths are cut
+    to the file name: they name the machine's user, and the text may go to a model."""
+    blocks, current = [], None
+    for line in output.splitlines():
+        if line.startswith("="):  # "short test summary info", warnings, the last line
+            current = None
+            continue
+        header = _SECTION.match(line)
+        if header:
+            current = [header.group(1)]
+            blocks.append(current)
+        elif current is not None and len(current) <= per_test and (
+                line.startswith("E ") or _TEST_LOCATION.match(line)):
+            current.append(_ABSOLUTE_PATH.sub(r"\1", line.rstrip()))
+    text = "\n".join("\n".join(block) for block in blocks if len(block) > 1)
+    return text if len(text) <= limit else text[:limit] + "\n..."
 
 
 def _falsifying_example(r: RunResult, limit: int = 300) -> str:
