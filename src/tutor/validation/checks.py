@@ -71,9 +71,13 @@ class ValidationReport:
         return next(r for r in self.results if r.rule == rule)
 
 
-def validate(ex: ExerciseFiles, timeout_s: float | None = None) -> ValidationReport:
+def validate(ex: ExerciseFiles, timeout_s: float | None = None,
+             oracle_on_failure: bool = False) -> ValidationReport:
     """timeout_s per pytest run: the argument, else metadata `timeout_s` (Hadoop exercises
-    need minutes, since every job costs 7-9 s), else DEFAULT_TIMEOUT_S."""
+    need minutes, since every job costs 7-9 s), else DEFAULT_TIMEOUT_S.
+    `oracle_on_failure`: when the reference fails its tests, still run rule 4. The oracle
+    does not use the tests, so whether the reference agrees with it tells which side of
+    the disagreement is likely wrong; the generation pipeline tells repair."""
     fmt = check_format(ex)
     if fmt.status is not Status.OK:
         # Every other rule reads metadata (timeout, partitions, constraints), so none of
@@ -97,11 +101,15 @@ def validate(ex: ExerciseFiles, timeout_s: float | None = None) -> ValidationRep
         # A failing reference means the tests or the exercise are wrong, so the rules that
         # run tests would prove nothing; skipping them also saves the runs. The static API
         # check does not depend on the tests, so it still runs.
+        skipped = _skipped_test_rules("skipped: the reference must pass first")
+        if oracle_on_failure:
+            skipped = [check_matches_oracle(ex, timeout_s) if r.rule == "4" else r
+                       for r in skipped]
         return ValidationReport(ex.exercise_id, [
             fmt,
             safe,
             reference,
-            *_skipped_test_rules("skipped: the reference must pass first"),
+            *skipped,
             check_api_constraints(ex),
         ])
     return ValidationReport(ex.exercise_id, [

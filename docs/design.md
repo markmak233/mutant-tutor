@@ -800,6 +800,14 @@ Design approved 2026-10-28 (owner):
   A rule 3 failure with a survivor now reminds repair to catch a bug in how the result is
   computed with a spy, or to replace a mutant whose result equals the reference's (a
   `groupByKey` then sum mutant had survived three repairs).
+- Who is wrong when rule 1 fails (2026-10-29). A reference and a test disagreeing can be
+  either side's fault, and DeepSeek, unable to tell, sent the same draft back word for
+  word (copying is near-certain even at temperature 0.6). The oracle does not use the
+  tests, so the pipeline validates with `oracle_on_failure`: rule 4 still runs after a
+  rule 1 failure. If the reference agrees with the oracle (an independent reading when
+  the `oracle` role is set), repair is told the tests' expected values are the likely
+  mistake; if not, the disagreement and the oracle's code go to repair as usual. The CLI
+  keeps skipping rules 2-5 after rule 1. Cost: one rule 4 run (15-30 s) per such round.
 - Batch (step 2, approved 2026-10-28): `plan` (LLM) reads coverage.md, one line per cached
   page (PDF page, footer, title), the existing exercise ids and the owner's preferences,
   and returns `count` PlanItems with a reason each; code checks the count, unique and new

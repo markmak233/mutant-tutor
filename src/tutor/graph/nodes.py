@@ -81,7 +81,8 @@ class Deps:
     oracle_config: llm.LLMConfig | None = None
     chat: Callable = llm.chat
     check: Callable[[Path, Path], ValidationReport] = field(
-        default=lambda exercise, solution: validate(load_exercise(exercise, solution)))
+        default=lambda exercise, solution: validate(load_exercise(exercise, solution),
+                                                    oracle_on_failure=True))
     # Called with (exercise id, node, update) after every node of an item, for progress.
     on_update: Callable[[str, str, dict], None] | None = None
     # Exercise replies arrive streamed: a reply that keeps coming is never cut off by the
@@ -328,9 +329,13 @@ def validate_draft(state: ItemState, deps: Deps) -> ItemState:
                 f"rule {r.rule} ({r.name}) FAIL: {r.detail}"
                 + ("\n" + textwrap.indent(r.excerpt, "    ") if r.excerpt else "")
                 for r in report.results if r.status is Status.FAIL)
-            if deps.oracle_config is not None and any(
-                    r.rule == "4" and r.status is Status.FAIL for r in report.results):
+            status = {r.rule: r.status for r in report.results}
+            if deps.oracle_config is not None and status.get("4") is Status.FAIL:
                 failure += ORACLE_DISAGREES + state["draft"].oracle_py
+            elif status.get("1") is Status.FAIL and status.get("4") is Status.OK:
+                failure += ORACLE_AGREES.format(
+                    oracle="oracle.py, which another model wrote from the question alone"
+                    if deps.oracle_config is not None else "oracle.py")
             if failure and dropped:
                 # Not a failure by itself (a VALID draft is saved without them), but a
                 # repair round may as well fix them.
@@ -348,6 +353,12 @@ ORACLE_DISAGREES = (
     "right, the question is ambiguous or incomplete there: make it say exactly what it "
     "means (the oracle is then written again). If the reference is wrong, fix it. The "
     "oracle it wrote:\n")
+
+
+ORACLE_AGREES = (
+    "\nAbout rule 1: rule 4 ran anyway, and on random inputs the reference agrees with "
+    "{oracle}. So the failing tests' expected values are the likely mistake: work them out "
+    "again from the question on each test's data, and fix the tests.")
 
 
 def _report_text(report: ValidationReport) -> str:

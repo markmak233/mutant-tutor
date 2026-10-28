@@ -649,3 +649,18 @@ def test_exercise_replies_are_streamed_with_progress_by_exercise(workspace, caps
     nodes.generate({"item": ITEM, "context": ""}, deps(workspace, model, on_stream=_receiving))
     assert seen["stream"] is True
     assert capsys.readouterr().out == "  [sum-list] receiving: 45,000 characters\n"
+
+
+def test_when_the_reference_agrees_with_the_oracle_repair_suspects_the_tests(workspace):
+    pytest.importorskip("langgraph")
+    from tutor.graph.build import build_item
+
+    model = FakeModel(json.dumps(draft()), json.dumps(draft()))
+    d = deps(workspace, model, checks=[report("1"), report()])  # rule 4 passed
+    build_item(d).invoke({"item": ITEM})
+    repair = model.calls[1][1][1]["content"]
+    assert "the reference agrees with oracle.py. So the failing tests' expected values" in repair
+    model = FakeModel(json.dumps(draft()), json.dumps(draft()))
+    d = deps(workspace, model, checks=[report("1", "4")] * 2, max_rounds=1)  # discarded
+    build_item(d).invoke({"item": ITEM})
+    assert "the reference agrees" not in model.calls[1][1][1]["content"]

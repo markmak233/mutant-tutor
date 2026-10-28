@@ -198,6 +198,21 @@ def test_broken_reference_skips_the_rules_that_run_tests(tmp_path):
     assert not report.valid
 
 
+def test_rule_4_can_still_run_to_tell_which_side_of_a_rule_1_failure_is_wrong(tmp_path):
+    """A test with a wrong expected value: the reference fails it but agrees with the oracle.
+    A wrong reference: it fails the test and disagrees with the oracle."""
+    wrong_test = TESTS.replace("== 5", "== 6")
+    report = validate(load_exercise(*make_exercise(tmp_path / "a", tests=wrong_test)),
+                      oracle_on_failure=True)
+    assert report.result("1").status is Status.FAIL
+    assert report.result("4").status is Status.OK
+    assert [report.result(r).status for r in ("2", "3", "5")] == [Status.SKIPPED] * 3
+    wrong = "def add(a, b):\n    return a * b\n"
+    report = validate(load_exercise(*make_exercise(tmp_path / "b", reference=wrong)),
+                      oracle_on_failure=True)
+    assert report.result("4").status is Status.FAIL and not report.valid
+
+
 def test_skeleton_that_passes_breaks_rule_2(tmp_path):
     """Tests that an unfinished skeleton can pass do not check the student's work."""
     report = run(make_exercise(tmp_path, skeleton=REFERENCE))
