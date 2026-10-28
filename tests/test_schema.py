@@ -56,6 +56,9 @@ def test_valid_metadata_and_manifest_have_no_problems():
         ({"function": "word_count"}, "function: Extra inputs are not permitted"),
         ({"partion_check": True}, "partion_check: Extra inputs are not permitted"),
         ({"id": "Word_Count"}, "id: String should match pattern"),
+        # Generated metadata once named a call signature as an entry point.
+        ({"entry_point": ["WordCount", "average(sc, rdd)"]},
+         "entry_point.1: String should match pattern"),
     ],
 )
 def test_metadata_field_problems_name_the_field(changes, expected):

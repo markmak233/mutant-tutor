@@ -183,7 +183,7 @@
     },
     "entry_point": {
       "items": {
-        "minLength": 1,
+        "pattern": "^[A-Za-z_]\\w*(\\.[A-Za-z_]\\w*)?$",
         "type": "string"
       },
       "minItems": 1,

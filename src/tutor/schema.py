@@ -22,6 +22,9 @@ SCHEMA_VERSION = 1
 SCHEMA_DIR = Path(__file__).resolve().parents[2] / "schemas"  # the repo's schemas/
 
 Name = Annotated[str, Field(min_length=1)]
+# A function or class name, or Class.run for file-level Spark (which names have a dot is
+# checked in Metadata). Generated metadata once put a call signature here.
+EntryPoint = Annotated[str, Field(pattern=r"^[A-Za-z_]\w*(\.[A-Za-z_]\w*)?$")]
 
 
 class _Strict(BaseModel):
@@ -65,7 +68,7 @@ class Metadata(_Strict):
     framework: Literal["python", "mrjob", "pyspark-rdd", "pyspark-df"]
     runner: Literal["inline", "hadoop"] | None = None
     # What the tests call: function names, an MRJob class, or "Class.run" for Spark.
-    entry_point: Annotated[list[Name], Field(min_length=1)]
+    entry_point: Annotated[list[EntryPoint], Field(min_length=1)]
     constraints: Constraints = Constraints()
     partition_check: bool = False
     combiner_check: bool = False
