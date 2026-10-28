@@ -65,6 +65,15 @@ mrjob 0.7.4 imports `distutils`, which 3.12 removed, and 3.12 venvs no longer co
 setuptools, whose `distutils` shim fills the gap. Without it the mrjob tests fail with
 `No module named 'distutils'`. CI tests 3.11 only.
 
+To run a PySpark program directly (`python student.py <input> <output>`), also tell Spark
+which Python its workers use; otherwise they start the first `python3` on PATH, which may
+be another version than the venv, and the job fails with `PYTHON_VERSION_MISMATCH`. The
+tests and the validator set this themselves.
+
+```bash
+export PYSPARK_PYTHON="$(which python)"   # after activating the venv; add it to your shell profile or venv activate script
+```
+
 Edit `.env`. Set only what you have, and **comment out the lines you do not use**: a variable
 left at its `/path/to/...` placeholder counts as set, so the checks that need it run and fail
 instead of being skipped.
@@ -137,6 +146,7 @@ they are drafted with Claude Code from the lectures and checked with `python -m 
 | `No module named 'pipes'` | the venv or Hadoop task runs Python 3.13 | recreate the venv with `python3.11` (or 3.12) |
 | `No module named 'distutils'` | Python 3.12 venv without setuptools | `pip install setuptools` |
 | `Java gateway process exited` / `JAVA_HOME is not set` | Spark cannot find the JDK | set `JAVA_HOME` in `.env` to a JDK 17 |
+| `PYTHON_VERSION_MISMATCH` when running a PySpark program directly | Spark workers start another `python3` than the venv's | `export PYSPARK_PYTHON="$(which python)"` (step 3) |
 | `test_env` fails with `/path/to/...` | a placeholder left in `.env` | set the real path or comment the line out |
 | Hadoop tests fail although Hadoop is not installed | `HADOOP_HOME` placeholder left in `.env` | comment the line out |
 | `yarn` runs Hadoop instead of JavaScript yarn, or the reverse | `brew install hadoop` | uninstall it; use the tarball |

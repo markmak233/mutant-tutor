@@ -53,7 +53,10 @@ Constraints (as in the course projects):
 - It must work with several reducers: the tests run it on Hadoop with 1, 2 and 4 reducers,
   so every key of a station must reach the same reducer.
 
-Run the logic quickly:  python student.py -r inline sample_input --jobconf myjob.settings.tau=0.25
+Run the logic quickly, as map | sort | reduce with one reducer (`-r inline` would split a
+station over two reducers, since it ignores the partitioner):
+    cat sample_input/* | python student.py --mapper | LC_ALL=C sort \
+        | myjob_settings_tau=0.25 python student.py --reducer
 Run the tests:          pytest test_student.py      (Hadoop, about 25 s)
 Stuck? hints.md has useful functions and three levels of hints.
 """

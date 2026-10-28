@@ -12,6 +12,9 @@ class StationMonthly:
         spark = (
             SparkSession.builder.master("local[2]").appName("station-monthly")
             .config("spark.sql.shuffle.partitions", "4")
+            # As on a cluster with real data: adaptive execution would merge these tiny
+            # partitions into one and hide a missing coalesce(1).
+            .config("spark.sql.adaptive.enabled", "false")
             .getOrCreate()
         )
 
