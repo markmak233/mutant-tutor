@@ -179,6 +179,37 @@ slide images are then sent to that provider. Other OpenAI-compatible servers use
 `provider = "custom"` with a `base_url`. About 7 s per image page with the local model on an
 M2 Pro; every call is logged in `$WORKSPACE_DIR/logs/llm_calls.jsonl` (never the key).
 
+### Generating exercises (optional, phase 3)
+
+Needs the lectures read into the cache (above), a model for the `generate` and `plan`
+roles, and the `gen` extra:
+
+```bash
+pip install -e ".[bigdata,dev,gen]"
+```
+
+```toml
+[llm.roles]
+generate = "glm-flash"
+plan = "glm-flash"
+```
+
+OpenAI is `provider = "openai"` with `api_key_env = "OPENAI_API_KEY"` (the key in `.env`).
+
+```bash
+python -m tutor.graph plan --lectures Lecture_4.1-Spark_I Lecture_4.2-Spark_II --batch w4 \
+    --prefs "one or two debugging exercises"
+# shows the plan and pauses; edit batches/.drafts/<batch>/plan.json if you like, then
+python -m tutor.graph resume --batch w4 --approve      # or --feedback "..."
+```
+
+The plan takes the knowledge points marked `gap-code` in the workspace's `coverage.md`
+(one exercise each, at most `--max-count`, or exactly `--count`) and follows the course
+facts in `conventions.md`. Approved exercises are generated a few at a time, each checked
+by the validator and repaired up to three times; only VALID ones reach the batch. A run
+that stopped midway continues with `resume`; `resume --profile NAME` finishes it with
+another model. `coverage-proposal.md` in the batch lists the coverage.md changes to make.
+
 ## 6. Common problems
 
 | Symptom | Cause | Fix |

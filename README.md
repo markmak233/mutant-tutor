@@ -151,6 +151,11 @@ src/tutor/
   config.py        find the workspace, refuse unsafe locations, load .env
   envcheck.py      check the machine against the workspace's [requires]
   execution.py     run pytest in a temp dir, subprocess + timeout, kill the whole process group
+  llm.py           a small client for OpenAI-compatible APIs (local LM Studio, GLM, OpenAI)
+  materials/       course PDFs -> a per-page markdown cache, image slides via a vision model;
+                   `python -m tutor.materials`
+  graph/           phase 3 generation with LangGraph: plan -> owner approves -> generate,
+                   validate, repair per exercise, in parallel; `python -m tutor.graph`
   schema.py        the batch format (metadata.json, manifest.json); `python -m tutor.schema`
   validation/      rule 0 (format), a static safety check, rules 1-5 and the api check;
                    `python -m tutor.validation`
@@ -171,8 +176,9 @@ Phase numbers match `docs/design.md`.
   hand to run the full loop)
 - **2b** Code-tracing exercises ("what does this print and why")
 - **3a** LLM generation: static check on generated code, slide reading with a cached text
-  layer and vision transcription, LangGraph generate → validate → repair loop with
-  Pydantic-parsed output, then a container for isolation
+  layer and vision transcription (done), LangGraph plan → owner approval → generate →
+  validate → repair, exercises in parallel (working, first course batch generated), an
+  oracle written by a second model, then a container for isolation
 - **3b** Checks that need a learner's real work: held-out solutions and mistakes, an LLM
   judge of teaching quality calibrated against the learner's ratings
 - **3c** Hint command: rules, mutant matching, then an LLM, never revealing the answer

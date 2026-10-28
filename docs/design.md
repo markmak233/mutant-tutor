@@ -664,13 +664,101 @@ solving.
 ## Generation pipeline (LangGraph)
 
 ```
-retrieve_context -> generate_exercise -> validate --pass--> save
-                          ^                  |
-                          +---- repair <--fail (max 3)
-                                             +--over limit--> discard + log
+plan -> [interrupt: owner approves / edits, adds preferences] -> for each plan item:
+  retrieve_context -> generate -> validate --pass--> save
+                         ^           |
+                         +-- repair <-+ fail, round < 3
+                                      + fail, round = 3 --> discard + log
 ```
 
-- LLM output parsed into Pydantic models, the same `schema.py` models that rule 0 checks.
+Design approved 2026-10-28 (owner):
+- Pluggable: nodes are plain functions (state in, partial state out) in `graph/nodes.py`,
+  calling `tutor.llm`; only `graph/build.py` imports `langgraph` (optional dependency group
+  `gen`), and nothing outside `graph/` depends on it. No LangChain. LangGraph is used for
+  what is tedious by hand: interrupt and resume with a SQLite checkpointer in the workspace
+  (approve the plan tomorrow), conditional edges, and state history for debugging.
+- State: sources, preferences, plan (items: knowledge point, slide range, type, interface,
+  framework), and per item the context, draft files, validation report, repair round;
+  outcomes per item for the phase 5 metrics.
+- Nodes: `plan` (LLM; coverage.md gaps + slide titles of the sources + preferences ->
+  BatchPlan, then interrupt), `retrieve_context` (no LLM, see below), `generate` (LLM,
+  structured output), `validate` (no LLM: `tutor.validation` as it is, rule 0 to api),
+  `repair` (LLM; gets the draft and the failing rules' details, not the passing ones, so
+  independent failures such as rule 3 and api are fixed in one round), `save` (moves
+  the exercise into `batches/`, updates the manifest; a `coverage.md` change is proposed to
+  the owner, never written).
+- Drafts are written to `batches/.drafts/` and kept when discarded, to study failures.
+- The draft (`graph/state.py` ExerciseDraft, sent as a JSON Schema; GLM enforces it) asks
+  only for what cannot be derived: skeleton.py is student.py, and a mutant is a list of
+  exact replacements in the reference (`old` must occur once) plus its bug, applied by
+  code. So every mutant differs from the reference by exactly the stated change, its
+  docstring is uniform, and the reply is shorter than 3-6 copies of the reference.
+- Prompt: a stable system part (the repo's format rules, with the safe-check allowlist
+  read from `safety.py`; the `tutor.testkit` API read from the module; the example
+  exercise closest to the item's framework and interface; the workspace's
+  `conventions.md`, the same file a hand-drafting assistant reads), then the item and its
+  course pages, then, when repairing, the last reply and the failures.
+- Stops: 3 repair rounds per item, a token budget per batch, an LLM error stops the current
+  item and keeps the finished ones.
+- Roles in `[llm.roles]`: `plan` and `generate` = GLM-5.3-Flash with thinking low (see the
+  experiment below); `oracle` = a different model family (GPT, decided 2026-10-28 in place
+  of local Gemma), since the same model writing reference and oracle is not an independent
+  check.
+- Experiment 2026-10-28, one item (a closure / accumulator debugging exercise from the
+  week 4 slides), same validator:
+
+  | Model, thinking | Rounds | Time | Tokens | Mutants |
+  |---|---|---|---|---|
+  | GLM-5.3-Flash, on | 4 (2 cut off at 32k output) | 28 min | 164k | - |
+  | GLM-5.3, on | stopped after 2 cut-off rounds | 19 min | 92k | - |
+  | GLM-5.3-FlashX, on (old prompt) | 1 | 4.3 min | 46k | good |
+  | GLM-5.3-Flash, low (old prompt) | 2 | 1.7 min | 39k | arbitrary edits |
+  | GLM-5.3-Flash, low | 1 | 1.3 min | 18k | good, two slips |
+  | GLM-5.3, low | 2 | 2.5 min | 42k | best: 3 misconceptions, 1 slip |
+  | gpt-6.1-terra, default | 2 | 1.2 min | 38k (~$0.06) | good, 3 misconceptions |
+
+  With thinking on, GLM spent its whole output on reasoning and was cut off before the
+  answer, so thinking is low by default (`--thinking on` to override). The prompt change
+  that mattered: mutants must be misconceptions of the knowledge point (at most one plain
+  slip), and `source` must cite the pages (a model copied "synthetic" from the example; a
+  code check now rejects it). One item per model, so a direction, not a measurement; phase
+  5 repeats it on whole batches.
+- A reply that cannot be read at all (cut off, not JSON) is not "repaired": the next round
+  asks the item again with what went wrong, since an empty draft gives repair nothing.
+- First real batch (week 4, 6 items, GLM-5.3-Flash, 2026-10-28) and what it changed: one
+  saved, two discarded after three rounds each on the same mutant error (`old` not found:
+  the model wrote other quotes or indentation than its own reference, and the error said
+  only "not found"), and one GLM reply containing a byte that is not UTF-8 crashed the
+  whole run, so collect never ran and two items never started. Fixes: the client decodes
+  with replacement; any exception in an item is that item's error (logged, the others
+  finish, collect runs); a mutant error lists every failing mutant with the closest line
+  of the reference, copied exactly; `resume` continues a run that stopped midway without
+  redoing finished items (tested), and `resume --profile` finishes it with another model;
+  the manifest names every model that generated its exercises.
+- Batch (step 2, approved 2026-10-28): `plan` (LLM) reads coverage.md, one line per cached
+  page (PDF page, footer, title), the existing exercise ids and the owner's preferences,
+  and returns `count` PlanItems with a reason each; code checks the count, unique and new
+  ids, lecture names and slide ranges, and asks again (twice at most) with the problems.
+  `approve` is a LangGraph `interrupt`: the CLI shows the plan and writes it to
+  `.drafts/<batch>/plan.json`; the owner approves (with any edits made to that file) or
+  sends it back with feedback, which goes to `plan`. A SQLite checkpointer in
+  `.drafts/<batch>/` keeps the paused batch, so `python -m tutor.graph resume` continues it
+  in another terminal or another day. Approved items fan out with `Send` and run the item
+  graph in parallel, at most `--parallel` at once (default: CPU cores / 4, 1-4: each
+  validation runs Spark on every core). One failing item (model unreachable, name clash)
+  does not stop the others. `collect` writes the manifest once (parallel items never
+  write it) with the preferences in `notes`, and `coverage-proposal.md`, the coverage.md
+  changes for the owner to apply. Which types a batch mixes (e.g. debugging exercises) is
+  left to the preferences, not a fixed rule.
+- Logs: `llm_calls.jsonl` with the node as purpose; one `generation.jsonl` per batch
+  (item, rounds, outcome, failure reasons).
+- Built in three steps: one item generate -> validate -> repair -> save (done); then plan
+  with the interrupt, preferences and parallel items (done); then the oracle in its own
+  context (until then `generate` writes the oracle too, as hand drafting does now).
+- The LLM never touches the disk or runs code: nodes read the cache and write files, and
+  generated code reaches `batches/` only after `validate` (including `safe`).
+- LLM output parsed into Pydantic models, the same `schema.py` models that rule 0 checks;
+  format failures are counted apart from validation failures.
 - `validate` is pure Python and acts as the judge; repair receives the failure report.
 - `retrieve_context` before RAG (phase 3, decided 2026-10-28): the cache of the batch's
   `sources`, whole (a lecture is roughly 15-25k tokens). When that does not fit the model's
