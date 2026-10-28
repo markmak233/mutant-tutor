@@ -24,14 +24,14 @@ container for isolation is fine; deploying the tool as a service is not.
   chat when stuck. Rules live in CLAUDE.md ("Tutoring"): read the code and run the tests first,
   explain the first real error and its concept, direction before code, never touch `student.py`
   or quote `solution/`. Mistakes seen this way feed debugging exercises and mutants. A hint
-  command inside the system follows phase 3 (roadmap 3b).
+  command inside the system follows phase 3 (roadmap 3c).
 - Batch format contract (decided 2026-10-28): drafting batches with Claude Code stays a
   supported way to make exercises after phase 3, next to the LLM pipeline. What both must
   produce is the batch format, defined once in `schema.py` (see "Exercise validation", rule
   0), so the validator, hints, evaluation and GUI never need to know who wrote a batch;
   `manifest.json` `method` and `model` record it. Reason: the first batches were written by
   hand without any check on metadata, and one assistant in one week produced three
-  spellings of the same field. Fields added later (such as 3b's per-mutant misconception
+  spellings of the same field. Fields added later (such as 3c's per-mutant misconception
   line) start optional with a default; making one required comes with a migration script
   for existing batches, never by letting them fail.
 
@@ -108,13 +108,13 @@ smartCodingReview/                       # public repo (the `tutor/` above), cod
 │   ├── config.py                        # P1 reads WORKSPACE_DIR, derives subpaths
 │   ├── envcheck.py                      # P1 checks the workspace's [requires]
 │   ├── execution.py                     # P1 copy to temp dir -> subprocess pytest -> delete
-│   ├── validation/                      # P1 the checks, rule 0 added in P2 (internals designed before coding)
+│   ├── validation/                      # P1 the checks; P2 rule 0, P3a the safety check (internals designed before coding)
 │   ├── testkit.py                       # P2a run a file-level program, read part-*, compare output
 │   ├── attempts.py                      # P2a pytest plugin: one attempts.jsonl line per exercise run
 │   ├── schema.py                        # P2 Pydantic models of metadata.json / manifest.json (rule 0),
 │   │                                    #   P3 parses LLM output into the same models
-│   ├── materials/                       # pre-P3 course files -> per-file md cache (pypdfium2), vision pages
-│   ├── llm.py                           # P3 thin LLM API client, no LangChain; a minimal one first, for vision pages
+│   ├── materials/                       # P3a course files -> per-file md cache (pypdfium2), vision pages
+│   ├── llm.py                           # P3a thin OpenAI-compatible client, standard library only, no LangChain
 │   ├── graph/                           # P3 langgraph dependency added here
 │   ├── rag/                             # P4
 │   └── eval/                            # P5
@@ -147,6 +147,7 @@ smartcodereview-workspace/
     │   └── proj2/
     ├── cache/                           # text of every source file, read once (see "Reading files")
     │   └── lectures/<file>.md           #   mirrors the source path; one section per page or slide
+    ├── logs/llm_calls.jsonl             # P3a one line per LLM call (purpose, model, tokens, seconds)
     ├── batches/                         # one directory per generation run
     │   ├── 2026-10-27_p2-golden/
     │   │   ├── manifest.json            # phase, date, mode, sources, method, model, git commit, exercises,
@@ -243,17 +244,43 @@ instead of the original files.
   page or slide, headed with the location (`## p.12 · slide 2.10`), followed by a comment
   with how it was read (text layer or vision model, model name, date) and a hash of that
   page's content. A page whose hash is unchanged is never read again; a changed file costs
-  only its changed pages. The hash is of the page content, not of a rendered image, so a
+  only its changed pages. A transcription also records the prompt version
+  (`vision.PROMPT_VERSION`, raised with every prompt change; a test fails if the prompt
+  changes without it), and a vision run transcribes pages made with an older prompt again,
+  except pages marked `corrected` (fixed by hand against the slide), which are listed
+  instead of overwritten (2026-10-28, after 130 pages were left on an old prompt). The hash is of the page content, not of a rendered image, so a
   library upgrade does not trigger a re-read.
-- Pages that need the vision model: ignore images that sit at the same position on at least
-  30% of the pages (logo, template background), then flag a page whose remaining images
-  cover at least 25% of it. On the first course's lectures this caught every code and
-  pseudocode image checked by eye; the false positives were decoration (photos, logos), cheap
-  to transcribe and impossible to tell from code without looking. A flagged page is rendered
-  to PNG and transcribed: code and pseudocode verbatim in fenced blocks, never corrected;
-  diagrams as structured text; tables as markdown; unreadable characters marked. Code blocks
-  are checked with `ast.parse` (illustrative lecture code is flagged, not rejected); pages
-  already read by hand serve as a reference set for transcription accuracy.
+- Pages that need the vision model (`materials/pdf.py`, revised 2026-10-28 on real data):
+  ignore images that sit at the same position on at least 30% of the pages (logo, template)
+  and images with 5 or more text-layer characters on top of them (a title's shadow effect,
+  a text box's background: the text layer already has their words); flag a page whose
+  remaining images cover at least 5% of it. An image inside a form XObject reports bounds in
+  the form's coordinates, so the form's bounds on the page stand for it. History: the first
+  rule (25%, no text rule) missed a slide of three small code screenshots; 5% without the
+  text rule flagged every section-divider slide. The final rule flagged 162 of 462 pages,
+  caught every code and pseudocode image checked by eye, and left out a code box whose code
+  was in the text layer.
+- Transcription (`materials/vision.py`): a flagged page is rendered to PNG and sent with its
+  text layer; the prompt asks for code, pseudocode and commands verbatim in fenced blocks
+  (pseudocode tagged `text`, symbols such as ← ∈ kept), diagrams as structured text, tables
+  as markdown, decoration (photos, logos, word clouds) as one line, `[?]` for what cannot be
+  read, and no invented links. Python blocks are checked with `ast.parse` (a block that does
+  not parse gets a note, not a rejection). Thinking is turned off (`reasoning_effort:
+  "none"`; transcription is copying) and output is capped at 2048 tokens. A runaway
+  repetition (a unit repeated 8 or more times over at least 400 characters, e.g. `&nbsp;`
+  filling a blank area) is cut with a note, since at temperature 0 a rerun loops the same
+  way; output that hits the cap without a loop is kept as `partial` and done again on the
+  next run. If the model fails, pages done so far are kept and the rest stay `pending`.
+- Measured on the first course (Gemma 4 26B-A4B, local): thinking on took 25-80 s per page
+  with about 85% of output tokens spent on hidden reasoning; thinking off took 4-11 s with
+  equal or better quality (code, pseudocode and commands exact on the six pages read by
+  hand). All 162 image pages: median 7.2 s, about 21 minutes. Weaknesses seen: symbols
+  rewritten to ASCII (fixed by the prompt), an empty `...` continuation line dropped, one
+  wrong description of an example. The pages read by hand stay the reference set for
+  comparing models.
+- Commands: `python -m tutor.materials <file or folder>` (text layer only; image pages
+  `pending`), `--vision` to transcribe pending and partial pages with `LLM_MODEL`; calls go to
+  `$WORKSPACE_DIR/logs/llm_calls.jsonl`.
 - PDF library: pypdfium2 (Apache / BSD) for text and rendering, plus pdfplumber (MIT) only if
   RAG needs per-character font data. Compared on the first course's 9 lecture PDFs with
   PyMuPDF and pdfplumber: pypdfium2 was the only one to merge the characters these slides
@@ -277,6 +304,13 @@ instead of the original files.
   - Not read: `.doc`, `.ppt`, Keynote and Google formats (the user exports to PDF, PPTX or
     DOCX); archives, as above. Office files are zip packages, so file and unpacked sizes are
     capped before parsing.
+  - Materials container (owner, 2026-10-28): the reader runs on the host first, PDF only
+    (pypdfium2 needs no system install). When office formats need LibreOffice, the reader
+    can also run in a container with no network: source files mounted read-only, the md
+    cache and page images written out, the vision model called from the host on those
+    images. It isolates parser exploits in crafted files and bundles LibreOffice. It does
+    not stop prompt injection: that text is meant to reach the LLM wherever it is parsed,
+    so layer A and the test-run container answer it.
   - All-in-one converters (MarkItDown, Docling, Unstructured) were considered: they hide
     page and slide numbers, which sources must record, or bring heavy layout models.
     MarkItDown may serve as a fallback for formats without a reader.
@@ -286,6 +320,8 @@ instead of the original files.
 An exercise is valid only if:
 
 0. `metadata.json` matches the `schema.py` model (format).
+safe. Every `.py` file that validation runs passes the static safety check (see "Code
+   execution safety", layer A); otherwise nothing is run.
 1. `reference.py` passes all tests.
 2. `skeleton.py` (the pristine skeleton) fails.
 3. Every mutant in `mutants/` fails.
@@ -577,7 +613,7 @@ too easy`), since yes/no labels compare cleanly with a judge's and need no scale
 assistant writes one JSON line per exercise to the workspace's `ratings.jsonl` (batch,
 exercise, date, clear, fits, taught, targets, remark), one file for all batches so later
 plans read every rating at once. Those ratings are the labels an LLM judge is checked against before
-phase 3 trusts it, and later batches' plans read them (see the [3] preference chat). ContentGen (SIGCSE TS 2026) separates
+it is trusted (roadmap 3b), and later batches' plans read them (see the [3] preference chat). ContentGen (SIGCSE TS 2026) separates
 correctness from contextual fit in the same way, and found that a summary of recently
 covered material in the prompt improved generated questions (a [3] candidate).
 
@@ -605,8 +641,9 @@ In phase 2 Claude Code drafts 3-5 per exercise and the validator plus the owner 
 mutants (unkillable) and ones that crash on import; any bug the owner makes while solving is added as
 a mutant. Phase 3 moves drafting to the LLM pipeline.
 
-Independent checks (decided in principle 2026-10-26, Codex review 4; built at phase 3
-start, design explained first since it touches `validation/`). When question, reference,
+Independent checks (decided in principle 2026-10-26, Codex review 4; the separate oracle
+is built in 3a, the held-out set in 3b once the owner's solutions and mistakes exist; design
+explained first since it touches `validation/`). When question, reference,
 tests, mutants and oracle come from one generation, they can agree with each other and
 still share one misreading of the requirement; killing every planted mutant only shows
 the planted bugs are caught. This already happened by hand: the stripes test rejected the
@@ -635,6 +672,13 @@ retrieve_context -> generate_exercise -> validate --pass--> save
 
 - LLM output parsed into Pydantic models, the same `schema.py` models that rule 0 checks.
 - `validate` is pure Python and acts as the judge; repair receives the failure report.
+- `retrieve_context` before RAG (phase 3, decided 2026-10-28): the cache of the batch's
+  `sources`, whole (a lecture is roughly 15-25k tokens). When that does not fit the model's
+  context, a slice instead: the slides that `coverage.md` lists for the batch plan's
+  knowledge points. A slice is chosen by label, not by a query, so it is deterministic and the owner
+  sees exactly which pages went in. For a local model, raising the context length it is
+  loaded with (8192 on the owner's Mac so far; the model supports more, at the cost of
+  memory) comes before slicing.
 - Every generated batch mixes function-level and file-level exercises (see "Exercise interfaces").
 
 ## RAG
@@ -646,6 +690,10 @@ retrieve_context -> generate_exercise -> validate --pass--> save
 - Hybrid retrieval (BM25 + vectors): API names like `aggregateByKey` are exact-match problems
   that pure vector search handles poorly.
 - Evaluate with 20-30 hand-labelled queries: recall@k for vector-only vs BM25-only vs hybrid.
+  The labels already exist by then (2026-10-28): each knowledge point in `coverage.md` with
+  its slides, and each exercise's `source.pdf_pages`, is a query with its relevant pages.
+- Chunks are the cache's page sections, the same unit phase 3's slices use, so the
+  chunker is not new work.
 - Vector store and embedding model not yet decided (Chroma or FAISS candidates).
 
 ## Evaluation metrics (README results table)
@@ -672,6 +720,37 @@ deterministic judge, hybrid RAG with recall@k, the phase 5 metrics, the hint lea
     code go to that provider; a local model keeps them on the machine;
   - cost estimate before a batch is generated, and a budget cap that stops the run (the
     user pays), using the call log below.
+  - Local first (decided 2026-10-28, owner): development and vision transcription start on
+    a local model through LM Studio's OpenAI-compatible server; a cloud provider is added
+    later through the same client. Local vision model: Gemma 4 26B-A4B (mixture of
+    experts, about 4B active, about 15 GB, on the owner's M2 Pro with 32 GB); Qwen3.8 27B
+    was dropped (owner: too power-hungry). A 15 GB model and Spark validation compete for
+    memory, so generation and validation do not run at the same time.
+  - First cloud provider (owner, 2026-10-28): Zhipu's bigmodel.cn, OpenAI-compatible at
+    `https://open.bigmodel.cn/api/paas/v4`, with GLM-5.3-Flash (native image input, base64
+    data URLs, 1M context; the owner has free tokens for it). How to minimise thinking
+    differs by provider and model: LM Studio takes `reasoning_effort: "none"`; GLM takes
+    `thinking: {"type": "disabled"}`, but GLM-5.3 models reject it and accept only
+    `reasoning_effort` low / high / max, so the client tries `disabled` and falls back to
+    `low` on a 400. With a cloud model the slide images go to that provider; the README
+    states this data flow.
+  - Several models (owner, 2026-10-28): keys stay in `.env`, one per provider
+    (`ZHIPU_API_KEY=...`); everything else is named profiles in the workspace's
+    `workspace.toml` (`[llm.profiles.<name>]`: provider, model, optional base_url,
+    api_key_env, reasoning_effort, timeout_s), and `[llm.roles]` maps a task (vision,
+    generate, oracle, ...) to a profile, so the oracle can come from a different model than
+    the exercise and phase 5 can compare models; `--profile` overrides for one run. The
+    provider (`lmstudio`, `glm`, `custom`) supplies the default base URL and the thinking
+    switches. A profile holding an `api_key` field or a key-like value is refused, unknown
+    fields are errors, and a missing variable is named in the message. Without an `[llm]`
+    section, `LLM_PROVIDER` / `LLM_MODEL` / `LLM_BASE_URL` / `LLM_API_KEY` act as one
+    profile. Like `[safety]`, the section is the owner's: generation never writes it. Apple Intelligence's on-device model is reachable too, through third-party
+    bridges that serve it as an OpenAI-compatible local API (apfel and similar; not an
+    Apple interface), so the same client can call it with no extra code. It is not a default:
+    about 4096 tokens for input and output together (one week's material and the format spec
+    do not fit), no image input found, one fixed small model, and rate limits for
+    background use. It may serve as one more local arm in the phase 5 model comparison or for
+    short text tasks.
 - [3] Summary of recently covered material in the generation prompt (ContentGen found it
   improved generated questions); built from `coverage.md` and the batch's sources.
 - [3] Call log: one JSONL line per LLM call (node, model, input / output / cached tokens,
@@ -711,6 +790,15 @@ deterministic judge, hybrid RAG with recall@k, the phase 5 metrics, the hint lea
     (see "Validity vs teaching quality") gains an optional free-text remark, and the next
     batch's plan reads the ratings and remarks of earlier batches.
 - [3] Batch API for whole-batch generation: not interactive, usually much cheaper.
+- Review of the [3] items (2026-10-28, owner adopted the proposals): adopted, as part of 3a:
+  model access (local first; cost estimate and budget cap once a cloud provider is added),
+  the recent-material summary, the call log, prompt caching as a prompt layout with a long
+  stable prefix now (its cost effect measured once a cloud provider is used), structured
+  output (JSON for the plan, metadata and manifest; if one large JSON with every code file
+  fails often on local models, code files come as separate outputs and are assembled and
+  checked in code; format failures counted apart from validation failures), plan approval,
+  and the preference chat (CLI first). Batch API: backlog until a cloud provider is used.
+  Isolation and vision transcription: decided separately (see their items).
 - [3] Revisit isolation: phase 3 runs LLM-generated code, and the runner is not a sandbox
   (see "Code execution safety"). Decide whether validation of generated batches moves into
   a local container, which changes the "Docker only for reproducibility" decision there
@@ -718,7 +806,7 @@ deterministic judge, hybrid RAG with recall@k, the phase 5 metrics, the hint lea
   malicious material. Also consider a static check on generated code that rejects network
   access, subprocesses and reads or writes outside the exercise directory. Decided
   2026-10-28: static check first, container later (see "Code execution safety").
-- [3b] Calibrated LLM judge for hint quality only (leaks the answer? right direction?),
+- [3c] Calibrated LLM judge for hint quality only (leaks the answer? right direction?),
   checked against owner-labelled hints before its scores are trusted. Never for validity.
 - [4] Reranker after hybrid retrieval, as one more arm of the recall@k comparison.
 - [5] Personal workflow cost (Codex review 4): steps and minutes from adding lecture files
@@ -731,6 +819,8 @@ deterministic judge, hybrid RAG with recall@k, the phase 5 metrics, the hint lea
   deterministic validator.
 - [5] Long-context baseline: "without RAG" means the whole week's material in the prompt
   (with caching), not no material, so the comparison shows whether retrieval earns its keep.
+  A third arm (2026-10-28): the labelled page slice from `coverage.md`, i.e. perfect
+  retrieval, the upper bound that shows how far RAG falls short of it.
 - [after 3, optional] MCP server exposing `validate` (and later `hint`) so any coding agent
   can check the exercises it writes.
 - Not proposed: fine-tuning or RL (too little data; model + validator suffices), multi-agent
@@ -775,22 +865,65 @@ cannot skip it.
 
 Isolation layers (decided 2026-10-28, owner): the material is files the user downloaded
 themselves, so a cheap layer comes first and a stronger one later.
-- A, static check, before phase 3 ships: every generated `.py` file is checked with `ast`
-  before the exercise is saved. Rejected: imports of `socket`, `subprocess`, `requests`,
-  `urllib`, `http`; calls to `os.system`, `eval`, `exec`, `__import__`; `open()` on an
-  absolute or `~` path. Allowed: what tests need, such as `os.environ` and testkit (trusted
-  repo code that starts subprocesses itself). It is the only layer that also covers the
-  learner's own `pytest test_student.py`, which runs generated tests outside the validator.
-  Bypassable by a determined author, so it is a filter, not a sandbox.
-- B, container, later: validation of generated batches in Docker or Podman, one
-  implementation for macOS, Linux and WSL: `--network none`, only the exercise and a temp
-  dir mounted, a non-root user, read-only root file system, memory / CPU / process limits;
-  one container per validation with `docker exec` per pytest run; a per-course image built
-  from `workspace.toml` `[requires]`, with envcheck run inside and outside so the image and
-  the learner's machine use the same versions. Measure the overhead first (one Spark and one
-  MRJob exercise, container vs host); if it is too slow on macOS, the fallback is the OS
-  sandboxes coding assistants use (Seatbelt `sandbox-exec` on macOS, bubblewrap on Linux),
-  which run on the host environment but need one profile per OS.
+- A, static safety check (rule `safe`, `validation/safety.py`; done 2026-10-28). Every `.py`
+  file validation runs (the exercise's own files except `student.py`, which is the
+  learner's and is replaced in every run, and every solution file) is read with `ast` and
+  never run. An allowlist, not a denylist: a denylist is never complete, and the first
+  course's 255 exercise files used only 17 modules. Six rules: imports from the allowlist
+  only; `os` / `sys` limited to `os.environ`, `os.path`, `sys.argv / exit / stdin / stdout /
+  stderr / executable`; no `eval`, `exec`, `compile`, `__import__`, `breakpoint`; no dunder
+  attribute outside a short list (`__name__`, `__module__`, `__qualname__`, `__init__`,
+  `__class__`, `__doc__`), and `getattr` / `setattr` / `delattr` take a literal name; no
+  literal path starting with `/` or `~` or containing `..` in a file-opening call
+  (`open`, `Path`, Spark readers), no `home()` / `expanduser()`; no shell commands through
+  the frameworks (`RDD.pipe`, MRJob `*_cmd` / `*_pre_filter`). The exercise folder may not
+  hold `conftest.py`, `pytest.ini`, `setup.cfg`, `tox.ini` or `pyproject.toml`, which pytest
+  runs on its own. A failure makes the exercise INVALID and skips every rule that runs
+  code. A file with a syntax error is not a finding: Python cannot run it either, and the
+  rules that run code report it.
+  - The allowlist has three layers: a core in code (pure-computation standard library,
+    `pytest`, `hypothesis`, `tutor`, the exercise's `student` / `oracle`); the modules of
+    the exercise's `framework` (`mrjob`; `pyspark`); and a course's extra modules in
+    `workspace.toml` `[safety] allow_imports`, found by walking up from the exercise. Only
+    the owner edits `workspace.toml` and generation never writes it, so generated code
+    (whose metadata an LLM writes) cannot widen its own allowlist.
+  - It is the only layer that also covers the learner's own `pytest test_student.py`,
+    which runs generated tests outside the validator. Python is too dynamic for a static
+    check to prove code safe: it is a filter that stops the obvious, not a sandbox.
+- B, test-run container: deferred to the generalization phase (second course) and the GUI
+  (owner, 2026-10-28), when courses with riskier libraries and other users arrive. Until
+  then phase 3 runs with layer A and material the user trusts, and a course whose modules
+  are rated medium or high risk (below) is refused rather than run unprotected. Draft:
+  the host orchestrates (validator logic, reports, attempts, hints, GUI, every LLM call)
+  and the container only executes. The one seam is `execution.run_pytest`: its subprocess
+  becomes `docker exec` in a long-lived per-course container (Docker or Podman, one
+  implementation for macOS, Linux and WSL) with the exercise mounted read-only and a
+  writable temp dir, `--network none`, a non-root user, a read-only root file system,
+  memory / CPU / process limits, and a whitelist of environment variables (never `.env` or
+  API keys). Results come back as they do now (exit code, JUnit XML, output), so `checks.py`
+  does not change. The image is built from `workspace.toml` `[requires]`, with envcheck run
+  inside and outside so both use the same versions. On medium / high risk courses the
+  learner's runs go through a command that runs in the container, and attempts are written
+  on the host from its result. Measure the overhead first; if it is too slow on macOS, the
+  fallback is the OS sandboxes coding assistants use (Seatbelt on macOS, bubblewrap on
+  Linux). Costs: debugging needs an editor that attaches to the container; the Docker VM
+  takes memory next to a local LLM.
+- Risk tiers for a course's modules (design for the generalization phase): pure
+  computation (numpy, networkx) is low and runs on the host; file- or URL-capable libraries
+  (pandas `read_csv` takes URLs, numpy `load` unpickles) are medium; system-level ones
+  (`subprocess`, `os.fork`, sockets, an operating-systems course) are high and run only in
+  the container. Which modules a course needs is hard to list by hand, so an LLM may draft
+  `[requires]` and `[safety] allow_imports` at workspace creation, each entry with its
+  source (lab, page), and the owner accepts entry by entry, as for the GUI's `[requires]`
+  draft. A generated exercise that needs an unlisted module fails `safe` and yields a
+  proposal to the owner, never an automatic widening.
+- Other languages (generalization phase, not built): a `language` field in metadata
+  (optional, default `python`); tests stay pytest and run the compiled program as a
+  subprocess, as file-level exercises already do; one safety checker per language chosen
+  by `check_safety` (tree-sitter for most languages, sqlglot for SQL), with per-language
+  allowlists. A few languages built in, others configured by the owner in `workspace.toml`
+  (extension, compile and run commands, allowlist); those commands run, so generation never
+  writes them. A language without a built-in checker needs the container.
 
 ## CI
 
@@ -850,7 +983,7 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
 - `attempts.jsonl` gets one line per exercise per test run (time, batch, exercise, mode,
   result, pass / fail / error counts, first error, partitions, duration). Nothing reads it in
   phase 2; it is kept so review batches can later target weak topics, and as material for
-  hint rules and mutants (roadmap 3b). Done 2026-10-25 as a pytest plugin, `tutor/attempts.py`,
+  hint rules and mutants (roadmap 3c). Done 2026-10-25 as a pytest plugin, `tutor/attempts.py`,
   registered through the `pytest11` entry point, so it loads in every pytest run of the venv
   with no file in the workspace (a per-batch conftest.py was the alternative). It writes only
   for test files under `$WORKSPACE_DIR/batches/<batch>/exercises/<exercise>/`, so validator
@@ -938,6 +1071,8 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
      baseline set for phase 5. While solving, two light additions (see "Validity vs
      teaching quality" and "Independent checks"): a one-line teaching-quality rating per
      exercise, and the owner's solutions and mistakes kept as the first held-out set.
+     Phase 3a does not wait for this (decided 2026-10-28: it needs no solving data, so it
+     runs alongside the owner's daily solving); 3b does.
    - Batch format contract (decided 2026-10-28, before `v0.1.0`; see "Batch format
      contract" and rule 0), in steps: `schema.py`, `python -m tutor.schema` and the JSON
      Schema export; the existing workspace batches migrated (21 metadata files: `entry_point`
@@ -970,24 +1105,37 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
      order, why the combiner is safe, memory needed, then pseudocode), checked against
      rubric points and the exercise's `pseudocode.md`. A code exercise can gain a design
      part after it is solved.
-   Before phase 3 so the generator covers these types too.
-3. LangGraph generate-validate-repair loop. First review the [3] items of "LLM engineering
-   candidates". Prerequisites (from the 2026-10-25 slide review):
+   Before the generation loop (3a) covers every exercise type: the loop starts with code
+   exercises, and these two types join once 2b is done (changed 2026-10-28; it was "before
+   phase 3", which the split of phase 3 made too strict).
+3. LLM generation, in three parts (split 2026-10-28, owner: most of phase 3 needs no
+   solving data, so it does not wait for phase 2 to be solved).
+3a. No solving data needed; runs alongside the owner's solving. First review the [3] items
+   of "LLM engineering candidates". In order: isolation layer A (static check); the
+   materials reader with the md cache and vision transcription ("Reading files"), with a
+   minimal `llm.py`; the LangGraph generate-validate-repair loop with the [3] items adopted
+   (model access, structured output, call log, caching, plan approval, preference chat),
+   code exercises first; the oracle written in a separate context (see "Independent
+   checks"). Isolation layer B moved to the generalization phase (2026-10-28).
+   Prerequisites (from the 2026-10-25 slide review):
    image-only slides are read as images (a multimodal model or OCR) before anything is
    generated from them, and every source records slide footer, PDF page and any lab or
    textbook origin, with the exercise's teaching assumptions stated.
-   Pre-phase-3 work (decided 2026-10-28), in order: isolation layer A (static check); the
-   materials reader with the md cache and vision transcription ("Reading files"), which
-   needs a minimal `llm.py`; isolation layer B can follow.
    Note, malicious material (2026-10-26): phase 3 feeds document text to the LLM and then
    runs the code it writes. A crafted PDF or web page can carry instructions (prompt
    injection) that make the generated reference, tests or mutants read files such as
    `~/.ssh` or send data out, and the validator would execute them with the user's rights.
-   Before phase 3 ships: validate generated batches isolated from the user's files and
-   without network (see the [3] isolation item), and tell users to generate only from
-   material they trust.
-3b. Hint command, `python -m tutor.hint <exercise>` (decided 2026-10-24, after phase 3 since it
-   needs the LLM client; first review the [3b] items of "LLM engineering candidates").
+   Before phase 3 ships: layer A checks every generated file before it runs, and users
+   are told to generate only from material they trust (changed 2026-10-28: the test-run
+   container, layer B, comes with the generalization phase; until then medium and high
+   risk courses are refused, see "Code execution safety").
+3b. Needs the owner's solving data; starts when the first batch's must exercises are solved:
+   the held-out set of "Independent checks" (the owner's passing solutions must pass, their
+   mistakes must fail), and an LLM judge of teaching quality checked against the owner's
+   ratings before it is trusted (never for validity).
+3c. Hint command, `python -m tutor.hint <exercise>` (decided 2026-10-24, after 3a since it
+   needs the LLM client, and after 3b since its rules come from the owner's real mistakes;
+   numbered 3b until 2026-10-28; first review the [3c] items of "LLM engineering candidates").
    Three layers, cheapest and most certain first:
    - rules, no LLM: known low-level errors (syntax, full-width punctuation, `NotImplementedError`
      left in, PYTHON_VERSION_MISMATCH, leftover SparkContext, tuple-formatted output) -> line and cause;
@@ -1006,6 +1154,9 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
 
 ## Backlog (decided, not scheduled)
 
+- Batch API for whole-batch generation, once a cloud provider is used (see the [3] review in
+  "LLM engineering candidates").
+
 - C1 value-order check: rule 5 also reruns with each key's values shuffled (a runtime
   subclass, like the combiner switch), catching reducers that rely on value order, the
   reason secondary sort exists. First verify that mrjob's inline runner delivers values
@@ -1017,7 +1168,10 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
   instead of defining their own word rule (owner, 2026-10-25). Existing exercises are not
   converted (see "Decisions not to do").
 - Workspace `coverage.md`: before each batch, list the lectures' knowledge points with their
-  status; the next batch is chosen from the gaps (Codex's list: secondary sort, inverted
+  status and their slide ranges (footer numbers; the cache headers map them to PDF pages).
+  Since 2026-10-28 these ranges also select phase 3's slices and label phase 4's retrieval
+  test, so the footer reading must be right (a year in the footer was once read as the
+  slide number); the next batch is chosen from the gaps (Codex's list: secondary sort, inverted
   index / TF-DF, multi-step MRJob and top-k, Spark lineage / cache / repartition, SQL views
   and UDFs; SQL is restricted per exercise, never globally).
 
@@ -1081,6 +1235,8 @@ Later phases, after phase 5. Order decided 2026-10-26: second course, then adapt
 release; exam mode stays open.
 - Second course: use the tool for another course (other language or framework) to prove
   workspace, testkit and setup recipes are not shaped around one course. A long-term goal.
+  Brings isolation layer B, the module risk tiers and other languages (see "Code execution
+  safety").
 - Adaptive review: use `attempts.jsonl` (failures, run counts, hints used) and `coverage.md`
   to find weak knowledge points and schedule `review`-mode batches with spaced repetition.
 - Packaging and release: `pipx install`, one command to start, CI on macOS and Windows
@@ -1140,14 +1296,14 @@ so it comes late; the adaptive review screens can be built with it.
     commands (arbitrary commands; hallucinated package names can be squatted). A component
     or platform missing from the recipes is reported as needing a new recipe.
   - This partly changes "Check, don't install" (see "Environment"): confirm with the owner
-    when the GUI phase starts. A per-course container image is now planned for isolation
-    (layer B, "Code execution safety"); whether setup also uses it is decided when the GUI
-    phase starts.
+    when the GUI phase starts. The per-course test-run container (layer B, "Code execution
+    safety") arrives with the generalization phase, before the GUI; whether setup also uses
+    it is decided when the GUI phase starts.
 
 ## Open questions
 
-- Default LLM provider and model, and the embedding model (the client itself is
-  provider-agnostic, see "LLM engineering candidates").
+- The embedding model (phase 4). LLMs: local Gemma 4 and bigmodel.cn GLM-5.3-Flash first
+  (decided 2026-10-28, see the [3] model access item); others through the same client.
 
 ## Pseudocode
 

@@ -139,6 +139,11 @@ with your user's permissions and can read or write other files and use the netwo
 validate exercises you wrote or reviewed. Phase 3 runs LLM-generated code the same way, so
 review it first or run the validator in a container or VM.
 
+Before anything runs, a static check reads every exercise file and rejects code outside an
+allowlist (modules, `os` / `sys` attributes, `eval` / `exec`, paths outside the exercise,
+shell commands through Spark or MRJob). It stops the obvious, but Python is too dynamic for
+a static check to prove code safe; a test-run container is planned for later phases.
+
 ## Layout
 
 ```
@@ -147,7 +152,8 @@ src/tutor/
   envcheck.py      check the machine against the workspace's [requires]
   execution.py     run pytest in a temp dir, subprocess + timeout, kill the whole process group
   schema.py        the batch format (metadata.json, manifest.json); `python -m tutor.schema`
-  validation/      rule 0 (format), rules 1-5 and the api check; `python -m tutor.validation`
+  validation/      rule 0 (format), a static safety check, rules 1-5 and the api check;
+                   `python -m tutor.validation`
 schemas/           the same format as JSON Schema files, exported from schema.py
 examples/          synthetic exercises (exercise/ for the learner, solution/ for the validator)
 tests/             unit tests; `-m spark` for end-to-end runs
@@ -164,7 +170,12 @@ Phase numbers match `docs/design.md`.
 - **2** Golden exercises: a first batch of 10 course exercises (validated; being solved by
   hand to run the full loop)
 - **2b** Code-tracing exercises ("what does this print and why")
-- **3** LLM generation: LangGraph generate → validate → repair loop, Pydantic-parsed output
+- **3a** LLM generation: static check on generated code, slide reading with a cached text
+  layer and vision transcription, LangGraph generate → validate → repair loop with
+  Pydantic-parsed output, then a container for isolation
+- **3b** Checks that need a learner's real work: held-out solutions and mistakes, an LLM
+  judge of teaching quality calibrated against the learner's ratings
+- **3c** Hint command: rules, mutant matching, then an LLM, never revealing the answer
 - **4** Hybrid RAG over course material (BM25 + vectors), evaluated with recall@k
 - **5** Evaluation: validity rate, mutant kill rate, cost per valid exercise, with vs without RAG
 
