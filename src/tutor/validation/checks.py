@@ -2,6 +2,8 @@
 
 0. metadata.json fits the batch format (schema.py); the other rules read their settings
    from it, so they are skipped if it does not.
+safe. Every .py file that validation would run passes the static safety check (safety.py);
+   if one does not, nothing is run.
 1. The reference passes every test.
 2. The skeleton fails them: tests ran and failed, not crashed before running.
 3. Every mutant fails them, so the tests can catch each planted bug.
@@ -24,7 +26,13 @@ from tutor.execution import DEFAULT_TIMEOUT_S, Outcome, RunResult, run_pytest
 from tutor.schema import Metadata, problems
 from tutor.testkit import COMBINER_ENV, DEFAULT_PARTITIONS, PARTITIONS_ENV
 from tutor.validation.api import count_uses, find_violations
-from tutor.validation.exercise import ExerciseFiles
+from tutor.validation.exercise import STUDENT_FILE, ExerciseFiles
+from tutor.validation.safety import (
+    allowed_imports,
+    config_files,
+    find_hazards,
+    workspace_allow_imports,
+)
 
 # Spark tests read PARTITIONS_ENV as their number of partitions / input files (design.md).
 PARTITION_COUNTS = (1, 2, 4)
@@ -33,13 +41,13 @@ PARTITION_COUNTS = (1, 2, 4)
 class Status(Enum):
     OK = "ok"
     FAIL = "FAIL"
-    SKIPPED = "skip"  # not run because rule 0 or 1 failed
+    SKIPPED = "skip"  # not run because rule 0, safe or 1 failed
     NOT_APPLICABLE = "n/a"  # does not apply to this exercise; does not affect validity
 
 
 @dataclass(frozen=True)
 class RuleResult:
-    rule: str  # "0" to "5", or "api"
+    rule: str  # "0", "safe", "1" to "5", or "api"
     name: str
     status: Status
     detail: str
@@ -69,9 +77,14 @@ def validate(ex: ExerciseFiles, timeout_s: float | None = None) -> ValidationRep
         reason = "skipped: metadata.json must fit the batch format first"
         return ValidationReport(ex.exercise_id, [
             fmt,
-            RuleResult("1", "reference passes", Status.SKIPPED, reason, 0.0),
-            *_skipped_test_rules(reason),
-            RuleResult("api", "api constraints", Status.SKIPPED, reason, 0.0),
+            RuleResult("safe", "static safety", Status.SKIPPED, reason, 0.0),
+            *_skipped_after_safety(reason),
+        ])
+    safe = check_safety(ex)
+    if safe.status is not Status.OK:
+        # Code that fails the safety check is never run, not even the reference.
+        return ValidationReport(ex.exercise_id, [
+            fmt, safe, *_skipped_after_safety("skipped: the code must pass the safety check"),
         ])
     if timeout_s is None:
         timeout_s = float(ex.metadata.get("timeout_s", DEFAULT_TIMEOUT_S))
@@ -82,12 +95,14 @@ def validate(ex: ExerciseFiles, timeout_s: float | None = None) -> ValidationRep
         # check does not depend on the tests, so it still runs.
         return ValidationReport(ex.exercise_id, [
             fmt,
+            safe,
             reference,
             *_skipped_test_rules("skipped: the reference must pass first"),
             check_api_constraints(ex),
         ])
     return ValidationReport(ex.exercise_id, [
         fmt,
+        safe,
         reference,
         check_skeleton_fails(ex, timeout_s),
         check_mutants_killed(ex, timeout_s),
@@ -95,6 +110,14 @@ def validate(ex: ExerciseFiles, timeout_s: float | None = None) -> ValidationRep
         check_distribution(ex, timeout_s),
         check_api_constraints(ex),
     ])
+
+
+def _skipped_after_safety(reason: str) -> list[RuleResult]:
+    return [
+        RuleResult("1", "reference passes", Status.SKIPPED, reason, 0.0),
+        *_skipped_test_rules(reason),
+        RuleResult("api", "api constraints", Status.SKIPPED, reason, 0.0),
+    ]
 
 
 def _skipped_test_rules(reason: str) -> list[RuleResult]:
@@ -111,6 +134,29 @@ def check_format(ex: ExerciseFiles) -> RuleResult:
     if found:
         return RuleResult("0", "format", Status.FAIL, "metadata.json: " + "; ".join(found), 0.0)
     return RuleResult("0", "format", Status.OK, "metadata.json fits the batch format", 0.0)
+
+
+def check_safety(ex: ExerciseFiles) -> RuleResult:
+    """The exercise's own .py files (student.py is the owner's and is replaced in every
+    run) and every solution file that validation runs."""
+    try:
+        allowed = allowed_imports(ex.metadata["framework"],
+                                  workspace_allow_imports(ex.exercise_dir))
+    except ValueError as e:
+        return RuleResult("safe", "static safety", Status.FAIL, str(e), 0.0)
+    files = {
+        p.name: p for p in sorted(ex.exercise_dir.glob("*.py")) if p.name != STUDENT_FILE
+    }
+    solution_files = [ex.reference, ex.skeleton, *ex.mutants, ex.oracle, ex.oracle_test]
+    for path in filter(None, solution_files):
+        files[f"{path.parent.name}/{path.name}"] = path
+    found = [f"{name} is not allowed in an exercise (pytest runs it on its own)"
+             for name in config_files(ex.exercise_dir)]
+    for name, path in files.items():
+        found += [f"{name} {hazard}" for hazard in find_hazards(path.read_text(), allowed)]
+    if found:
+        return RuleResult("safe", "static safety", Status.FAIL, "; ".join(found), 0.0)
+    return RuleResult("safe", "static safety", Status.OK, f"{len(files)} files checked", 0.0)
 
 
 def check_reference_passes(ex: ExerciseFiles, timeout_s: float) -> RuleResult:

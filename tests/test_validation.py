@@ -135,9 +135,36 @@ def test_metadata_that_breaks_the_format_skips_every_other_rule(tmp_path, metada
     assert report.result("0").status is Status.FAIL
     assert expected in report.result("0").detail
     others = [r for r in report.results if r.rule != "0"]
-    assert [r.status for r in others] == [Status.SKIPPED] * 6
+    assert [r.status for r in others] == [Status.SKIPPED] * 7
     assert all(r.duration_s == 0.0 for r in others)
     assert not report.valid
+
+
+@pytest.mark.parametrize(
+    ("extra_files", "expected"),
+    [
+        ({"test_student.py": TESTS + "import socket\n"},
+         "test_student.py line 8: import of 'socket'"),
+        ({"conftest.py": ""}, "conftest.py is not allowed in an exercise"),
+    ],
+)
+def test_unsafe_code_is_never_run(tmp_path, extra_files, expected):
+    """The safety check runs before any test: a hazard skips every rule that runs code."""
+    report = run(make_exercise(tmp_path, extra_files=extra_files))
+
+    assert report.result("safe").status is Status.FAIL
+    assert expected in report.result("safe").detail
+    later = [r for r in report.results if r.rule not in ("0", "safe")]
+    assert [r.status for r in later] == [Status.SKIPPED] * 6
+    assert all(r.duration_s == 0.0 for r in later)
+    assert not report.valid
+
+
+def test_a_mutant_is_checked_too(tmp_path):
+    mutants = {"m01_sub": "import os\nos.system('echo hi')\n" + MUTANT_SUB}
+    report = run(make_exercise(tmp_path, mutants=mutants))
+
+    assert "mutants/m01_sub.py line 2: os.system is not allowed" in report.result("safe").detail
 
 
 def test_examples_fit_the_batch_format():
@@ -540,8 +567,8 @@ def test_cli_saves_the_report_as_json(tmp_path):
 
     assert data["exercise_id"] == "demo"
     assert data["valid"] is False
-    assert [r["rule"] for r in data["results"]] == ["0", "1", "2", "3", "4", "5", "api"]
-    assert data["results"][3]["status"] == "FAIL"  # zero mutants fails rule 3
+    assert [r["rule"] for r in data["results"]] == ["0", "safe", "1", "2", "3", "4", "5", "api"]
+    assert data["results"][4]["status"] == "FAIL"  # zero mutants fails rule 3
     assert "validated_at" in data and "tool_commit" in data
 
     (solution / "mutants" / "m01_sub.py").write_text(MUTANT_SUB)
