@@ -146,7 +146,9 @@ src/tutor/
   config.py        find the workspace, refuse unsafe locations, load .env
   envcheck.py      check the machine against the workspace's [requires]
   execution.py     run pytest in a temp dir, subprocess + timeout, kill the whole process group
-  validation/      rules 1-5 and the api check; `python -m tutor.validation`
+  schema.py        the batch format (metadata.json, manifest.json); `python -m tutor.schema`
+  validation/      rule 0 (format), rules 1-5 and the api check; `python -m tutor.validation`
+schemas/           the same format as JSON Schema files, exported from schema.py
 examples/          synthetic exercises (exercise/ for the learner, solution/ for the validator)
 tests/             unit tests; `-m spark` for end-to-end runs
 docs/design.md     every design decision, with the measurements behind it
