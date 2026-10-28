@@ -736,9 +736,26 @@ Design approved 2026-10-28 (owner):
   that item's error (logged, the others finish, collect runs); the client decodes replies
   with replacement (harmless either way); the item graph no longer inherits the batch's
   checkpointer (it saved every step's models in the batch's SQLite); a mutant error lists
-  every failing mutant with the closest line of the reference, copied exactly; `resume` continues a run that stopped midway without
-  redoing finished items (tested), and `resume --profile` finishes it with another model;
-  the manifest names every model that generated its exercises.
+  every failing mutant with the closest line of the reference, copied exactly; `resume`
+  continues a run that stopped midway without redoing finished items (tested), and
+  `resume --profile` finishes it with another model; the manifest names every model that
+  generated its exercises.
+- Week 4 again with four models (2026-10-28/29, same plan items; small samples): GPT 6/6
+  VALID (about $0.07 each), DeepSeek 5/6 (about 0.06 RMB each, the fastest), GLM-5.3-Flash
+  saved 4 and discarded 2, GLM-5.3 discarded 3 of 3. DeepSeek became the `generate` role.
+  The four discards that were not the model's fault changed two things:
+  - GLM-5.3 lost all three to one mutant each whose `old` it invented (a "placeholder"
+    line not in its reference) and sent back unchanged through three repairs. A mutant
+    that cannot be applied is now left out while at least three others remain
+    (`MIN_MUTANTS`, the schema's minimum): a VALID draft is saved without it, and a draft
+    repaired for another reason is asked to fix it too. The round's `dropped` list goes to
+    `generation.jsonl`. Cost: an exercise may have one mutant fewer, never fewer than
+    three.
+  - DeepSeek put the API calls it wanted used into `required_any`, which lists names the
+    code defines, and could not read that from "must define one of". The constraint
+    fields now carry descriptions, which reach the model in the draft's JSON Schema, and
+    the api messages say the names are defined, not called. There is still no "must call"
+    constraint: what an exercise must use is checked by its tests and `forbidden_calls`.
 - Batch (step 2, approved 2026-10-28): `plan` (LLM) reads coverage.md, one line per cached
   page (PDF page, footer, title), the existing exercise ids and the owner's preferences,
   and returns `count` PlanItems with a reason each; code checks the count, unique and new

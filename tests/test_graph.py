@@ -102,12 +102,35 @@ def test_a_mutant_that_cannot_be_applied_is_a_format_error(old, expected):
 
 def test_write_draft_lays_out_a_batch_and_derives_the_skeleton(tmp_path):
     d = ExerciseDraft.model_validate(draft(data_files={"sample_input/a.txt": "1\n2"}))
-    exercise, solution = write_draft(d, "sum-list", tmp_path / "round-0")
+    exercise, solution, dropped = write_draft(d, "sum-list", tmp_path / "round-0")
+    assert dropped == {}
     assert (solution / "skeleton.py").read_text() == (exercise / "student.py").read_text()
     assert (exercise / "sample_input" / "a.txt").read_text() == "1\n2\n"
     assert sorted(p.name for p in (solution / "mutants").iterdir()) == [
         "m01_wrong.py", "m02_wrong.py", "m03_wrong.py"]
     assert json.loads((solution / "metadata.json").read_text())["id"] == "sum-list"
+
+
+def broken_mutant(name: str) -> dict:
+    return {"name": name, "bug": "b, wrong", "replacements": [
+        {"old": "product(xs)", "new": "sum(xs)"}]}  # not in the reference
+
+
+def test_a_mutant_that_cannot_be_applied_is_left_out_while_three_others_remain(tmp_path):
+    good = draft()["mutants"]
+    d = ExerciseDraft.model_validate(draft(mutants=[*good, broken_mutant("m04_invented")]))
+    _, solution, dropped = write_draft(d, "sum-list", tmp_path / "round-0")
+    assert sorted(p.stem for p in (solution / "mutants").iterdir()) == [
+        "m01_wrong", "m02_wrong", "m03_wrong"]
+    assert list(dropped) == ["m04_invented"] and "occurs 0 times" in dropped["m04_invented"]
+
+
+def test_too_few_mutants_left_is_still_a_format_error(tmp_path):
+    good = draft()["mutants"][:2]
+    d = ExerciseDraft.model_validate(draft(mutants=[*good, broken_mutant("m03_invented")]))
+    with pytest.raises(DraftError, match="mutant m03_invented: 'product"):
+        write_draft(d, "sum-list", tmp_path / "round-0")
+    assert not (tmp_path / "round-0" / "exercises").exists()
 
 
 def test_a_generated_exercise_must_cite_its_course_pages(tmp_path):
@@ -173,6 +196,27 @@ def test_the_graph_repairs_a_failing_draft_then_saves_it(workspace):
     log = json.loads((d.batch_dir / "generation.jsonl").read_text())
     assert (log["outcome"], log["rounds"], log["tokens"]) == ("saved", 1, 3000)
     assert (d.drafts / "sum-list" / "round-0" / "report.txt").read_text().endswith("INVALID\n")
+
+
+def test_the_graph_saves_a_valid_draft_without_its_broken_mutant(workspace):
+    """GLM-5.3 lost three exercises in a night, each to one invented mutant it kept
+    sending back through three repairs."""
+    pytest.importorskip("langgraph")
+    from tutor.graph.build import build_item
+
+    four = draft(mutants=[*draft()["mutants"], broken_mutant("m04_invented")])
+    model = FakeModel(json.dumps(four), json.dumps(four))
+    d = deps(workspace, model, checks=[report("4"), report()])
+    final = build_item(d).invoke({"item": ITEM})
+
+    assert final["outcome"] == "saved" and final["round"] == 1
+    repair = model.calls[1][1][1]["content"]
+    assert "Left out, could not be applied (fix them too):\nmutant m04_invented" in repair
+    assert [a["dropped"] for a in final["attempts"]] == [["m04_invented"], ["m04_invented"]]
+    saved = d.batch_dir / "solutions" / "sum-list" / "mutants"
+    assert sorted(p.stem for p in saved.iterdir()) == ["m01_wrong", "m02_wrong", "m03_wrong"]
+    log = json.loads((d.batch_dir / "generation.jsonl").read_text())
+    assert log["attempts"][-1]["dropped"] == ["m04_invented"]
 
 
 def test_the_graph_discards_after_the_last_repair_round(workspace):
@@ -397,3 +441,12 @@ def test_the_draft_schema_tells_the_model_what_each_constraint_means():
                            "required_any", "count_uses"}
     assert all(field.get("description") for field in fields.values())
     assert "Not API calls" in fields["required_any"]["description"]
+
+
+def test_the_progress_line_names_mutants_left_out(capsys):
+    from tutor.graph.__main__ import _progress
+
+    _progress("sum-list", "validate", {"failure": None, "attempts": [
+        {"round": 0, "failure": None, "format_error": False, "dropped": ["m04_invented"]}]})
+    assert capsys.readouterr().out == (
+        "  [sum-list] validate: VALID (left out, could not be applied: m04_invented)\n")

@@ -25,6 +25,7 @@ from pydantic import ValidationError
 from tutor import llm
 from tutor.graph import prompts
 from tutor.graph.state import (
+    MIN_MUTANTS,
     BatchPlan,
     BatchState,
     ExerciseDraft,
@@ -174,10 +175,11 @@ def validate_draft(state: ItemState, deps: Deps) -> ItemState:
     item, round_ = state["item"], state.get("round", 0)
     attempts = list(state.get("attempts", []))
     failure, format_error, round_dir = state.get("failure"), state.get("format_error", False), ""
+    dropped: dict[str, str] = {}
     if state.get("draft") is not None:
         round_dir_path = deps.drafts / item.id / f"round-{round_}"
         try:
-            exercise, solution = write_draft(state["draft"], item.id, round_dir_path)
+            exercise, solution, dropped = write_draft(state["draft"], item.id, round_dir_path)
         except DraftError as e:
             failure, format_error = f"format: {e}", True
         else:
@@ -187,7 +189,13 @@ def validate_draft(state: ItemState, deps: Deps) -> ItemState:
             failure = None if report.valid else "\n".join(
                 f"rule {r.rule} ({r.name}) FAIL: {r.detail}"
                 for r in report.results if r.status is Status.FAIL)
-    attempts.append({"round": round_, "failure": failure, "format_error": format_error})
+            if failure and dropped:
+                # Not a failure by itself (a VALID draft is saved without them), but a
+                # repair round may as well fix them.
+                failure += ("\nLeft out, could not be applied (fix them too):\n"
+                            + "\n".join(dropped.values()))
+    attempts.append({"round": round_, "failure": failure, "format_error": format_error,
+                     "dropped": sorted(dropped)})
     return {"failure": failure, "format_error": format_error, "attempts": attempts,
             "round_dir": round_dir}
 
@@ -197,8 +205,11 @@ def _report_text(report: ValidationReport) -> str:
                      for r in report.results) + ("\nVALID\n" if report.valid else "\nINVALID\n")
 
 
-def write_draft(draft: ExerciseDraft, exercise_id: str, root: Path) -> tuple[Path, Path]:
-    """root/exercises/<id> and root/solutions/<id>, laid out like a batch."""
+def write_draft(draft: ExerciseDraft, exercise_id: str,
+                root: Path) -> tuple[Path, Path, dict[str, str]]:
+    """root/exercises/<id> and root/solutions/<id>, laid out like a batch, and the mutants
+    left out: one that cannot be applied is left out (name -> why) while MIN_MUTANTS others
+    remain, so one copying slip does not cost the whole exercise; fewer is a format error."""
     if draft.metadata.id != exercise_id:
         raise DraftError(f"metadata.id is {draft.metadata.id!r}, the plan names {exercise_id!r}")
     if draft.metadata.source == "synthetic":
@@ -222,19 +233,19 @@ def write_draft(draft: ExerciseDraft, exercise_id: str, root: Path) -> tuple[Pat
     }
     for name, content in draft.data_files.items():
         files[exercise / _data_path(name)] = content
-    problems = []  # every mutant that cannot be applied, so one repair round fixes them all
+    dropped = {}  # every mutant that cannot be applied, so one repair round fixes them all
     for mutant in draft.mutants:
         try:
             files[solution / "mutants" / f"{mutant.name}.py"] = apply_mutant(
                 draft.reference_py, mutant)
         except DraftError as e:
-            problems.append(str(e))
-    if problems:
-        raise DraftError("\n".join(problems))
+            dropped[mutant.name] = str(e)
+    if dropped and len(draft.mutants) - len(dropped) < MIN_MUTANTS:
+        raise DraftError("\n".join(dropped.values()))
     for path, content in files.items():
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content if content.endswith("\n") else content + "\n")
-    return exercise, solution
+    return exercise, solution, dropped
 
 
 def _data_path(name: str) -> PurePosixPath:

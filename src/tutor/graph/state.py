@@ -15,6 +15,10 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from tutor.schema import Metadata
 
+# Fewer planted mistakes make rule 3 a weak check; a draft keeps at least this many after
+# leaving out mutants that cannot be applied (nodes.write_draft).
+MIN_MUTANTS = 3
+
 
 class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -58,13 +62,14 @@ class ExerciseDraft(_Strict):
     reference_py: str
     oracle_py: str
     test_oracle_py: str
-    mutants: Annotated[list[MutantDraft], Field(min_length=3, max_length=6)]
+    mutants: Annotated[list[MutantDraft], Field(min_length=MIN_MUTANTS, max_length=6)]
 
 
 class Attempt(TypedDict):
     round: int  # 0 = generate, 1-3 = repair
     failure: str | None  # the first failing rule, or a format error; None when VALID
     format_error: bool  # the reply did not parse or could not be written out
+    dropped: list[str]  # mutants left out because they could not be applied
 
 
 class ItemState(TypedDict, total=False):

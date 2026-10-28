@@ -216,6 +216,9 @@ def _progress(exercise: str, node: str, change: dict) -> None:
         failure = change.get("failure")
         text = ("validate: VALID" if failure is None
                 else "validate: " + failure.splitlines()[0][:160])
+        dropped = change["attempts"][-1].get("dropped") if change.get("attempts") else None
+        if dropped:
+            text += f" (left out, could not be applied: {', '.join(dropped)})"
     else:
         text = node
     print(f"  [{exercise}] {text}", flush=True)
