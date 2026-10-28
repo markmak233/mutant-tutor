@@ -644,3 +644,11 @@ def test_the_failure_excerpt_keeps_what_a_fix_needs_and_no_home_paths():
         "test_student.py:57: ValueError")
     assert "someone" not in failure_excerpt(PYTEST_OUTPUT)
     assert len(failure_excerpt(PYTEST_OUTPUT, limit=40)) == 40 + len("\n...")
+
+
+def test_required_definitions_accepts_a_method_named_with_its_class():
+    """The form metadata entry_point uses for file-level programs: Class.run."""
+    source = "class AuctionStats:\n    def run(self, a, b):\n        pass\n"
+    assert find_violations(source, {"required_definitions": ["AuctionStats.run", "run"]}) == []
+    assert find_violations(source, {"required_definitions": ["Other.run"]}) == [
+        "must define Other.run (a name the code defines, not a call)"]

@@ -766,6 +766,19 @@ Design approved 2026-10-28 (owner):
   report still shows the one-line detail); repair round N asks at temperature 0.2 * N; and
   a reply identical to the previous one is recorded (`unchanged` in the attempts) and the
   next repair is told so.
+- Prompt rules added for failures seen on week 4 (2026-10-29), each tied to one: test
+  expected values are worked out by hand from the question on small data, never taken
+  from the reference (a test said 2 bids where the data had 3); a rule 1 failure tells
+  repair that the test can be the wrong side (three repairs had edited a right reference);
+  the reference is written as a good student would, never forcing an API into a role it
+  does not fit (GPT's reference sent a countByKey result back to the cluster to join).
+  Rules stay few and concrete: a longer prompt is followed less closely, and what code can
+  check (constraints, mutants) is checked in code. After the first rule the same item
+  passed rule 1 at once, and the independent oracle caught a real bug in its reference
+  (`reduce()` on an empty input, which the question says gives no lines). The constraint
+  descriptions had named "the entry point" as a required definition, and a model then
+  wrote `AuctionStats.run`, which the api check did not know: it now accepts
+  `Class.method`, the form `entry_point` uses.
 - Batch (step 2, approved 2026-10-28): `plan` (LLM) reads coverage.md, one line per cached
   page (PDF page, footer, title), the existing exercise ids and the owner's preferences,
   and returns `count` PlanItems with a reason each; code checks the count, unique and new

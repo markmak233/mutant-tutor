@@ -26,7 +26,7 @@
         },
         "required_definitions": {
           "default": [],
-          "description": "Functions or methods the code must define (def, or an MRStep keyword), e.g. the entry point or \"mapper_final\". Not API calls the code should make.",
+          "description": "Functions or methods the code must define (def, or an MRStep keyword), e.g. \"mapper_final\", or \"AuctionStats.run\" for a method of a class. Not API calls the code should make.",
           "items": {
             "minLength": 1,
             "type": "string"

@@ -594,3 +594,10 @@ def test_repair_sees_the_failing_tests_and_asks_a_little_warmer_each_round(works
     assert "identical to the one before" not in first_repair
     assert "identical to the one before" in model.calls[2][1][1]["content"]
     assert [a["unchanged"] for a in final["attempts"]] == [False, True, True]
+
+
+def test_a_rule_1_failure_reminds_repair_that_the_test_may_be_wrong():
+    rule_1 = prompts.repair_prompt(ITEM, "", "{}", "rule 1 (reference passes) FAIL: ...")
+    rule_3 = prompts.repair_prompt(ITEM, "", "{}", "rule 3 (mutants killed) FAIL: ...")
+    assert "if the test is wrong, fix the test" in rule_1
+    assert "if the test is wrong" not in rule_3

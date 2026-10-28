@@ -45,8 +45,9 @@ class Constraints(_Strict):
     forbidden_imports: list[Name] = Field(default=[], description=(
         'Modules that must not be imported, submodules included, e.g. "pyspark.sql".'))
     required_definitions: list[Name] = Field(default=[], description=(
-        "Functions or methods the code must define (def, or an MRStep keyword), e.g. the "
-        'entry point or "mapper_final". Not API calls the code should make.'))
+        "Functions or methods the code must define (def, or an MRStep keyword), e.g. "
+        '"mapper_final", or "AuctionStats.run" for a method of a class. Not API calls the '
+        "code should make."))
     required_any: list[Annotated[list[Name], Field(min_length=1)]] = Field(
         default=[], description=(
             "Groups of names the code defines (as in required_definitions); at least one "

@@ -6,7 +6,8 @@ metadata.json "constraints" may contain:
     forbidden_imports     modules that must not be imported, submodules included,
                           e.g. "pyspark.sql" (no DataFrames)
     required_definitions  functions or methods the code must define,
-                          e.g. "mapper_init", "mapper_final" (in-mapper combining)
+                          e.g. "mapper_init", "mapper_final" (in-mapper combining),
+                          or "Class.method" for a method of that class
     required_any          groups of names; at least one group must be fully defined,
                           e.g. [["combiner"], ["mapper_init", "mapper_final"]]
     count_uses            names whose uses are counted and reported, never limited,
@@ -73,6 +74,11 @@ def find_violations(source: str, constraints: Mapping[str, list]) -> list[str]:
                     violations.append(f"line {node.lineno}: imports {module}")
         elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
             defined.add(node.name)
+        elif isinstance(node, ast.ClassDef):
+            # "AuctionStats.run", as metadata entry_point names a file-level program's
+            # method; a model copied the entry point into required_definitions.
+            defined.update(f"{node.name}.{item.name}" for item in node.body
+                           if isinstance(item, ast.FunctionDef | ast.AsyncFunctionDef))
         if isinstance(node, ast.Call) and _called_name(node) == "MRStep":
             defined.update(
                 k.arg for k in node.keywords

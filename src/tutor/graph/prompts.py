@@ -10,6 +10,7 @@ here holds for any course.
 from __future__ import annotations
 
 import inspect
+import re
 from pathlib import Path
 
 from tutor import testkit
@@ -55,7 +56,9 @@ Files (fields of the JSON you return):
   mode (below).
 - test_student_py: pytest tests importing `student`, using tutor.testkit (API below). Spark
   tests read the partition count with testkit.partitions(); file-level tests split their
-  input into that many files.
+  input into that many files. Work out every expected value from the question by hand on
+  that test's data, never from your reference; keep each test's data small enough for
+  that.
 - hints_md: "## Useful functions" first (each relevant API, and any forbidden one, with a
   tiny example on different data and its exact output), then "## Hint 1", "## Hint 2",
   "## Hint 3", each more specific. Never the answer.
@@ -63,7 +66,8 @@ Files (fields of the JSON you return):
   Paths are relative to the exercise folder.
 - reference_py: the worked solution, as numbered steps (`# Step N: what and why`), each with a
   comment showing a record after that step on the question's example data. Never one long
-  chain.
+  chain. Write it the way a good student would with the slides' APIs; never force an API
+  into a role it does not fit (e.g. an action's result sent back to the cluster to join).
 {oracle}test_oracle_py: a hypothesis test comparing student.py with oracle.py
   (`@settings(deadline=None, derandomize=True)`, a moderate max_examples).
 - mutants: 3 to 6 mistakes, each named m01_ to m06_ plus a short snake_case description
@@ -176,6 +180,14 @@ def item_prompt(item: PlanItem, context: str, mode: str = "learn") -> str:
     )
 
 
+# Rule 1 failing means the reference and a test disagree; a week 4 item spent three
+# repairs changing a right reference to match a test whose hand-computed value was wrong.
+RULE_1_HINT = (
+    "\n\nThe reference and a test disagree, and either can be wrong. Before changing "
+    "anything, work out that test's expected value from the question by hand on its data; "
+    "if the test is wrong, fix the test.")
+
+
 def repair_prompt(item: PlanItem, context: str, draft_json: str, failure: str,
                   mode: str = "learn", unchanged: bool = False) -> str:
     """`unchanged`: that answer repeated the one before it, which failed the same way."""
@@ -183,6 +195,7 @@ def repair_prompt(item: PlanItem, context: str, draft_json: str, failure: str,
         item_prompt(item, context, mode)
         + "\n\nYour previous answer:\n" + draft_json
         + "\n\nThe validator rejected it:\n" + failure
+        + (RULE_1_HINT if re.search(r"^rule 1 ", failure, re.MULTILINE) else "")
         + ("\n\nThat answer was identical to the one before it, which failed in the same "
            "way: returning it again cannot pass. Find what the failure points at and "
            "change it." if unchanged else "")
