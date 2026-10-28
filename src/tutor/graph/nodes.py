@@ -81,6 +81,10 @@ class Deps:
     # None: the generating model repairs too.
     repair_config: llm.LLMConfig | None = None
     stronger_repair_from: int = 2
+    # The repair model reasons before answering: deciding which side of a failure is wrong
+    # is the part the cheap model cannot do, and DeepSeek-V4-Pro without thinking did not
+    # do it either (2026-10-29).
+    repair_thinking: bool = True
     # The `oracle` role: another model family writes oracle.py from the question alone.
     # None: the generating model writes the whole oracle, as hand drafting does.
     oracle_config: llm.LLMConfig | None = None
@@ -158,13 +162,16 @@ def repair(state: ItemState, deps: Deps) -> ItemState:
                                      unchanged=state.get("unchanged", False))
     round_ = state.get("round", 0) + 1
     stronger = deps.repair_config is not None and round_ >= deps.stronger_repair_from
-    return _ask(state, deps, user, "repair", round_,
-                deps.repair_config if stronger else deps.config)
+    if stronger:
+        return _ask(state, deps, user, "repair", round_, deps.repair_config,
+                    deps.repair_thinking)
+    return _ask(state, deps, user, "repair", round_)
 
 
 def _ask(state: ItemState, deps: Deps, user: str, purpose: str, round_: int,
-         config: llm.LLMConfig | None = None) -> ItemState:
+         config: llm.LLMConfig | None = None, thinking: bool | None = None) -> ItemState:
     config = config or deps.config
+    thinking = deps.thinking if thinking is None else thinking
     conventions = deps.workspace / "conventions.md"
     messages = [
         {"role": "system", "content": prompts.system_prompt(
@@ -174,7 +181,7 @@ def _ask(state: ItemState, deps: Deps, user: str, purpose: str, round_: int,
     ]
     reply = deps.chat(config, messages, purpose=purpose, log_path=deps.llm_log,
                       max_tokens=deps.max_tokens, response_schema=DRAFT_SCHEMA,
-                      thinking=deps.thinking,
+                      thinking=thinking,
                       temperature=min(round_ * deps.repair_temperature_step, 0.8),
                       **_streaming(state, deps))
     update: ItemState = {**_spent(state, reply), "round": round_, "draft_json": reply.text,

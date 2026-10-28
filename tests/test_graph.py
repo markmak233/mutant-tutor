@@ -62,6 +62,7 @@ class FakeModel:
                  thinking, temperature=0.0, **streaming):
         self.calls.append((purpose, messages, response_schema))
         self.configs = [*getattr(self, "configs", []), config.name]
+        self.thinkings = [*getattr(self, "thinkings", []), thinking]
         self.thinking = thinking
         self.temperatures = [*getattr(self, "temperatures", []), temperature]
         return Reply(self.texts.pop(0), 1000, 500, 0.1, self.finish_reason)
@@ -681,6 +682,7 @@ def test_the_repair_role_takes_over_from_the_second_repair(workspace):
 
     assert final["outcome"] == "saved"
     assert model.configs == ["glm-flash", "glm-flash", "deepseek-pro", "deepseek-pro"]
+    assert model.thinkings == [False, False, True, True]  # the repair model reasons
     assert [a["model"] for a in final["attempts"]] == model.configs
     log = json.loads((d.batch_dir / "generation.jsonl").read_text())
     assert log["repair_model"] == "deepseek-pro: deepseek-v4-pro"

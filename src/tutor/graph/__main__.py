@@ -71,6 +71,8 @@ def main(argv: list[str] | None = None) -> int:
                        help="profile writing the oracle (default: oracle role, if set)")
         p.add_argument("--repair-profile",
                        help="profile for repairs from the second on (default: repair role)")
+        p.add_argument("--repair-thinking", choices=["low", "on"], default="on",
+                       help="whether that repair model reasons first (default: on)")
         p.add_argument("--thinking", choices=["low", "on"], default="low",
                        help="on: the model reasons at length (slower; GLM gets cut off)")
         p.add_argument("--mode", choices=["learn", "review"], default="learn")
@@ -108,6 +110,7 @@ def _deps(workspace: Path, batch_dir: Path, settings: dict) -> Deps:
     return Deps(workspace=workspace, batch_dir=batch_dir, config=config,
                 plan_config=plan_config, oracle_config=oracle_config,
                 repair_config=repair_config,
+                repair_thinking=settings.get("repair_thinking", "on") == "on",
                 thinking=settings.get("thinking") == "on",
                 mode=settings.get("mode", "learn"), on_update=_progress,
                 on_stream=_receiving)
@@ -156,7 +159,8 @@ def _batch(args, workspace: Path, build) -> int:
                              "another label")
         batch_dir = workspace / "batches" / f"{date.today()}_p3-{args.batch}"
         settings = {k: getattr(args, k) for k in (
-            "profile", "oracle_profile", "repair_profile", "thinking", "mode", "parallel")}
+            "profile", "oracle_profile", "repair_profile", "repair_thinking", "thinking", "mode",
+            "parallel")}
         (drafts / batch_dir.name).mkdir(parents=True)
         (drafts / batch_dir.name / "run.json").write_text(json.dumps(settings, indent=1))
         pending = {"lectures": args.lectures, "preferences": args.prefs,
