@@ -19,8 +19,8 @@ Keys live only in the environment (`.env`), never in the TOML: a profile with an
 field or a key-like value is refused. Without an [llm] section, LLM_PROVIDER / LLM_MODEL /
 LLM_BASE_URL / LLM_API_KEY form a single default profile.
 
-Every call appends one JSON line to a call log (purpose, profile, model, tokens, seconds,
-outcome); the key is never logged.
+Every call appends one JSON line to a call log (purpose, profile, model, tokens including
+those served from the provider's prompt cache, seconds, outcome); the key is never logged.
 """
 
 from __future__ import annotations
@@ -45,6 +45,10 @@ PROVIDERS = {
     "lmstudio": ("http://localhost:1234/v1", ({"reasoning_effort": "none"},)),
     "glm": ("https://open.bigmodel.cn/api/paas/v4",
             ({"thinking": {"type": "disabled"}}, {"reasoning_effort": "low"})),
+    # Reasoning models differ in their lowest setting; the first one accepted is used.
+    "openai": ("https://api.openai.com/v1",
+               ({"reasoning_effort": "none"}, {"reasoning_effort": "minimal"},
+                {"reasoning_effort": "low"})),
     "custom": (None, ()),  # any other OpenAI-compatible server; base_url required
 }
 PROFILE_FIELDS = {"provider", "model", "base_url", "api_key_env", "reasoning_effort",
@@ -75,6 +79,8 @@ class Reply:
     output_tokens: int | None
     seconds: float
     finish_reason: str | None = None  # "length": cut off at max_tokens
+    # Input tokens served from the provider's prompt cache (cheaper), when it reports them.
+    cached_tokens: int | None = None
 
 
 def config_for(role: str, profile: str | None = None, workspace: Path | None = None,
@@ -157,13 +163,29 @@ def image_message(prompt: str, png: bytes) -> dict:
 
 def chat(config: LLMConfig, messages: list[dict], *, purpose: str,
          log_path: Path | None = None, max_tokens: int | None = None,
-         temperature: float = 0.0, thinking: bool = True) -> Reply:
+         temperature: float = 0.0, thinking: bool = True,
+         response_schema: dict | None = None) -> Reply:
     """One chat completion. `purpose` names the caller in the call log (e.g. "vision").
     `thinking=False` turns a reasoning model's hidden thinking off (or as low as the model
-    allows), for tasks such as copying text from an image that need none."""
-    body = {"model": config.model, "messages": messages, "temperature": temperature}
+    allows), for tasks such as copying text from an image that need none.
+    `response_schema` (a JSON Schema) asks for structured output: the reply text is then
+    JSON fitting the schema. GLM-5.3-Flash and LM Studio enforce it (tested 2026-10-28: keys
+    the prompt asked for but the schema forbids were left out); the caller still parses and
+    validates it, since a cut-off reply is not valid JSON."""
+    openai = config.provider == "openai"
+    body = {"model": config.model, "messages": messages}
+    if not openai:
+        # OpenAI reasoning models accept only their default temperature.
+        body["temperature"] = temperature
     if max_tokens is not None:
-        body["max_tokens"] = max_tokens
+        # OpenAI reasoning models refuse max_tokens; the limit there includes reasoning.
+        body["max_completion_tokens" if openai else "max_tokens"] = max_tokens
+    if response_schema is not None:
+        # OpenAI's strict mode needs every field required, which a schema with defaults
+        # (optional fields) is not; without it the schema still guides the reply, and the
+        # caller's validation catches what does not fit.
+        body["response_format"] = {"type": "json_schema", "json_schema": {
+            "name": "output", "schema": response_schema, "strict": not openai}}
     variants = [{}] if thinking or not config.thinking_off else list(config.thinking_off)
     for number, extra in enumerate(variants, 1):
         try:
@@ -187,7 +209,9 @@ def _post(config: LLMConfig, body: dict, purpose: str, log_path: Path | None) ->
     start = time.monotonic()
     try:
         with urllib.request.urlopen(request, timeout=config.timeout_s) as response:
-            data = json.loads(response.read())
+            # GLM once sent a byte that is not UTF-8 inside a long reply; a replacement
+            # character there is harmless (the caller validates the text), a crash is not.
+            data = json.loads(response.read().decode("utf-8", errors="replace"))
         choice = data["choices"][0]
         text = choice["message"]["content"] or ""
     except urllib.error.HTTPError as e:
@@ -196,7 +220,14 @@ def _post(config: LLMConfig, body: dict, purpose: str, log_path: Path | None) ->
         if e.code == 400:
             raise _Rejected(error) from None
         raise LLMError(error) from e
-    except (urllib.error.URLError, TimeoutError, OSError) as e:
+    except TimeoutError as e:
+        # The server answers but the reply takes longer than timeout_s (a long generation
+        # with thinking on), not an unreachable server.
+        error = (f"no reply from {config.base_url} within {config.timeout_s:.0f} s; raise "
+                 f"timeout_s in [llm.profiles.{config.name}] for long replies")
+        _log(log_path, purpose, config, None, time.monotonic() - start, error)
+        raise LLMError(error) from e
+    except (urllib.error.URLError, OSError) as e:
         error = f"cannot reach {config.base_url} ({e}); is the server running?"
         _log(log_path, purpose, config, None, time.monotonic() - start, error)
         raise LLMError(error) from e
@@ -206,7 +237,8 @@ def _post(config: LLMConfig, body: dict, purpose: str, log_path: Path | None) ->
         raise LLMError(error) from e
     usage = data.get("usage") or {}
     reply = Reply(text, usage.get("prompt_tokens"), usage.get("completion_tokens"),
-                  time.monotonic() - start, choice.get("finish_reason"))
+                  time.monotonic() - start, choice.get("finish_reason"),
+                  (usage.get("prompt_tokens_details") or {}).get("cached_tokens"))
     _log(log_path, purpose, config, reply, reply.seconds, None)
     return reply
 
@@ -222,6 +254,7 @@ def _log(path: Path | None, purpose: str, config: LLMConfig, reply: Reply | None
         "model": config.model,
         "base_url": config.base_url,
         "input_tokens": reply.input_tokens if reply else None,
+        "cached_tokens": reply.cached_tokens if reply else None,
         "output_tokens": reply.output_tokens if reply else None,
         "seconds": round(seconds, 2),
         "finish_reason": reply.finish_reason if reply else None,

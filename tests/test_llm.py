@@ -145,6 +145,49 @@ def test_an_unreachable_server_is_a_clear_error_and_is_logged(monkeypatch, tmp_p
     assert json.loads(log.read_text())["outcome"] == "error"
 
 
+def test_cached_input_tokens_are_read_and_logged(monkeypatch, tmp_path):
+    def cached(request, timeout):
+        return FakeResponse(json.dumps({
+            "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 17405, "completion_tokens": 2516,
+                      "prompt_tokens_details": {"cached_tokens": 5504}},
+        }).encode())
+
+    monkeypatch.setattr(llm.urllib.request, "urlopen", cached)
+    log = tmp_path / "calls.jsonl"
+    reply = chat(LLMConfig("p", "openai", "https://api.openai.com/v1", "gpt-6.1-terra"), [],
+                 purpose="repair", log_path=log)
+    assert reply.cached_tokens == 5504
+    assert json.loads(log.read_text())["cached_tokens"] == 5504
+
+
+def test_a_byte_that_is_not_utf8_does_not_crash_the_call(monkeypatch):
+    body = json.dumps({"choices": [{"message": {"content": "abXcd"}}]}).encode()
+    monkeypatch.setattr(llm.urllib.request, "urlopen",
+                        lambda request, timeout: FakeResponse(body.replace(b"X", b"\x80")))
+    reply = chat(LLMConfig("p", "glm", "http://x/v1", "glm-5.3-flash"), [], purpose="generate")
+    assert reply.text == "ab�cd"
+
+
+def test_openai_gets_its_own_parameter_names(sent):
+    schema = {"type": "object", "properties": {"id": {"type": "string"}}}
+    chat(LLMConfig("p", "openai", "https://api.openai.com/v1", "gpt-6.1-terra"), [],
+         purpose="generate", max_tokens=1000, response_schema=schema)
+    body = json.loads(sent[0][0].data)
+    assert body["max_completion_tokens"] == 1000 and "max_tokens" not in body
+    assert "temperature" not in body
+    assert body["response_format"]["json_schema"]["strict"] is False
+
+
+def test_a_slow_reply_says_timeout_not_unreachable(monkeypatch):
+    def slow(request, timeout):
+        raise TimeoutError("The read operation timed out")
+
+    monkeypatch.setattr(llm.urllib.request, "urlopen", slow)
+    with pytest.raises(LLMError, match=r"within 300 s; raise timeout_s in \[llm.profiles.p\]"):
+        chat(LLMConfig("p", "glm", "http://x/v1", "glm-5.3-flash"), [], purpose="generate")
+
+
 def test_thinking_off_tries_each_switch_until_the_model_accepts_one(monkeypatch, tmp_path):
     """GLM-5.3 refuses thinking: disabled with HTTP 400 and accepts reasoning_effort low."""
     bodies = []
@@ -166,6 +209,16 @@ def test_thinking_off_tries_each_switch_until_the_model_accepts_one(monkeypatch,
     bodies.clear()
     chat(config, [], purpose="generate")  # thinking left on: no switch sent
     assert "thinking" not in bodies[0] and "reasoning_effort" not in bodies[0]
+
+
+def test_a_response_schema_asks_for_structured_output(sent):
+    schema = {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}
+    chat(LLMConfig("p", "glm", "http://x/v1", "glm-5.3-flash"), [], purpose="generate",
+         response_schema=schema)
+    assert json.loads(sent[0][0].data)["response_format"] == {
+        "type": "json_schema", "json_schema": {"name": "output", "schema": schema, "strict": True}}
+    chat(LLMConfig("p", "glm", "http://x/v1", "glm-5.3-flash"), [], purpose="generate")
+    assert "response_format" not in json.loads(sent[1][0].data)
 
 
 def test_lm_studio_turns_thinking_off_with_reasoning_effort_none(sent):
