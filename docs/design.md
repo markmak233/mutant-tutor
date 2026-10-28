@@ -113,7 +113,8 @@ smartCodingReview/                       # public repo (the `tutor/` above), cod
 │   ├── attempts.py                      # P2a pytest plugin: one attempts.jsonl line per exercise run
 │   ├── schema.py                        # P2 Pydantic models of metadata.json / manifest.json (rule 0),
 │   │                                    #   P3 parses LLM output into the same models
-│   ├── llm.py                           # P3 thin LLM API client, no LangChain
+│   ├── materials/                       # pre-P3 course files -> per-file md cache (pypdfium2), vision pages
+│   ├── llm.py                           # P3 thin LLM API client, no LangChain; a minimal one first, for vision pages
 │   ├── graph/                           # P3 langgraph dependency added here
 │   ├── rag/                             # P4
 │   └── eval/                            # P5
@@ -144,6 +145,8 @@ smartcodereview-workspace/
     ├── coding_materials/                # labs and projects, read-only
     │   ├── labN/                        # one flat folder each: problem text, data, expected outputs
     │   └── proj2/
+    ├── cache/                           # text of every source file, read once (see "Reading files")
+    │   └── lectures/<file>.md           #   mirrors the source path; one section per page or slide
     ├── batches/                         # one directory per generation run
     │   ├── 2026-10-27_p2-golden/
     │   │   ├── manifest.json            # phase, date, mode, sources, method, model, git commit, exercises,
@@ -232,6 +235,51 @@ Decided 2026-10-24 after reading the course's labs and projects.
 - Labs and projects are references for what course tasks look like (input formats, parameters,
   output rules, marking points), and can also be generation sources when the user includes
   them (see "Material selection").
+
+Reading files (decided 2026-10-28, pre-phase 3). Every source file is read once into a
+markdown cache, which generation, RAG and an assistant drafting exercises by hand all read
+instead of the original files.
+- Cache: `$WORKSPACE_DIR/cache/<source path>.md`, one file per source file, one section per
+  page or slide, headed with the location (`## p.12 · slide 2.10`), followed by a comment
+  with how it was read (text layer or vision model, model name, date) and a hash of that
+  page's content. A page whose hash is unchanged is never read again; a changed file costs
+  only its changed pages. The hash is of the page content, not of a rendered image, so a
+  library upgrade does not trigger a re-read.
+- Pages that need the vision model: ignore images that sit at the same position on at least
+  30% of the pages (logo, template background), then flag a page whose remaining images
+  cover at least 25% of it. On the first course's lectures this caught every code and
+  pseudocode image checked by eye; the false positives were decoration (photos, logos), cheap
+  to transcribe and impossible to tell from code without looking. A flagged page is rendered
+  to PNG and transcribed: code and pseudocode verbatim in fenced blocks, never corrected;
+  diagrams as structured text; tables as markdown; unreadable characters marked. Code blocks
+  are checked with `ast.parse` (illustrative lecture code is flagged, not rejected); pages
+  already read by hand serve as a reference set for transcription accuracy.
+- PDF library: pypdfium2 (Apache / BSD) for text and rendering, plus pdfplumber (MIT) only if
+  RAG needs per-character font data. Compared on the first course's 9 lecture PDFs with
+  PyMuPDF and pdfplumber: pypdfium2 was the only one to merge the characters these slides
+  draw twice (shadow / bold) and keep diagram rows together; all three found the same slide
+  footers; speed does not matter at this size. PyMuPDF (the earlier choice) is AGPL, which
+  would follow the code into a packaged GUI and make the repo's MIT label misleading for
+  reuse, and it offered nothing the other two lack here.
+- Other formats, each library added only when a course has such files (pip-installable,
+  permissive licence, as optional extras such as `tutor[office]`; a missing one is reported
+  with the extra to install, not a crash):
+  - `.pptx`: python-pptx (MIT): text, tables, speaker notes, and pictures as their original
+    bytes with position, which go to the vision model directly. Diagrams drawn from shapes
+    and SmartArt are lost without rendering, which needs LibreOffice or an export to PDF by
+    the user; envcheck reports `soffice` as optional.
+  - `.docx`: python-docx or mammoth (MIT / BSD); saved web pages: BeautifulSoup + markdownify
+    (MIT), keeping LaTeX formulas (not html2text: GPL); `.ipynb`: the standard library's
+    `json` (markdown, code and outputs per cell; output images to the vision model);
+    images: Pillow, with pillow-heif for phone photos; `.xlsx`: openpyxl, read as data like
+    CSV; EPUB: `zipfile` + BeautifulSoup (not ebooklib: AGPL); captions (`.vtt`, `.srt`):
+    standard library; lecture recordings: faster-whisper, much later.
+  - Not read: `.doc`, `.ppt`, Keynote and Google formats (the user exports to PDF, PPTX or
+    DOCX); archives, as above. Office files are zip packages, so file and unpacked sizes are
+    capped before parsing.
+  - All-in-one converters (MarkItDown, Docling, Unstructured) were considered: they hide
+    page and slide numbers, which sources must record, or bring heavy layout models.
+    MarkItDown may serve as a fallback for formats without a reader.
 
 ## Exercise validation (deterministic, never LLM-judged)
 
@@ -591,7 +639,8 @@ retrieve_context -> generate_exercise -> validate --pass--> save
 
 ## RAG
 
-- PyMuPDF parsing, chunking by section / code block, keep source file and page.
+- Reads the per-file md cache (see "Reading files"), not the PDFs; chunking by section / code
+  block, keeping source file, page and slide.
 - Retrieval filters by the batch's `sources` first, so a week-2 batch only draws on week-2
   material; searching the whole course is the fallback, not the default.
 - Hybrid retrieval (BM25 + vectors): API names like `aggregateByKey` are exact-match problems
@@ -632,7 +681,8 @@ deterministic judge, hybrid RAG with recall@k, the phase 5 metrics, the hint lea
   example exercises, the week's material), resent on up to 3 repair rounds. Measure cost
   with and without it.
 - [3, prerequisite] Image slides through a vision model, transcribed once and stored in the
-  workspace with slide footer and PDF page; the input side of RAG.
+  workspace with slide footer and PDF page; the input side of RAG. Decided 2026-10-28, see
+  "Reading files".
 - [3] Native structured output (JSON schema / tool use) instead of free text parsed after
   the fact. Count format failures apart from validation failures, or the validity metric
   mixes two causes.
@@ -666,7 +716,8 @@ deterministic judge, hybrid RAG with recall@k, the phase 5 metrics, the hint lea
   a local container, which changes the "Docker only for reproducibility" decision there
   (allowed by "Local-first": it stays on the machine). Main reason, see the phase 3 note on
   malicious material. Also consider a static check on generated code that rejects network
-  access, subprocesses and reads or writes outside the exercise directory.
+  access, subprocesses and reads or writes outside the exercise directory. Decided
+  2026-10-28: static check first, container later (see "Code execution safety").
 - [3b] Calibrated LLM judge for hint quality only (leaks the answer? right direction?),
   checked against owner-labelled hints before its scores are trusted. Never for validity.
 - [4] Reranker after hybrid retrieval, as one more arm of the recall@k comparison.
@@ -688,8 +739,9 @@ deterministic judge, hybrid RAG with recall@k, the phase 5 metrics, the hint lea
 
 ## Code execution safety
 
-Subprocess + timeout + temporary working directory. Docker only if environment reproducibility
-(Java/Spark) becomes a problem, not for isolation.
+Subprocess + timeout + temporary working directory. Docker was first meant only for
+environment reproducibility (Java/Spark); since 2026-10-28 a container is also the planned
+second isolation layer (see "Where isolation goes").
 
 `execution.run_pytest(files, timeout_s=30)` copies a name -> source mapping into a fresh temp
 dir (so the same tests can run against reference, skeleton or a mutant as `student.py`), runs
@@ -720,6 +772,25 @@ the exercise) sits at the validator's entry, `validate()` and `python -m tutor.v
 not in the LangGraph `validate` node. A batch drafted with Claude Code is LLM-written code
 from the same material, so it gets the same protection, and running the validator by hand
 cannot skip it.
+
+Isolation layers (decided 2026-10-28, owner): the material is files the user downloaded
+themselves, so a cheap layer comes first and a stronger one later.
+- A, static check, before phase 3 ships: every generated `.py` file is checked with `ast`
+  before the exercise is saved. Rejected: imports of `socket`, `subprocess`, `requests`,
+  `urllib`, `http`; calls to `os.system`, `eval`, `exec`, `__import__`; `open()` on an
+  absolute or `~` path. Allowed: what tests need, such as `os.environ` and testkit (trusted
+  repo code that starts subprocesses itself). It is the only layer that also covers the
+  learner's own `pytest test_student.py`, which runs generated tests outside the validator.
+  Bypassable by a determined author, so it is a filter, not a sandbox.
+- B, container, later: validation of generated batches in Docker or Podman, one
+  implementation for macOS, Linux and WSL: `--network none`, only the exercise and a temp
+  dir mounted, a non-root user, read-only root file system, memory / CPU / process limits;
+  one container per validation with `docker exec` per pytest run; a per-course image built
+  from `workspace.toml` `[requires]`, with envcheck run inside and outside so the image and
+  the learner's machine use the same versions. Measure the overhead first (one Spark and one
+  MRJob exercise, container vs host); if it is too slow on macOS, the fallback is the OS
+  sandboxes coding assistants use (Seatbelt `sandbox-exec` on macOS, bubblewrap on Linux),
+  which run on the host environment but need one profile per OS.
 
 ## CI
 
@@ -872,8 +943,8 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
      Schema export; the existing workspace batches migrated (21 metadata files: `entry_point`
      as a list, `function` replaced by `interface` + `entry_point`; `exercises/` untouched,
      all 21 VALID again); rule 0 in `validate()`, the examples' metadata in the one
-     spelling, tests for a missing, mistyped and unknown field. **Done 2026-10-28.** Still
-     to do: the workspace `AGENTS.md` "Authoring exercises" section.
+     spelling, tests for a missing, mistyped and unknown field; the workspace `AGENTS.md`
+     "Authoring exercises" section. **Done 2026-10-28.**
    - Then release `v0.1.0` (decided 2026-10-26, from a Codex review before going public):
      a `constraints.txt` with the dependency versions CI passed on, a short CHANGELOG, and
      a git tag. Not earlier: before phase 2 is solved, the whole loop has not run once.
@@ -905,6 +976,9 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
    image-only slides are read as images (a multimodal model or OCR) before anything is
    generated from them, and every source records slide footer, PDF page and any lab or
    textbook origin, with the exercise's teaching assumptions stated.
+   Pre-phase-3 work (decided 2026-10-28), in order: isolation layer A (static check); the
+   materials reader with the md cache and vision transcription ("Reading files"), which
+   needs a minimal `llm.py`; isolation layer B can follow.
    Note, malicious material (2026-10-26): phase 3 feeds document text to the LLM and then
    runs the code it writes. A crafted PDF or web page can carry instructions (prompt
    injection) that make the generated reference, tests or mutants read files such as
@@ -999,7 +1073,7 @@ gaps. Each was decided by the owner; change one only with the owner.
 
 ## Deferred
 
-SQLite, CLI, Docker, error taxonomy (derive categories from real attempt data later).
+SQLite, CLI, Docker (beyond the planned isolation container, see "Code execution safety"), error taxonomy (derive categories from real attempt data later).
 Adaptive learning and exam mode are listed under the later phases below.
 
 Later phases, after phase 5. Order decided 2026-10-26: second course, then adaptive review
@@ -1066,8 +1140,9 @@ so it comes late; the adaptive review screens can be built with it.
     commands (arbitrary commands; hallucinated package names can be squatted). A component
     or platform missing from the recipes is reported as needing a new recipe.
   - This partly changes "Check, don't install" (see "Environment"): confirm with the owner
-    when the GUI phase starts. A per-course container image would avoid platform differences but
-    reopens "Docker deferred"; decide it together with the phase 3 isolation question.
+    when the GUI phase starts. A per-course container image is now planned for isolation
+    (layer B, "Code execution safety"); whether setup also uses it is decided when the GUI
+    phase starts.
 
 ## Open questions
 
