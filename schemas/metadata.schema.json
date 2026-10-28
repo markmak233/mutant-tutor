@@ -1,0 +1,264 @@
+{
+  "$defs": {
+    "Constraints": {
+      "additionalProperties": false,
+      "description": "Static API constraints, checked with `ast` by validation/api.py.",
+      "properties": {
+        "forbidden_calls": {
+          "default": [],
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Forbidden Calls",
+          "type": "array"
+        },
+        "forbidden_imports": {
+          "default": [],
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Forbidden Imports",
+          "type": "array"
+        },
+        "required_definitions": {
+          "default": [],
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Required Definitions",
+          "type": "array"
+        },
+        "required_any": {
+          "default": [],
+          "items": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "title": "Required Any",
+          "type": "array"
+        },
+        "count_uses": {
+          "default": [],
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Count Uses",
+          "type": "array"
+        }
+      },
+      "title": "Constraints",
+      "type": "object"
+    },
+    "Source": {
+      "additionalProperties": false,
+      "description": "Where a workspace exercise comes from: slide footers and PDF pages, both, since\nthey differ (docs/design.md, batch-1 review).",
+      "properties": {
+        "lecture": {
+          "minLength": 1,
+          "title": "Lecture",
+          "type": "string"
+        },
+        "slides": {
+          "minLength": 1,
+          "title": "Slides",
+          "type": "string"
+        },
+        "pdf_pages": {
+          "minLength": 1,
+          "title": "Pdf Pages",
+          "type": "string"
+        },
+        "lab": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lab"
+        },
+        "assumptions": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Assumptions",
+          "type": "array"
+        }
+      },
+      "required": [
+        "lecture",
+        "slides",
+        "pdf_pages"
+      ],
+      "title": "Source",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "solutions/<id>/metadata.json (examples: solution/metadata.json).",
+  "properties": {
+    "schema_version": {
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "id": {
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+      "title": "Id",
+      "type": "string"
+    },
+    "title": {
+      "minLength": 1,
+      "title": "Title",
+      "type": "string"
+    },
+    "topic": {
+      "minLength": 1,
+      "title": "Topic",
+      "type": "string"
+    },
+    "type": {
+      "enum": [
+        "implementation",
+        "completion",
+        "debugging"
+      ],
+      "title": "Type",
+      "type": "string"
+    },
+    "interface": {
+      "enum": [
+        "function",
+        "file"
+      ],
+      "title": "Interface",
+      "type": "string"
+    },
+    "difficulty": {
+      "enum": [
+        "easy",
+        "medium",
+        "hard"
+      ],
+      "title": "Difficulty",
+      "type": "string"
+    },
+    "framework": {
+      "enum": [
+        "python",
+        "mrjob",
+        "pyspark-rdd",
+        "pyspark-df"
+      ],
+      "title": "Framework",
+      "type": "string"
+    },
+    "runner": {
+      "anyOf": [
+        {
+          "enum": [
+            "inline",
+            "hadoop"
+          ],
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Runner"
+    },
+    "entry_point": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Entry Point",
+      "type": "array"
+    },
+    "constraints": {
+      "$ref": "#/$defs/Constraints",
+      "default": {
+        "forbidden_calls": [],
+        "forbidden_imports": [],
+        "required_definitions": [],
+        "required_any": [],
+        "count_uses": []
+      }
+    },
+    "partition_check": {
+      "default": false,
+      "title": "Partition Check",
+      "type": "boolean"
+    },
+    "combiner_check": {
+      "default": false,
+      "title": "Combiner Check",
+      "type": "boolean"
+    },
+    "timeout_s": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Timeout S"
+    },
+    "mutant_partitions": {
+      "default": [
+        2
+      ],
+      "items": {
+        "minimum": 1,
+        "type": "integer"
+      },
+      "minItems": 1,
+      "title": "Mutant Partitions",
+      "type": "array"
+    },
+    "source": {
+      "anyOf": [
+        {
+          "const": "synthetic",
+          "type": "string"
+        },
+        {
+          "$ref": "#/$defs/Source"
+        }
+      ],
+      "title": "Source"
+    }
+  },
+  "required": [
+    "id",
+    "title",
+    "topic",
+    "type",
+    "interface",
+    "difficulty",
+    "framework",
+    "entry_point",
+    "source"
+  ],
+  "title": "Metadata",
+  "type": "object"
+}
