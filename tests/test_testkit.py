@@ -85,6 +85,19 @@ def test_run_program_requires_success_marker(tmp_path):
         run_program(SavesNothing, tmp_path / "in", tmp_path / "out")
 
 
+class SavesIntoFolders:
+    def run(self, input_path, output_path):
+        for name in ("count", "total"):
+            (Path(output_path) / name).mkdir(parents=True)
+            (Path(output_path) / name / "_SUCCESS").touch()
+
+
+def test_run_program_says_where_output_went_when_saved_into_folders(tmp_path):
+    with pytest.raises(AssertionError, match=r"outputPath itself: save it there with one "
+                       r"saveAsTextFile\(outputPath\); it was saved into count/, total/"):
+        run_program(SavesIntoFolders, tmp_path / "in", tmp_path / "out")
+
+
 # --- order="any" -------------------------------------------------------------------------
 
 

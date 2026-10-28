@@ -94,7 +94,15 @@ def run_program(program, input_dir: Path | str, output_dir: Path | str, *params)
         _stop_leftover_spark()
     # Spark writes _SUCCESS when saving finished; without this check a program that saves
     # nothing would pass a test that expects empty output.
-    assert (Path(output_dir) / "_SUCCESS").exists(), "no output was saved to outputPath"
+    out = Path(output_dir)
+    if not (out / "_SUCCESS").exists():
+        saved = sorted(f"{p.parent.relative_to(out)}/" for p in out.glob("*/**/_SUCCESS"))
+        # A program that saved into folders of outputPath otherwise reads as one that
+        # saved nothing (a generated exercise lost three repairs to that).
+        raise AssertionError(
+            "no output was saved to outputPath itself: save it there with one "
+            f"saveAsTextFile(outputPath); it was saved into {', '.join(saved)} instead"
+            if saved else "no output was saved to outputPath")
     return read_output(output_dir)
 
 
