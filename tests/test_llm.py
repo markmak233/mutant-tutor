@@ -1,0 +1,175 @@
+"""The OpenAI-compatible client, with urlopen replaced: no server, no network."""
+
+import base64
+import io
+import json
+import re
+import urllib.error
+
+import pytest
+
+from tutor import llm
+from tutor.llm import LLMConfig, LLMError, chat, config_for, image_message
+
+SECRET = "sk-test-not-a-real-key"
+
+
+class FakeResponse(io.BytesIO):
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+@pytest.fixture
+def sent(monkeypatch):
+    """Captures each request; answers with a fixed completion."""
+    requests = []
+
+    def fake_urlopen(request, timeout):
+        requests.append((request, timeout))
+        return FakeResponse(json.dumps({
+            "choices": [{"message": {"content": "## Mean v1"}}],
+            "usage": {"prompt_tokens": 1200, "completion_tokens": 80},
+        }).encode())
+
+    monkeypatch.setattr(llm.urllib.request, "urlopen", fake_urlopen)
+    return requests
+
+
+WORKSPACE_LLM = """
+[llm.profiles.gemma-local]
+provider = "lmstudio"
+model = "google/gemma-4-26b-a4b-qat"
+
+[llm.profiles.glm-flash]
+provider = "glm"
+model = "glm-5.3-flash"
+api_key_env = "ZHIPU_API_KEY"
+
+[llm.roles]
+vision = "gemma-local"
+generate = "glm-flash"
+"""
+
+
+def workspace(tmp_path, llm=WORKSPACE_LLM):
+    (tmp_path / "workspace.toml").write_text('course = "demo"\n' + llm)
+    return tmp_path
+
+
+def test_roles_pick_profiles_and_providers_fill_in_the_rest(tmp_path):
+    ws = workspace(tmp_path)
+    env = {"ZHIPU_API_KEY": SECRET}
+
+    vision = config_for("vision", workspace=ws, environ=env)
+    assert (vision.name, vision.base_url, vision.api_key) == (
+        "gemma-local", "http://localhost:1234/v1", None)
+    assert vision.thinking_off == ({"reasoning_effort": "none"},)
+
+    generate = config_for("generate", workspace=ws, environ=env)
+    assert (generate.base_url, generate.model, generate.api_key) == (
+        "https://open.bigmodel.cn/api/paas/v4", "glm-5.3-flash", SECRET)
+    assert SECRET not in repr(generate)
+
+    assert config_for("vision", "glm-flash", ws, env).name == "glm-flash"  # --profile wins
+
+
+@pytest.mark.parametrize(
+    ("role", "profile", "llm", "env", "expected"),
+    [
+        ("hint", None, WORKSPACE_LLM, {}, "no model for 'hint'"),
+        ("vision", "gpt", WORKSPACE_LLM, {}, "no [llm.profiles.gpt]"),
+        ("generate", None, WORKSPACE_LLM, {}, "needs ZHIPU_API_KEY set in .env"),
+        ("vision", None, '[llm.profiles.p]\nprovider = "glm"\nmodel = "m"\napi_key = "x"\n'
+         '[llm.roles]\nvision = "p"\n', {}, "holds a key"),
+        ("vision", None, '[llm.profiles.p]\nprovider = "glm"\nmodel = "sk-abcdefghijklmnopqrstu"\n'
+         '[llm.roles]\nvision = "p"\n', {}, "holds a key"),
+        ("vision", None, '[llm.profiles.p]\nprovider = "lmstudio"\nmodel = "m"\nmodle = "x"\n'
+         '[llm.roles]\nvision = "p"\n', {}, "unknown fields: modle"),
+        ("vision", None, '[llm.profiles.p]\nprovider = "custom"\nmodel = "m"\n'
+         '[llm.roles]\nvision = "p"\n', {}, "needs a base_url"),
+    ],
+)
+def test_configuration_errors_say_what_to_fix(tmp_path, role, profile, llm, env, expected):
+    with pytest.raises(LLMError, match=re.escape(expected)):
+        config_for(role, profile, workspace(tmp_path, llm), env)
+
+
+def test_without_an_llm_section_the_environment_is_the_profile(tmp_path):
+    ws = workspace(tmp_path, "")
+    with pytest.raises(LLMError, match="no model configured"):
+        config_for("vision", workspace=ws, environ={})
+    config = config_for("vision", workspace=ws,
+                        environ={"LLM_MODEL": "gemma", "LLM_API_KEY": SECRET})
+    assert (config.name, config.base_url, config.api_key) == (
+        "env", "http://localhost:1234/v1", SECRET)
+
+
+def test_chat_sends_an_openai_request_and_logs_without_the_key(sent, tmp_path):
+    config = LLMConfig("p", "lmstudio", "http://localhost:1234/v1", "gemma", api_key=SECRET,
+                       timeout_s=9)
+    log = tmp_path / "logs" / "calls.jsonl"
+    message = image_message("transcribe", b"\x89PNG fake")
+
+    reply = chat(config, [message], purpose="vision", log_path=log)
+
+    request, timeout = sent[0]
+    body = json.loads(request.data)
+    assert request.full_url == "http://localhost:1234/v1/chat/completions"
+    assert request.get_header("Authorization") == f"Bearer {SECRET}"
+    assert (body["model"], body["temperature"], timeout) == ("gemma", 0.0, 9)
+    url = body["messages"][0]["content"][1]["image_url"]["url"]
+    assert base64.b64decode(url.removeprefix("data:image/png;base64,")) == b"\x89PNG fake"
+    assert (reply.text, reply.input_tokens, reply.output_tokens) == ("## Mean v1", 1200, 80)
+    line = json.loads(log.read_text())
+    assert (line["purpose"], line["outcome"], line["output_tokens"]) == ("vision", "ok", 80)
+    assert SECRET not in log.read_text()
+
+
+def test_no_authorization_header_without_a_key(sent):
+    chat(LLMConfig("p", "custom", "http://x/v1", "gemma"), [], purpose="test")
+    assert sent[0][0].get_header("Authorization") is None
+
+
+def test_an_unreachable_server_is_a_clear_error_and_is_logged(monkeypatch, tmp_path):
+    def refuse(request, timeout):
+        raise urllib.error.URLError(ConnectionRefusedError(61, "Connection refused"))
+
+    monkeypatch.setattr(llm.urllib.request, "urlopen", refuse)
+    log = tmp_path / "calls.jsonl"
+    with pytest.raises(LLMError, match="is the server running"):
+        chat(LLMConfig("p", "lmstudio", "http://localhost:1234/v1", "gemma"), [], purpose="vision",
+             log_path=log)
+    assert json.loads(log.read_text())["outcome"] == "error"
+
+
+def test_thinking_off_tries_each_switch_until_the_model_accepts_one(monkeypatch, tmp_path):
+    """GLM-5.3 refuses thinking: disabled with HTTP 400 and accepts reasoning_effort low."""
+    bodies = []
+
+    def fake_urlopen(request, timeout):
+        body = json.loads(request.data)
+        bodies.append(body)
+        if "thinking" in body:
+            raise urllib.error.HTTPError(request.full_url, 400, "bad", {},
+                                         io.BytesIO(b'{"error": "thinking cannot be disabled"}'))
+        return FakeResponse(json.dumps({"choices": [{"message": {"content": "ok"}}]}).encode())
+
+    monkeypatch.setattr(llm.urllib.request, "urlopen", fake_urlopen)
+    config = config_for("vision", "glm-flash", workspace(tmp_path), {"ZHIPU_API_KEY": SECRET})
+
+    assert chat(config, [], purpose="vision", thinking=False).text == "ok"
+    assert [b.get("thinking") or b.get("reasoning_effort") for b in bodies] == [
+        {"type": "disabled"}, "low"]
+    bodies.clear()
+    chat(config, [], purpose="generate")  # thinking left on: no switch sent
+    assert "thinking" not in bodies[0] and "reasoning_effort" not in bodies[0]
+
+
+def test_lm_studio_turns_thinking_off_with_reasoning_effort_none(sent):
+    chat(LLMConfig("p", "lmstudio", "http://x/v1", "gemma",
+                   thinking_off=({"reasoning_effort": "none"},)), [], purpose="vision",
+         thinking=False)
+    assert json.loads(sent[0][0].data)["reasoning_effort"] == "none"

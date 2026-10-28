@@ -139,6 +139,46 @@ python -m tutor.envcheck     # one line per [requires] entry, with a hint for ea
 Exercises are generated into `batches/` inside the workspace. Until phase 3 (LLM generation),
 they are drafted with Claude Code from the lectures and checked with `python -m tutor.validation`.
 
+### Reading the lectures into text (optional)
+
+```bash
+python -m tutor.materials "$WORKSPACE_DIR/lectures"            # text layer, about a second
+python -m tutor.materials --vision "$WORKSPACE_DIR/lectures"   # also slides that are images
+```
+
+The text goes to `$WORKSPACE_DIR/cache/lectures/<file>.pdf.md`, one section per page; a page
+is read again only when it changes. Slides that are images (code screenshots, pseudocode,
+diagrams) stay marked `pending` until a run with `--vision` transcribes them with a vision
+model through an OpenAI-compatible API. A local model keeps the slides on your machine:
+
+1. Install [LM Studio](https://lmstudio.ai), download a vision model (tested: Gemma 4
+   26B-A4B, about 15 GB; needs about 32 GB of memory), and start the server on its
+   Developer page (or `lms server start`).
+2. Name the model in `workspace.toml` and give it the `vision` role:
+   ```toml
+   [llm.profiles.gemma-local]
+   provider = "lmstudio"                    # base URL http://localhost:1234/v1
+   model = "google/gemma-4-26b-a4b-qat"     # the id LM Studio shows
+
+   [llm.roles]
+   vision = "gemma-local"
+   ```
+
+A cloud model is one more profile. Its key goes in `.env` only, and the profile names the
+variable (a key written into `workspace.toml` is refused):
+
+```toml
+[llm.profiles.glm-flash]
+provider = "glm"                            # Zhipu bigmodel.cn
+model = "glm-5.3-flash"
+api_key_env = "ZHIPU_API_KEY"               # .env: ZHIPU_API_KEY=...
+```
+
+Use it for one run with `--vision --profile glm-flash`, or make it the `vision` role. The
+slide images are then sent to that provider. Other OpenAI-compatible servers use
+`provider = "custom"` with a `base_url`. About 7 s per image page with the local model on an
+M2 Pro; every call is logged in `$WORKSPACE_DIR/logs/llm_calls.jsonl` (never the key).
+
 ## 6. Common problems
 
 | Symptom | Cause | Fix |
