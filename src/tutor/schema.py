@@ -37,11 +37,23 @@ class _Strict(BaseModel):
 class Constraints(_Strict):
     """Static API constraints, checked with `ast` by validation/api.py."""
 
-    forbidden_calls: list[Name] = []
-    forbidden_imports: list[Name] = []
-    required_definitions: list[Name] = []
-    required_any: list[Annotated[list[Name], Field(min_length=1)]] = []
-    count_uses: list[Name] = []
+    # The descriptions reach the generating model through the JSON Schema: without them a
+    # model once put API calls it wanted used into required_any and could not tell why
+    # that failed.
+    forbidden_calls: list[Name] = Field(default=[], description=(
+        'Names that must not be used as a method or function, e.g. "groupByKey".'))
+    forbidden_imports: list[Name] = Field(default=[], description=(
+        'Modules that must not be imported, submodules included, e.g. "pyspark.sql".'))
+    required_definitions: list[Name] = Field(default=[], description=(
+        "Functions or methods the code must define (def, or an MRStep keyword), e.g. the "
+        'entry point or "mapper_final". Not API calls the code should make.'))
+    required_any: list[Annotated[list[Name], Field(min_length=1)]] = Field(
+        default=[], description=(
+            "Groups of names the code defines (as in required_definitions); at least one "
+            'group must be fully defined, e.g. [["combiner"], ["mapper_init", '
+            '"mapper_final"]]. Not API calls.'))
+    count_uses: list[Name] = Field(default=[], description=(
+        'Names whose uses are counted for the report, never limited, e.g. "MRStep".'))
 
 
 class Source(_Strict):

@@ -388,3 +388,12 @@ def test_the_item_graph_keeps_no_checkpoints_of_its_own(workspace):
     from tutor.graph.build import build_item
 
     assert build_item(deps(workspace, None)).checkpointer is False
+
+
+def test_the_draft_schema_tells_the_model_what_each_constraint_means():
+    """A model put API calls into required_any: the meaning must reach it in the schema."""
+    fields = nodes.DRAFT_SCHEMA["$defs"]["Constraints"]["properties"]
+    assert set(fields) == {"forbidden_calls", "forbidden_imports", "required_definitions",
+                           "required_any", "count_uses"}
+    assert all(field.get("description") for field in fields.values())
+    assert "Not API calls" in fields["required_any"]["description"]

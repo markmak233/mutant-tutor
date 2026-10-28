@@ -81,10 +81,10 @@ def find_violations(source: str, constraints: Mapping[str, list]) -> list[str]:
 
     for name in constraints.get("required_definitions", []):
         if name not in defined:
-            violations.append(f"must define {name}")
+            violations.append(f"must define {name} (a name the code defines, not a call)")
     if groups and not any(all(name in defined for name in group) for group in groups):
         options = " | ".join(" + ".join(group) for group in groups)
-        violations.append(f"must define one of: {options}")
+        violations.append(f"must define one of: {options} (names the code defines, not calls)")
     return violations
 
 

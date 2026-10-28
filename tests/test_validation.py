@@ -459,7 +459,8 @@ def test_similar_module_name_is_not_forbidden():
 def test_required_definitions():
     source = "class J:\n    def mapper_init(self):\n        pass\n"
     constraints = {"required_definitions": ["mapper_init", "mapper_final"]}
-    assert find_violations(source, constraints) == ["must define mapper_final"]
+    assert find_violations(source, constraints) == [
+        "must define mapper_final (a name the code defines, not a call)"]
 
 
 COMBINE = {"required_any": [["combiner"], ["mapper_init", "mapper_final"]]}
@@ -483,7 +484,8 @@ def test_required_any_is_met_by_any_one_group(source):
 ])
 def test_required_any_ignores_keywords_outside_mrstep_or_set_to_none(source):
     assert find_violations(source, COMBINE) == [
-        "must define one of: combiner | mapper_init + mapper_final"
+        "must define one of: combiner | mapper_init + mapper_final "
+        "(names the code defines, not calls)"
     ]
 
 
@@ -491,7 +493,8 @@ def test_required_any_needs_a_whole_group():
     """mapper_init alone is half of in-mapper combining, and there is no combiner."""
     source = "class J:\n    def mapper_init(self):\n        pass\n"
     assert find_violations(source, COMBINE) == [
-        "must define one of: combiner | mapper_init + mapper_final"
+        "must define one of: combiner | mapper_init + mapper_final "
+        "(names the code defines, not calls)"
     ]
 
 
