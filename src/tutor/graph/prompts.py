@@ -67,8 +67,10 @@ Files (fields of the JSON you return):
 - oracle_py: a plain-Python specification of the same result, written independently of the
   reference (no Spark / MRJob), and test_oracle_py: a hypothesis test comparing student.py
   with oracle.py (`@settings(deadline=None, derandomize=True)`, a moderate max_examples).
-- mutants: 3 to 6 mistakes, each given as replacements of exact text in reference_py
-  (`old` must occur exactly once in it). Most must be misconceptions of this knowledge
+- mutants: 3 to 6 mistakes, each named m01_ to m06_ plus a short snake_case description
+  (e.g. m01_average_of_averages), each given as replacements of exact text in reference_py
+  (`old` must occur exactly once in it, copied character for character, quotes and
+  indentation included). Most must be misconceptions of this knowledge
   point: the code a student writes who has a wrong idea of how the concept works (for
   example, for lazy evaluation: an accumulator updated in a transformation that no action
   ever runs). At most one may be a plain slip such as > for >=; never arbitrary edits such
@@ -110,8 +112,17 @@ def example(framework: str, interface: str) -> str:
     parts = [f"Example exercise ({root.name}), as files; your answer gives the same content "
              "as JSON fields, with mutants as replacements:"]
     for path in sorted(root.rglob("*")):
-        if path.is_file() and "__pycache__" not in path.parts and path.name != "validation.json":
-            parts.append(f"=== {path.relative_to(root)} ===\n{path.read_text()}")
+        rel = path.relative_to(root)
+        # Only the exercise's own files: not caches, not hidden files such as macOS's
+        # .DS_Store (binary, git-ignored, so absent in CI but present on a Mac).
+        if (not path.is_file() or "__pycache__" in rel.parts
+                or any(part.startswith(".") for part in rel.parts)
+                or path.name == "validation.json"):
+            continue
+        try:
+            parts.append(f"=== {rel} ===\n{path.read_text()}")
+        except UnicodeDecodeError:
+            continue
     return "\n\n".join(parts)
 
 

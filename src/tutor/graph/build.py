@@ -42,7 +42,10 @@ def build_item(deps: Deps):
     graph.add_edge("repair", "validate")
     graph.add_edge("save", END)
     graph.add_edge("discard", END)
-    return graph.compile()
+    # checkpointer=False: run inside a batch, it must not inherit the batch's checkpointer
+    # (it would save every step with its models in the batch's SQLite); a stopped batch
+    # redoes a whole unfinished item anyway.
+    return graph.compile(checkpointer=False)
 
 
 def build_batch(deps: Deps, checkpointer):

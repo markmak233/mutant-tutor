@@ -728,11 +728,15 @@ Design approved 2026-10-28 (owner):
 - First real batch (week 4, 6 items, GLM-5.3-Flash, 2026-10-28) and what it changed: one
   saved, two discarded after three rounds each on the same mutant error (`old` not found:
   the model wrote other quotes or indentation than its own reference, and the error said
-  only "not found"), and one GLM reply containing a byte that is not UTF-8 crashed the
-  whole run, so collect never ran and two items never started. Fixes: the client decodes
-  with replacement; any exception in an item is that item's error (logged, the others
-  finish, collect runs); a mutant error lists every failing mutant with the closest line
-  of the reference, copied exactly; `resume` continues a run that stopped midway without
+  only "not found"), and one item crashed the whole run, so collect never ran and two
+  items never started. The crash was local, not the model: the example loader read
+  macOS's `.DS_Store` (binary, git-ignored, so never in CI) from the file-level example;
+  it was first blamed on a GLM reply, until GPT failed at the same byte. Fixes: the
+  example loader reads only the exercise's own text files; any exception in an item is
+  that item's error (logged, the others finish, collect runs); the client decodes replies
+  with replacement (harmless either way); the item graph no longer inherits the batch's
+  checkpointer (it saved every step's models in the batch's SQLite); a mutant error lists
+  every failing mutant with the closest line of the reference, copied exactly; `resume` continues a run that stopped midway without
   redoing finished items (tested), and `resume --profile` finishes it with another model;
   the manifest names every model that generated its exercises.
 - Batch (step 2, approved 2026-10-28): `plan` (LLM) reads coverage.md, one line per cached

@@ -369,3 +369,22 @@ def test_a_mutant_that_misses_the_reference_is_shown_the_closest_line():
     with pytest.raises(DraftError, match=r"closest line in reference.py is, exactly: "
                                          r"'    return sum\(xs\)'"):
         apply_mutant(REFERENCE, mutant)
+
+
+def test_the_example_leaves_out_hidden_and_binary_files(tmp_path, monkeypatch):
+    root = tmp_path / prompts.DEFAULT_EXAMPLE
+    (root / "exercise").mkdir(parents=True)
+    (root / "exercise" / "student.py").write_text("def f(): ...\n")
+    (root / ".DS_Store").write_bytes(b"\x00\x00\x00\x01Bud1\x80")  # what macOS leaves
+    (root / "exercise" / "data.bin").write_bytes(b"\x80\x81")
+    monkeypatch.setattr(prompts, "EXAMPLES", tmp_path)
+    text = prompts.example("python", "function")
+    assert "=== exercise/student.py ===" in text
+    assert ".DS_Store" not in text and "data.bin" not in text
+
+
+def test_the_item_graph_keeps_no_checkpoints_of_its_own(workspace):
+    pytest.importorskip("langgraph")
+    from tutor.graph.build import build_item
+
+    assert build_item(deps(workspace, None)).checkpointer is False

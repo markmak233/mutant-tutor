@@ -209,8 +209,8 @@ def _post(config: LLMConfig, body: dict, purpose: str, log_path: Path | None) ->
     start = time.monotonic()
     try:
         with urllib.request.urlopen(request, timeout=config.timeout_s) as response:
-            # GLM once sent a byte that is not UTF-8 inside a long reply; a replacement
-            # character there is harmless (the caller validates the text), a crash is not.
+            # A stray byte that is not UTF-8 in a long reply should cost one character
+            # (the caller validates the text), not the whole call.
             data = json.loads(response.read().decode("utf-8", errors="replace"))
         choice = data["choices"][0]
         text = choice["message"]["content"] or ""
