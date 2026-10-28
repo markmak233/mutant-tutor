@@ -66,7 +66,12 @@ def build_batch(deps: Deps, checkpointer):
     def after_approve(state: BatchState):
         if not state.get("approved"):
             return "plan"
-        return [Send("item", {"item": p}) for p in state["plan"]]
+        # One lecture, then one kind of exercise, after another: an item started after
+        # another with the same course pages (and example) finds them in the provider's
+        # prompt cache.
+        ordered = sorted(state["plan"], key=lambda p: (p["lecture"], p["framework"],
+                                                       p["interface"]))
+        return [Send("item", {"item": p}) for p in ordered]
 
     def item(payload: dict) -> BatchState:
         plan_item = PlanItem.model_validate(payload["item"])

@@ -779,6 +779,18 @@ Design approved 2026-10-28 (owner):
   descriptions had named "the entry point" as a required definition, and a model then
   wrote `AuctionStats.run`, which the api check did not know: it now accepts
   `Class.method`, the form `entry_point` uses.
+- Prompt order and cache accounting (2026-10-29). Providers cache the longest prompt
+  prefix they have seen, and the item's own lines came before its course pages, so items
+  of one lecture shared only the system prompt (DeepSeek: about 6k of 16k input tokens
+  cached on a first call). Now the system prompt holds what the whole course shares
+  (rules, testkit API, conventions) and the user message gives the course pages, then the
+  example exercise (chosen by framework and interface), then the item; a batch starts its
+  items sorted by lecture, framework and interface. Each item counts input, cached input
+  and output (`usage` in generation.jsonl), and the CLI prints the batch's share served
+  from the cache. Considered: a summary of the lecture instead of its pages, to shrink
+  the prompt; rejected, since exercises must match the slides' code and cite their pages,
+  a summary is one more model output that can be wrong for every item after it, and with
+  caching the pages cost little (output tokens dominate the cost).
 - Batch (step 2, approved 2026-10-28): `plan` (LLM) reads coverage.md, one line per cached
   page (PDF page, footer, title), the existing exercise ids and the owner's preferences,
   and returns `count` PlanItems with a reason each; code checks the count, unique and new

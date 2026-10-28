@@ -125,6 +125,8 @@ def _item(args, workspace: Path, build) -> int:
         for node, change in update.items():
             final.update(change or {})
             _progress(item.id, node, change or {})
+    if final.get("usage"):
+        print(f"  {_usage_text(final['usage'])}")
     if final.get("outcome") == "saved":
         write_manifest(deps, [item])
         return 0
@@ -252,12 +254,24 @@ def _progress(exercise: str, node: str, change: dict) -> None:
     print(f"  [{exercise}] {text}", flush=True)
 
 
+def _usage_text(usage: dict[str, int]) -> str:
+    """e.g. "input 45,277 tokens (13,440 from the provider's cache, 30%), output 9,809"."""
+    share = usage["cached"] / usage["input"] if usage["input"] else 0.0
+    return (f"input {usage['input']:,} tokens ({usage['cached']:,} from the provider's "
+            f"cache, {share:.0%}), output {usage['output']:,}")
+
+
 def _summary(results: list[dict], batch_dir: Path, workspace: Path) -> int:
     print(f"\n{batch_dir.relative_to(workspace)}:")
+    total = {"input": 0, "cached": 0, "output": 0}
     for r in results:
         why = f"  ({r['last_failure'].splitlines()[0][:100]})" if r["outcome"] != "saved" else ""
         print(f"  {r['outcome']:<9} {r['id']}: {r['rounds'] + 1} round(s), "
               f"{r['tokens']:,} tokens{why}")
+        for key in total:
+            total[key] += r.get("usage", {}).get(key, 0)
+    if total["input"]:
+        print(f"  all items: {_usage_text(total)}")
     if (batch_dir / "coverage-proposal.md").is_file():
         proposal = (batch_dir / "coverage-proposal.md").relative_to(workspace)
         print(f"coverage.md changes proposed in {proposal}")

@@ -1,6 +1,7 @@
 """The generation graph with a fake model and a fake validator: no network, no Spark."""
 
 import json
+import re
 
 import pytest
 
@@ -234,7 +235,7 @@ def test_the_graph_discards_after_the_last_repair_round(workspace):
 
 
 def test_the_system_prompt_lists_the_allowed_imports_from_the_safety_check():
-    text = prompts.system_prompt(ITEM, "")
+    text = prompts.system_prompt("")
     assert "collections" in text and "{imports}" not in text and "(none recorded)" in text
 
 
@@ -259,7 +260,7 @@ class BatchModel:
         if purpose == "plan":
             self.last_plan_request = messages[1]["content"]
             return Reply(self.plans.pop(0), 800, 200, 0.1, "stop")
-        exercise_id = messages[1]["content"].split("`")[1]
+        exercise_id = re.search(r"Write the exercise `([^`]+)`", messages[1]["content"])[1]
         data = draft()
         data["metadata"]["id"] = exercise_id
         return Reply(json.dumps(data), 1000, 500, 0.1, "stop")
@@ -472,8 +473,8 @@ def test_without_an_oracle_role_the_generating_model_writes_the_whole_oracle(wor
     model = FakeModel()
     assert nodes.write_oracle({"draft": ExerciseDraft.model_validate(draft())},
                               deps(workspace, model)) == {}
-    assert "only the interface" not in prompts.system_prompt(ITEM, "")
-    assert "only the interface" in prompts.system_prompt(ITEM, "", oracle_interface=True)
+    assert "only the interface" not in prompts.system_prompt("")
+    assert "only the interface" in prompts.system_prompt("", oracle_interface=True)
 
 
 def test_the_oracle_model_sees_the_question_and_interface_never_the_reference(workspace):
@@ -601,3 +602,28 @@ def test_a_rule_1_failure_reminds_repair_that_the_test_may_be_wrong():
     rule_3 = prompts.repair_prompt(ITEM, "", "{}", "rule 3 (mutants killed) FAIL: ...")
     assert "if the test is wrong, fix the test" in rule_1
     assert "if the test is wrong" not in rule_3
+
+
+def test_shared_parts_come_first_so_providers_can_cache_them():
+    """System: the same for the whole course. User: pages (one lecture), the example (one
+    kind of exercise), then the item."""
+    other = ITEM.model_copy(update={"id": "other", "knowledge_point": "another point"})
+    assert "Example exercise" not in prompts.system_prompt("conventions")
+    first, second = (prompts.item_prompt(i, "PAGES", "learn") for i in (ITEM, other))
+    shared = first[:first.index("Write the exercise")]
+    assert second.startswith(shared) and shared.index("PAGES") < shared.index("Example exercise")
+
+
+def test_usage_counts_the_cached_input_of_every_call_of_an_item(workspace, capsys):
+    from tutor.graph.__main__ import _summary, _usage_text
+
+    state = {"usage": {"input": 1000, "cached": 0, "output": 500}}
+    spent = nodes._spent(state, Reply("{}", 2000, 300, 0.1, "stop", cached_tokens=1500))
+    assert spent == {"tokens": 3800, "usage": {"input": 3000, "cached": 1500, "output": 800}}
+    assert _usage_text(spent["usage"]) == (
+        "input 3,000 tokens (1,500 from the provider's cache, 50%), output 800")
+    results = [{"id": i, "outcome": "saved", "rounds": 0, "tokens": 3800,
+                "usage": spent["usage"], "last_failure": None} for i in ("a", "b")]
+    _summary(results, workspace / "batches" / "b", workspace)
+    assert "all items: input 6,000 tokens (3,000 from the provider's cache, 50%)" in (
+        capsys.readouterr().out)

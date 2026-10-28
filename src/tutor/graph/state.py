@@ -97,6 +97,7 @@ class ItemState(TypedDict, total=False):
     round: int
     attempts: list[Attempt]
     tokens: int  # input + output tokens spent on this item
+    usage: dict[str, int]  # the same, split: input, cached (part of input), output
     outcome: Literal["saved", "discarded"]
     # The independent oracle (nodes.write_oracle): what it was written from (a hash of the
     # question, the interface and the sample data), its code, and what the node did.

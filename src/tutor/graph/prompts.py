@@ -1,8 +1,10 @@
 """Prompts of the generation graph.
 
-The system prompt is the same for every item of a course (format rules, an example
-exercise, the testkit API, the course conventions), so a provider can cache it; the item,
-its course pages and, when repairing, the failed draft come after it. The course
+Ordered for prompt caching, which reuses the longest prefix a provider has seen: the system
+prompt is the same for every item of a course (format rules, the testkit API, the course
+conventions); the user message then gives the course pages (shared by the items of one
+lecture), the example exercise (shared by items of one framework and interface), and only
+then the item and, when repairing, the failed draft. The course
 conventions come from the workspace's conventions.md, never from this file: everything
 here holds for any course.
 """
@@ -145,7 +147,7 @@ def example(framework: str, interface: str) -> str:
     return "\n\n".join(parts)
 
 
-def system_prompt(item: PlanItem, conventions: str, oracle_interface: bool = False) -> str:
+def system_prompt(conventions: str, oracle_interface: bool = False) -> str:
     """`oracle_interface`: another model writes the oracle (the `oracle` role is set)."""
     imports = ", ".join(sorted(m for m in CORE_IMPORTS if not m.startswith("_")))
     spec = SPEC.replace("{imports}", imports).replace(
@@ -153,7 +155,6 @@ def system_prompt(item: PlanItem, conventions: str, oracle_interface: bool = Fal
     return "\n\n".join([
         spec,
         "tutor.testkit API:\n" + testkit_api(),
-        example(item.framework, item.interface),
         "Course conventions (facts about this course every exercise must respect):\n"
         + (conventions.strip() or "(none recorded)"),
     ])
@@ -169,14 +170,15 @@ MODES = {
 
 def item_prompt(item: PlanItem, context: str, mode: str = "learn") -> str:
     return (
-        f"Write the exercise `{item.id}`.\n"
+        "The course pages (one section per PDF page, `## p.N · slide S`; image slides "
+        "were transcribed, so code there is as on the slide):\n\n" + context
+        + "\n\n" + example(item.framework, item.interface)
+        + f"\n\nWrite the exercise `{item.id}`.\n"
         f"Knowledge point: {item.knowledge_point}\n"
         f"From: {item.lecture}, slides {item.slides}\n"
         f"Type: {item.type}; interface: {item.interface}; framework: {item.framework}\n"
         f"Batch mode: {MODES[mode]}\n"
         + (f"Notes: {item.notes}\n" if item.notes else "")
-        + "\nThe course pages (one section per PDF page, `## p.N · slide S`; image slides "
-        "were transcribed, so code there is as on the slide):\n\n" + context
     )
 
 

@@ -150,11 +150,10 @@ def repair(state: ItemState, deps: Deps) -> ItemState:
 
 
 def _ask(state: ItemState, deps: Deps, user: str, purpose: str, round_: int) -> ItemState:
-    item = state["item"]
     conventions = deps.workspace / "conventions.md"
     messages = [
         {"role": "system", "content": prompts.system_prompt(
-            item, conventions.read_text() if conventions.is_file() else "",
+            conventions.read_text() if conventions.is_file() else "",
             oracle_interface=deps.oracle_config is not None)},
         {"role": "user", "content": user},
     ]
@@ -162,8 +161,7 @@ def _ask(state: ItemState, deps: Deps, user: str, purpose: str, round_: int) -> 
                       max_tokens=deps.max_tokens, response_schema=DRAFT_SCHEMA,
                       thinking=deps.thinking,
                       temperature=min(round_ * deps.repair_temperature_step, 0.8))
-    tokens = state.get("tokens", 0) + (reply.input_tokens or 0) + (reply.output_tokens or 0)
-    update: ItemState = {"round": round_, "tokens": tokens, "draft_json": reply.text,
+    update: ItemState = {**_spent(state, reply), "round": round_, "draft_json": reply.text,
                          "unchanged": round_ > 0 and reply.text.strip()
                          == state.get("draft_json", "").strip()}
     try:
@@ -175,6 +173,16 @@ def _ask(state: ItemState, deps: Deps, user: str, purpose: str, round_: int) -> 
                       failure=f"format: the reply does not fit the JSON schema{cut}: "
                               + "; ".join(_describe(err) for err in e.errors()[:10]))
     return update
+
+
+def _spent(state: ItemState, reply: llm.Reply) -> ItemState:
+    """The item's running token counts after `reply`: `tokens` (input + output, for the
+    budget) and `usage`, which also counts the input served from the provider's cache."""
+    before = state.get("usage", {"input": 0, "cached": 0, "output": 0})
+    usage = {"input": before["input"] + (reply.input_tokens or 0),
+             "cached": before["cached"] + (reply.cached_tokens or 0),
+             "output": before["output"] + (reply.output_tokens or 0)}
+    return {"tokens": usage["input"] + usage["output"], "usage": usage}
 
 
 def _describe(err: dict) -> str:
@@ -213,7 +221,7 @@ def write_oracle(state: ItemState, deps: Deps) -> ItemState:
     reply = deps.chat(deps.oracle_config, messages, purpose="oracle", log_path=deps.llm_log,
                       max_tokens=deps.max_tokens, response_schema=ORACLE_SCHEMA,
                       thinking=deps.thinking)
-    tokens = state.get("tokens", 0) + (reply.input_tokens or 0) + (reply.output_tokens or 0)
+    spent = _spent(state, reply)
     try:
         code = OracleDraft.model_validate_json(reply.text).oracle_py
     except ValidationError as e:
@@ -222,12 +230,12 @@ def write_oracle(state: ItemState, deps: Deps) -> ItemState:
     else:
         problem = _filled_problems(draft.oracle_py, code)
         if not problem:
-            return {"draft": draft.model_copy(update={"oracle_py": code}), "tokens": tokens,
+            return {"draft": draft.model_copy(update={"oracle_py": code}), **spent,
                     "oracle_key": key, "oracle_py": code, "oracle_status": "written"}
     return {**_oracle_failed(state, f"the oracle model could not implement oracle_py: "
                              f"{problem}. Make the interface's docstrings and the question "
                              "say exactly what each function takes and returns."),
-            "tokens": tokens}
+            **spent}
 
 
 def after_oracle(state: ItemState, deps: Deps) -> str:
@@ -463,6 +471,7 @@ def item_summary(item: PlanItem, final: ItemState | None, error: str | None = No
     return {"id": item.id, "lecture": item.lecture, "slides": item.slides,
             "outcome": "error" if error else final.get("outcome", "discarded"),
             "rounds": final.get("round", 0), "tokens": final.get("tokens", 0),
+            "usage": final.get("usage", {"input": 0, "cached": 0, "output": 0}),
             "last_failure": error or final.get("failure")}
 
 
@@ -641,6 +650,7 @@ def _log(state: ItemState, deps: Deps, outcome: str, error: str | None = None) -
         "format_errors": sum(a["format_error"] for a in state.get("attempts", [])),
         "attempts": state.get("attempts", []),
         "tokens": state.get("tokens", 0),
+        "usage": state.get("usage", {"input": 0, "cached": 0, "output": 0}),
         "model": f"{deps.config.name}: {deps.config.model}",
     }
     if deps.oracle_config:
