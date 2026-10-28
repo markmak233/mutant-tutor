@@ -15,7 +15,8 @@ items are generated in parallel (--parallel, default from the CPU count) into
 coverage-proposal.md lists the coverage.md changes for the owner to apply.
 
 With an `oracle` role (or --oracle-profile), that model writes each exercise's oracle.py
-from the question alone; it must be another provider than the generating model.
+from the question alone; it must be another provider than the generating model. With a
+`repair` role (or --repair-profile), a larger model takes over from the second repair.
 """
 
 from __future__ import annotations
@@ -59,6 +60,7 @@ def main(argv: list[str] | None = None) -> int:
     resume.add_argument("--feedback")
     resume.add_argument("--profile", help="generate the remaining items with this profile")
     resume.add_argument("--oracle-profile", help="write their oracles with this profile")
+    resume.add_argument("--repair-profile", help="repair them with this profile")
     item = sub.add_parser("item", help="generate one item from a JSON file")
     item.add_argument("item_file", type=Path)
     for p in (plan, resume, item):
@@ -67,6 +69,8 @@ def main(argv: list[str] | None = None) -> int:
         p.add_argument("--profile", help="profile for generating (default: generate role)")
         p.add_argument("--oracle-profile",
                        help="profile writing the oracle (default: oracle role, if set)")
+        p.add_argument("--repair-profile",
+                       help="profile for repairs from the second on (default: repair role)")
         p.add_argument("--thinking", choices=["low", "on"], default="low",
                        help="on: the model reasons at length (slower; GLM gets cut off)")
         p.add_argument("--mode", choices=["learn", "review"], default="learn")
@@ -92,13 +96,18 @@ def _deps(workspace: Path, batch_dir: Path, settings: dict) -> Deps:
     config = config_for("generate", settings.get("profile"), workspace)
     plan_config = _optional_role("plan", None, workspace)
     oracle_config = _optional_role("oracle", settings.get("oracle_profile"), workspace)
-    if oracle_config and (oracle_config.provider, oracle_config.base_url) == (
-            config.provider, config.base_url):
-        # One provider's models share training data and habits: not an independent reading.
-        raise ValueError(f"the oracle ({oracle_config.name}) and the generating model "
-                         f"({config.name}) come from one provider; choose another oracle")
+    repair_config = _optional_role("repair", settings.get("repair_profile"), workspace)
+    for writer in (config, repair_config):
+        if oracle_config and writer and (oracle_config.provider, oracle_config.base_url) == (
+                writer.provider, writer.base_url):
+            # One provider's models share training data and habits: not an independent
+            # reading.
+            raise ValueError(f"the oracle ({oracle_config.name}) and {writer.name}, which "
+                             "writes the exercise, come from one provider; choose another "
+                             "oracle")
     return Deps(workspace=workspace, batch_dir=batch_dir, config=config,
                 plan_config=plan_config, oracle_config=oracle_config,
+                repair_config=repair_config,
                 thinking=settings.get("thinking") == "on",
                 mode=settings.get("mode", "learn"), on_update=_progress,
                 on_stream=_receiving)
@@ -119,6 +128,7 @@ def _item(args, workspace: Path, build) -> int:
                  else workspace / "batches" / f"{date.today()}_p3-{args.batch}")
     deps = _deps(workspace, batch_dir, vars(args))
     oracle = f", oracle {deps.oracle_config.name}" if deps.oracle_config else ""
+    oracle += f", repair {deps.repair_config.name}" if deps.repair_config else ""
     print(f"{item.id}: {deps.config.name} ({deps.config.model}, thinking {args.thinking}"
           f"{oracle}) -> {batch_dir.relative_to(workspace)}", flush=True)
     final: dict = {}
@@ -145,8 +155,8 @@ def _batch(args, workspace: Path, build) -> int:
             raise ValueError(f"a batch labelled {args.batch} exists: resume it or choose "
                              "another label")
         batch_dir = workspace / "batches" / f"{date.today()}_p3-{args.batch}"
-        settings = {k: getattr(args, k)
-                    for k in ("profile", "oracle_profile", "thinking", "mode", "parallel")}
+        settings = {k: getattr(args, k) for k in (
+            "profile", "oracle_profile", "repair_profile", "thinking", "mode", "parallel")}
         (drafts / batch_dir.name).mkdir(parents=True)
         (drafts / batch_dir.name / "run.json").write_text(json.dumps(settings, indent=1))
         pending = {"lectures": args.lectures, "preferences": args.prefs,
@@ -158,7 +168,8 @@ def _batch(args, workspace: Path, build) -> int:
         batch_dir = workspace / "batches" / found[-1].parent.name
         settings = json.loads((found[-1].parent / "run.json").read_text())
         # e.g. finish a batch with another model; kept for later resumes
-        changed = {k: getattr(args, k) for k in ("profile", "oracle_profile") if getattr(args, k)}
+        changed = {k: getattr(args, k) for k in ("profile", "oracle_profile", "repair_profile")
+                   if getattr(args, k)}
         if changed:
             settings.update(changed)
             (found[-1].parent / "run.json").write_text(json.dumps(settings, indent=1))
@@ -236,7 +247,9 @@ def _progress(exercise: str, node: str, change: dict) -> None:
         text = f"context: {len(change['context']):,} characters of course pages"
     elif node in ("generate", "repair"):
         state = "format error" if change.get("format_error") else "draft ready"
-        text = f"{node} (round {change['round']}): {state}, {change['tokens']:,} tokens so far"
+        by = f", {change['model']}" if change.get("model") else ""
+        text = (f"{node} (round {change['round']}{by}): {state}, "
+                f"{change['tokens']:,} tokens so far")
     elif node == "oracle":
         if not change:
             return  # no oracle role: the generating model wrote it

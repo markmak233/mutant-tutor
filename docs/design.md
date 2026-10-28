@@ -808,6 +808,14 @@ Design approved 2026-10-28 (owner):
   the `oracle` role is set), repair is told the tests' expected values are the likely
   mistake; if not, the disagreement and the oracle's code go to repair as usual. The CLI
   keeps skipping rules 2-5 after rule 1. Cost: one rule 4 run (15-30 s) per such round.
+- A `repair` role (2026-10-29): a larger model takes over from the second repair
+  (`stronger_repair_from`), since the cheap model fails at diagnosis, not at writing: on
+  the hardest week 4 item DeepSeek-Flash sent drafts back unchanged or half fixed, while
+  GPT generating fixed it in one repair. Each attempt records its model; the manifest
+  names the repair model; the oracle must come from another provider than both writers.
+  First try with DeepSeek-V4-Pro (thinking off) did not fix that item either, and lost a
+  round copying the oracle's code, which rule 4's failure shows, into the oracle
+  interface; the message now says not to.
 - Batch (step 2, approved 2026-10-28): `plan` (LLM) reads coverage.md, one line per cached
   page (PDF page, footer, title), the existing exercise ids and the owner's preferences,
   and returns `count` PlanItems with a reason each; code checks the count, unique and new

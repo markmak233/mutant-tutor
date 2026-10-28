@@ -61,6 +61,7 @@ class FakeModel:
     def __call__(self, config, messages, *, purpose, log_path, max_tokens, response_schema,
                  thinking, temperature=0.0, **streaming):
         self.calls.append((purpose, messages, response_schema))
+        self.configs = [*getattr(self, "configs", []), config.name]
         self.thinking = thinking
         self.temperatures = [*getattr(self, "temperatures", []), temperature]
         return Reply(self.texts.pop(0), 1000, 500, 0.1, self.finish_reason)
@@ -521,6 +522,7 @@ def test_when_the_oracle_disagrees_the_repair_is_told_the_question_may_be_unclea
 
     repair = model.calls[2][1][1]["content"]
     assert "it never saw your reference" in repair and "t += x" in repair
+    assert "never copy this code into it" in repair  # a repair once pasted it into oracle_py
     # The question changed, so the oracle was written again from the new one.
     assert [purpose for purpose, _, _ in model.calls] == ["generate", "oracle", "repair",
                                                           "oracle"]
@@ -664,3 +666,32 @@ def test_when_the_reference_agrees_with_the_oracle_repair_suspects_the_tests(wor
     d = deps(workspace, model, checks=[report("1", "4")] * 2, max_rounds=1)  # discarded
     build_item(d).invoke({"item": ITEM})
     assert "the reference agrees" not in model.calls[1][1][1]["content"]
+
+
+PRO = LLMConfig("deepseek-pro", "deepseek", "https://api.deepseek.com", "deepseek-v4-pro")
+
+
+def test_the_repair_role_takes_over_from_the_second_repair(workspace):
+    pytest.importorskip("langgraph")
+    from tutor.graph.build import build_item
+
+    model = FakeModel(*[json.dumps(draft())] * 4)
+    d = deps(workspace, model, checks=[report("1")] * 3 + [report()], repair_config=PRO)
+    final = build_item(d).invoke({"item": ITEM})
+
+    assert final["outcome"] == "saved"
+    assert model.configs == ["glm-flash", "glm-flash", "deepseek-pro", "deepseek-pro"]
+    assert [a["model"] for a in final["attempts"]] == model.configs
+    log = json.loads((d.batch_dir / "generation.jsonl").read_text())
+    assert log["repair_model"] == "deepseek-pro: deepseek-v4-pro"
+
+
+def test_the_oracle_must_differ_from_the_repair_model_too(workspace):
+    from tutor.graph.__main__ import _deps
+
+    (workspace / "workspace.toml").write_text(
+        'course = "demo"\n[llm.profiles.ds]\nprovider = "deepseek"\nmodel = "f"\n'
+        '[llm.profiles.gpt]\nprovider = "openai"\nmodel = "g"\n'
+        '[llm.roles]\ngenerate = "ds"\nrepair = "gpt"\noracle = "gpt"\n')
+    with pytest.raises(ValueError, match="the oracle \\(gpt\\) and gpt, which writes"):
+        _deps(workspace, workspace / "batches" / "b", {})

@@ -76,6 +76,11 @@ class Deps:
     # unchanged prompt got the identical draft back, round after round (2026-10-29).
     repair_temperature_step: float = 0.2
     plan_config: llm.LLMConfig | None = None  # the `plan` role; default: config
+    # The `repair` role: a larger model for the repair rounds from `stronger_repair_from` on,
+    # where the cheap model fails most (it cannot tell which side of a failure is wrong).
+    # None: the generating model repairs too.
+    repair_config: llm.LLMConfig | None = None
+    stronger_repair_from: int = 2
     # The `oracle` role: another model family writes oracle.py from the question alone.
     # None: the generating model writes the whole oracle, as hand drafting does.
     oracle_config: llm.LLMConfig | None = None
@@ -151,10 +156,15 @@ def repair(state: ItemState, deps: Deps) -> ItemState:
         user = prompts.repair_prompt(item, state["context"], state.get("draft_json", ""),
                                      state["failure"] or "", deps.mode,
                                      unchanged=state.get("unchanged", False))
-    return _ask(state, deps, user, "repair", state.get("round", 0) + 1)
+    round_ = state.get("round", 0) + 1
+    stronger = deps.repair_config is not None and round_ >= deps.stronger_repair_from
+    return _ask(state, deps, user, "repair", round_,
+                deps.repair_config if stronger else deps.config)
 
 
-def _ask(state: ItemState, deps: Deps, user: str, purpose: str, round_: int) -> ItemState:
+def _ask(state: ItemState, deps: Deps, user: str, purpose: str, round_: int,
+         config: llm.LLMConfig | None = None) -> ItemState:
+    config = config or deps.config
     conventions = deps.workspace / "conventions.md"
     messages = [
         {"role": "system", "content": prompts.system_prompt(
@@ -162,12 +172,13 @@ def _ask(state: ItemState, deps: Deps, user: str, purpose: str, round_: int) -> 
             oracle_interface=deps.oracle_config is not None)},
         {"role": "user", "content": user},
     ]
-    reply = deps.chat(deps.config, messages, purpose=purpose, log_path=deps.llm_log,
+    reply = deps.chat(config, messages, purpose=purpose, log_path=deps.llm_log,
                       max_tokens=deps.max_tokens, response_schema=DRAFT_SCHEMA,
                       thinking=deps.thinking,
                       temperature=min(round_ * deps.repair_temperature_step, 0.8),
                       **_streaming(state, deps))
     update: ItemState = {**_spent(state, reply), "round": round_, "draft_json": reply.text,
+                         "model": config.name,
                          "unchanged": round_ > 0 and reply.text.strip()
                          == state.get("draft_json", "").strip()}
     try:
@@ -260,7 +271,8 @@ def _oracle_failed(state: ItemState, failure: str) -> ItemState:
     """Not written: shown to repair as a format failure of this round."""
     attempts = [*state.get("attempts", []), {
         "round": state.get("round", 0), "failure": f"format: {failure}",
-        "format_error": True, "dropped": [], "unchanged": state.get("unchanged", False)}]
+        "format_error": True, "dropped": [], "unchanged": state.get("unchanged", False),
+        "model": state.get("model", "")}]
     return {"failure": f"format: {failure}", "format_error": True, "attempts": attempts,
             "oracle_status": "failed"}
 
@@ -342,7 +354,8 @@ def validate_draft(state: ItemState, deps: Deps) -> ItemState:
                 failure += ("\nLeft out, could not be applied (fix them too):\n"
                             + "\n".join(dropped.values()))
     attempts.append({"round": round_, "failure": failure, "format_error": format_error,
-                     "dropped": sorted(dropped), "unchanged": state.get("unchanged", False)})
+                     "dropped": sorted(dropped), "unchanged": state.get("unchanged", False),
+                     "model": state.get("model", deps.config.name)})
     return {"failure": failure, "format_error": format_error, "attempts": attempts,
             "round_dir": round_dir}
 
@@ -351,8 +364,8 @@ ORACLE_DISAGREES = (
     "\nAbout rule 4: oracle.py was written by another model from your question, oracle "
     "interface and sample data alone; it never saw your reference. If the reference is "
     "right, the question is ambiguous or incomplete there: make it say exactly what it "
-    "means (the oracle is then written again). If the reference is wrong, fix it. The "
-    "oracle it wrote:\n")
+    "means (the oracle is then written again). If the reference is wrong, fix it. Keep "
+    "oracle_py an interface: never copy this code into it. The oracle it wrote:\n")
 
 
 ORACLE_AGREES = (
@@ -620,8 +633,9 @@ def _models_of(deps: Deps, ids: set[str]) -> str | None:
         return None
     lines = [json.loads(line) for line in deps.generation_log.read_text().splitlines()]
     saved = [x for x in lines if x["exercise"] in ids and x["outcome"] == "saved"]
-    models = [x["model"] for x in saved] + [f"oracle {x['oracle_model']}" for x in saved
-                                            if x.get("oracle_model")]
+    models = ([x["model"] for x in saved]
+              + [f"repair {x['repair_model']}" for x in saved if x.get("repair_model")]
+              + [f"oracle {x['oracle_model']}" for x in saved if x.get("oracle_model")])
     return "; ".join(dict.fromkeys(models)) or None
 
 
@@ -677,6 +691,9 @@ def _log(state: ItemState, deps: Deps, outcome: str, error: str | None = None) -
     }
     if deps.oracle_config:
         line["oracle_model"] = f"{deps.oracle_config.name}: {deps.oracle_config.model}"
+    if deps.repair_config and any(a.get("model") == deps.repair_config.name
+                                  for a in state.get("attempts", [])):
+        line["repair_model"] = f"{deps.repair_config.name}: {deps.repair_config.model}"
     if error:
         line["error"] = error
     with _LOG_LOCK:
