@@ -33,7 +33,7 @@ import time
 import tomllib
 import urllib.error
 import urllib.request
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -54,6 +54,9 @@ PROVIDERS = {
                  ({"thinking": {"type": "disabled"}}, {"reasoning_effort": "none"})),
     "custom": (None, ()),  # any other OpenAI-compatible server; base_url required
 }
+# Providers that send token usage in a streamed reply's last piece when asked to with
+# stream_options (documented); others stream without the option, which may be refused.
+STREAM_USAGE = {"openai", "deepseek"}
 PROFILE_FIELDS = {"provider", "model", "base_url", "api_key_env", "reasoning_effort",
                   "timeout_s"}
 KEY_LIKE = re.compile(r"^(sk-[\w-]{16,}|[0-9a-f]{32}\.\w{8,})$")
@@ -172,14 +175,17 @@ def image_message(prompt: str, png: bytes) -> dict:
 def chat(config: LLMConfig, messages: list[dict], *, purpose: str,
          log_path: Path | None = None, max_tokens: int | None = None,
          temperature: float = 0.0, thinking: bool = True,
-         response_schema: dict | None = None) -> Reply:
+         response_schema: dict | None = None, stream: bool = False,
+         on_progress: Callable[[int], None] | None = None) -> Reply:
     """One chat completion. `purpose` names the caller in the call log (e.g. "vision").
     `thinking=False` turns a reasoning model's hidden thinking off (or as low as the model
     allows), for tasks such as copying text from an image that need none.
     `response_schema` (a JSON Schema) asks for structured output: the reply text is then
     JSON fitting the schema. GLM-5.3-Flash and LM Studio enforce it (tested 2026-10-28: keys
     the prompt asked for but the schema forbids were left out); the caller still parses and
-    validates it, since a cut-off reply is not valid JSON."""
+    validates it, since a cut-off reply is not valid JSON.
+    `stream=True` receives the reply in pieces: `timeout_s` then bounds each pause, not the
+    whole reply, and `on_progress` is called with the characters received so far."""
     openai = config.provider == "openai"
     body = {"model": config.model, "messages": messages}
     if not openai:
@@ -201,10 +207,14 @@ def chat(config: LLMConfig, messages: list[dict], *, purpose: str,
         # caller's validation catches what does not fit.
         body["response_format"] = {"type": "json_schema", "json_schema": {
             "name": "output", "schema": response_schema, "strict": not openai}}
+    if stream:
+        body["stream"] = True
+        if config.provider in STREAM_USAGE:
+            body["stream_options"] = {"include_usage": True}
     variants = [{}] if thinking or not config.thinking_off else list(config.thinking_off)
     for number, extra in enumerate(variants, 1):
         try:
-            return _post(config, {**body, **extra}, purpose, log_path)
+            return _post(config, {**body, **extra}, purpose, log_path, on_progress)
         except _Rejected as e:
             if number == len(variants):
                 raise LLMError(str(e)) from None
@@ -215,7 +225,8 @@ class _Rejected(Exception):
     """HTTP 400: the request (often a thinking switch) was refused; another variant may work."""
 
 
-def _post(config: LLMConfig, body: dict, purpose: str, log_path: Path | None) -> Reply:
+def _post(config: LLMConfig, body: dict, purpose: str, log_path: Path | None,
+          on_progress: Callable[[int], None] | None = None) -> Reply:
     headers = {"Content-Type": "application/json"}
     if config.api_key:
         headers["Authorization"] = f"Bearer {config.api_key}"
@@ -226,7 +237,8 @@ def _post(config: LLMConfig, body: dict, purpose: str, log_path: Path | None) ->
         with urllib.request.urlopen(request, timeout=config.timeout_s) as response:
             # A stray byte that is not UTF-8 in a long reply should cost one character
             # (the caller validates the text), not the whole call.
-            data = json.loads(response.read().decode("utf-8", errors="replace"))
+            data = (_read_stream(response, on_progress) if body.get("stream")
+                    else json.loads(response.read().decode("utf-8", errors="replace")))
         choice = data["choices"][0]
         text = choice["message"]["content"] or ""
     except urllib.error.HTTPError as e:
@@ -256,6 +268,33 @@ def _post(config: LLMConfig, body: dict, purpose: str, log_path: Path | None) ->
                   (usage.get("prompt_tokens_details") or {}).get("cached_tokens"))
     _log(log_path, purpose, config, reply, reply.seconds, None)
     return reply
+
+
+def _read_stream(response, on_progress: Callable[[int], None] | None) -> dict:
+    """A streamed completion (server-sent events, one `data: {json}` line per piece) put
+    back together as the reply a call without streaming returns."""
+    parts, received, finish, usage = [], 0, None, None
+    for raw in response:
+        line = raw.decode("utf-8", errors="replace").strip()
+        if not line.startswith("data:"):
+            continue
+        payload = line.removeprefix("data:").strip()
+        if payload == "[DONE]":
+            break
+        chunk = json.loads(payload)
+        if "error" in chunk:
+            raise KeyError(f"error in the stream: {chunk['error']}")
+        usage = chunk.get("usage") or usage  # the last piece, when the provider sends it
+        for choice in chunk.get("choices") or []:
+            text = (choice.get("delta") or {}).get("content")
+            if text:
+                parts.append(text)
+                received += len(text)
+                if on_progress:
+                    on_progress(received)
+            finish = choice.get("finish_reason") or finish
+    return {"choices": [{"message": {"content": "".join(parts)}, "finish_reason": finish}],
+            "usage": usage or {}}
 
 
 def _log(path: Path | None, purpose: str, config: LLMConfig, reply: Reply | None,

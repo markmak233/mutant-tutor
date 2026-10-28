@@ -190,6 +190,15 @@ RULE_1_HINT = (
     "if the test is wrong, fix the test.")
 
 
+# A surviving mutant whose output equals the reference's (groupByKey then sum, instead of
+# reduceByKey) went through three repairs on a week 4 item: no output test can catch it.
+RULE_3_HINT = (
+    "\n\nA mutant that survives shows a gap in the tests: add a case its bug gets wrong, or, "
+    "when the bug is in how the result is computed and not in the result, catch it as in "
+    "\"Making how testable\" (a spy or monkeypatch on the API). A mutant whose result equals "
+    "the reference's on every input is not a mistake the tests can show: replace it.")
+
+
 def repair_prompt(item: PlanItem, context: str, draft_json: str, failure: str,
                   mode: str = "learn", unchanged: bool = False) -> str:
     """`unchanged`: that answer repeated the one before it, which failed the same way."""
@@ -198,6 +207,7 @@ def repair_prompt(item: PlanItem, context: str, draft_json: str, failure: str,
         + "\n\nYour previous answer:\n" + draft_json
         + "\n\nThe validator rejected it:\n" + failure
         + (RULE_1_HINT if re.search(r"^rule 1 ", failure, re.MULTILINE) else "")
+        + (RULE_3_HINT if re.search(r"^rule 3 .*survived", failure, re.MULTILINE) else "")
         + ("\n\nThat answer was identical to the one before it, which failed in the same "
            "way: returning it again cannot pass. Find what the failure points at and "
            "change it." if unchanged else "")

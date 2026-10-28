@@ -84,6 +84,10 @@ class Deps:
         default=lambda exercise, solution: validate(load_exercise(exercise, solution)))
     # Called with (exercise id, node, update) after every node of an item, for progress.
     on_update: Callable[[str, str, dict], None] | None = None
+    # Exercise replies arrive streamed: a reply that keeps coming is never cut off by the
+    # timeout, and on_stream gets (exercise id, characters so far) while it arrives.
+    stream: bool = True
+    on_stream: Callable[[str, int], None] | None = None
 
     @property
     def drafts(self) -> Path:
@@ -160,7 +164,8 @@ def _ask(state: ItemState, deps: Deps, user: str, purpose: str, round_: int) -> 
     reply = deps.chat(deps.config, messages, purpose=purpose, log_path=deps.llm_log,
                       max_tokens=deps.max_tokens, response_schema=DRAFT_SCHEMA,
                       thinking=deps.thinking,
-                      temperature=min(round_ * deps.repair_temperature_step, 0.8))
+                      temperature=min(round_ * deps.repair_temperature_step, 0.8),
+                      **_streaming(state, deps))
     update: ItemState = {**_spent(state, reply), "round": round_, "draft_json": reply.text,
                          "unchanged": round_ > 0 and reply.text.strip()
                          == state.get("draft_json", "").strip()}
@@ -173,6 +178,12 @@ def _ask(state: ItemState, deps: Deps, user: str, purpose: str, round_: int) -> 
                       failure=f"format: the reply does not fit the JSON schema{cut}: "
                               + "; ".join(_describe(err) for err in e.errors()[:10]))
     return update
+
+
+def _streaming(state: ItemState, deps: Deps) -> dict:
+    item_id = state["item"].id
+    progress = (lambda chars: deps.on_stream(item_id, chars)) if deps.on_stream else None
+    return {"stream": deps.stream, "on_progress": progress}
 
 
 def _spent(state: ItemState, reply: llm.Reply) -> ItemState:
@@ -220,7 +231,7 @@ def write_oracle(state: ItemState, deps: Deps) -> ItemState:
                     question, draft.oracle_py, draft.data_files)}]
     reply = deps.chat(deps.oracle_config, messages, purpose="oracle", log_path=deps.llm_log,
                       max_tokens=deps.max_tokens, response_schema=ORACLE_SCHEMA,
-                      thinking=deps.thinking)
+                      thinking=deps.thinking, **_streaming(state, deps))
     spent = _spent(state, reply)
     try:
         code = OracleDraft.model_validate_json(reply.text).oracle_py

@@ -243,3 +243,55 @@ def test_lm_studio_turns_thinking_off_with_reasoning_effort_none(sent):
                    thinking_off=({"reasoning_effort": "none"},)), [], purpose="vision",
          thinking=False)
     assert json.loads(sent[0][0].data)["reasoning_effort"] == "none"
+
+
+def stream_of(*pieces: dict) -> bytes:
+    lines = [f"data: {json.dumps(p)}\n\n" for p in pieces] + ["data: [DONE]\n\n"]
+    return (": keep-alive\n\n" + "".join(lines)).encode()
+
+
+def test_a_streamed_reply_is_put_back_together_with_its_usage(monkeypatch):
+    bodies = []
+
+    def fake_urlopen(request, timeout):
+        bodies.append(json.loads(request.data))
+        return FakeResponse(stream_of(
+            {"choices": [{"delta": {"role": "assistant", "content": ""}}]},
+            {"choices": [{"delta": {"content": '{"a": '}}]},
+            {"choices": [{"delta": {"content": "1}"}, "finish_reason": "stop"}]},
+            {"choices": [], "usage": {"prompt_tokens": 900, "completion_tokens": 12,
+                                      "prompt_tokens_details": {"cached_tokens": 640}}}))
+
+    monkeypatch.setattr(llm.urllib.request, "urlopen", fake_urlopen)
+    progress = []
+    reply = chat(LLMConfig("p", "deepseek", "https://api.deepseek.com", "deepseek-v4-flash"),
+                 [], purpose="generate", stream=True, on_progress=progress.append)
+
+    assert (reply.text, reply.finish_reason) == ('{"a": 1}', "stop")
+    assert (reply.input_tokens, reply.cached_tokens, reply.output_tokens) == (900, 640, 12)
+    assert progress == [6, 8]
+    assert bodies[0]["stream"] is True
+    assert bodies[0]["stream_options"] == {"include_usage": True}
+
+
+def test_only_providers_known_to_accept_it_are_asked_for_usage_in_a_stream(monkeypatch):
+    bodies = []
+
+    def fake_urlopen(request, timeout):
+        bodies.append(json.loads(request.data))
+        return FakeResponse(stream_of({"choices": [{"delta": {"content": "ok"}}]}))
+
+    monkeypatch.setattr(llm.urllib.request, "urlopen", fake_urlopen)
+    reply = chat(LLMConfig("p", "glm", "http://x/v1", "glm-5.3-flash"), [], purpose="plan",
+                 stream=True)
+    assert reply.text == "ok" and reply.input_tokens is None
+    assert bodies[0]["stream"] is True and "stream_options" not in bodies[0]
+
+
+def test_an_error_inside_a_stream_is_an_llm_error(monkeypatch, tmp_path):
+    monkeypatch.setattr(llm.urllib.request, "urlopen", lambda request, timeout: FakeResponse(
+        stream_of({"error": {"message": "overloaded"}})))
+    with pytest.raises(LLMError, match="error in the stream.*overloaded"):
+        chat(LLMConfig("p", "openai", "http://x/v1", "gpt"), [], purpose="generate",
+             stream=True, log_path=tmp_path / "calls.jsonl")
+    assert json.loads((tmp_path / "calls.jsonl").read_text())["outcome"] == "error"

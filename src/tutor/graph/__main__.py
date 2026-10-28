@@ -100,7 +100,8 @@ def _deps(workspace: Path, batch_dir: Path, settings: dict) -> Deps:
     return Deps(workspace=workspace, batch_dir=batch_dir, config=config,
                 plan_config=plan_config, oracle_config=oracle_config,
                 thinking=settings.get("thinking") == "on",
-                mode=settings.get("mode", "learn"), on_update=_progress)
+                mode=settings.get("mode", "learn"), on_update=_progress,
+                on_stream=_receiving)
 
 
 def _optional_role(role: str, profile: str | None, workspace: Path):
@@ -252,6 +253,17 @@ def _progress(exercise: str, node: str, change: dict) -> None:
     else:
         text = node
     print(f"  [{exercise}] {text}", flush=True)
+
+
+_RECEIVED: dict[str, int] = {}  # characters of the reply arriving for each exercise
+RECEIVING_STEP = 20_000
+
+
+def _receiving(exercise: str, chars: int) -> None:
+    """A line each time a streamed reply passes another RECEIVING_STEP characters."""
+    if chars // RECEIVING_STEP > _RECEIVED.get(exercise, 0) // RECEIVING_STEP:
+        print(f"  [{exercise}] receiving: {chars:,} characters", flush=True)
+    _RECEIVED[exercise] = chars
 
 
 def _usage_text(usage: dict[str, int]) -> str:

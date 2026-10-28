@@ -791,6 +791,15 @@ Design approved 2026-10-28 (owner):
   the prompt; rejected, since exercises must match the slides' code and cite their pages,
   a summary is one more model output that can be wrong for every item after it, and with
   caching the pages cost little (output tokens dominate the cost).
+- Streaming (2026-10-29): generate, repair and oracle calls receive the reply in pieces,
+  so `timeout_s` bounds a pause, not a whole long reply, and the CLI shows
+  `receiving: N characters` as it arrives; usage comes from the last piece
+  (`stream_options` only for OpenAI and DeepSeek, which document it). Plan and vision
+  calls are unchanged. The first real run showed why it is worth having: DeepSeek ran away
+  for 32,000 output tokens (cut off, retried) and the progress lines made it visible.
+  A rule 3 failure with a survivor now reminds repair to catch a bug in how the result is
+  computed with a spy, or to replace a mutant whose result equals the reference's (a
+  `groupByKey` then sum mutant had survived three repairs).
 - Batch (step 2, approved 2026-10-28): `plan` (LLM) reads coverage.md, one line per cached
   page (PDF page, footer, title), the existing exercise ids and the owner's preferences,
   and returns `count` PlanItems with a reason each; code checks the count, unique and new

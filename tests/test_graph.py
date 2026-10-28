@@ -59,7 +59,7 @@ class FakeModel:
         self.texts, self.calls, self.finish_reason = list(texts), [], finish_reason
 
     def __call__(self, config, messages, *, purpose, log_path, max_tokens, response_schema,
-                 thinking, temperature=0.0):
+                 thinking, temperature=0.0, **streaming):
         self.calls.append((purpose, messages, response_schema))
         self.thinking = thinking
         self.temperatures = [*getattr(self, "temperatures", []), temperature]
@@ -255,7 +255,7 @@ class BatchModel:
         self.plans, self.purposes = list(plans), []
 
     def __call__(self, config, messages, *, purpose, log_path, max_tokens, response_schema,
-                 thinking, temperature=0.0):
+                 thinking, temperature=0.0, **streaming):
         self.purposes.append(purpose)
         if purpose == "plan":
             self.last_plan_request = messages[1]["content"]
@@ -627,3 +627,25 @@ def test_usage_counts_the_cached_input_of_every_call_of_an_item(workspace, capsy
     _summary(results, workspace / "batches" / "b", workspace)
     assert "all items: input 6,000 tokens (3,000 from the provider's cache, 50%)" in (
         capsys.readouterr().out)
+
+
+def test_a_surviving_mutant_reminds_repair_how_to_catch_a_how_bug():
+    survived = "rule 3 (mutants killed) FAIL: 5/6 killed; survived (tests miss this bug): m01_x"
+    broken = "rule 3 (mutants killed) FAIL: 5/6 killed; cannot run (not a useful mutant): m01"
+    assert "a spy or monkeypatch" in prompts.repair_prompt(ITEM, "", "{}", survived)
+    assert "a spy or monkeypatch" not in prompts.repair_prompt(ITEM, "", "{}", broken)
+
+
+def test_exercise_replies_are_streamed_with_progress_by_exercise(workspace, capsys):
+    from tutor.graph.__main__ import _receiving
+
+    seen = {}
+
+    def model(config, messages, **kw):
+        seen.update(kw)
+        kw["on_progress"](45_000)
+        return Reply(json.dumps(draft()), 1000, 500, 0.1, "stop")
+
+    nodes.generate({"item": ITEM, "context": ""}, deps(workspace, model, on_stream=_receiving))
+    assert seen["stream"] is True
+    assert capsys.readouterr().out == "  [sum-list] receiving: 45,000 characters\n"
