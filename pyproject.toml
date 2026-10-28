@@ -12,7 +12,8 @@ license = "MIT"
 license-files = ["LICENSE"]
 # mrjob is unmaintained and breaks on 3.13 (no `pipes` module); see docs/design.md.
 requires-python = ">=3.11,<3.13"
-dependencies = []
+# pydantic: the batch format (schema.py), checked by validation rule 0 (docs/design.md).
+dependencies = ["pydantic>=2,<3"]
 
 [project.optional-dependencies]
 bigdata = [

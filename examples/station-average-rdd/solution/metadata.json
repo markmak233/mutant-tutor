@@ -5,7 +5,8 @@
   "type": "implementation",
   "difficulty": "easy",
   "framework": "pyspark-rdd",
-  "function": "average_by_station",
+  "interface": "function",
+  "entry_point": ["average_by_station"],
   "constraints": {
     "forbidden_calls": ["groupByKey", "collect"]
   },

@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from tutor.config import load_env
+from tutor.schema import Metadata, problems
 from tutor.validation import ExerciseError, Status, load_exercise, validate
 from tutor.validation.__main__ import format_report, main
 from tutor.validation.api import count_uses, find_violations
@@ -61,6 +62,16 @@ PART_ORACLE_TEST = (
 )
 
 
+# Rule 0 checks metadata.json first, so every mini exercise carries the required fields.
+METADATA = {
+    "id": "demo", "title": "Demo", "topic": "python/demo", "type": "implementation",
+    "interface": "function", "difficulty": "easy", "framework": "python",
+    "entry_point": ["add"], "source": "synthetic",
+}
+MR_METADATA = {"interface": "file", "framework": "mrjob", "runner": "inline",
+               "entry_point": ["Count"]}
+
+
 def make_exercise(tmp_path, *, tests=TESTS, reference=REFERENCE, skeleton=SKELETON,
                   mutants=None, extra_files=None, metadata=None,
                   oracle=ORACLE, oracle_test=ORACLE_TEST):
@@ -75,7 +86,7 @@ def make_exercise(tmp_path, *, tests=TESTS, reference=REFERENCE, skeleton=SKELET
     (exercise / "hints.md").write_text("# Hints\n")
     for name, text in (extra_files or {}).items():
         (exercise / name).write_text(text)
-    (solution / "metadata.json").write_text(json.dumps({"id": "demo", **(metadata or {})}))
+    (solution / "metadata.json").write_text(json.dumps({**METADATA, **(metadata or {})}))
     (solution / "reference.py").write_text(reference)
     (solution / "skeleton.py").write_text(skeleton)
     for name, text in mutants.items():
@@ -91,13 +102,48 @@ def make_partition_exercise(tmp_path, *, reference=PART_REFERENCE, mutants=None,
     mutants = {"m01_first_only": FIRST_ONLY} if mutants is None else mutants
     return make_exercise(
         tmp_path, tests=PART_TESTS, reference=reference, skeleton=PART_SKELETON,
-        mutants=mutants, metadata={"partition_check": True, **(metadata or {})},
+        mutants=mutants,
+        metadata={"entry_point": ["total"], "partition_check": True, **(metadata or {})},
         oracle=PART_ORACLE, oracle_test=PART_ORACLE_TEST,
     )
 
 
 def run(exercise_paths):
     return validate(load_exercise(*exercise_paths))
+
+
+# --- rule 0: format ---------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("metadata", "expected"),
+    [
+        ({"interface": None}, "interface: Field required"),
+        ({"partition_check": "yes"}, "partition_check: Input should be a valid boolean"),
+        ({"partion_check": True}, "partion_check: Extra inputs are not permitted"),
+    ],
+)
+def test_metadata_that_breaks_the_format_skips_every_other_rule(tmp_path, metadata, expected):
+    """Rules 1-5 and the API check read their settings from metadata.json, so a file that
+    does not fit schema.py stops validation before any test runs."""
+    exercise, solution = make_exercise(tmp_path)
+    data = {**METADATA, **metadata}
+    (solution / "metadata.json").write_text(
+        json.dumps({k: v for k, v in data.items() if v is not None}))
+    report = run((exercise, solution))
+
+    assert report.result("0").status is Status.FAIL
+    assert expected in report.result("0").detail
+    others = [r for r in report.results if r.rule != "0"]
+    assert [r.status for r in others] == [Status.SKIPPED] * 6
+    assert all(r.duration_s == 0.0 for r in others)
+    assert not report.valid
+
+
+def test_examples_fit_the_batch_format():
+    """Fast check without Spark; `pytest -m spark` validates the examples end to end."""
+    for metadata in sorted(EXAMPLES.glob("*/solution/metadata.json")):
+        assert problems(Metadata, json.loads(metadata.read_text())) == [], metadata.parent
 
 
 # --- rules 1-3 -------------------------------------------------------------------------
@@ -109,7 +155,7 @@ def test_valid_exercise(tmp_path):
     report = run(make_exercise(tmp_path))
 
     assert report.valid
-    assert [report.result(r).status for r in ("1", "2", "3", "4")] == [Status.OK] * 4
+    assert [report.result(r).status for r in ("0", "1", "2", "3", "4")] == [Status.OK] * 5
     assert report.result("5").status is Status.NOT_APPLICABLE
     assert report.result("api").status is Status.NOT_APPLICABLE
     assert "1/1 killed" in report.result("3").detail
@@ -320,7 +366,8 @@ def test_combiner_check(tmp_path, combine, reduce, status):
     """Rule 5 with combiner_check reruns the reference with the combiner removed."""
     reference = MR_JOB.format(COMBINE=combine, REDUCE=reduce)
     report = run(make_exercise(
-        tmp_path, tests=MR_TESTS, reference=reference, metadata={"combiner_check": True},
+        tmp_path, tests=MR_TESTS, reference=reference,
+        metadata={**MR_METADATA, "combiner_check": True},
     ))
 
     assert report.result("1").status is Status.OK
@@ -493,8 +540,8 @@ def test_cli_saves_the_report_as_json(tmp_path):
 
     assert data["exercise_id"] == "demo"
     assert data["valid"] is False
-    assert [r["rule"] for r in data["results"]] == ["1", "2", "3", "4", "5", "api"]
-    assert data["results"][2]["status"] == "FAIL"  # zero mutants fails rule 3
+    assert [r["rule"] for r in data["results"]] == ["0", "1", "2", "3", "4", "5", "api"]
+    assert data["results"][3]["status"] == "FAIL"  # zero mutants fails rule 3
     assert "validated_at" in data and "tool_commit" in data
 
     (solution / "mutants" / "m01_sub.py").write_text(MUTANT_SUB)

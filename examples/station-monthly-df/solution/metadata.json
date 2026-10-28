@@ -6,7 +6,7 @@
   "interface": "file",
   "difficulty": "easy",
   "framework": "pyspark-df",
-  "entry_point": "StationMonthly.run",
+  "entry_point": ["StationMonthly.run"],
   "constraints": {
     "forbidden_calls": ["sql", "rdd", "collect", "toPandas", "sorted"],
     "forbidden_imports": ["pandas", "numpy"]

@@ -7,7 +7,7 @@
   "difficulty": "medium",
   "framework": "mrjob",
   "runner": "hadoop",
-  "entry_point": "ConditionShare",
+  "entry_point": ["ConditionShare"],
   "constraints": {
     "required_any": [["combiner"], ["mapper_init", "mapper_final"]],
     "count_uses": ["MRStep"]

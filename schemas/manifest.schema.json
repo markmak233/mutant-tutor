@@ -1,0 +1,215 @@
+{
+  "$defs": {
+    "Priority": {
+      "additionalProperties": false,
+      "description": "Which exercises the owner should solve; unlisted ones count as must.",
+      "properties": {
+        "must": {
+          "default": [],
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Must",
+          "type": "array"
+        },
+        "optional": {
+          "default": [],
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Optional",
+          "type": "array"
+        },
+        "skip": {
+          "default": [],
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Skip",
+          "type": "array"
+        },
+        "decided": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Decided"
+        }
+      },
+      "title": "Priority",
+      "type": "object"
+    },
+    "SourceRef": {
+      "additionalProperties": false,
+      "description": "One material a batch was generated from, relative to the workspace.",
+      "properties": {
+        "path": {
+          "minLength": 1,
+          "title": "Path",
+          "type": "string"
+        },
+        "slides": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Slides"
+        },
+        "pdf_pages": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Pdf Pages"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "SourceRef",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "batches/<batch>/manifest.json.",
+  "properties": {
+    "schema_version": {
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "phase": {
+      "minimum": 1,
+      "title": "Phase",
+      "type": "integer"
+    },
+    "date": {
+      "format": "date",
+      "title": "Date",
+      "type": "string"
+    },
+    "label": {
+      "minLength": 1,
+      "title": "Label",
+      "type": "string"
+    },
+    "mode": {
+      "enum": [
+        "learn",
+        "review"
+      ],
+      "title": "Mode",
+      "type": "string"
+    },
+    "sources": {
+      "items": {
+        "$ref": "#/$defs/SourceRef"
+      },
+      "minItems": 1,
+      "title": "Sources",
+      "type": "array"
+    },
+    "method": {
+      "minLength": 1,
+      "title": "Method",
+      "type": "string"
+    },
+    "model": {
+      "minLength": 1,
+      "title": "Model",
+      "type": "string"
+    },
+    "git_commit": {
+      "minLength": 1,
+      "title": "Git Commit",
+      "type": "string"
+    },
+    "exercises": {
+      "items": {
+        "minLength": 1,
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Exercises",
+      "type": "array"
+    },
+    "not_covered": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Not Covered"
+    },
+    "lab_references": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Lab References"
+    },
+    "notes": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Notes"
+    },
+    "priority": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Priority"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    }
+  },
+  "required": [
+    "phase",
+    "date",
+    "label",
+    "mode",
+    "sources",
+    "method",
+    "model",
+    "git_commit",
+    "exercises"
+  ],
+  "title": "Manifest",
+  "type": "object"
+}

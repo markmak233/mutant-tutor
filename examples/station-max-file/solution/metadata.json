@@ -6,7 +6,7 @@
   "interface": "file",
   "difficulty": "easy",
   "framework": "pyspark-rdd",
-  "entry_point": "StationMax.run",
+  "entry_point": ["StationMax.run"],
   "constraints": {
     "forbidden_calls": ["groupByKey"],
     "forbidden_imports": ["pyspark.sql"]

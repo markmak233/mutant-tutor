@@ -16,7 +16,8 @@
 - First check the batch's `manifest.json` `mode`. `learn`: explain concepts proactively, give a
   line-level fix when asked. `review`: help only when asked, name just the kind of error first,
   and leave the fix to the owner unless they insist.
-- Before answering, run the exercise's tests in its folder and read `student.py`; do not guess.
+- Before answering, run the exercise's tests and read `student.py`; do not guess. Run them in a
+  temp copy of the exercise folder, so `attempts.jsonl` keeps only the owner's own runs.
 - Start from the first real error: what causes it and the concept behind it
   (e.g. why an RDD cannot be looped over on the driver).
 - Default to direction, not code. Give a concrete line-level fix only when the owner asks how to fix it.

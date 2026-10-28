@@ -1,5 +1,7 @@
 """Validation rules (docs/design.md, "Exercise validation").
 
+0. metadata.json fits the batch format (schema.py); the other rules read their settings
+   from it, so they are skipped if it does not.
 1. The reference passes every test.
 2. The skeleton fails them: tests ran and failed, not crashed before running.
 3. Every mutant fails them, so the tests can catch each planted bug.
@@ -19,6 +21,7 @@ from enum import Enum
 from pathlib import Path
 
 from tutor.execution import DEFAULT_TIMEOUT_S, Outcome, RunResult, run_pytest
+from tutor.schema import Metadata, problems
 from tutor.testkit import COMBINER_ENV, DEFAULT_PARTITIONS, PARTITIONS_ENV
 from tutor.validation.api import count_uses, find_violations
 from tutor.validation.exercise import ExerciseFiles
@@ -30,13 +33,13 @@ PARTITION_COUNTS = (1, 2, 4)
 class Status(Enum):
     OK = "ok"
     FAIL = "FAIL"
-    SKIPPED = "skip"  # not run because rule 1 failed
+    SKIPPED = "skip"  # not run because rule 0 or 1 failed
     NOT_APPLICABLE = "n/a"  # does not apply to this exercise; does not affect validity
 
 
 @dataclass(frozen=True)
 class RuleResult:
-    rule: str  # "1", "2", "3", "5" or "api"
+    rule: str  # "0" to "5", or "api"
     name: str
     status: Status
     detail: str
@@ -59,6 +62,17 @@ class ValidationReport:
 def validate(ex: ExerciseFiles, timeout_s: float | None = None) -> ValidationReport:
     """timeout_s per pytest run: the argument, else metadata `timeout_s` (Hadoop exercises
     need minutes, since every job costs 7-9 s), else DEFAULT_TIMEOUT_S."""
+    fmt = check_format(ex)
+    if fmt.status is not Status.OK:
+        # Every other rule reads metadata (timeout, partitions, constraints), so none of
+        # them can be trusted to run as intended.
+        reason = "skipped: metadata.json must fit the batch format first"
+        return ValidationReport(ex.exercise_id, [
+            fmt,
+            RuleResult("1", "reference passes", Status.SKIPPED, reason, 0.0),
+            *_skipped_test_rules(reason),
+            RuleResult("api", "api constraints", Status.SKIPPED, reason, 0.0),
+        ])
     if timeout_s is None:
         timeout_s = float(ex.metadata.get("timeout_s", DEFAULT_TIMEOUT_S))
     reference = check_reference_passes(ex, timeout_s)
@@ -66,16 +80,14 @@ def validate(ex: ExerciseFiles, timeout_s: float | None = None) -> ValidationRep
         # A failing reference means the tests or the exercise are wrong, so the rules that
         # run tests would prove nothing; skipping them also saves the runs. The static API
         # check does not depend on the tests, so it still runs.
-        reason = "skipped: the reference must pass first"
         return ValidationReport(ex.exercise_id, [
+            fmt,
             reference,
-            RuleResult("2", "skeleton fails", Status.SKIPPED, reason, 0.0),
-            RuleResult("3", "mutants killed", Status.SKIPPED, reason, 0.0),
-            RuleResult("4", "matches oracle", Status.SKIPPED, reason, 0.0),
-            RuleResult("5", "distribution", Status.SKIPPED, reason, 0.0),
+            *_skipped_test_rules("skipped: the reference must pass first"),
             check_api_constraints(ex),
         ])
     return ValidationReport(ex.exercise_id, [
+        fmt,
         reference,
         check_skeleton_fails(ex, timeout_s),
         check_mutants_killed(ex, timeout_s),
@@ -83,6 +95,22 @@ def validate(ex: ExerciseFiles, timeout_s: float | None = None) -> ValidationRep
         check_distribution(ex, timeout_s),
         check_api_constraints(ex),
     ])
+
+
+def _skipped_test_rules(reason: str) -> list[RuleResult]:
+    return [
+        RuleResult("2", "skeleton fails", Status.SKIPPED, reason, 0.0),
+        RuleResult("3", "mutants killed", Status.SKIPPED, reason, 0.0),
+        RuleResult("4", "matches oracle", Status.SKIPPED, reason, 0.0),
+        RuleResult("5", "distribution", Status.SKIPPED, reason, 0.0),
+    ]
+
+
+def check_format(ex: ExerciseFiles) -> RuleResult:
+    found = problems(Metadata, ex.metadata)
+    if found:
+        return RuleResult("0", "format", Status.FAIL, "metadata.json: " + "; ".join(found), 0.0)
+    return RuleResult("0", "format", Status.OK, "metadata.json fits the batch format", 0.0)
 
 
 def check_reference_passes(ex: ExerciseFiles, timeout_s: float) -> RuleResult:

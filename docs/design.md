@@ -25,6 +25,15 @@ container for isolation is fine; deploying the tool as a service is not.
   explain the first real error and its concept, direction before code, never touch `student.py`
   or quote `solution/`. Mistakes seen this way feed debugging exercises and mutants. A hint
   command inside the system follows phase 3 (roadmap 3b).
+- Batch format contract (decided 2026-10-28): drafting batches with Claude Code stays a
+  supported way to make exercises after phase 3, next to the LLM pipeline. What both must
+  produce is the batch format, defined once in `schema.py` (see "Exercise validation", rule
+  0), so the validator, hints, evaluation and GUI never need to know who wrote a batch;
+  `manifest.json` `method` and `model` record it. Reason: the first batches were written by
+  hand without any check on metadata, and one assistant in one week produced three
+  spellings of the same field. Fields added later (such as 3b's per-mutant misconception
+  line) start optional with a default; making one required comes with a migration script
+  for existing batches, never by letting them fail.
 
 ## Environment
 
@@ -84,6 +93,7 @@ smartCodingReview/                       # public repo (the `tutor/` above), cod
 ├── AGENTS.md
 ├── CLAUDE.md
 ├── README.md
+├── schemas/                             # P2 metadata / manifest JSON Schema, exported from schema.py
 ├── .claude/settings.json
 ├── docs/design.md
 ├── notes/                               # git-ignored local notes (course memory, research)
@@ -98,10 +108,11 @@ smartCodingReview/                       # public repo (the `tutor/` above), cod
 │   ├── config.py                        # P1 reads WORKSPACE_DIR, derives subpaths
 │   ├── envcheck.py                      # P1 checks the workspace's [requires]
 │   ├── execution.py                     # P1 copy to temp dir -> subprocess pytest -> delete
-│   ├── validation/                      # P1 the five checks (internals designed before coding)
+│   ├── validation/                      # P1 the checks, rule 0 added in P2 (internals designed before coding)
 │   ├── testkit.py                       # P2a run a file-level program, read part-*, compare output
 │   ├── attempts.py                      # P2a pytest plugin: one attempts.jsonl line per exercise run
-│   ├── schema.py                        # P3 Pydantic exercise models
+│   ├── schema.py                        # P2 Pydantic models of metadata.json / manifest.json (rule 0),
+│   │                                    #   P3 parses LLM output into the same models
 │   ├── llm.py                           # P3 thin LLM API client, no LangChain
 │   ├── graph/                           # P3 langgraph dependency added here
 │   ├── rag/                             # P4
@@ -126,6 +137,8 @@ smartCodingReview/                       # public repo (the `tutor/` above), cod
 smartcodereview-workspace/
 └── bigdata/                             # WORKSPACE_DIR points here; one workspace per course
     ├── workspace.toml                   # course name + [requires]; marks this as a workspace
+    ├── AGENTS.md                        # orientation for an AI coding assistant opened here
+    ├── CLAUDE.md                        # one line, `@AGENTS.md`, so Claude Code reads the same file
     ├── coverage.md                      # knowledge points per lecture -> exercise / design / not yet
     ├── lectures/                        # PDFs, read-only
     ├── coding_materials/                # labs and projects, read-only
@@ -133,7 +146,8 @@ smartcodereview-workspace/
     │   └── proj2/
     ├── batches/                         # one directory per generation run
     │   ├── 2026-10-27_p2-golden/
-    │   │   ├── manifest.json            # phase, date, mode, sources, method, model, git commit, exercises
+    │   │   ├── manifest.json            # phase, date, mode, sources, method, model, git commit, exercises,
+    │   │   │                            #   optional priority (must / optional / skip)
     │   │   ├── exercises/               # the only place the owner looks while solving
     │   │   │   └── <exercise-id>/
     │   │   │       ├── student.py       # the one file to open: question in the module docstring,
@@ -150,17 +164,34 @@ smartcodereview-workspace/
     │   │           ├── test_oracle.py   # rule 4: hypothesis, reference vs oracle on random inputs
     │   │           ├── mutants/
     │   │           ├── pseudocode.md    # MRJob exercises: same solution in exam pseudocode
-    │   │           └── validation.json  # result of the five checks
+    │   │           └── validation.json  # result of the checks
     │   ├── 2026-11-03_p3-graph/
     │   │   └── discarded/               # also: exercises still failing after 3 repairs + log
     │   └── 2026-11-10_p4-rag-2/         # second run on the same day
     ├── attempts/attempts.jsonl          # one line per test run: batch, exercise, time, pass/fail, errors
+    ├── ratings.jsonl                    # one teaching-quality rating per solved exercise
     ├── index/                           # P4 BM25 / vector index, rebuildable
     └── runs/<date>_<label>/             # P5 evaluation outputs
 ```
 
 - Batch name: `YYYY-MM-DD_p<phase>-<label>`, suffix `-2`, `-3` for repeat runs on the same day.
 - The phase in the name is a hint only; `manifest.json` records the git commit that produced the batch.
+- Assistant orientation (decided 2026-10-27): each workspace has an `AGENTS.md`, so an AI
+  coding assistant opened in the workspace (it does not see the repo's instructions) knows
+  what the folder is. `AGENTS.md` is the file most assistants read; `CLAUDE.md` only imports
+  it, the same split as in this repo. It holds the layout, which Python env runs the tests,
+  the tutoring rules and the private-data rules. It is written in English and says nothing about the user's personal
+  preferences (such as reply language); those belong in the user's own assistant settings.
+  The tutoring rules are copied from the repo's `CLAUDE.md`, so a change to one is made in
+  both (kept in both places, confirmed 2026-10-28). An "Authoring exercises" section
+  (decided 2026-10-28) holds the rules for writing exercises, general and course-specific:
+  layout, the `schema.py` fields, reference style, mutant and test-data rules, the
+  framework pitfalls found so far, and that every exercise ends with a validator run.
+  Reason: an assistant's memory is kept per opened folder, so an assistant opened in the
+  workspace cannot see what a session in the repo learned; this section is the one place
+  for those rules, and other notes point to it. The assistant runs exercise tests in a temp copy of the exercise folder, so
+  `attempts.jsonl` holds only the learner's own runs. Written by hand for now; when
+  creating a workspace is automated (packaging), it comes from a template.
 - Material selection (decided 2026-10-24): each batch is generated from materials the owner picks,
   e.g. one week while learning it, or several weeks mixed for review. `manifest.json` `sources`
   lists them (workspace-relative paths, optional page ranges); each exercise's metadata `source`
@@ -168,13 +199,19 @@ smartcodereview-workspace/
 - Generation takes exactly two inputs, a source list and a mode; any selection UI (terminal
   checklist, tkinter, a local web page) only produces those, so the UI can change without
   touching generation. No UI in phase 2: the owner names the materials in chat.
+- Which kinds of material may be sources (decided 2026-10-26): the user chooses per batch,
+  with one option in the selection step (a checkbox in the GUI): lectures only, or lectures
+  plus other material (labs, project specs, notes). Labs and projects are allowed as
+  sources, not only as shape references. No attempt is made to keep graded-task specs out:
+  what users do with their exercises is theirs to decide, and any LLM chat can already
+  turn a spec into a solution. The choice is recorded in `manifest.json`.
 - An exercise is identified by `<batch>/<exercise-id>`; the same id may recur across batches.
 
 ## Course coding materials
 
 Course-specific provenance (lecture and slide numbers, lab and project contents, the
-course's tool versions, batch sources) is kept out of this public file, in the private
-workspace's `course-notes.md`.
+course's tool versions, batch sources) is kept out of this public file, in private notes
+that are never committed.
 
 Decided 2026-10-24 after reading the course's labs and projects.
 - `coding_materials/<labN|projN>/`: one flat folder per lab or project, no subfolders.
@@ -193,12 +230,14 @@ Decided 2026-10-24 after reading the course's labs and projects.
 - A course expected output and the owner's own run look the same on disk, so which is which is
   asked when an exercise needs it.
 - Labs and projects are references for what course tasks look like (input formats, parameters,
-  output rules, marking points).
+  output rules, marking points), and can also be generation sources when the user includes
+  them (see "Material selection").
 
 ## Exercise validation (deterministic, never LLM-judged)
 
 An exercise is valid only if:
 
+0. `metadata.json` matches the `schema.py` model (format).
 1. `reference.py` passes all tests.
 2. `skeleton.py` (the pristine skeleton) fails.
 3. Every mutant in `mutants/` fails.
@@ -220,6 +259,31 @@ An exercise is valid only if:
    reducer that relies on the combiner (the classic broken mean) fails their own tests, not
    only the reference check. Neither flag: "n/a".
    - Plain Python: not applicable.
+
+Rule 0, format (decided 2026-10-28, see "Batch format contract"; built in phase 2, design
+explained before code since it touches `validation/`):
+- `src/tutor/schema.py` holds Pydantic models of `metadata.json` and `manifest.json`, each
+  with a `schema_version`. One spelling per field: `interface` is `"function"` or `"file"`
+  and required; `entry_point` is a list of names (`["StationMax.run"]`,
+  `["mapper", "reducer"]`); `source` is `"synthetic"` or an object with slides, PDF pages,
+  lab and assumptions.
+- The validator checks `metadata.json` first; if it fails, every other rule is SKIPPED,
+  since they read their settings from it. The message names the field and the problem.
+- Unknown fields are errors (`extra="forbid"`) and types are strict (`"yes"` is not a bool),
+  so a typo or an old spelling is reported instead of ignored. Cross-field rules: an mrjob
+  exercise names its runner and only it may; `combiner_check` needs the inline runner;
+  function and MRJob entry points have no dots, file-level Spark ones are `Class.run`; in a
+  manifest, priority marks name listed exercises, each at most once.
+- The models are also exported as JSON Schema files in `schemas/` (`python -m tutor.schema
+  --export`), so an assistant that is not running Python, and phase 3's structured output,
+  read the same definition; a test fails if the exported files differ from the models.
+  JSON Schema holds the fields only, not the cross-field rules, so `python -m tutor.schema`
+  stays the check that counts.
+- `manifest.json` belongs to the batch, not to one exercise, so a separate command,
+  `python -m tutor.schema <batch_dir>`, checks it and every exercise's metadata, and that
+  the manifest's exercise list matches the folders. The validator's per-exercise structure
+  stays as it is.
+- Pydantic enters the dependencies in phase 2 instead of 3, because rule 0 needs it now.
 
 Rules 1-3 (phase 1f) live in `src/tutor/validation/`: `exercise.py` finds the files from an
 exercise dir + solution dir (examples and workspace batches name them differently), `checks.py`
@@ -424,10 +488,12 @@ in two places would drift. Metadata keeps what the validator reads (constraints,
   positional argument, output ordered (station asc, average desc, month asc) in one file:
   `order="total"` with `float_tol`. Constraints: `forbidden_calls` `sql`, `rdd`, `collect`,
   `toPandas`, `sorted`; no pandas / numpy. Mutants: average ascending, tie-break month
-  descending, `>` for `>=`, `count("*")` counting non-numeric rows, month without the year.
-  Full validation about 70 s. "Forgot `coalesce(1)`" is not a mutant: on small data adaptive
-  query execution merges the shuffle partitions into one anyway, so it cannot be killed
-  reliably.
+  descending, `>` for `>=`, `count("*")` counting non-numeric rows, month without the year,
+  and (since 2026-10-28) no `coalesce(1)`. Full validation about 75 s. That last mutant at
+  first survived: on small data adaptive query execution merges the shuffle partitions into
+  one, so a missing `coalesce(1)` still wrote one file. DataFrame programs therefore set
+  `spark.sql.adaptive.enabled=false` in their session, as on a cluster with real data where
+  the partitions would not merge, and the mutant is killed.
   - Rule 4 lesson: with temperatures drawn from a wide range, equal averages almost never
     occurred, and the reversed tie-break mutant passed the hypothesis test (rule 3 still
     killed it with a hand-written tie). Drawing from a few multiples of 2.5 makes ties
@@ -457,8 +523,13 @@ quality is a separate score that never replaces or overrides validity, on four p
 - targets the concept: solving it needs the knowledge point it is filed under, not a
   workaround.
 The owner rates the first batch after solving each exercise (one line per exercise, a few
-seconds; format fixed at the first rating). Those ratings are the labels an LLM judge is
-checked against before phase 3 trusts it. ContentGen (SIGCSE TS 2026) separates
+seconds), optionally with a free-text remark ("too easy", "unclear input format"). Format
+fixed at the first rating (2026-10-28): y or n per point, in the order above (`pairs yyyy
+too easy`), since yes/no labels compare cleanly with a judge's and need no scale; the
+assistant writes one JSON line per exercise to the workspace's `ratings.jsonl` (batch,
+exercise, date, clear, fits, taught, targets, remark), one file for all batches so later
+plans read every rating at once. Those ratings are the labels an LLM judge is checked against before
+phase 3 trusts it, and later batches' plans read them (see the [3] preference chat). ContentGen (SIGCSE TS 2026) separates
 correctness from contextual fit in the same way, and found that a summary of recently
 covered material in the prompt improved generated questions (a [3] candidate).
 
@@ -514,7 +585,7 @@ retrieve_context -> generate_exercise -> validate --pass--> save
                                              +--over limit--> discard + log
 ```
 
-- LLM output parsed into Pydantic models.
+- LLM output parsed into Pydantic models, the same `schema.py` models that rule 0 checks.
 - `validate` is pure Python and acts as the judge; repair receives the failure report.
 - Every generated batch mixes function-level and file-level exercises (see "Exercise interfaces").
 
@@ -577,12 +648,25 @@ deterministic judge, hybrid RAG with recall@k, the phase 5 metrics, the hint lea
   validator, and a request outside what has been taught (e.g. an API from a later week) is
   allowed only when the user asks for it explicitly, and is flagged in the manifest. The
   number of follow-up requests per batch and per exercise is logged: a cheap proxy for the
-  manual effort the ablation below does not measure.
+  manual effort the ablation below does not measure. Shape decided 2026-10-26:
+  - per batch: three points to speak, before the plan ("more combiner practice"), at the
+    plan (swap an exercise, which doubles as the human-in-the-loop approval) and after
+    generation ("exercise 3 harder", "exercise 6 unclear, redo"); a redone exercise is
+    validated again like any other;
+  - standing preferences: habits that hold across batches (course tokenizer line in text
+    skeletons, interface mix, reference written as numbered steps) live in one
+    machine-readable workspace file (e.g. `preferences.toml`) that every generation reads,
+    instead of being scattered over notes the generator cannot see;
+  - feedback after solving is not a separate feature: the one-line teaching-quality rating
+    (see "Validity vs teaching quality") gains an optional free-text remark, and the next
+    batch's plan reads the ratings and remarks of earlier batches.
 - [3] Batch API for whole-batch generation: not interactive, usually much cheaper.
 - [3] Revisit isolation: phase 3 runs LLM-generated code, and the runner is not a sandbox
   (see "Code execution safety"). Decide whether validation of generated batches moves into
   a local container, which changes the "Docker only for reproducibility" decision there
-  (allowed by "Local-first": it stays on the machine).
+  (allowed by "Local-first": it stays on the machine). Main reason, see the phase 3 note on
+  malicious material. Also consider a static check on generated code that rejects network
+  access, subprocesses and reads or writes outside the exercise directory.
 - [3b] Calibrated LLM judge for hint quality only (leaks the answer? right direction?),
   checked against owner-labelled hints before its scores are trusted. Never for validity.
 - [4] Reranker after hybrid retrieval, as one more arm of the recall@k comparison.
@@ -629,6 +713,13 @@ become a problem.
 
 The README states this boundary too ("Running exercise code is not sandboxed", 2026-10-26),
 since anyone who clones the repo validates code on their own machine.
+
+Where isolation goes (decided 2026-10-28; built with the [3] isolation item): whatever
+phase 3 adds (a container, a static check against network, subprocesses and files outside
+the exercise) sits at the validator's entry, `validate()` and `python -m tutor.validation`,
+not in the LangGraph `validate` node. A batch drafted with Claude Code is LLM-written code
+from the same material, so it gets the same protection, and running the validator by hand
+cannot skip it.
 
 ## CI
 
@@ -678,6 +769,13 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
   - `review`: one or several weeks mixed, fuller tasks leaning file-level (closer to labs and
     projects), a bare skeleton. The tutor helps only when asked, first naming just the kind of
     error, and leaves the fix to the owner.
+- Priority marks (decided 2026-10-28, after the owner found the first batch of 10 too much):
+  `manifest.json` may hold `priority` with `must`, `optional` and `skip` lists of exercise
+  ids; an exercise not listed counts as must. Claude proposes the marks (exam weight, what
+  later weeks build on, overlap with exercises already solved), the owner decides. Marks
+  live only in the manifest: student.py is never edited for them and folders are not
+  renamed, so attempts keep their ids. "Solved" in a batch's done condition means its must
+  exercises; skipped ones need no work and no rating.
 - `attempts.jsonl` gets one line per exercise per test run (time, batch, exercise, mode,
   result, pass / fail / error counts, first error, partitions, duration). Nothing reads it in
   phase 2; it is kept so review batches can later target weak topics, and as material for
@@ -763,11 +861,19 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
      which the golden set should not depend on.
 
    - Done when: every exercise of the first batch passes validation, the owner has solved
-     them (review-mode ones without asking for help), attempts are in `attempts.jsonl`, and
+     its must exercises (see "Priority marks"; review-mode ones without asking for help),
+     attempts are in `attempts.jsonl`, and
      the steps that felt repetitive are noted as input for phase 3. This batch is the
      baseline set for phase 5. While solving, two light additions (see "Validity vs
      teaching quality" and "Independent checks"): a one-line teaching-quality rating per
      exercise, and the owner's solutions and mistakes kept as the first held-out set.
+   - Batch format contract (decided 2026-10-28, before `v0.1.0`; see "Batch format
+     contract" and rule 0), in steps: `schema.py`, `python -m tutor.schema` and the JSON
+     Schema export; the existing workspace batches migrated (21 metadata files: `entry_point`
+     as a list, `function` replaced by `interface` + `entry_point`; `exercises/` untouched,
+     all 21 VALID again); rule 0 in `validate()`, the examples' metadata in the one
+     spelling, tests for a missing, mistyped and unknown field. **Done 2026-10-28.** Still
+     to do: the workspace `AGENTS.md` "Authoring exercises" section.
    - Then release `v0.1.0` (decided 2026-10-26, from a Codex review before going public):
      a `constraints.txt` with the dependency versions CI passed on, a short CHANGELOG, and
      a git tag. Not earlier: before phase 2 is solved, the whole loop has not run once.
@@ -799,6 +905,13 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
    image-only slides are read as images (a multimodal model or OCR) before anything is
    generated from them, and every source records slide footer, PDF page and any lab or
    textbook origin, with the exercise's teaching assumptions stated.
+   Note, malicious material (2026-10-26): phase 3 feeds document text to the LLM and then
+   runs the code it writes. A crafted PDF or web page can carry instructions (prompt
+   injection) that make the generated reference, tests or mutants read files such as
+   `~/.ssh` or send data out, and the validator would execute them with the user's rights.
+   Before phase 3 ships: validate generated batches isolated from the user's files and
+   without network (see the [3] isolation item), and tell users to generate only from
+   material they trust.
 3b. Hint command, `python -m tutor.hint <exercise>` (decided 2026-10-24, after phase 3 since it
    needs the LLM client; first review the [3b] items of "LLM engineering candidates").
    Three layers, cheapest and most certain first:
@@ -826,7 +939,7 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
 - C2 algorithm-quality warnings (see "Correctness vs algorithm quality"), later Hadoop
   counters (map output records, combine input / output) to report how much a combiner cut.
 - C3 tokenizer: the course's labs hand out a fixed tokenizing line (a `re.split` over
-  punctuation, recorded in the workspace's `course-notes.md`), so new exercises that split text give that line in the skeleton, as the labs do,
+  punctuation, recorded in the private course notes), so new exercises that split text give that line in the skeleton, as the labs do,
   instead of defining their own word rule (owner, 2026-10-25). Existing exercises are not
   converted (see "Decisions not to do").
 - Workspace `coverage.md`: before each batch, list the lectures' knowledge points with their
@@ -870,6 +983,13 @@ gaps. Each was decided by the owner; change one only with the owner.
   manual edit time per arm. Instead, user effort shows up as preference / revision
   requests in the generation chat (see the [3] preference-chat candidate), counted per
   batch.
+- No license change and no closed generator (decided 2026-10-26, misuse discussion). The
+  license stays MIT: commercial reuse is legal anyway, and AGPL would put off some readers
+  of a portfolio. The phase 3 generator stays public too: hiding it would remove half of
+  the project's point, and an LLM chat can do the misuse it would prevent. Misuse is
+  handled by describing the intended use positively (README "Intended use", no
+  prohibitions), by MIT's as-is clause, and by protecting users (phase 3 note on malicious
+  material).
 - No CONTRIBUTING.md or SECURITY.md (decided 2026-10-26, before going public; a Codex review
   suggested both without knowing the repo's intent). This is a personal portfolio and
   revision tool, not a project seeking contributors: setup and checks are in README and
@@ -901,6 +1021,14 @@ so it comes late; the adaptive review screens can be built with it.
 - Shape: a local web app (FastAPI backend reusing the CLI functions, which a later MCP server
   could share too, plus a light frontend), bound to `127.0.0.1` with a per-launch token or a
   Host header check so other web pages cannot drive it.
+- Frontend without an npm build chain (candidate, owner 2026-10-27; confirm when the GUI
+  phase starts): server-rendered Jinja2 templates plus htmx as one vendored JS file.
+  Reason: most security alerts in web projects come from deep npm dependency trees and
+  build tools; without npm, Dependabot only watches the Python side. A desktop shell is no
+  better (Electron ships Chromium and still uses npm). The screens are manage-and-browse
+  pages that do not need a SPA framework. What still needs care: the Python server deps
+  (FastAPI, Starlette, uvicorn, `python-multipart` for uploads), and escaping everything not
+  written by us (lecture text, LLM hints, learner code) to prevent XSS.
 - Manage, do not edit: drag lectures and lab files into the workspace, pick sources and start
   generation with the preference chat box (approving the batch plan there if phase 3 adopts
   the human-in-the-loop item),
