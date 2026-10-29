@@ -1308,10 +1308,18 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
   both first learning and later review. Validation is identical in both; scaffolding and help differ:
   - `learn`: one week's material, small steps close to the slides, the docstring names the slide
     pages, a fuller skeleton. The tutor explains concepts proactively and gives a line-level fix
-    when asked.
+    when asked. One knowledge point per exercise (decided 2026-10-29): a slide example that
+    chains several ideas becomes several small exercises, or one exercise in parts with their
+    own tests. The owner spent long on W5 `df-udf-closure-debug`: it marked one bug, but the
+    fix also needed a split, a lowercase and a return type the skeleton never had. In both
+    modes a debugging skeleton is the reference with only the bug changed. The plan model
+    sees each existing exercise's title and topic, not only its id, and repeats a solved
+    task with another API only when the new API is the whole point (W5 had planned a fourth
+    word count and a Spark SQL exercise that redid cleaning and per-key averages).
   - `review`: one or several weeks mixed, fuller tasks leaning file-level (closer to labs and
     projects), a bare skeleton. The tutor helps only when asked, first naming just the kind of
-    error, and leaves the fix to the owner.
+    error, and leaves the fix to the owner. Exercises may combine knowledge points, as a
+    final exam does.
 - Priority marks (decided 2026-10-28, after the owner found the first batch of 10 too much):
   `manifest.json` may hold `priority` with `must`, `optional` and `skip` lists of exercise
   ids; an exercise not listed counts as must. Claude proposes the marks (exam weight, what
@@ -1616,6 +1624,15 @@ gaps. Each was decided by the owner; change one only with the owner.
   `docs/setup/`, the synthetic-data rule in AGENTS.md. Vulnerability reports go through
   GitHub's private vulnerability reporting (repo settings, once public), which keeps them
   out of public issues; nobody should post keys or course material in an issue anyway.
+
+- No deterministic check that a debugging skeleton differs from its reference only at the
+  bug (considered 2026-10-29 after `df-udf-closure-debug`, whose fix needed three steps the
+  skeleton never had). Measured on the three debugging exercises, the changed code lines
+  (comments and docstrings ignored) do not separate it: it changes 2 lines and adds 5,
+  since its reference chains the steps in one expression, while the good
+  `mean-combiner-debug` (-4 +7) and `closure-counter-debug` (-8 +5) change as much or
+  more. The rule is in the generation prompt instead, and the teaching-quality judge (3b)
+  can rate it.
 
 ## Deferred
 

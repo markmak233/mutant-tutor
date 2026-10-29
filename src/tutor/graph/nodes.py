@@ -692,9 +692,10 @@ def plan_batch(state: BatchState, deps: Deps) -> BatchState:
     inputs = dict(
         lectures=lectures, coverage=coverage.read_text() if coverage.is_file() else "(none)",
         pages="\n".join(page_titles(deps.workspace, lecture) for lecture in lectures),
-        existing=existing_ids(deps.workspace), preferences=state.get("preferences", ""),
+        existing=existing_exercises(deps.workspace), preferences=state.get("preferences", ""),
         count=count, max_count=max_count, feedback=state.get("feedback", ""),
-        previous=json.dumps(state["plan"], indent=1) if state.get("plan") else "")
+        previous=json.dumps(state["plan"], indent=1) if state.get("plan") else "",
+        mode=deps.mode)
     config = deps.plan_config or deps.config
     problems: list[str] = []
     plan: list[dict] = []
@@ -819,6 +820,22 @@ def existing_ids(workspace: Path) -> list[str]:
     batches = workspace / "batches"
     return sorted({p.name for p in batches.glob("*/exercises/*")
                    if p.is_dir() and not p.name.startswith((".", "_"))})
+
+
+def existing_exercises(workspace: Path) -> list[str]:
+    """One line per existing exercise, "id: title [topic]", for the plan model: with ids
+    alone it planned a fourth word count, since it could not see what each one does."""
+    lines = []
+    for exercise_id in existing_ids(workspace):
+        meta = next((workspace / "batches").glob(f"*/solutions/{exercise_id}/metadata.json"), None)
+        try:
+            data = json.loads(meta.read_text()) if meta else {}
+        except (OSError, ValueError):  # a hand-edited or half-written file: the id still counts
+            data = {}
+        title = f": {data['title']}" if data.get("title") else ""
+        topic = f" [{data['topic']}]" if data.get("topic") else ""
+        lines.append(exercise_id + title + topic)
+    return lines
 
 
 def _git_commit() -> str:

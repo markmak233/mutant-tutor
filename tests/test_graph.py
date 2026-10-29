@@ -162,6 +162,25 @@ def test_the_batch_mode_sets_how_much_a_debugging_question_explains():
     assert "symptom only" in prompts.item_prompt(ITEM, "", "review")
 
 
+def test_the_batch_mode_sets_how_much_one_planned_exercise_combines():
+    def plan(mode):
+        return prompts.plan_prompt(["L1"], "", "", [], "", None, mode=mode)
+    assert "never merged" in plan("learn")
+    assert "final exam" in plan("review")
+
+
+def test_the_plan_model_sees_what_each_existing_exercise_does(tmp_path):
+    batch = tmp_path / "batches" / "b1"
+    for exercise_id in ("word-count", "bare"):
+        (batch / "exercises" / exercise_id).mkdir(parents=True)
+    (batch / "solutions" / "word-count").mkdir(parents=True)
+    (batch / "solutions" / "word-count" / "metadata.json").write_text(
+        json.dumps({"title": "Word count with MRJob", "topic": "mrjob/word-count"}))
+    # an exercise without readable metadata still keeps its id from being reused
+    assert nodes.existing_exercises(tmp_path) == [
+        "bare", "word-count: Word count with MRJob [mrjob/word-count]"]
+
+
 @pytest.mark.parametrize("name", ["../escape.txt", "/etc/x", "~/x", "student.py", "run.py",
                                   ".hidden/x", "./hints.md", "data//../hints.md"])
 def test_data_files_stay_inside_the_exercise(tmp_path, name):

@@ -55,7 +55,9 @@ Files (fields of the JSON you return):
   `raise NotImplementedError` (or `pass` with a TODO) where the student writes code. For a
   debugging exercise the skeleton is the buggy program, and the docstring says it is wrong
   and how it shows (the symptom); whether it also names the cause depends on the batch's
-  mode (below). It ends with an `if __name__ == "__main__":` block, so `python student.py`
+  mode (below). The buggy program is the reference with only the bug changed: every other
+  line already works, so fixing the bug is the whole task (no missing steps to write).
+  It ends with an `if __name__ == "__main__":` block, so `python student.py`
   runs on its own (validation rule "main"): for the function interface it calls the
   functions on the question's example and prints the results (a Spark one builds its own
   session and stops it, with PYSPARK_PYTHON set to sys.executable); for the file interface
@@ -169,7 +171,9 @@ def system_prompt(conventions: str, oracle_interface: bool = False) -> str:
 
 MODES = {
     "learn": "learn: the student is meeting the topic. Questions may explain the concept; a "
-             "debugging question may name the cause of the bug, not the fix.",
+             "debugging question may name the cause of the bug, not the fix. The student's "
+             "code practises only the knowledge point: steps that are not the point (reading "
+             "and cleaning input, formatting output) are given in the skeleton or kept trivial.",
     "review": "review: the student has learnt the topic. A debugging question gives the "
               "symptom only, never the cause.",
 }
@@ -279,7 +283,10 @@ Rules:
   given (`gap-tracing`, `gap-design` and `concept` rows are not code exercises). The
   text in brackets after gap-code says what an exercise there could check.
 - One exercise per knowledge point; the batch covers different points, and none repeats
-  an existing exercise (ids listed below).
+  an existing exercise (listed below with their titles and topics). A task the student
+  has already solved with another API (word count again, a per-key average again) is
+  repeated only when the new API is the whole point; say so in `reason`.
+- The batch mode (below) sets how much one exercise combines.
 - Use the page list to choose the slide range each exercise draws on; `slides` is a range
   of slide footers such as "4.15-4.24", and `lecture` is one of the lecture names given.
 - type: implementation (write it), completion (fill in parts), debugging (fix a given
@@ -294,17 +301,30 @@ Rules:
 Return only the JSON object."""
 
 
+# How much one exercise combines, by batch mode (decided 2026-10-29: the owner found a
+# learn exercise that chained a UDF, a split and a lowercase too hard to study from).
+PLAN_MODES = {
+    "learn": "learn: one knowledge point per exercise, never merged with another. A slide "
+             "example that chains several ideas becomes several exercises, each practising "
+             "one; the steps that are not its point are given in its skeleton.",
+    "review": "review: an exercise may combine knowledge points from the lectures given, "
+              "as a final exam question does.",
+}
+
+
 def plan_prompt(lectures: list[str], coverage: str, pages: str, existing: list[str],
                 preferences: str, count: int | None, max_count: int = 6, feedback: str = "",
-                previous: str = "", problems: list[str] | None = None) -> str:
+                previous: str = "", problems: list[str] | None = None,
+                mode: str = "learn") -> str:
+    """`existing`: one line per existing exercise, "id: title [topic]"."""
     how_many = (f"Plan {count} exercises" if count else
                 "Plan one exercise per knowledge point that deserves its own exercise "
-                "(merge small related points into one; leave out what the existing "
-                f"exercises already practise), at most {max_count}")
+                f"(leave out what the existing exercises already practise), at most {max_count}")
     parts = [
         f"{how_many} from: {', '.join(lectures)}.",
+        "Batch mode: " + PLAN_MODES[mode],
         "Owner's preferences: " + (preferences.strip() or "(none)"),
-        "Existing exercise ids (do not reuse): " + (", ".join(existing) or "(none)"),
+        "Existing exercises (do not reuse an id):\n" + ("\n".join(existing) or "(none)"),
         "Coverage table:\n" + coverage,
         "Pages of the lectures (PDF page, slide footer, title):\n" + pages,
     ]
