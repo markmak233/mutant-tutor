@@ -796,7 +796,9 @@ Design approved 2026-10-28 (owner):
 - Streaming (2026-10-29): generate, repair and oracle calls receive the reply in pieces,
   so `timeout_s` bounds a pause, not a whole long reply, and the CLI shows
   `receiving: N characters` as it arrives; usage comes from the last piece
-  (`stream_options` only for OpenAI and DeepSeek, which document it). Plan and vision
+  (`stream_options` only for OpenAI and DeepSeek, which document it). A stream that ends
+  with neither `[DONE]` nor a finish reason is an error, not a reply (outside review,
+  2026-10-29): a cut-off draft was counted as the model's format error. Plan and vision
   calls are unchanged. The first real run showed why it is worth having: DeepSeek ran away
   for 32,000 output tokens (cut off, retried) and the progress lines made it visible.
   A rule 3 failure with a survivor now reminds repair to catch a bug in how the result is

@@ -221,6 +221,10 @@ def chat(config: LLMConfig, messages: list[dict], *, purpose: str,
     raise AssertionError("unreachable")
 
 
+class _StreamCut(Exception):
+    """A stream ended with neither [DONE] nor a finish reason: the reply may be incomplete."""
+
+
 class _Rejected(Exception):
     """HTTP 400: the request (often a thinking switch) was refused; another variant may work."""
 
@@ -260,6 +264,10 @@ def _post(config: LLMConfig, body: dict, purpose: str, log_path: Path | None,
         error = _redact(f"cannot reach {config.base_url} ({e}); is the server running?", config)
         _log(log_path, purpose, config, None, time.monotonic() - start, error)
         raise LLMError(error) from e
+    except _StreamCut as e:
+        error = f"{e} from {config.base_url}; try again"
+        _log(log_path, purpose, config, None, time.monotonic() - start, error)
+        raise LLMError(error) from e
     except (KeyError, IndexError, json.JSONDecodeError) as e:
         error = _redact(f"unexpected reply from {config.base_url}: {e!r}", config)
         _log(log_path, purpose, config, None, time.monotonic() - start, error)
@@ -286,13 +294,14 @@ _SECRET = re.compile(r"(?<=Bearer )\S+|sk-[\w-]{16,}")
 def _read_stream(response, on_progress: Callable[[int], None] | None) -> dict:
     """A streamed completion (server-sent events, one `data: {json}` line per piece) put
     back together as the reply a call without streaming returns."""
-    parts, received, finish, usage = [], 0, None, None
+    parts, received, finish, usage, done = [], 0, None, None, False
     for raw in response:
         line = raw.decode("utf-8", errors="replace").strip()
         if not line.startswith("data:"):
             continue
         payload = line.removeprefix("data:").strip()
         if payload == "[DONE]":
+            done = True
             break
         chunk = json.loads(payload)
         if "error" in chunk:
@@ -306,6 +315,9 @@ def _read_stream(response, on_progress: Callable[[int], None] | None) -> dict:
                 if on_progress:
                     on_progress(received)
             finish = choice.get("finish_reason") or finish
+    if not done and finish is None:
+        # The connection closed early; what arrived must not pass for a whole reply.
+        raise _StreamCut(f"the stream ended after {received} characters without finishing")
     return {"choices": [{"message": {"content": "".join(parts)}, "finish_reason": finish}],
             "usage": usage or {}}
 

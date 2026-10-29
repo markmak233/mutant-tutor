@@ -288,6 +288,17 @@ def test_a_streamed_reply_is_put_back_together_with_its_usage(monkeypatch):
     assert bodies[0]["stream_options"] == {"include_usage": True}
 
 
+def test_a_stream_that_ends_without_finishing_is_an_error(monkeypatch, tmp_path):
+    cut = 'data: {"choices": [{"delta": {"content": "{\\"a\\": 1"}}]}\n\n'
+    monkeypatch.setattr(llm.urllib.request, "urlopen",
+                        lambda request, timeout: FakeResponse(cut.encode()))
+    log = tmp_path / "calls.jsonl"
+    with pytest.raises(LLMError, match="ended after 7 characters without finishing"):
+        chat(LLMConfig("p", "deepseek", "https://api.deepseek.com", "deepseek-v4-flash"),
+             [], purpose="generate", stream=True, log_path=log)
+    assert json.loads(log.read_text())["outcome"] == "error"
+
+
 def test_only_providers_known_to_accept_it_are_asked_for_usage_in_a_stream(monkeypatch):
     bodies = []
 
