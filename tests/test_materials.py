@@ -307,3 +307,31 @@ def test_runaway_repetition_is_cut_and_short_repeats_stay():
 
     table = "| String | Int |\n" * 6 + "----------------\n"
     assert trim_repetition(table) == (table, False)
+
+
+def test_an_assistant_is_asked_for_every_image_page_in_one_run(tmp_path, monkeypatch, capsys):
+    """No API: each page to read becomes a request with its PNG; the next run stores the
+    answers as transcriptions."""
+    from tutor.exchange import Queue, store_answer
+
+    (tmp_path / "workspace.toml").write_text(
+        'course = "demo"\n[llm.profiles.claude-code]\nprovider = "assistant"\n'
+        '[llm.roles]\nvision = "claude-code"\n')
+    (tmp_path / "lectures").mkdir()
+    pdf = make_pdf(tmp_path / "lectures" / "l.pdf", [
+        {"lines": [f"Figure {n}"], "images": [(name, 0, 20, 720, 380)]}
+        for n, name in enumerate(["Red", "Blue"], 1)])
+    monkeypatch.setenv("WORKSPACE_DIR", str(tmp_path))
+
+    assert main(["--vision", str(pdf)]) == 3
+    assert "2 pages wait for the assistant" in capsys.readouterr().err
+    queue = Queue(tmp_path / ".exchange" / "claude-code")
+    requests = queue.waiting()
+    assert len(requests) == 2 and all(r.with_name(f"{r.stem}-1.png").is_file()
+                                      for r in requests)
+    for n, request in enumerate(requests, 1):
+        store_answer(queue, request.stem, f"Figure {n}: a coloured box")
+    assert main(["--vision", str(pdf)]) == 0
+    entries = cache.load(cache.lecture_cache(tmp_path, "l"))
+    assert [e.read for e in entries.values()] == ["vision", "vision"]
+    assert entries[1].model == "claude-code: claude-code"

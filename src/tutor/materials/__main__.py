@@ -9,6 +9,11 @@ pick another; see tutor.llm); calls are logged in
 `$WORKSPACE_DIR/logs/llm_calls.jsonl`. If the model fails, the pages done so far are kept
 and the rest stay pending for the next run. Pages transcribed with an older prompt version
 are transcribed again, except pages corrected by hand, which are listed instead.
+
+With an assistant profile as the vision model (provider "assistant", no API), one run
+writes a request per page to transcribe, with the page as a PNG; once the assistant has
+answered them, the next `--vision` run stores the transcriptions. Exit code 3 means
+requests are waiting.
 """
 
 from __future__ import annotations
@@ -18,6 +23,7 @@ from datetime import date
 from pathlib import Path
 
 from tutor.config import WorkspaceError, load_env, load_workspace
+from tutor.exchange import AwaitingAnswer
 from tutor.llm import LLMConfig, LLMError, config_for
 from tutor.materials import cache
 from tutor.materials.pdf import Page, read_pdf, render_png
@@ -45,6 +51,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"setup: {e}", file=sys.stderr)
         return 1
     failed: list[str] = []  # the first model error stops transcription for this run
+    waiting: list[str] = []  # assistant requests written this run, one per page
     sources = []
     for arg in map(Path, args):
         sources += sorted(arg.glob("*.pdf")) if arg.is_dir() else [arg]
@@ -61,7 +68,8 @@ def main(argv: list[str] | None = None) -> int:
             status = 1
             continue
         pages = read_pdf(source)
-        transcribe = (_transcriber(config, source, workspace, failed) if config else None)
+        transcribe = (_transcriber(config, source, workspace, failed, waiting)
+                      if config else None)
         prompt = str(PROMPT_VERSION) if config else None
         old = cache.load(target)
         entries, read_now = cache.update(pages, old, transcribe,
@@ -84,10 +92,16 @@ def main(argv: list[str] | None = None) -> int:
     if failed:
         print(f"vision stopped: {failed[0]}", file=sys.stderr)
         status = 1
+    if waiting:
+        print(f"{len(waiting)} pages wait for the assistant: answer the requests "
+              f"(python -m tutor.exchange list; docs/assistant-mode.md), then run --vision "
+              f"again", file=sys.stderr)
+        status = status or 3
     return status
 
 
-def _transcriber(config: LLMConfig, source: Path, workspace: Path, failed: list[str]):
+def _transcriber(config: LLMConfig, source: Path, workspace: Path, failed: list[str],
+                 waiting: list[str]):
     inner = make_transcriber(config, lambda number: render_png(source, number),
                              workspace / "logs" / "llm_calls.jsonl")
 
@@ -96,6 +110,11 @@ def _transcriber(config: LLMConfig, source: Path, workspace: Path, failed: list[
             return None
         try:
             text = inner(page)
+        except AwaitingAnswer as e:
+            # An assistant reads this page later: the page stays pending, and the run goes
+            # on, so one run asks for every page at once instead of one per run.
+            waiting.append(e.request_id)
+            return None
         except LLMError as e:
             failed.append(str(e))
             return None

@@ -1104,7 +1104,10 @@ Plus) acting as the model for vision, planning, generation, oracle, repair and h
 - An assistant profile's `model` names the assistant (default: the profile name) and its
   queue is its base URL, so two assistants are as independent as two providers for the
   oracle rule.
-- Planned next: vision requests for every pending page in one run, the batch pausing
+- Vision: one `--vision` run writes a request for every page to transcribe (the page as
+  PNG) and goes on, instead of stopping at the first; the next run stores the answers as
+  transcriptions (exit code 3: requests are waiting).
+- Planned next: the batch pausing
   once for all items' requests with validation reports reused on replay, instructions
   for the assistant (`docs/assistant-mode.md`), then a thin MCP server over the same files.
 
