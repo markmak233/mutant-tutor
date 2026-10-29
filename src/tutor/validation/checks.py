@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
-from tutor.execution import DEFAULT_TIMEOUT_S, Outcome, RunResult, run_pytest
+from tutor.execution import Outcome, RunResult, run_pytest
 from tutor.schema import Metadata, problems
 from tutor.testkit import COMBINER_ENV, DEFAULT_PARTITIONS, PARTITIONS_ENV
 from tutor.validation.api import count_uses, find_violations
@@ -95,7 +95,7 @@ def validate(ex: ExerciseFiles, timeout_s: float | None = None,
             fmt, safe, *_skipped_after_safety("skipped: the code must pass the safety check"),
         ])
     if timeout_s is None:
-        timeout_s = float(ex.metadata.get("timeout_s", DEFAULT_TIMEOUT_S))
+        timeout_s = ex.timeout_s
     reference = check_reference_passes(ex, timeout_s)
     if reference.status is not Status.OK:
         # A failing reference means the tests or the exercise are wrong, so the rules that

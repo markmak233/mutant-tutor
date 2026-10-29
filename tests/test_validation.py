@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from tutor.config import load_env
+from tutor.execution import DEFAULT_TIMEOUT_S
 from tutor.schema import Metadata, problems
 from tutor.validation import ExerciseError, Status, load_exercise, validate
 from tutor.validation.__main__ import format_report, main
@@ -163,6 +164,13 @@ def test_unsafe_code_is_never_run(tmp_path, extra_files, expected):
     assert [r.status for r in later] == [Status.SKIPPED] * 6
     assert all(r.duration_s == 0.0 for r in later)
     assert not report.valid
+
+
+def test_a_null_timeout_means_the_default(tmp_path):
+    """The format allows timeout_s: null; validation must not turn it into float(None)."""
+    exercise, solution = make_exercise(tmp_path, metadata={"timeout_s": None})
+    assert load_exercise(exercise, solution).timeout_s == DEFAULT_TIMEOUT_S
+    assert run((exercise, solution)).valid
 
 
 def test_a_mutant_is_checked_too(tmp_path):

@@ -21,7 +21,7 @@ from pathlib import Path
 
 from tutor.attempts import ATTEMPTS_FILE, exercise_of
 from tutor.config import WorkspaceError, load_env, load_workspace
-from tutor.execution import DEFAULT_TIMEOUT_S, Outcome, run_pytest
+from tutor.execution import Outcome, run_pytest
 from tutor.hint import mutants
 from tutor.hint.rules import Hint, first_rule
 from tutor.testkit import DEFAULT_PARTITIONS, PARTITIONS_ENV
@@ -46,7 +46,7 @@ def hint_for(exercise_dir: Path, run_tests=run_pytest, say=print) -> Hint | None
     """The hint for the student.py in `exercise_dir`, or None when every test passes."""
     solution_dir, mode = locate(exercise_dir)
     ex = load_exercise(exercise_dir, solution_dir)
-    timeout = float(ex.metadata.get("timeout_s", DEFAULT_TIMEOUT_S))
+    timeout = ex.timeout_s
     env = {PARTITIONS_ENV: str(DEFAULT_PARTITIONS)}
 
     def run(candidate: Path):
