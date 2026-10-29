@@ -102,6 +102,7 @@ def hint_for(exercise_dir: Path, run_tests=run_pytest, say=print,
         else:
             text = f"{how}, where {effect or 'the result differs'}; look for the cause"
         return Hint("mutant", best.mutant, text)
+    # Layer 3: neither a rule nor a known mistake fits, so ask the model (if there is one).
     key, note = "", ""
     if model:
         hints_file = exercise_dir / "hints.md"
@@ -115,6 +116,8 @@ def hint_for(exercise_dir: Path, run_tests=run_pytest, say=print,
                               output=result.output, reference=ex.reference.read_text(),
                               visible=visible, mode=mode, level=level)
         except HintRefused as e:
+            # Blocked twice by the leak guard, or the model failed: fall through to the
+            # first error. The key records why in attempts.jsonl.
             key = f"llm-{e.kind}"
             note = f" (no model hint: {e})" if e.kind == "error" else ""
     first = failure_excerpt(result.output, per_test=6, limit=800) or result.output[-800:]
@@ -123,6 +126,7 @@ def hint_for(exercise_dir: Path, run_tests=run_pytest, say=print,
 
 
 def code_hash(exercise_dir: Path) -> str:
+    """A short fingerprint of student.py: the same hash means the code did not change."""
     return hashlib.sha256((exercise_dir / STUDENT_FILE).read_bytes()).hexdigest()[:12]
 
 
@@ -136,6 +140,8 @@ def model_hints_given(exercise_dir: Path) -> int:
     path = workspace.attempts_dir / ATTEMPTS_FILE
     if where is None or not path.is_file():
         return 0
+    # Count this exercise's earlier model hints whose logged hash matches the code now;
+    # hints for an older version of the code do not count, so a change starts at level 1.
     code = code_hash(exercise_dir)
     lines = (json.loads(line) for line in path.read_text().splitlines() if line.strip())
     return sum(1 for line in lines if line.get("event") == "hint" and line.get("layer") == "llm"
@@ -167,6 +173,7 @@ def hint_model() -> HintModel | None:
     try:
         root = load_workspace().root
         if "hint" not in roles(root):
+            # No hint model configured: layer 3 is off and the command works as before.
             return None
         return HintModel(config_for("hint", workspace=root),
                          log_path=root / "logs" / "llm_calls.jsonl")
@@ -185,6 +192,7 @@ def main(argv: list[str] | None = None) -> int:
     load_env()
     exercise_dir = Path(args[0]).resolve()
     model = hint_model() if use_model else None
+    # The level only matters with a model: 1 for a first request on this code, up to 3.
     try:
         hint = hint_for(exercise_dir, model=model,
                         level=1 + (model_hints_given(exercise_dir) if model else 0))
