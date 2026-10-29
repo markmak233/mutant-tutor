@@ -1453,6 +1453,12 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
    against consecutive reference lines. A rejection is sent back once with its reason;
    a second one falls back to the first error (`llm-blocked` in attempts.jsonl). Shorter
    reference lines are not guarded: `sc.stop()`-sized lines would reject honest hints.
+   Evaluation 2026-10-29 (the 32 week-5 mutants as students, docstring and comments
+   stripped, layer 2 off, DeepSeek Flash with thinking): 32 hints, none blocked, about
+   $0.001 and 4 s each; about 31 of 32 pointed at the real mistake. Most level 1 hints were
+   more specific than level 1 asks (they named the function, the operator or the fix, in
+   words). Kept as it is (owner, 2026-10-29): a stuck learner gains more from a precise
+   hint, and the guard already keeps code out; not a gap to report.
    Evaluation 2026-10-29, each of the 32 mutants of the six week-5 Spark exercises as a
    simulated student: first 29/32 named; the misses were one pair the tests cannot tell
    apart and two no-coalesce mutants whose output order varies. With the two rules above
