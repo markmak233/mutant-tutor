@@ -826,6 +826,20 @@ Design approved 2026-10-28 (owner):
   first week 5 batch (GLM plan, Flash writing, Pro repairing with thinking, GPT oracle)
   saved 6 of 6: two after a Flash repair, four rescued by one Pro repair each, about $0.39
   in all at peak prices.
+- A diagnosis first, and the oracle's own mistakes (2026-10-29). The draft's first field
+  is `diagnosis`, filled by repairs before any file: what failed, the right result worked
+  out by hand, which file is wrong and why. A scratchpad that works without thinking, and
+  a log of what the model believed. With Flash alone repairing two week 5 items that had
+  needed Pro, one passed (three bugs, each named and fixed in turn) and the other made
+  progress every round instead of being copied back. The Pro-written week 5 batch (2 of 5)
+  showed two faults of the pipeline: Pro wrote whole oracles where an interface was asked
+  for, on every first draft, and the oracle model imported `io`, which the safety check
+  refuses, after which repair asked the generating model, which cannot change that code,
+  three times. Now a whole oracle is cut to an interface in code (signatures and
+  docstrings stay, the oracle model never sees the bodies); the oracle model is given the
+  import allowlist, its oracle is safety-checked in the node, and it rewrites its own
+  oracle once when told what is wrong. The rule 4 note goes with a real disagreement only,
+  not with a differential test that cannot run.
 - Batch (step 2, approved 2026-10-28): `plan` (LLM) reads coverage.md, one line per cached
   page (PDF page, footer, title), the existing exercise ids and the owner's preferences,
   and returns `count` PlanItems with a reason each; code checks the count, unique and new

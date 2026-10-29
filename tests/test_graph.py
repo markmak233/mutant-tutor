@@ -520,7 +520,11 @@ def test_when_the_oracle_disagrees_the_repair_is_told_the_question_may_be_unclea
     asked_again = with_interface(student_py='"""Sum a list of ints; [] gives 0."""\n')
     model = FakeModel(with_interface(), json.dumps({"oracle_py": FILLED}), asked_again,
                       json.dumps({"oracle_py": FILLED}))
-    d = deps(workspace, model, checks=[report("4"), report()], oracle_config=ORACLE)
+    disagrees = ValidationReport("sum-list", [
+        RuleResult(r.rule, r.name, r.status, "reference disagrees with the oracle; "
+                   "Failing test case: test_same(xs=[])" if r.rule == "4" else r.detail, 0.0)
+        for r in report("4").results])
+    d = deps(workspace, model, checks=[disagrees, report()], oracle_config=ORACLE)
     final = build_item(d).invoke({"item": ITEM})
 
     repair = model.calls[2][1][1]["content"]
@@ -532,22 +536,23 @@ def test_when_the_oracle_disagrees_the_repair_is_told_the_question_may_be_unclea
     assert final["outcome"] == "saved" and final["oracle_status"] == "written"
 
 
-def test_an_oracle_interface_with_a_body_goes_back_without_asking_the_oracle(workspace):
+def test_a_whole_oracle_becomes_an_interface_before_the_oracle_model_sees_it(workspace):
     pytest.importorskip("langgraph")
     from tutor.graph.build import build_item
 
-    model = FakeModel(json.dumps(draft()), with_interface(), json.dumps({"oracle_py": FILLED}))
+    model = FakeModel(json.dumps(draft()), json.dumps({"oracle_py": FILLED}))
     d = deps(workspace, model, checks=[report()], oracle_config=ORACLE)
     final = build_item(d).invoke({"item": ITEM})
 
-    assert [purpose for purpose, _, _ in model.calls] == ["generate", "repair", "oracle"]
-    assert "total has a body" in model.calls[1][1][1]["content"]
-    assert final["outcome"] == "saved"
-    assert final["attempts"][0]["format_error"] is True
+    assert [purpose for purpose, _, _ in model.calls] == ["generate", "oracle"]
+    asked = model.calls[1][1][1]["content"]
+    assert "def total(xs):\n    raise NotImplementedError" in asked and "t += x" not in asked
+    assert final["outcome"] == "saved" and final["round"] == 0
 
 
 def test_an_oracle_left_unwritten_is_a_failure_of_the_round(workspace):
-    d = deps(workspace, FakeModel(json.dumps({"oracle_py": INTERFACE})), oracle_config=ORACLE)
+    unwritten = json.dumps({"oracle_py": INTERFACE})
+    d = deps(workspace, FakeModel(unwritten, unwritten), oracle_config=ORACLE)
     state = {"item": ITEM, "draft": ExerciseDraft.model_validate_json(with_interface())}
     update = nodes.write_oracle(state, d)
     assert update["oracle_status"] == "failed" and update["format_error"] is True
@@ -667,7 +672,7 @@ def test_when_the_reference_agrees_with_the_oracle_repair_suspects_the_tests(wor
     d = deps(workspace, model, checks=[report("1"), report()])  # rule 4 passed
     build_item(d).invoke({"item": ITEM})
     repair = model.calls[1][1][1]["content"]
-    assert "the reference agrees with oracle.py. So the failing tests' expected values" in repair
+    assert "the reference agrees with oracle.py. So the tests are the likely side" in repair
     model = FakeModel(json.dumps(draft()), json.dumps(draft()))
     d = deps(workspace, model, checks=[report("1", "4")] * 2, max_rounds=1)  # discarded
     build_item(d).invoke({"item": ITEM})
@@ -702,3 +707,48 @@ def test_the_oracle_must_differ_from_the_repair_model_too(workspace):
         '[llm.roles]\ngenerate = "ds"\nrepair = "gpt"\noracle = "gpt"\n')
     with pytest.raises(ValueError, match="the oracle \\(gpt\\) and gpt, which writes"):
         _deps(workspace, workspace / "batches" / "b", {})
+
+
+def test_a_repair_writes_its_diagnosis_first_and_it_is_logged(workspace):
+    pytest.importorskip("langgraph")
+    from tutor.graph.build import build_item
+
+    assert next(iter(nodes.DRAFT_SCHEMA["properties"])) == "diagnosis"
+    fixed = draft(diagnosis="test_total expects 4; by hand 1 + 2 = 3, so the test is wrong.")
+    model = FakeModel(json.dumps(draft()), json.dumps(fixed))
+    d = deps(workspace, model, checks=[report("1"), report()])
+    final = build_item(d).invoke({"item": ITEM})
+
+    assert "Start with `diagnosis`" in model.calls[1][1][1]["content"]
+    assert [a["diagnosis"] for a in final["attempts"]] == ["", fixed["diagnosis"]]
+    saved = d.batch_dir / "solutions" / "sum-list"
+    assert not any("by hand" in p.read_text() for p in saved.rglob("*") if p.is_file())
+
+
+def test_the_oracle_model_fixes_its_own_unsafe_import(workspace):
+    """GPT imported io in an oracle; the generating model, told to fix it, could not."""
+    unsafe = json.dumps({"oracle_py": "import socket\n" + FILLED})
+    model = FakeModel(unsafe, json.dumps({"oracle_py": FILLED}))
+    d = deps(workspace, model, oracle_config=ORACLE)
+    state = {"item": ITEM, "draft": ExerciseDraft.model_validate_json(with_interface())}
+    update = nodes.write_oracle(state, d)
+
+    assert update["oracle_status"] == "written" and update["oracle_py"] == FILLED
+    retry = model.calls[1][1]
+    assert retry[2]["role"] == "assistant"
+    assert "import of 'socket' is not allowed" in retry[3]["content"]
+    assert "imports only from" in model.calls[0][1][0]["content"] and "collections" in (
+        model.calls[0][1][0]["content"])
+
+
+def test_a_differential_test_that_cannot_run_is_not_called_a_disagreement(workspace):
+    cannot_run = ValidationReport("sum-list", [
+        RuleResult(r.rule, r.name, r.status,
+                   "differential test cannot run: 1 error" if r.rule == "4" else r.detail, 0.0)
+        for r in report("4").results])
+    d = deps(workspace, FakeModel(json.dumps({"oracle_py": FILLED})), checks=[cannot_run],
+             oracle_config=ORACLE)
+    state = {"item": ITEM, "draft": ExerciseDraft.model_validate_json(with_interface())}
+    state.update(nodes.write_oracle(state, d))
+    failure = nodes.validate_draft(state, d)["failure"]
+    assert "cannot run" in failure and "it never saw your reference" not in failure

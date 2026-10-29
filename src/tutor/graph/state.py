@@ -54,6 +54,13 @@ class MutantDraft(_Strict):
 
 
 class ExerciseDraft(_Strict):
+    # First, so a model writes it before the files: a scratchpad that also works without
+    # thinking (a repair without one tended to copy its previous answer). Never written
+    # into the exercise; kept in generation.jsonl.
+    diagnosis: str = Field(default="", description=(
+        "Repairs only, before any file: which test or rule failed, the right result worked "
+        "out by hand from the question, and which file is wrong (test, reference, question "
+        "or mutant) and why. Empty for a first draft."))
     metadata: Metadata
     student_py: str  # the question in the module docstring, then the skeleton
     test_student_py: str
@@ -82,6 +89,7 @@ class Attempt(TypedDict):
     dropped: list[str]  # mutants left out because they could not be applied
     unchanged: bool  # the repair reply repeated the previous draft word for word
     model: str  # the profile that wrote this round's draft
+    diagnosis: str  # what that draft's author said was wrong (repairs)
 
 
 class ItemState(TypedDict, total=False):

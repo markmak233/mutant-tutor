@@ -40,6 +40,7 @@ from tutor.materials import cache
 from tutor.schema import Manifest, SourceRef
 from tutor.validation.checks import Status, ValidationReport, validate
 from tutor.validation.exercise import load_exercise
+from tutor.validation.safety import CORE_IMPORTS, find_hazards, workspace_allow_imports
 
 DRAFT_SCHEMA = ExerciseDraft.model_json_schema()
 PLAN_SCHEMA = BatchPlan.model_json_schema()
@@ -237,34 +238,49 @@ def write_oracle(state: ItemState, deps: Deps) -> ItemState:
     if draft is None:  # the reply could not be read; repair asks again
         return {"oracle_status": "skipped"}
     question = _docstring(draft.student_py)
-    problems = _interface_problems(draft.oracle_py)
+    interface = draft.oracle_py
+    problems = _interface_problems(interface)
+    if problems and all(p.endswith(_HAS_BODY) for p in problems):
+        # A whole oracle where an interface was asked for (DeepSeek-V4-Pro did it on every
+        # first draft of a batch): keep the signatures and docstrings, drop the bodies. The
+        # oracle model never sees the bodies, so its reading stays independent.
+        interface, problems = _as_interface(interface), []
     if not question:
         problems.insert(0, "student.py has no module docstring: the question goes there")
     if problems:
         return _oracle_failed(state, "oracle_py must be an interface for another model to "
                               "fill in: " + "; ".join(problems))
     key = hashlib.sha256(json.dumps(
-        [question, draft.oracle_py, draft.data_files], sort_keys=True).encode()).hexdigest()
+        [question, interface, draft.data_files], sort_keys=True).encode()).hexdigest()
     if key == state.get("oracle_key") and state.get("oracle_py"):
         return {"draft": draft.model_copy(update={"oracle_py": state["oracle_py"]}),
                 "oracle_status": "kept"}
-    messages = [{"role": "system", "content": prompts.ORACLE_SPEC},
+    messages = [{"role": "system", "content": prompts.oracle_spec()},
                 {"role": "user", "content": prompts.oracle_prompt(
-                    question, draft.oracle_py, draft.data_files)}]
-    reply = deps.chat(deps.oracle_config, messages, purpose="oracle", log_path=deps.llm_log,
-                      max_tokens=deps.max_tokens, response_schema=ORACLE_SCHEMA,
-                      thinking=deps.thinking, **_streaming(state, deps))
-    spent = _spent(state, reply)
-    try:
-        code = OracleDraft.model_validate_json(reply.text).oracle_py
-    except ValidationError as e:
-        problem = "its reply does not fit the JSON schema: " + "; ".join(
-            _describe(err) for err in e.errors()[:5])
-    else:
-        problem = _filled_problems(draft.oracle_py, code)
+                    question, interface, draft.data_files)}]
+    allowed = CORE_IMPORTS | workspace_allow_imports(deps.workspace)
+    spent: ItemState = {}
+    for _ in range(1 + ORACLE_RETRIES):
+        reply = deps.chat(deps.oracle_config, messages, purpose="oracle",
+                          log_path=deps.llm_log, max_tokens=deps.max_tokens,
+                          response_schema=ORACLE_SCHEMA, thinking=deps.thinking,
+                          **_streaming(state, deps))
+        spent = _spent({**state, **spent}, reply)
+        try:
+            code = OracleDraft.model_validate_json(reply.text).oracle_py
+        except ValidationError as e:
+            problem = "its reply does not fit the JSON schema: " + "; ".join(
+                _describe(err) for err in e.errors()[:5])
+            continue
+        problem = _filled_problems(interface, code) or "; ".join(find_hazards(code, allowed))
         if not problem:
             return {"draft": draft.model_copy(update={"oracle_py": code}), **spent,
                     "oracle_key": key, "oracle_py": code, "oracle_status": "written"}
+        # The oracle model's own mistake (an import outside the allowlist, a function left
+        # unwritten): it fixes it, since the generating model cannot change its code.
+        messages = [*messages[:2], {"role": "assistant", "content": reply.text},
+                    {"role": "user", "content": f"That oracle.py has problems: {problem}. "
+                                                "Return it again with them fixed."}]
     return {**_oracle_failed(state, f"the oracle model could not implement oracle_py: "
                              f"{problem}. Make the interface's docstrings and the question "
                              "say exactly what each function takes and returns."),
@@ -304,6 +320,22 @@ def _is_stub(func: ast.FunctionDef) -> bool:
             and "NotImplementedError" in ast.unparse(body[0]))
 
 
+ORACLE_RETRIES = 1  # the oracle model's second try, after it was told what was wrong
+_HAS_BODY = "has a body; give only its docstring and raise NotImplementedError"
+
+
+def _as_interface(code: str) -> str:
+    """`code` with every top-level function body replaced by its docstring and
+    `raise NotImplementedError`; imports and constants stay."""
+    tree = ast.parse(code)
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and not _is_stub(node):
+            doc = ast.get_docstring(node)
+            node.body = ([ast.Expr(ast.Constant(doc))] if doc is not None else []) + [
+                ast.parse("raise NotImplementedError").body[0]]
+    return ast.unparse(ast.fix_missing_locations(tree)) + "\n"
+
+
 def _interface_problems(code: str) -> list[str]:
     try:
         functions = _functions(ast.parse(code))
@@ -311,8 +343,7 @@ def _interface_problems(code: str) -> list[str]:
         return [f"it does not parse: {e.msg} (line {e.lineno})"]
     if not functions:
         return ["it defines no top-level function"]
-    return [f"{name} has a body; give only its docstring and raise NotImplementedError"
-            for name, func in functions.items() if not _is_stub(func)]
+    return [f"{name} {_HAS_BODY}" for name, func in functions.items() if not _is_stub(func)]
 
 
 def _filled_problems(interface: str, code: str) -> str:
@@ -352,7 +383,9 @@ def validate_draft(state: ItemState, deps: Deps) -> ItemState:
                 + ("\n" + textwrap.indent(r.excerpt, "    ") if r.excerpt else "")
                 for r in report.results if r.status is Status.FAIL)
             status = {r.rule: r.status for r in report.results}
-            if deps.oracle_config is not None and status.get("4") is Status.FAIL:
+            disagrees = any(r.rule == "4" and r.detail.startswith("reference disagrees")
+                            for r in report.results)  # not a test that cannot run
+            if deps.oracle_config is not None and disagrees:
                 failure += ORACLE_DISAGREES + state["draft"].oracle_py
             elif status.get("1") is Status.FAIL and status.get("4") is Status.OK:
                 failure += ORACLE_AGREES.format(
@@ -365,7 +398,8 @@ def validate_draft(state: ItemState, deps: Deps) -> ItemState:
                             + "\n".join(dropped.values()))
     attempts.append({"round": round_, "failure": failure, "format_error": format_error,
                      "dropped": sorted(dropped), "unchanged": state.get("unchanged", False),
-                     "model": state.get("model", deps.config.name)})
+                     "model": state.get("model", deps.config.name),
+                     "diagnosis": state["draft"].diagnosis if state.get("draft") else ""})
     return {"failure": failure, "format_error": format_error, "attempts": attempts,
             "round_dir": round_dir}
 
@@ -380,8 +414,8 @@ ORACLE_DISAGREES = (
 
 ORACLE_AGREES = (
     "\nAbout rule 1: rule 4 ran anyway, and on random inputs the reference agrees with "
-    "{oracle}. So the failing tests' expected values are the likely mistake: work them out "
-    "again from the question on each test's data, and fix the tests.")
+    "{oracle}. So the tests are the likely side to fix: their expected values (work them "
+    "out again from the question on each test's data) or how they run.")
 
 
 def _report_text(report: ValidationReport) -> str:

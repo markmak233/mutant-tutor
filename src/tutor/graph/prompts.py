@@ -211,8 +211,10 @@ def repair_prompt(item: PlanItem, context: str, draft_json: str, failure: str,
         + ("\n\nThat answer was identical to the one before it, which failed in the same "
            "way: returning it again cannot pass. Find what the failure points at and "
            "change it." if unchanged else "")
-        + "\n\nFix the cause and return the whole exercise again. Change only what the fix "
-        "needs; keep everything that already worked."
+        + "\n\nStart with `diagnosis`: which test or rule failed, the right result worked out "
+        "by hand from the question, and which file is wrong and why. Then fix the cause and "
+        "return the whole exercise again. Change only what the fix needs; keep everything "
+        "that already worked."
     )
 
 
@@ -234,11 +236,20 @@ implement and its sample data, nothing else.
 - Read the question literally: its input format, edge cases, rounding, ordering and output
   format decide the result. Where it is silent, follow the interface's docstrings.
 - Write every function body of the interface; keep its names, signatures and imports.
-- Plain Python only: the standard library (no Spark, MRJob, numpy or pandas), no files,
-  no network, no randomness. Clear loops over clever code.
+- Plain Python only, imports only from {imports} (no Spark, MRJob, numpy or pandas), no
+  files, no network, no randomness. Clear loops over clever code.
 - No absolute or `~` paths, no eval / exec / __import__, no dunder tricks.
 
 Return only the JSON object."""
+
+
+# Modules an oracle may import: the safety check's core list without the test-only ones.
+ORACLE_IMPORTS = sorted(m for m in CORE_IMPORTS if not m.startswith("_") and m not in {
+    "hypothesis", "oracle", "pytest", "student", "tutor"})
+
+
+def oracle_spec() -> str:
+    return ORACLE_SPEC.replace("{imports}", ", ".join(ORACLE_IMPORTS))
 
 
 def oracle_prompt(question: str, interface: str, data_files: dict[str, str],
