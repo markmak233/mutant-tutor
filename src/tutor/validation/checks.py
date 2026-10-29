@@ -332,24 +332,32 @@ _TEST_LOCATION = re.compile(r"^test_\w+\.py:\d+")
 _ABSOLUTE_PATH = re.compile(r"(?:/[^\s/'\"]+)+/([^\s/'\"]+)")
 
 
-def failure_excerpt(output: str, per_test: int = 12, limit: int = 2500) -> str:
-    """Each failing test's name, its line in the test file and pytest's `E` lines (the
-    assertion and what differed), from `pytest -q` output: what a fix needs, without
-    pytest's tracebacks through testkit or Spark and their warnings. Absolute paths are cut
-    to the file name: they name the machine's user, and the text may go to a model."""
-    blocks, current = [], None
+def failure_blocks(output: str, per_test: int = 12) -> list[tuple[str, list[str]]]:
+    """(failing test, its lines) from `pytest -q` output: the test's line in the test file
+    and pytest's `E` lines (the assertion and what differed), without the tracebacks
+    through testkit or Spark and their warnings. Absolute paths are cut to the file name:
+    they name the machine's user, and the text may go to a model."""
+    blocks: list[tuple[str, list[str]]] = []
+    current: list[str] | None = None
     for line in output.splitlines():
         if line.startswith("="):  # "short test summary info", warnings, the last line
             current = None
             continue
         header = _SECTION.match(line)
         if header:
-            current = [header.group(1)]
-            blocks.append(current)
-        elif current is not None and len(current) <= per_test and (
+            current = []
+            blocks.append((header.group(1), current))
+        elif current is not None and len(current) < per_test and (
                 line.startswith("E ") or _TEST_LOCATION.match(line)):
             current.append(_ABSOLUTE_PATH.sub(r"\1", line.rstrip()))
-    text = "\n".join("\n".join(block) for block in blocks if len(block) > 1)
+    return [(name, lines) for name, lines in blocks if lines]
+
+
+def failure_excerpt(output: str, per_test: int = 12, limit: int = 2500) -> str:
+    """failure_blocks as text, for whoever must fix the failure (the generation pipeline's
+    repair round)."""
+    text = "\n".join("\n".join([name, *lines])
+                     for name, lines in failure_blocks(output, per_test))
     return text if len(text) <= limit else text[:limit] + "\n..."
 
 

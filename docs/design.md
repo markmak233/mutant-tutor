@@ -1359,6 +1359,19 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
    - Evaluation: mutants act as simulated students with a known bug: diagnosis hit rate, leak
      rate, share solved without the LLM, cost per hint. Real tutoring mistakes from phases 1-2
      seed the rules and mutants. Hints only on request, logged in `attempts.jsonl`.
+   Layers 1 and 2 built 2026-10-29 (`tutor/hint/`, owner-approved design): the student's
+   tests run in a temporary copy (student.py untouched, not an attempt); rules see the
+   source and the first failures (eight from tutoring: full-width punctuation, syntax, a
+   forbidden API, Python version mismatch, a TODO left, an RDD used like a list, a
+   SparkContext left running, tuple output, nothing saved to outputPath). A run's
+   signature is which tests fail with which `E` lines (addresses and timings normalised);
+   each mutant's signature is computed once and cached in `solutions/<id>/.hints/`, keyed
+   by a hash of the tests and the mutant. An exact match quotes the mutant's bug ("<the
+   bug>, <what goes wrong>"); the same failing tests with other values is offered as a
+   guess. In a review batch only the "what goes wrong" half is shown. Mutants the tests
+   cannot tell apart are reported (an exercise lacking a test). Each request is a line in
+   `attempts.jsonl` (event "hint", layer, rule or mutant). First request on a Spark
+   exercise about a minute (every mutant runs once), later ones the student's run only.
 4. Hybrid RAG. First review the [4] items of "LLM engineering candidates".
 5. Evaluation script + README results. First review the [5] items of "LLM engineering
    candidates".

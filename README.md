@@ -133,7 +133,13 @@ Solve an example yourself:
 cd examples/station-average-rdd/exercise
 pytest test_student.py          # 7 failed -> write average_by_station in student.py -> 7 passed
 TUTOR_PARTITIONS=4 pytest test_student.py
+cd ../../.. && python -m tutor.hint examples/station-average-rdd/exercise   # when stuck
 ```
+
+The hint command runs your tests in a temporary copy, then names a known low-level mistake
+(a TODO left, full-width punctuation, an RDD used like a list, output as tuples, ...) or,
+when your tests fail exactly as one of the exercise's planted mutants does, that mistake;
+it never shows the reference.
 
 ## Private course material stays out of the repo
 
@@ -192,6 +198,8 @@ src/tutor/
   graph/           phase 3 generation with LangGraph: plan -> owner approves -> generate,
                    oracle by a second model, validate, repair, per exercise in parallel;
                    `python -m tutor.graph`
+  hint/            hints while solving: rules, then the exercise's known mistakes (its
+                   mutants), never the reference; `python -m tutor.hint`
   schema.py        the batch format (metadata.json, manifest.json); `python -m tutor.schema`
   validation/      rule 0 (format), a static safety check, rules 1-5 and the api check;
                    `python -m tutor.validation`
@@ -217,7 +225,8 @@ Phase numbers match `docs/design.md`.
   (a container for running generated code is moved to a later phase)
 - **3b** Checks that need a learner's real work: held-out solutions and mistakes, an LLM
   judge of teaching quality calibrated against the learner's ratings
-- **3c** Hint command: rules, mutant matching, then an LLM, never revealing the answer
+- **3c** Hint command: rules and mutant matching (working), then an LLM, never revealing
+  the answer
 - **4** Hybrid RAG over course material (BM25 + vectors), evaluated with recall@k
 - **5** Evaluation: validity rate, mutant kill rate, cost per valid exercise, with vs without RAG
 
