@@ -299,11 +299,38 @@ def test_page_titles_skip_the_footer_line(workspace):
 
 def test_the_owner_may_edit_the_plan_before_approving():
     plan = json.loads(plan_json("a"))["items"]
+    state = {"plan": plan, "lectures": ["L1"]}
     edited = [{**plan[0], "id": "a-better-name"}]
-    assert nodes.apply_decision({"plan": plan}, {"action": "approve", "plan": edited}) == {
+    assert nodes.apply_decision(state, {"action": "approve", "plan": edited}, []) == {
         "plan": edited, "approved": True}
-    assert nodes.apply_decision({"plan": plan}, {"action": "revise", "feedback": "harder"}) == {
+    assert nodes.apply_decision(state, {"action": "revise", "feedback": "harder"}, []) == {
         "feedback": "harder", "approved": False}
+
+
+def test_a_plan_with_a_repeated_or_taken_id_is_never_approved():
+    """Two items with one id would share a drafts folder, each clearing it first."""
+    plan = json.loads(plan_json("a", "a"))["items"]
+    with pytest.raises(ValueError, match="id 'a' is used twice"):
+        nodes.apply_decision({"plan": plan, "lectures": ["L1"]}, {"action": "approve"}, [])
+    with pytest.raises(ValueError, match="already exists in another batch"):
+        nodes.apply_decision({"plan": plan[:1], "lectures": ["L1"]}, {"action": "approve"},
+                             ["a"])
+    # A count other than the one asked for is the owner's choice, not a blocking problem.
+    items = [PlanItem.model_validate(i) for i in plan[:1]]
+    assert nodes.blocking_problems(items, ["L1"], []) == []
+
+
+def test_a_resume_keeps_the_owners_edits_to_the_plan_until_the_model_plans_again(tmp_path):
+    from tutor.graph.__main__ import _owner_plan
+
+    model_plan = json.loads(plan_json("a"))["items"]
+    assert _owner_plan(tmp_path, model_plan) == (model_plan, False)  # first pause: written
+    edited = [{**model_plan[0], "id": "a-better-name"}]
+    (tmp_path / "plan.json").write_text(json.dumps(edited))
+    assert _owner_plan(tmp_path, model_plan) == (edited, True)  # resume: edits kept
+    replanned = json.loads(plan_json("b"))["items"]  # after feedback
+    assert _owner_plan(tmp_path, replanned) == (replanned, False)
+    assert json.loads((tmp_path / "plan.json").read_text()) == replanned
 
 
 def test_a_batch_is_planned_sent_back_approved_later_and_generated_in_parallel(workspace):

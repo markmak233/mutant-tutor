@@ -31,7 +31,7 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from tutor.config import WorkspaceError, load_env, load_workspace
-from tutor.graph.nodes import Deps, write_manifest
+from tutor.graph.nodes import Deps, blocking_problems, existing_ids, write_manifest
 from tutor.graph.state import BatchPlan, PlanItem
 from tutor.llm import LLMError, config_for, roles
 
@@ -206,9 +206,11 @@ def _batch(args, workspace: Path, build) -> int:
                     pass
                 continue
             plan_file = deps.drafts / "plan.json"
-            plan_file.write_text(json.dumps(snapshot.values["plan"], indent=1) + "\n")
-            _show_plan(snapshot.values["plan"], snapshot.values.get("plan_problems", []),
-                       plan_file, workspace)
+            plan, edited = _owner_plan(deps.drafts, snapshot.values["plan"])
+            problems = (blocking_problems(BatchPlan.model_validate({"items": plan}).items,
+                                          snapshot.values["lectures"], existing_ids(workspace))
+                        if edited else snapshot.values.get("plan_problems", []))
+            _show_plan(plan, problems, plan_file, workspace)
             answer = decision or _ask()
             decision = None  # a flag answers once
             if answer is None:
@@ -217,7 +219,11 @@ def _batch(args, workspace: Path, build) -> int:
                 return 0
             if answer.get("approve"):
                 plan = json.loads(plan_file.read_text())  # with the owner's edits
-                BatchPlan.model_validate({"items": plan})
+                items = BatchPlan.model_validate({"items": plan}).items
+                if found := blocking_problems(items, snapshot.values["lectures"],
+                                              existing_ids(workspace)):
+                    raise ValueError(f"{plan_file.name} cannot be approved: {'; '.join(found)}."
+                                     " Fix it, then resume with --approve again")
                 pending = Command(resume={"action": "approve", "plan": plan})
                 print(f"generating {len(plan)} items, {settings['parallel']} at a time",
                       flush=True)
@@ -232,6 +238,21 @@ def _ask() -> dict | None:
     if not answer:
         return None
     return {"approve": True} if answer.lower() in ("y", "yes") else {"feedback": answer}
+
+
+def _owner_plan(drafts: Path, model_plan: list[dict]) -> tuple[list[dict], bool]:
+    """The plan to show and approve, and whether the owner edited it. plan.json is written
+    when the model's plan is new (the first pause, or a plan made again after feedback);
+    otherwise it is kept, so a resume does not undo the owner's edits. plan.model.json
+    holds the model's plan last written, to tell the two apart."""
+    plan_file, model_file = drafts / "plan.json", drafts / "plan.model.json"
+    text = json.dumps(model_plan, indent=1) + "\n"
+    if not plan_file.is_file() or not model_file.is_file() or model_file.read_text() != text:
+        plan_file.write_text(text)
+        model_file.write_text(text)
+        return model_plan, False
+    plan = json.loads(plan_file.read_text())
+    return plan, plan != model_plan
 
 
 def _show_plan(plan: list[dict], problems: list[str], plan_file: Path, workspace: Path) -> None:

@@ -61,7 +61,7 @@ def build_batch(deps: Deps, checkpointer):
     def approve(state: BatchState) -> BatchState:
         # Pauses the graph; `Command(resume=decision)` continues it, also in a new process.
         decision = interrupt({"plan": state["plan"], "problems": state.get("plan_problems", [])})
-        return nodes.apply_decision(state, decision)
+        return nodes.apply_decision(state, decision, nodes.existing_ids(deps.workspace))
 
     def after_approve(state: BatchState):
         if not state.get("approved"):

@@ -636,8 +636,16 @@ def plan_problems(items: list[PlanItem], lectures: list[str], count: int | None,
     if not count and len(items) > max_count:
         found.append(f"{len(items)} items, at most {max_count}: merge or drop the least "
                      "important")
+    return found + blocking_problems(items, lectures, existing)
+
+
+def blocking_problems(items: list[PlanItem], lectures: list[str],
+                      existing: list[str]) -> list[str]:
+    """What no plan may have, edited by the owner or not: a repeated or taken id (two items
+    would share a drafts folder, and each draft clears it first), an unknown lecture, a
+    slide range that is not one. The count is the owner's to change."""
     ids = [i.id for i in items]
-    found += [f"id {i!r} is used twice" for i in sorted({i for i in ids if ids.count(i) > 1})]
+    found = [f"id {i!r} is used twice" for i in sorted({i for i in ids if ids.count(i) > 1})]
     found += [f"id {i!r} already exists in another batch" for i in ids if i in existing]
     found += [f"{i.id}: lecture {i.lecture!r} is not one of {lectures}"
               for i in items if i.lecture not in lectures]
@@ -646,12 +654,15 @@ def plan_problems(items: list[PlanItem], lectures: list[str], count: int | None,
     return found
 
 
-def apply_decision(state: BatchState, decision: dict) -> BatchState:
+def apply_decision(state: BatchState, decision: dict, existing: list[str]) -> BatchState:
     """The owner's answer to the plan: approve (with the plan as they may have edited it)
-    or send it back with feedback."""
+    or send it back with feedback. The CLI refuses a plan with blocking problems first;
+    this check is for any other caller."""
     if decision.get("action") == "approve":
         plan = decision.get("plan", state["plan"])
-        BatchPlan.model_validate({"items": plan})  # an edited plan must still fit
+        items = BatchPlan.model_validate({"items": plan}).items  # an edited plan must fit
+        if found := blocking_problems(items, state["lectures"], existing):
+            raise ValueError("the approved plan cannot run: " + "; ".join(found))
         return {"plan": plan, "approved": True}
     return {"feedback": decision.get("feedback", ""), "approved": False}
 

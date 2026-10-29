@@ -846,7 +846,12 @@ Design approved 2026-10-28 (owner):
   ids, lecture names and slide ranges, and asks again (twice at most) with the problems.
   `approve` is a LangGraph `interrupt`: the CLI shows the plan and writes it to
   `.drafts/<batch>/plan.json`; the owner approves (with any edits made to that file) or
-  sends it back with feedback, which goes to `plan`. A SQLite checkpointer in
+  sends it back with feedback, which goes to `plan`. A resume rewrites plan.json only when
+  the model has planned again (`plan.model.json` keeps its last plan), so the owner's
+  edits survive a pause. The approved plan, edited or not, must pass the blocking checks
+  (unique and new ids, since two items with one id would share a drafts folder; known
+  lectures; slide ranges), in the CLI and again in `approve`; a count other than the one
+  asked for is the owner's choice (both found in an outside review, 2026-10-29). A SQLite checkpointer in
   `.drafts/<batch>/` keeps the paused batch, so `python -m tutor.graph resume` continues it
   in another terminal or another day. Approved items fan out with `Send` and run the item
   graph in parallel, at most `--parallel` at once (default: CPU cores / 4, 1-4: each
