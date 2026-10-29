@@ -86,6 +86,7 @@ class Deps:
     plan_thinking: bool = DEFAULTS.plan_thinking
     stronger_repair_from: int = DEFAULTS.stronger_repair_from
     repair_thinking: bool = DEFAULTS.repair_thinking
+    oracle_thinking: bool = DEFAULTS.oracle_thinking
     plan_config: llm.LLMConfig | None = None  # the `plan` role; default: config
     # The `repair` role: a larger model for the repair rounds from `stronger_repair_from` on,
     # where the cheap model fails most (it cannot tell which side of a failure is wrong).
@@ -280,7 +281,7 @@ def write_oracle(state: ItemState, deps: Deps) -> ItemState:
     for _ in range(1 + ORACLE_RETRIES):
         reply = deps.chat(deps.oracle_config, messages, purpose="oracle",
                           log_path=deps.llm_log, max_tokens=deps.max_tokens,
-                          response_schema=ORACLE_SCHEMA, thinking=deps.thinking,
+                          response_schema=ORACLE_SCHEMA, thinking=deps.oracle_thinking,
                           **_streaming(state, deps))
         spent = _spent({**state, **spent}, reply)
         try:

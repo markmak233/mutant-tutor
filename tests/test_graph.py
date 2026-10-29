@@ -664,6 +664,21 @@ def test_the_oracle_model_sees_the_question_and_interface_never_the_reference(wo
     assert log["oracle_model"] == "gpt-terra: gpt-6.1-terra"
 
 
+def test_the_oracle_thinks_by_its_own_setting_not_the_generating_one(workspace):
+    pytest.importorskip("langgraph")
+    from tutor.graph.build import build_item
+
+    model = FakeModel(with_interface(), json.dumps({"oracle_py": FILLED}))
+    build_item(deps(workspace, model, checks=[report()], oracle_config=ORACLE,
+                    thinking=True)).invoke({"item": ITEM})
+    assert model.thinkings == [True, False]  # generate thinks, the oracle does not
+
+    model = FakeModel(with_interface(), json.dumps({"oracle_py": FILLED}))
+    build_item(deps(workspace, model, checks=[report()], oracle_config=ORACLE,
+                    oracle_thinking=True)).invoke({"item": ITEM})
+    assert model.thinkings == [False, True]
+
+
 def test_a_repair_that_keeps_the_question_keeps_the_oracle(workspace):
     pytest.importorskip("langgraph")
     from tutor.graph.build import build_item

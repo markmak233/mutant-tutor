@@ -60,6 +60,11 @@ class GenerationSettings(BaseModel):
     # One short reply per batch, so thinking costs little; without it DeepSeek-V4-Pro wrote
     # vague checks and ignored a preference (2026-10-29).
     plan_thinking: bool = Field(True, description="The planning model reasons first.")
+    # The oracle fills in a few function bodies from the question, which needs no long
+    # reasoning. It followed `thinking` until 2026-10-30; with week 7's generation thinking
+    # on, a GLM-5.3 oracle would think too, and GLM spent its whole output on reasoning when
+    # it did (2026-10-28); without, it wrote all 19 week-7 oracles in 9 s each.
+    oracle_thinking: bool = Field(False, description="The oracle's model reasons first.")
 
     # --- size limits --------------------------------------------------------------------
     max_tokens: int = Field(32_000, ge=2_000, le=128_000, description=(
@@ -89,8 +94,8 @@ DEFAULTS = GenerationSettings()
 # The fields that are also Deps fields (graph/nodes.py): passed to it, and logged with each
 # item. max_count and parallel act on the whole batch instead.
 DEPS_FIELDS = ("max_rounds", "stronger_repair_from", "repair_temperature_step", "thinking",
-               "repair_thinking", "plan_thinking", "max_tokens", "max_tokens_no_thinking",
-               "item_token_budget", "context_chars", "mode")
+               "repair_thinking", "plan_thinking", "oracle_thinking", "max_tokens",
+               "max_tokens_no_thinking", "item_token_budget", "context_chars", "mode")
 
 
 def workspace_table(workspace: Path) -> dict:

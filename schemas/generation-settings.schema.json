@@ -43,6 +43,12 @@
       "title": "Plan Thinking",
       "type": "boolean"
     },
+    "oracle_thinking": {
+      "default": false,
+      "description": "The oracle's model reasons first.",
+      "title": "Oracle Thinking",
+      "type": "boolean"
+    },
     "max_tokens": {
       "default": 32000,
       "description": "Output tokens per reply when the model thinks (its reasoning counts as output).",
