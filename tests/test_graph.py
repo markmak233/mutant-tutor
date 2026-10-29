@@ -359,6 +359,16 @@ def test_a_resume_keeps_the_owners_edits_to_the_plan_until_the_model_plans_again
     assert json.loads((tmp_path / "plan.json").read_text()) == replanned
 
 
+def test_a_batch_paused_before_the_model_plan_was_kept_keeps_the_owners_plan(tmp_path):
+    from tutor.graph.__main__ import _owner_plan
+
+    model_plan = json.loads(plan_json("a"))["items"]
+    edited = [{**model_plan[0], "id": "a-better-name"}]
+    (tmp_path / "plan.json").write_text(json.dumps(edited))  # no plan.model.json yet
+    assert _owner_plan(tmp_path, model_plan) == (edited, True)
+    assert _owner_plan(tmp_path, model_plan) == (edited, True)  # and on the next resume
+
+
 def test_a_batch_is_planned_sent_back_approved_later_and_generated_in_parallel(workspace):
     pytest.importorskip("langgraph")
     sqlite = pytest.importorskip("langgraph.checkpoint.sqlite")

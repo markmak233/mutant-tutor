@@ -850,7 +850,8 @@ Design approved 2026-10-28 (owner):
   `.drafts/<batch>/plan.json`; the owner approves (with any edits made to that file) or
   sends it back with feedback, which goes to `plan`. A resume rewrites plan.json only when
   the model has planned again (`plan.model.json` keeps its last plan), so the owner's
-  edits survive a pause. The approved plan, edited or not, must pass the blocking checks
+  edits survive a pause; a batch paused before that file existed keeps its plan.json, and
+  the CLI says when plan.json differs from the model's latest plan. The approved plan, edited or not, must pass the blocking checks
   (unique and new ids, since two items with one id would share a drafts folder; known
   lectures; slide ranges), in the CLI and again in `approve`; a count other than the one
   asked for is the owner's choice (both found in an outside review, 2026-10-29). A SQLite checkpointer in

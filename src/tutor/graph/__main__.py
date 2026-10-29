@@ -211,6 +211,9 @@ def _batch(args, workspace: Path, build) -> int:
                                           snapshot.values["lectures"], existing_ids(workspace))
                         if edited else snapshot.values.get("plan_problems", []))
             _show_plan(plan, problems, plan_file, workspace)
+            if edited:
+                print(f"{plan_file.name} differs from the model's latest plan; approving uses "
+                      f"{plan_file.name} (delete it to take the model's plan)", flush=True)
             answer = decision or _ask()
             decision = None  # a flag answers once
             if answer is None:
@@ -247,7 +250,13 @@ def _owner_plan(drafts: Path, model_plan: list[dict]) -> tuple[list[dict], bool]
     holds the model's plan last written, to tell the two apart."""
     plan_file, model_file = drafts / "plan.json", drafts / "plan.model.json"
     text = json.dumps(model_plan, indent=1) + "\n"
-    if not plan_file.is_file() or not model_file.is_file() or model_file.read_text() != text:
+    if plan_file.is_file() and not model_file.is_file():
+        # Paused before plan.model.json existed: plan.json may hold the owner's edits (or
+        # the plan before their feedback), so it is kept; the caller says it differs.
+        model_file.write_text(text)
+        plan = json.loads(plan_file.read_text())
+        return plan, plan != model_plan
+    if not plan_file.is_file() or model_file.read_text() != text:
         plan_file.write_text(text)
         model_file.write_text(text)
         return model_plan, False
