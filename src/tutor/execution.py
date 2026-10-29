@@ -72,14 +72,32 @@ def run_pytest(
     deleted afterwards; the source files are never modified.
     """
     with tempfile.TemporaryDirectory(prefix="tutor-run-") as tmp:
-        workdir = Path(tmp)
-        for name, source in files.items():
-            target = workdir / name
-            if source.is_dir():
-                shutil.copytree(source, target)
-            else:
-                shutil.copy2(source, target)
+        workdir = _copy_in(files, Path(tmp))
         return _run_in(workdir, timeout_s, env or {})
+
+
+def run_script(
+    files: Mapping[str, Path],
+    script: str,
+    timeout_s: float = DEFAULT_TIMEOUT_S,
+    env: Mapping[str, str] | None = None,
+) -> RunResult:
+    """`python <script>` with no arguments, in a fresh temp dir holding `files`, the way a
+    student runs `python student.py` in the exercise folder; isolated like run_pytest.
+    PASSED: exit code 0; anything else is ERROR (or TIMEOUT)."""
+    with tempfile.TemporaryDirectory(prefix="tutor-run-") as tmp:
+        workdir = _copy_in(files, Path(tmp))
+        return _run_in(workdir, timeout_s, env or {}, [sys.executable, script])
+
+
+def _copy_in(files: Mapping[str, Path], workdir: Path) -> Path:
+    for name, source in files.items():
+        target = workdir / name
+        if source.is_dir():
+            shutil.copytree(source, target)
+        else:
+            shutil.copy2(source, target)
+    return workdir
 
 
 def copied_files(files: Mapping[str, Path]) -> dict[str, Path]:
@@ -112,12 +130,14 @@ def links(files: Mapping[str, Path]) -> list[str]:
     return found
 
 
-def _run_in(workdir: Path, timeout_s: float, extra_env: Mapping[str, str]) -> RunResult:
+def _run_in(workdir: Path, timeout_s: float, extra_env: Mapping[str, str],
+            script: list[str] | None = None) -> RunResult:
+    """Run pytest in `workdir`, or the command `script` (a Python file run directly)."""
     # sys.executable: the project venv, so student code can import pyspark and mrjob.
     # no:cacheprovider: no .pytest_cache; the temp dir is discarded anyway.
     # --junitxml: the counts that tell "all passed" from "all skipped" (see _outcome).
-    cmd = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
-           f"--junitxml={REPORT_FILE}"]
+    cmd = script or [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
+                     f"--junitxml={REPORT_FILE}"]
     # PYSPARK_PYTHON: Spark workers otherwise start the `python3` on PATH, which may be a
     # different minor version than the driver (PYTHON_VERSION_MISMATCH).
     env = {
@@ -141,6 +161,9 @@ def _run_in(workdir: Path, timeout_s: float, extra_env: Mapping[str, str]) -> Ru
         return RunResult(Outcome.TIMEOUT, None, time.monotonic() - start, output)
     duration = time.monotonic() - start
     _kill_group(proc.pid)  # leftovers such as a JVM that was never stopped
+    if script:  # no test report: the exit code is the whole answer
+        outcome = Outcome.PASSED if proc.returncode == 0 else Outcome.ERROR
+        return RunResult(outcome, proc.returncode, duration, output)
     counts = _read_counts(workdir / REPORT_FILE)
     return RunResult(_outcome(proc.returncode, counts), proc.returncode, duration, output,
                      counts)

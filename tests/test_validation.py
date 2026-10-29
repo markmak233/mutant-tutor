@@ -137,7 +137,7 @@ def test_metadata_that_breaks_the_format_skips_every_other_rule(tmp_path, metada
     assert report.result("0").status is Status.FAIL
     assert expected in report.result("0").detail
     others = [r for r in report.results if r.rule != "0"]
-    assert [r.status for r in others] == [Status.SKIPPED] * 7
+    assert [r.status for r in others] == [Status.SKIPPED] * 8
     assert all(r.duration_s == 0.0 for r in others)
     assert not report.valid
 
@@ -161,7 +161,7 @@ def test_unsafe_code_is_never_run(tmp_path, extra_files, expected):
     assert report.result("safe").status is Status.FAIL
     assert expected in report.result("safe").detail
     later = [r for r in report.results if r.rule not in ("0", "safe")]
-    assert [r.status for r in later] == [Status.SKIPPED] * 6
+    assert [r.status for r in later] == [Status.SKIPPED] * 7
     assert all(r.duration_s == 0.0 for r in later)
     assert not report.valid
 
@@ -617,7 +617,8 @@ def test_cli_saves_the_report_as_json(tmp_path):
 
     assert data["exercise_id"] == "demo"
     assert data["valid"] is False
-    assert [r["rule"] for r in data["results"]] == ["0", "safe", "1", "2", "3", "4", "5", "api"]
+    assert [r["rule"] for r in data["results"]] == ["0", "safe", "1", "2", "3", "4", "5", "api",
+                                                 "main"]
     assert data["results"][4]["status"] == "FAIL"  # zero mutants fails rule 3
     assert "validated_at" in data and "tool_commit" in data
 
@@ -699,3 +700,48 @@ def test_required_definitions_accepts_a_method_named_with_its_class():
     assert find_violations(source, {"required_definitions": ["AuctionStats.run", "run"]}) == []
     assert find_violations(source, {"required_definitions": ["Other.run"]}) == [
         "must define Other.run (a name the code defines, not a call)"]
+
+
+# --- rule main: `python student.py` runs on its own --------------------------------------
+
+MAIN = '\n\nif __name__ == "__main__":\n    print(add(2, 3))  # the question\'s example\n'
+
+
+@pytest.mark.parametrize(("standalone", "reference", "skeleton", "status", "expected"), [
+    (None, REFERENCE, SKELETON, Status.NOT_APPLICABLE, "from before this rule"),
+    (False, REFERENCE, SKELETON, Status.NOT_APPLICABLE, "a framework launches it"),
+    (True, REFERENCE + MAIN, SKELETON + MAIN, Status.OK, "ran the example"),
+    (True, REFERENCE + MAIN, SKELETON, Status.FAIL, "student.py lack"),
+    (True, REFERENCE + '\n\nif __name__ == "__main__":\n    print(add(2))\n', SKELETON + MAIN,
+     Status.FAIL, "error, exit code 1"),
+])
+def test_student_py_must_run_on_its_own(tmp_path, standalone, reference, skeleton, status,
+                                        expected):
+    metadata = {} if standalone is None else {"standalone": standalone}
+    report = run(make_exercise(tmp_path, reference=reference, skeleton=skeleton,
+                               metadata=metadata))
+    rule = report.result("main")
+    assert (rule.status, expected in rule.detail) == (status, True), rule.detail
+    if status is Status.FAIL and "exit code" in expected:
+        assert "TypeError" in rule.excerpt  # what the run printed, for whoever fixes it
+
+
+@pytest.mark.parametrize(("source", "found"), [
+    ('if __name__ == "__main__":\n    main()\n', True),
+    ("if '__main__' == __name__:\n    main()\n", True),
+    ("def f():\n    if __name__ == '__main__':\n        pass\n", False),  # not module level
+    ("x = 1\n", False),
+])
+def test_a_main_block_is_found_at_module_level_only(source, found):
+    from tutor.validation.checks import has_main_block
+    assert has_main_block(source) is found
+
+
+def test_the_main_block_is_not_held_to_the_solutions_constraints():
+    """The demo may print with collect(); the solution above it may not."""
+    source = ("def f(rdd):\n    return rdd.map(str)\n\n"
+              'if __name__ == "__main__":\n    print(f(rdd).collect())\n')
+    assert find_violations(source, {"forbidden_calls": ["collect"]}) == []
+    assert find_violations(source.replace("rdd.map(str)", "rdd.collect()"),
+                           {"forbidden_calls": ["collect"]}) == ["line 2: uses collect"]
+    assert count_uses(source, ["collect"]) == {"collect": 0}

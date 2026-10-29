@@ -22,6 +22,11 @@ A name counts as defined if a function has that name, or an MRStep(...) call pas
 keyword with a real value: multi-step jobs write `MRStep(combiner=self.combine_counts)`
 instead of a `combiner` method (`dict(combiner=None)` does not count).
 
+The `if __name__ == "__main__":` block is left out of every check: it is the demo that
+`python student.py` runs on the question's example (validation rule "main"), not the
+solution, and may print with an action such as collect() that the solution must not use.
+The safety check still reads it.
+
 This is a static aid, not a proof: dynamic access (getattr with a built string, exec,
 importing a name under another module) can still get round it. Tests and mutants carry
 the real weight; the check catches the honest mistakes and the obvious shortcuts.
@@ -52,6 +57,7 @@ def find_violations(source: str, constraints: Mapping[str, list]) -> list[str]:
         tree = ast.parse(source)
     except SyntaxError as e:
         return [f"line {e.lineno}: cannot parse ({e.msg})"]
+    tree = without_main_block(tree)
 
     forbidden_calls = set(constraints.get("forbidden_calls", []))
     forbidden_imports = constraints.get("forbidden_imports", [])
@@ -90,11 +96,27 @@ def find_violations(source: str, constraints: Mapping[str, list]) -> list[str]:
     return violations
 
 
+def is_main_block(node: ast.AST) -> bool:
+    """`if __name__ == "__main__":` (either side of the ==)."""
+    if not (isinstance(node, ast.If) and isinstance(node.test, ast.Compare)):
+        return False
+    sides = [node.test.left, *node.test.comparators]
+    names = {side.id for side in sides if isinstance(side, ast.Name)}
+    texts = {side.value for side in sides if isinstance(side, ast.Constant)}
+    return names == {"__name__"} and texts == {"__main__"}
+
+
+def without_main_block(tree: ast.Module) -> ast.Module:
+    """The module without its top-level main blocks (the demo, not the solution)."""
+    return ast.Module(body=[n for n in tree.body if not is_main_block(n)],
+                      type_ignores=tree.type_ignores)
+
+
 def count_uses(source: str, names: list[str]) -> dict[str, int]:
     """How often each name is used as a name or attribute: `MRStep(...)` and
     `mrjob.step.MRStep(...)` both count, the import line does not. For reports only."""
     counts = dict.fromkeys(names, 0)
-    for node in ast.walk(ast.parse(source)):
+    for node in ast.walk(without_main_block(ast.parse(source))):
         if isinstance(node, ast.Name) and node.id in counts:
             counts[node.id] += 1
         elif isinstance(node, ast.Attribute) and node.attr in counts:

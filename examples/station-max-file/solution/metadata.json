@@ -12,5 +12,6 @@
     "forbidden_imports": ["pyspark.sql"]
   },
   "partition_check": true,
+  "standalone": true,
   "source": "synthetic"
 }

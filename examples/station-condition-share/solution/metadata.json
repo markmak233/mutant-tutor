@@ -14,5 +14,6 @@
   },
   "partition_check": true,
   "timeout_s": 150,
+  "standalone": true,
   "source": "synthetic"
 }

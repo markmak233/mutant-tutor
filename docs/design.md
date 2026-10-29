@@ -404,6 +404,19 @@ Rule 5 and the API check (phase 1g):
   not); both gaps were found by a Codex review on 2026-10-25. Still a static aid, not a proof:
   `getattr` with a built string, `exec` and the like escape it. The same function can later
   check student answers. It runs even when rule 1 fails, since it does not depend on the tests.
+  The `if __name__ == "__main__":` block is left out of it (the demo below, not the solution,
+  may print with a forbidden action such as collect()); the safety check still reads it.
+- Rule `main` (owner, 2026-10-29: every program runs with `python xxx.py`, except code a
+  framework launches with no main of its own): metadata `standalone` true means
+  `student.py` and `reference.py` have an `if __name__ == "__main__":` block. A function
+  exercise's block runs the question's example and prints the result (a Spark one builds
+  and stops its own session), and the rule runs the reference that way in the isolated
+  runner (`execution.run_script`, exit code 0). A file exercise's block takes its paths
+  from sys.argv as the slides' standalone programs do (static check only; the tests run
+  it). `standalone` false (a Hadoop submission, a project's entry point) and unset (an
+  exercise from before the rule) are n/a. The pipeline asks for the block and writes
+  `standalone: true` unless the model chose false. The skeleton's block raises
+  NotImplementedError until the student writes the function, which is expected.
 - Measured 2026-10-24 for rules 1-3, 5 and api: `station-average-rdd` about 29 s,
   `station-max-file` about 61 s.
 
@@ -1566,7 +1579,9 @@ gaps. Each was decided by the owner; change one only with the owner.
   their differences from the course are stated as teaching assumptions in the question and
   metadata `source.assumptions`. The owner prefers more exercises over edited ones, and
   edits would mean re-validating and re-reading material already solved. Decided 2026-10-25.
-  (Exception: an exercise that teaches something wrong, as the stripes test did, is fixed.)
+  (Exception: an exercise that teaches something wrong, as the stripes test did, is fixed.
+  Exception, owner 2026-10-29: rule `main` was added to the unsolved week 3-5 batches and
+  the examples; the solved week 1-2 batch keeps `standalone` unset.)
 - No LLM judges whether an exercise is valid; only the deterministic validator does (see
   "Exercise validation"). LLM feedback on the learner's answers (hints, rubric feedback) is
   a different thing and allowed.

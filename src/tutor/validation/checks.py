@@ -10,6 +10,9 @@ safe. Every .py file that validation would run passes the static safety check (s
 4. The reference agrees with oracle.py on random inputs (hypothesis, solution/test_oracle.py).
 5. The reference passes with 1, 2 and 4 partitions (exercises with "partition_check").
 api. The reference respects the exercise's static API constraints (see api.py).
+main. `python student.py` runs on its own (metadata `standalone`): both student.py and the
+   reference have an `if __name__ == "__main__":` block, and for a function exercise the
+   reference run that way exits cleanly (it runs the question's example).
 
 Rules 1-3 and 5 run the exercise's own test file with a different candidate as student.py;
 rule 4 runs the exercise's differential test instead. Neither needs to know whether the
@@ -18,15 +21,16 @@ exercise is function-level or file-level: that lives in the exercise's test file
 
 from __future__ import annotations
 
+import ast
 import re
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
-from tutor.execution import Outcome, RunResult, copied_files, links, run_pytest
+from tutor.execution import Outcome, RunResult, copied_files, links, run_pytest, run_script
 from tutor.schema import Metadata, problems
 from tutor.testkit import COMBINER_ENV, DEFAULT_PARTITIONS, PARTITIONS_ENV
-from tutor.validation.api import count_uses, find_violations
+from tutor.validation.api import count_uses, find_violations, is_main_block
 from tutor.validation.exercise import STUDENT_FILE, ExerciseFiles
 from tutor.validation.safety import (
     allowed_imports,
@@ -111,6 +115,7 @@ def validate(ex: ExerciseFiles, timeout_s: float | None = None,
             reference,
             *skipped,
             check_api_constraints(ex),
+            check_main(ex, timeout_s),
         ])
     return ValidationReport(ex.exercise_id, [
         fmt,
@@ -121,6 +126,7 @@ def validate(ex: ExerciseFiles, timeout_s: float | None = None,
         check_matches_oracle(ex, timeout_s),
         check_distribution(ex, timeout_s),
         check_api_constraints(ex),
+        check_main(ex, timeout_s),
     ])
 
 
@@ -129,6 +135,7 @@ def _skipped_after_safety(reason: str) -> list[RuleResult]:
         RuleResult("1", "reference passes", Status.SKIPPED, reason, 0.0),
         *_skipped_test_rules(reason),
         RuleResult("api", "api constraints", Status.SKIPPED, reason, 0.0),
+        RuleResult("main", "runs on its own", Status.SKIPPED, reason, 0.0),
     ]
 
 
@@ -179,6 +186,46 @@ def _copied(ex: ExerciseFiles) -> dict[str, Path]:
     """The files a run copies into its directory, by their path there, without student.py."""
     return copied_files({name: path for name, path in ex.run_files(ex.skeleton).items()
                          if name != STUDENT_FILE})
+
+
+def check_main(ex: ExerciseFiles, timeout_s: float) -> RuleResult:
+    """Rule main: what a student types first, `python student.py`, does something.
+    Static for both interfaces; a function exercise's reference is also run (no arguments,
+    in a temp copy), since its main block calls the student's function on the example."""
+    standalone = ex.metadata.get("standalone")
+    if standalone is None:  # an exercise written before the rule (2026-10-29)
+        return RuleResult("main", "runs on its own", Status.NOT_APPLICABLE,
+                          "standalone not set: an exercise from before this rule", 0.0)
+    if standalone is False:
+        return RuleResult("main", "runs on its own", Status.NOT_APPLICABLE,
+                          "standalone: false (a framework launches it; no main of its own)",
+                          0.0)
+    missing = [name for name, path in (("student.py", ex.skeleton), ("reference.py",
+                                                                     ex.reference))
+               if not has_main_block(path.read_text())]
+    if missing:
+        return RuleResult("main", "runs on its own", Status.FAIL,
+                          f"{' and '.join(missing)} lack an `if __name__ == \"__main__\":` "
+                          f"block: `python student.py` must run on its own", 0.0)
+    if ex.metadata.get("interface") != "function":
+        # A program taking its paths from sys.argv (the slides' form); the tests run it.
+        return RuleResult("main", "runs on its own", Status.OK,
+                          "a program run as `python student.py <input> <output>`", 0.0)
+    r = run_script(ex.run_files(ex.reference), STUDENT_FILE, timeout_s)
+    if r.outcome is Outcome.PASSED:
+        return RuleResult("main", "runs on its own", Status.OK,
+                          "`python student.py` ran the example (reference)", r.duration_s)
+    return RuleResult("main", "runs on its own", Status.FAIL,
+                      f"`python student.py` with the reference: {r.outcome.value}, exit code "
+                      f"{r.returncode}", r.duration_s, r.output[-1500:])
+
+
+def has_main_block(source: str) -> bool:
+    """A module-level `if __name__ == "__main__":` (either side of the ==)."""
+    try:
+        return any(is_main_block(node) for node in ast.parse(source).body)
+    except SyntaxError:
+        return False
 
 
 def check_reference_passes(ex: ExerciseFiles, timeout_s: float) -> RuleResult:

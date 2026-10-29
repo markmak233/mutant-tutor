@@ -87,6 +87,17 @@ class Metadata(_Strict):
     combiner_check: bool = False
     timeout_s: Annotated[float, Field(gt=0)] | None = None
     mutant_partitions: Annotated[list[Annotated[int, Field(ge=1)]], Field(min_length=1)] = [2]
+    # `python student.py` runs on its own (validation rule "main"): a function exercise runs
+    # the question's example and prints the result; a file exercise is a program taking its
+    # paths from the command line, as the slides write them. False: code a framework
+    # launches with no main of its own (a Hadoop submission, a project's entry point).
+    # None: written before the rule (2026-10-29), not checked; the pipeline sets True.
+    standalone: Annotated[bool | None, Field(description=(
+        "student.py and reference.py run with `python <file>.py`: a function exercise has "
+        "an `if __name__ == \"__main__\":` block that runs the question's example and prints "
+        "the result; a file exercise one that reads its paths from sys.argv. False only for "
+        "code a framework launches that has no main of its own (a Hadoop submission, a "
+        "project's entry point). Left out: an exercise from before this rule."))] = None
     source: Literal["synthetic"] | Source
 
     @model_validator(mode="after")

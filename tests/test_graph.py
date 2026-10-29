@@ -138,6 +138,18 @@ def test_too_few_mutants_left_is_still_a_format_error(tmp_path):
     assert not (tmp_path / "round-0" / "exercises").exists()
 
 
+def test_a_generated_exercise_is_always_under_rule_main(tmp_path):
+    exercise, solution, _ = write_draft(ExerciseDraft.model_validate(draft()), "sum-list",
+                                        tmp_path / "r")
+    assert json.loads((solution / "metadata.json").read_text())["standalone"] is True
+    framework_launched = draft()
+    framework_launched["metadata"]["standalone"] = False  # the model's explicit choice
+    _, solution, _ = write_draft(ExerciseDraft.model_validate(framework_launched), "sum-list",
+                                 tmp_path / "r2")
+    assert json.loads((solution / "metadata.json").read_text())["standalone"] is False
+    assert 'if __name__ == "__main__":' in prompts.SPEC
+
+
 def test_a_generated_exercise_must_cite_its_course_pages(tmp_path):
     synthetic = draft()
     synthetic["metadata"]["source"] = "synthetic"  # copied from the example exercise

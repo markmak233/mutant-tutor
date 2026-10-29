@@ -454,11 +454,16 @@ def write_draft(draft: ExerciseDraft, exercise_id: str,
     if root.exists():
         shutil.rmtree(root)
     exercise, solution = root / "exercises" / exercise_id, root / "solutions" / exercise_id
+    metadata = draft.metadata
+    if metadata.standalone is None:
+        # A generated exercise is always under rule "main"; only the model's explicit
+        # false (a framework-launched program) is kept.
+        metadata = metadata.model_copy(update={"standalone": True})
     files = {
         exercise / "student.py": draft.student_py,
         exercise / "test_student.py": draft.test_student_py,
         exercise / "hints.md": draft.hints_md,
-        solution / "metadata.json": draft.metadata.model_dump_json(
+        solution / "metadata.json": metadata.model_dump_json(
             indent=2, exclude_unset=True, exclude_none=True) + "\n",
         solution / "reference.py": draft.reference_py,
         solution / "skeleton.py": draft.student_py,  # what the student starts from

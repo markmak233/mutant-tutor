@@ -55,7 +55,13 @@ Files (fields of the JSON you return):
   `raise NotImplementedError` (or `pass` with a TODO) where the student writes code. For a
   debugging exercise the skeleton is the buggy program, and the docstring says it is wrong
   and how it shows (the symptom); whether it also names the cause depends on the batch's
-  mode (below).
+  mode (below). It ends with an `if __name__ == "__main__":` block, so `python student.py`
+  runs on its own (validation rule "main"): for the function interface it calls the
+  functions on the question's example and prints the results (a Spark one builds its own
+  session and stops it, with PYSPARK_PYTHON set to sys.executable); for the file interface
+  it takes the input and output paths from sys.argv, as the slides' standalone programs do.
+  Only code that a framework launches and that has no main of its own (a Hadoop submission,
+  a project's entry point) leaves the block out and sets metadata `standalone` to false.
 - test_student_py: pytest tests importing `student`, using tutor.testkit (API below). Spark
   tests read the partition count with testkit.partitions(); file-level tests split their
   input into that many files. Work out every expected value from the question by hand on
@@ -70,6 +76,7 @@ Files (fields of the JSON you return):
   comment showing a record after that step on the question's example data. Never one long
   chain. Write it the way a good student would with the slides' APIs; never force an API
   into a role it does not fit (e.g. an action's result sent back to the cluster to join).
+  It ends with the same `__main__` block as student_py.
 {oracle}test_oracle_py: a hypothesis test comparing student.py with oracle.py
   (`@settings(deadline=None, derandomize=True)`, a moderate max_examples).
 - mutants: 3 to 6 mistakes, each named m01_ to m06_ plus a short snake_case description

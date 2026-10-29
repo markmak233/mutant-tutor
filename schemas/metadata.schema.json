@@ -240,6 +240,19 @@
       "title": "Mutant Partitions",
       "type": "array"
     },
+    "standalone": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "student.py and reference.py run with `python <file>.py`: a function exercise has an `if __name__ == \"__main__\":` block that runs the question's example and prints the result; a file exercise one that reads its paths from sys.argv. False only for code a framework launches that has no main of its own (a Hadoop submission, a project's entry point). Left out: an exercise from before this rule.",
+      "title": "Standalone"
+    },
     "source": {
       "anyOf": [
         {

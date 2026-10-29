@@ -21,3 +21,20 @@ def average_by_station(readings: RDD) -> RDD:
     # Step 3: divide once, at the end.
     #   ('s1', 15.0), ('s2', 5.0)
     return totals.mapValues(lambda sum_count: sum_count[0] / sum_count[1])
+
+
+if __name__ == "__main__":
+    # python student.py: runs the example from the question and prints the result.
+    import os
+    import sys
+
+    from pyspark import SparkContext
+
+    os.environ.setdefault("PYSPARK_PYTHON", sys.executable)  # Spark workers use this Python
+    sc = SparkContext("local[2]", "station-average-example")
+    sc.setLogLevel("ERROR")
+    try:
+        readings = sc.parallelize([("s1", 10.0), ("s2", 4.0), ("s1", 20.0), ("s1", 30.0)])
+        print(sorted(average_by_station(readings).collect()))  # [('s1', 20.0), ('s2', 4.0)]
+    finally:
+        sc.stop()
