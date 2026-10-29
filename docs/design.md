@@ -280,7 +280,9 @@ instead of the original files.
   comparing models.
 - Commands: `python -m tutor.materials <file or folder>` (text layer only; image pages
   `pending`), `--vision` to transcribe pending and partial pages with `LLM_MODEL`; calls go to
-  `$WORKSPACE_DIR/logs/llm_calls.jsonl`.
+  `$WORKSPACE_DIR/logs/llm_calls.jsonl`. Error bodies quoted there and in error messages
+  have the profile's key and anything key-like (`Bearer ...`, `sk-...`) replaced first, in
+  case a server echoes the request (outside review, 2026-10-29).
 - PDF library: pypdfium2 (Apache / BSD) for text and rendering, plus pdfplumber (MIT) only if
   RAG needs per-character font data. Compared on the first course's 9 lecture PDFs with
   PyMuPDF and pdfplumber: pypdfium2 was the only one to merge the characters these slides

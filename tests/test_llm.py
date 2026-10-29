@@ -191,6 +191,20 @@ def test_a_slow_reply_says_timeout_not_unreachable(monkeypatch):
         chat(LLMConfig("p", "glm", "http://x/v1", "glm-5.3-flash"), [], purpose="generate")
 
 
+def test_an_error_that_echoes_the_key_is_logged_and_raised_without_it(monkeypatch, tmp_path):
+    def refuse(request, timeout):
+        echo = f'{{"error": "invalid key {SECRET}", "header": "Bearer {SECRET}"}}'
+        raise urllib.error.HTTPError(request.full_url, 401, "no", {}, io.BytesIO(echo.encode()))
+
+    monkeypatch.setattr(llm.urllib.request, "urlopen", refuse)
+    config = config_for("vision", "glm-flash", workspace(tmp_path), {"ZHIPU_API_KEY": SECRET})
+    log = tmp_path / "calls.jsonl"
+    with pytest.raises(LLMError) as raised:
+        chat(config, [], purpose="vision", log_path=log)
+    assert "HTTP 401" in str(raised.value) and "invalid key [key]" in str(raised.value)
+    assert SECRET not in str(raised.value) and SECRET not in log.read_text()
+
+
 def test_thinking_off_tries_each_switch_until_the_model_accepts_one(monkeypatch, tmp_path):
     """GLM-5.3 refuses thinking: disabled with HTTP 400 and accepts reasoning_effort low."""
     bodies = []

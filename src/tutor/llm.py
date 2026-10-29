@@ -242,7 +242,9 @@ def _post(config: LLMConfig, body: dict, purpose: str, log_path: Path | None,
         choice = data["choices"][0]
         text = choice["message"]["content"] or ""
     except urllib.error.HTTPError as e:
-        error = f"HTTP {e.code} from {config.base_url}: {e.read()[:300].decode(errors='replace')}"
+        # Redacted before it is cut, so a key on the cut cannot be left half there.
+        body = _redact(e.read()[:4000].decode(errors="replace"), config)
+        error = f"HTTP {e.code} from {config.base_url}: {body[:300]}"
         _log(log_path, purpose, config, None, time.monotonic() - start, error)
         if e.code == 400:
             raise _Rejected(error) from None
@@ -255,11 +257,11 @@ def _post(config: LLMConfig, body: dict, purpose: str, log_path: Path | None,
         _log(log_path, purpose, config, None, time.monotonic() - start, error)
         raise LLMError(error) from e
     except (urllib.error.URLError, OSError) as e:
-        error = f"cannot reach {config.base_url} ({e}); is the server running?"
+        error = _redact(f"cannot reach {config.base_url} ({e}); is the server running?", config)
         _log(log_path, purpose, config, None, time.monotonic() - start, error)
         raise LLMError(error) from e
     except (KeyError, IndexError, json.JSONDecodeError) as e:
-        error = f"unexpected reply from {config.base_url}: {e!r}"
+        error = _redact(f"unexpected reply from {config.base_url}: {e!r}", config)
         _log(log_path, purpose, config, None, time.monotonic() - start, error)
         raise LLMError(error) from e
     usage = data.get("usage") or {}
@@ -268,6 +270,17 @@ def _post(config: LLMConfig, body: dict, purpose: str, log_path: Path | None,
                   (usage.get("prompt_tokens_details") or {}).get("cached_tokens"))
     _log(log_path, purpose, config, reply, reply.seconds, None)
     return reply
+
+
+def _redact(text: str, config: LLMConfig) -> str:
+    """An error body may echo the request (a proxy returning the Authorization header, a
+    provider quoting the key it refused): the key never reaches a message or the log."""
+    if config.api_key:
+        text = text.replace(config.api_key, "[key]")
+    return _SECRET.sub("[key]", text)
+
+
+_SECRET = re.compile(r"(?<=Bearer )\S+|sk-[\w-]{16,}")
 
 
 def _read_stream(response, on_progress: Callable[[int], None] | None) -> dict:
