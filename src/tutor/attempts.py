@@ -14,6 +14,11 @@ repo's own tests are never recorded. One line per exercise per run, e.g.
 "result" is "error", "failed", "interrupted" (Ctrl+C before the run finished),
 "incomplete" (a test was skipped) or "passed": only a run where every test ran and passed.
 
+A failed or errored run also keeps a copy of the student.py it tested, under
+attempts/code/<batch>/<exercise>/<hash>.py (one copy per distinct content), named in the
+line's "code" field: the owner's real mistakes, replayable as wrong solutions that an
+exercise's tests must catch (the held-out set, roadmap 3b).
+
 Nothing reads the file in phase 2; it is kept for choosing review batches later and as
 material for hint rules and mutants. Recording never changes a test result: any problem
 becomes a warning.
@@ -21,6 +26,7 @@ becomes a warning.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -33,6 +39,7 @@ from pathlib import Path
 from tutor.config import WorkspaceError, load_env, load_workspace
 
 ATTEMPTS_FILE = "attempts.jsonl"
+CODE_DIR = "code"  # snapshots of failing student.py files, inside attempts/
 INTERRUPTED = 2  # pytest.ExitCode.INTERRUPTED, without importing pytest here
 _FIRST_ERROR_CHARS = 300
 # Terminal colour codes: pytest colours its assertion diffs when the terminal (or VS Code)
@@ -148,12 +155,13 @@ def _write(duration_s: float, interrupted: bool = False) -> None:
     workspace.attempts_dir.mkdir(exist_ok=True)
     with open(workspace.attempts_dir / ATTEMPTS_FILE, "a", encoding="utf-8") as f:
         for (batch, exercise), tally in by_exercise.items():
+            result = _result(tally, interrupted)
             line = {
                 "time": datetime.now().isoformat(timespec="seconds"),
                 "batch": batch,
                 "exercise": exercise,
                 "mode": _mode(workspace.batches_dir / batch),
-                "result": _result(tally, interrupted),
+                "result": result,
                 "passed": tally.passed,
                 "failed": tally.failed,
                 "errors": tally.errors,
@@ -162,7 +170,27 @@ def _write(duration_s: float, interrupted: bool = False) -> None:
                 "partitions": int(os.environ.get("TUTOR_PARTITIONS", "2")),
                 "duration_s": round(duration_s, 1),
             }
+            if result in ("failed", "error"):
+                student = workspace.batches_dir / batch / "exercises" / exercise / "student.py"
+                if code := _snapshot(student, workspace.attempts_dir, batch, exercise):
+                    line["code"] = code
             f.write(json.dumps(line, ensure_ascii=False) + "\n")
+
+
+def _snapshot(student: Path, attempts_dir: Path, batch: str, exercise: str) -> str | None:
+    """Copy the failing student.py into attempts/code/ once per content; its path relative
+    to attempts/, or None (with a warning) when it cannot be copied."""
+    try:
+        data = student.read_bytes()
+        relative = Path(CODE_DIR, batch, exercise, hashlib.sha256(data).hexdigest()[:12] + ".py")
+        target = attempts_dir / relative
+        if not target.exists():  # the same mistake run again is kept once
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+        return relative.as_posix()
+    except OSError as e:
+        warnings.warn(f"failing code not kept: {e}", stacklevel=1)
+        return None
 
 
 def _mode(batch_dir: Path) -> str | None:

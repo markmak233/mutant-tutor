@@ -70,6 +70,23 @@ def test_the_first_error_is_stored_without_terminal_colours():
         "test_columns: AssertionError: assert ['(age + 10)'] == ['age10']")
 
 
+def test_a_failing_run_keeps_its_student_py_once_and_a_passing_run_none(tmp_path):
+    exercise = make_workspace(tmp_path)
+    (exercise / "student.py").write_text("def add(a, b):\n    return a * b\n")
+    run_pytest_in(exercise, tmp_path / "ws")
+    run_pytest_in(exercise, tmp_path / "ws")  # the same mistake again
+    (exercise / "test_student.py").write_text("def test_ok():\n    assert True\n")
+    run_pytest_in(exercise, tmp_path / "ws")
+
+    first, again, passing = attempts(tmp_path / "ws")
+    assert first["code"] == again["code"]
+    assert first["code"].startswith("code/2026-10-25_p2-w2/word-count/")
+    kept = tmp_path / "ws" / "attempts" / first["code"]
+    assert kept.read_text() == "def add(a, b):\n    return a * b\n"
+    assert len(list(kept.parent.iterdir())) == 1
+    assert "code" not in passing
+
+
 def test_every_run_appends_a_line(tmp_path):
     exercise = make_workspace(tmp_path, mode=None)
     run_pytest_in(exercise, tmp_path / "ws")
