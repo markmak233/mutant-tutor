@@ -38,6 +38,7 @@ from tutor.graph.state import (
     PlanItem,
 )
 from tutor.materials import cache
+from tutor.question import QUESTION_FILE, question_markdown
 from tutor.schema import Manifest, SourceRef
 from tutor.validation.checks import RuleResult, Status, ValidationReport, validate
 from tutor.validation.exercise import load_exercise
@@ -47,7 +48,7 @@ DRAFT_SCHEMA = ExerciseDraft.model_json_schema()
 PLAN_SCHEMA = BatchPlan.model_json_schema()
 ORACLE_SCHEMA = OracleDraft.model_json_schema()
 # Files of the exercise folder that data_files must not replace.
-OWN_FILES = {"student.py", "test_student.py", "hints.md"}
+OWN_FILES = {"student.py", "test_student.py", "hints.md", "question.md"}
 REPO = Path(__file__).resolve().parents[3]
 PLAN_RETRIES = 2  # extra plan calls when the plan breaks a rule checked here
 UNREAD = ("pending", "partial")  # cached pages whose transcription is missing or cut off
@@ -470,6 +471,9 @@ def write_draft(draft: ExerciseDraft, exercise_id: str,
         solution / "oracle.py": draft.oracle_py,
         solution / "test_oracle.py": draft.test_oracle_py,
     }
+    question = question_markdown(draft.student_py)
+    if question:  # the question again as Markdown, for reading in a previewer
+        files[exercise / QUESTION_FILE] = question
     for name, content in draft.data_files.items():
         target = exercise / _data_path(name)
         if target in files:  # "a.csv" and "./a.csv"
@@ -498,7 +502,7 @@ def _data_path(name: str) -> PurePosixPath:
             or path.suffix == ".py"):
         raise DraftError(f"data file {name!r}: give a relative path inside the exercise "
                          "folder, not a Python file or one of student.py / test_student.py "
-                         "/ hints.md")
+                         "/ hints.md / question.md")
     return path
 
 

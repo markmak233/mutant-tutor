@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 import warnings
 from dataclasses import dataclass
@@ -34,6 +35,9 @@ from tutor.config import WorkspaceError, load_env, load_workspace
 ATTEMPTS_FILE = "attempts.jsonl"
 INTERRUPTED = 2  # pytest.ExitCode.INTERRUPTED, without importing pytest here
 _FIRST_ERROR_CHARS = 300
+# Terminal colour codes: pytest colours its assertion diffs when the terminal (or VS Code)
+# asks for colour, and they would land in the log as "[0m[33m'".
+_ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 
 
 @dataclass
@@ -110,6 +114,7 @@ def _short_error(report) -> str:
         lines = [line for line in str(report.longrepr).splitlines() if line.strip()]
         message = lines[-1] if lines else "error"
     name = report.nodeid.split("::")[-1]
+    message = _ANSI.sub("", message)
     return f"{name}: {' '.join(message.split())}"[:_FIRST_ERROR_CHARS]
 
 

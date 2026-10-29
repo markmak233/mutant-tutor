@@ -156,6 +156,7 @@ smartcodereview-workspace/
     │   │   │   └── <exercise-id>/
     │   │   │       ├── student.py       # the one file to open: question in the module docstring,
     │   │   │       │                    #   skeleton below; owner writes the answer here
+    │   │   │       ├── question.md      # the docstring as Markdown, made by code (tutor/question.py)
     │   │   │       ├── test_student.py  # run it, no need to read it
     │   │   │       ├── sample_input/    # file-level only: the docstring example as input files
     │   │   │       └── hints.md         # three levels; separate so it is opened only when stuck
@@ -1316,6 +1317,16 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
     sees each existing exercise's title and topic, not only its id, and repeats a solved
     task with another API only when the new API is the whole point (W5 had planned a fourth
     word count and a Spark SQL exercise that redid cleaning and per-key averages).
+  - The question (both modes, decided 2026-10-29: the owner rated three week 5 questions
+    unclear, "explanations too long", and found a docstring hard to read) is a title and
+    fixed sections, each label alone on a line: `Concept:` (learn only, at most 3 lines;
+    more goes in hints.md), `Symptom:` (debugging), `Task:`, `Input:`, `Output:`,
+    `Example:`, `Constraints:`, `Slides:`, `Run:`. `question.md` next to student.py is the
+    same text as Markdown, made by code from the docstring (no model, so they never
+    disagree), labels as headings and indented data as code blocks; existing batches get
+    it with `python -m tutor.question BATCH_DIR`. Not hints.md's top, which the owner
+    first suggested: hints.md is opened only when stuck. No validation check of the
+    layout yet: older exercises do not follow it and are not reworked.
   - `review`: one or several weeks mixed, fuller tasks leaning file-level (closer to labs and
     projects), a bare skeleton. The tutor helps only when asked, first naming just the kind of
     error, and leaves the fix to the owner. Exercises may combine knowledge points, as a

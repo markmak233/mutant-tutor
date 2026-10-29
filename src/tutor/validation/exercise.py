@@ -22,7 +22,7 @@ ORACLE_TEST_FILE = "test_oracle.py"
 
 # Never copied into a test run: student.py is replaced by the code under test, and the
 # rest is for people (hints) or left behind by running things by hand.
-_NOT_COPIED = {STUDENT_FILE, "hints.md", "sample_output", "__pycache__"}
+_NOT_COPIED = {STUDENT_FILE, "hints.md", "question.md", "sample_output", "__pycache__"}
 
 
 class ExerciseError(Exception):

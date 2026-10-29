@@ -49,15 +49,25 @@ Files (fields of the JSON you return):
   below, the footer its `slide S`), and the teaching assumptions (choices of this
   exercise, not rules of the framework). Never "synthetic": that is only for the example,
   which is not from a course.
-- student_py: the question in the module docstring (task; input and output format with a
-  small example; constraints; the slides and PDF pages; teaching assumptions; how to run it
-  and its tests), then the skeleton: imports, the function or class signatures, and
-  `raise NotImplementedError` (or `pass` with a TODO) where the student writes code. For a
-  debugging exercise the skeleton is the buggy program, and the docstring says it is wrong
-  and how it shows (the symptom); whether it also names the cause depends on the batch's
-  mode (below). The buggy program is the reference with only the bug changed: every other
-  line already works, so fixing the bug is the whole task (no missing steps to write).
-  It ends with an `if __name__ == "__main__":` block, so `python student.py`
+- student_py: the question in the module docstring, then the skeleton: imports, the
+  function or class signatures, and `raise NotImplementedError` (or `pass` with a TODO)
+  where the student writes code. The question is a title line, then these sections in
+  this order, each starting with its label alone on a line at column 0 (the example
+  exercise below predates this layout; follow this one):
+    Concept:      learn mode only, at most 3 lines on the idea the exercise practises;
+                  longer explanation belongs in hints_md
+    Symptom:      debugging only: the program is wrong and how that shows
+    Task:         one or two sentences: what to write or fix
+    Input:  Output:  Example:  Constraints:
+    Slides:       the lecture, slides and PDF pages; teaching assumptions, if any
+    Run:          `python student.py ...`, `pytest test_student.py`, hints.md for help
+  Prose is plain lines at column 0; data, tables and commands are indented by 4 spaces.
+  The question is also saved as question.md with the labels as headings, and the student
+  reads it on every exercise: keep it short, the task first. For a debugging exercise
+  the skeleton is the buggy program; whether Symptom also names the cause depends on the
+  batch's mode (below). The buggy program is the reference with only the bug changed:
+  every other line already works, so fixing the bug is the whole task (no missing steps
+  to write). It ends with an `if __name__ == "__main__":` block, so `python student.py`
   runs on its own (validation rule "main"): for the function interface it calls the
   functions on the question's example and prints the results (a Spark one builds its own
   session and stops it, with PYSPARK_PYTHON set to sys.executable); for the file interface
@@ -147,7 +157,7 @@ def example(framework: str, interface: str) -> str:
         # .DS_Store (binary, git-ignored, so absent in CI but present on a Mac).
         if (not path.is_file() or "__pycache__" in rel.parts
                 or any(part.startswith(".") for part in rel.parts)
-                or path.name == "validation.json"):
+                or path.name in ("validation.json", "question.md")):  # question.md: a copy
             continue
         try:
             parts.append(f"=== {rel} ===\n{path.read_text()}")
@@ -170,12 +180,13 @@ def system_prompt(conventions: str, oracle_interface: bool = False) -> str:
 
 
 MODES = {
-    "learn": "learn: the student is meeting the topic. Questions may explain the concept; a "
-             "debugging question may name the cause of the bug, not the fix. The student's "
+    "learn": "learn: the student is meeting the topic. The Concept section explains the idea "
+             "in at most 3 lines; a debugging Symptom may name the cause of the bug, not the "
+             "fix. The student's "
              "code practises only the knowledge point: steps that are not the point (reading "
              "and cleaning input, formatting output) are given in the skeleton or kept trivial.",
-    "review": "review: the student has learnt the topic. A debugging question gives the "
-              "symptom only, never the cause.",
+    "review": "review: the student has learnt the topic. No Concept section; a debugging "
+              "Symptom gives the symptom only, never the cause.",
 }
 
 

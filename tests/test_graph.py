@@ -114,6 +114,7 @@ def test_write_draft_lays_out_a_batch_and_derives_the_skeleton(tmp_path):
     assert sorted(p.name for p in (solution / "mutants").iterdir()) == [
         "m01_wrong.py", "m02_wrong.py", "m03_wrong.py"]
     assert json.loads((solution / "metadata.json").read_text())["id"] == "sum-list"
+    assert (exercise / "question.md").read_text() == "# Sum a list.\n"  # from the docstring
 
 
 def broken_mutant(name: str) -> dict:
