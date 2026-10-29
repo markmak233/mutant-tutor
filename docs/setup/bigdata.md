@@ -216,6 +216,22 @@ by the validator and repaired up to three times; only VALID ones reach the batch
 that stopped midway continues with `resume`; `resume --profile NAME` finishes it with
 another model. `coverage-proposal.md` in the batch lists the coverage.md changes to make.
 
+Tunable values (repair rounds, thinking per role, token limits, ...) have defaults; to
+change them for every batch, add a `[generation]` table (the names, meanings and bounds are
+in `src/tutor/graph/settings.py` and `schemas/generation-settings.schema.json`), or change
+one run with `--set`:
+
+```toml
+[generation]
+max_rounds = 3
+stronger_repair_from = 1    # the repair model from the first repair on
+```
+
+```bash
+python -m tutor.graph plan ... --set max_rounds=2
+python -m tutor.graph resume --batch w4 --set max_rounds=4   # for the rest of the batch
+```
+
 A `hint` role (e.g. `hint = "deepseek"`) adds a model's hint to `python -m tutor.hint`
 when no rule and no known mistake fits. The model gets your `student.py`, `hints.md`, the
 constraints and the first error, never the solution; a hint that shows solution code is

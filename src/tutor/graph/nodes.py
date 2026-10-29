@@ -26,6 +26,7 @@ from pydantic import ValidationError
 
 from tutor import llm
 from tutor.graph import prompts
+from tutor.graph.settings import DEFAULTS, DEPS_FIELDS
 from tutor.graph.state import (
     MIN_MUTANTS,
     BatchPlan,
@@ -65,34 +66,24 @@ class Deps:
     workspace: Path
     batch_dir: Path
     config: llm.LLMConfig
-    max_rounds: int = 3  # repair rounds after the first draft
-    item_token_budget: int = 400_000  # input + output tokens per item, all rounds
-    context_chars: int = 120_000  # above this a lecture is sliced to the item's slides
-    max_tokens: int = 32_000  # per reply, when the model thinks (reasoning counts as output)
-    # Without thinking a draft is 4-7k tokens; a DeepSeek reply that ran away filled all
-    # 32k (2026-10-29), so a lower cap halves what such a reply costs.
-    max_tokens_no_thinking: int = 16_000
-    # Off by default: with thinking on, GLM-5.3 (Flash and full) spent the whole 32k output
-    # on reasoning and was cut off before the answer, 9-10 min per call (2026-10-28,
-    # docs/design.md); thinking low passed in one round in about a minute.
-    thinking: bool = False
-    mode: str = "learn"  # the batch's mode: how much a question may explain
-    # Repair round N asks at temperature N * step (at most 0.8; generate asks at 0): at 0 an
-    # unchanged prompt got the identical draft back, round after round (2026-10-29).
-    repair_temperature_step: float = 0.2
+    # The tunable values: their defaults, meaning and the measurements behind them live in
+    # graph/settings.py (GenerationSettings); the CLI passes the resolved ones in.
+    max_rounds: int = DEFAULTS.max_rounds
+    item_token_budget: int = DEFAULTS.item_token_budget
+    context_chars: int = DEFAULTS.context_chars
+    max_tokens: int = DEFAULTS.max_tokens
+    max_tokens_no_thinking: int = DEFAULTS.max_tokens_no_thinking
+    thinking: bool = DEFAULTS.thinking
+    mode: str = DEFAULTS.mode
+    repair_temperature_step: float = DEFAULTS.repair_temperature_step
+    plan_thinking: bool = DEFAULTS.plan_thinking
+    stronger_repair_from: int = DEFAULTS.stronger_repair_from
+    repair_thinking: bool = DEFAULTS.repair_thinking
     plan_config: llm.LLMConfig | None = None  # the `plan` role; default: config
-    # Planning reasons first: one short reply per batch, so thinking costs little, and
-    # DeepSeek-V4-Pro without it wrote vague checks and ignored a preference (2026-10-29).
-    plan_thinking: bool = True
     # The `repair` role: a larger model for the repair rounds from `stronger_repair_from` on,
     # where the cheap model fails most (it cannot tell which side of a failure is wrong).
     # None: the generating model repairs too.
     repair_config: llm.LLMConfig | None = None
-    stronger_repair_from: int = 2
-    # The repair model reasons before answering: deciding which side of a failure is wrong
-    # is the part the cheap model cannot do, and DeepSeek-V4-Pro without thinking did not
-    # do it either (2026-10-29).
-    repair_thinking: bool = True
     # The `oracle` role: another model family writes oracle.py from the question alone.
     # None: the generating model writes the whole oracle, as hand drafting does.
     oracle_config: llm.LLMConfig | None = None
@@ -800,6 +791,8 @@ def _log(state: ItemState, deps: Deps, outcome: str, error: str | None = None) -
         "tokens": state.get("tokens", 0),
         "usage": state.get("usage", {"input": 0, "cached": 0, "output": 0}),
         "model": f"{deps.config.name}: {deps.config.model}",
+        # What this item ran with, so a comparison of runs can tell configurations apart.
+        "settings": {name: getattr(deps, name) for name in DEPS_FIELDS},
     }
     if deps.oracle_config:
         line["oracle_model"] = f"{deps.oracle_config.name}: {deps.oracle_config.model}"

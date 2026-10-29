@@ -17,6 +17,11 @@ coverage-proposal.md lists the coverage.md changes for the owner to apply.
 With an `oracle` role (or --oracle-profile), that model writes each exercise's oracle.py
 from the question alone; it must be another provider than the generating model. With a
 `repair` role (or --repair-profile), a larger model takes over from the second repair.
+
+Tunable values (repair rounds, thinking, token limits, ...; see graph/settings.py) come
+from the defaults, then workspace.toml's [generation] table, then this run's flags:
+`--set max_rounds=2 --set stronger_repair_from=1`. A batch keeps the values it was
+planned with; `resume --set ...` changes them for the rest of it.
 """
 
 from __future__ import annotations
@@ -32,10 +37,22 @@ from pydantic import ValidationError
 
 from tutor.config import WorkspaceError, load_env, load_workspace
 from tutor.graph.nodes import Deps, blocking_problems, existing_ids, write_manifest
+from tutor.graph.settings import (
+    DEFAULTS,
+    DEPS_FIELDS,
+    GenerationSettings,
+    parse_set,
+    resolve,
+)
 from tutor.graph.state import BatchPlan, PlanItem
 from tutor.llm import LLMError, config_for, roles
 
 _CONTINUE = object()  # resume a run that stopped midway (nothing new to send)
+# Flags that choose a model for a role: kept with the batch, outside the settings.
+_PROFILE_FLAGS = ("profile", "plan_profile", "oracle_profile", "repair_profile")
+# The older named flags that set a settings field (same name); "on" / "low" mean True / False.
+_SETTING_FLAGS = ("thinking", "repair_thinking", "plan_thinking", "mode", "parallel",
+                  "max_count")
 
 
 def default_parallel() -> int:
@@ -53,32 +70,39 @@ def main(argv: list[str] | None = None) -> int:
     plan.add_argument("--prefs", default="", help="your preferences, in plain words")
     plan.add_argument("--count", type=int,
                       help="exactly this many (default: one per knowledge point)")
-    plan.add_argument("--max-count", type=int, default=6,
-                      help="at most this many when --count is not given")
+    plan.add_argument("--max-count", type=int,
+                      help="at most this many when --count is not given (default: 6)")
     resume = sub.add_parser("resume", help="continue a planned batch")
     resume.add_argument("--approve", action="store_true")
     resume.add_argument("--feedback")
     resume.add_argument("--profile", help="generate the remaining items with this profile")
     resume.add_argument("--oracle-profile", help="write their oracles with this profile")
     resume.add_argument("--repair-profile", help="repair them with this profile")
+    resume.add_argument("--set", action="append", metavar="NAME=VALUE",
+                        help="change a setting for the rest of the batch")
     item = sub.add_parser("item", help="generate one item from a JSON file")
     item.add_argument("item_file", type=Path)
     for p in (plan, resume, item):
         p.add_argument("--batch", required=True, help="batch label, e.g. w4-spark")
     for p in (plan, item):
+        # Defaults of None: a flag left out must not hide the workspace's [generation].
+        p.add_argument("--set", action="append", metavar="NAME=VALUE",
+                       help="a generation setting for this run, e.g. max_rounds=2 "
+                            "(names in graph/settings.py)")
         p.add_argument("--profile", help="profile for generating (default: generate role)")
         p.add_argument("--oracle-profile",
                        help="profile writing the oracle (default: oracle role, if set)")
         p.add_argument("--repair-profile",
                        help="profile for repairs from the second on (default: repair role)")
-        p.add_argument("--repair-thinking", choices=["low", "on"], default="on",
+        p.add_argument("--repair-thinking", choices=["low", "on"],
                        help="whether that repair model reasons first (default: on)")
-        p.add_argument("--thinking", choices=["low", "on"], default="low",
+        p.add_argument("--thinking", choices=["low", "on"],
                        help="on: the model reasons at length (slower; GLM gets cut off)")
-        p.add_argument("--mode", choices=["learn", "review"], default="learn")
-    plan.add_argument("--parallel", type=int, default=default_parallel())
+        p.add_argument("--mode", choices=["learn", "review"])
+    plan.add_argument("--parallel", type=int,
+                      help="items at once (default: one per four CPU cores, 1-4)")
     plan.add_argument("--plan-profile", help="profile that plans (default: plan role)")
-    plan.add_argument("--plan-thinking", choices=["low", "on"], default="on",
+    plan.add_argument("--plan-thinking", choices=["low", "on"],
                       help="whether the planning model reasons first (default: on)")
     args = parser.parse_args(argv)
     try:
@@ -97,11 +121,55 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
 
-def _deps(workspace: Path, batch_dir: Path, settings: dict) -> Deps:
-    config = config_for("generate", settings.get("profile"), workspace)
-    plan_config = _optional_role("plan", settings.get("plan_profile"), workspace)
-    oracle_config = _optional_role("oracle", settings.get("oracle_profile"), workspace)
-    repair_config = _optional_role("repair", settings.get("repair_profile"), workspace)
+def _given(args) -> dict:
+    """The settings this run's command line sets: the named flags that were given, then
+    each --set (which wins)."""
+    given = {}
+    for name in _SETTING_FLAGS:
+        value = getattr(args, name, None)
+        if value is not None:
+            given[name] = value == "on" if value in ("on", "low") else value
+    return {**given, **parse_set(getattr(args, "set", None))}
+
+
+def _profiles(args) -> dict:
+    """The profile flags that were given, e.g. {"oracle_profile": "gpt-terra"}."""
+    return {name: getattr(args, name) for name in _PROFILE_FLAGS if getattr(args, name, None)}
+
+
+def _write_run(path: Path, profiles: dict, settings: GenerationSettings) -> None:
+    """run.json: what the batch was planned with, read again by every resume."""
+    path.write_text(json.dumps({"profiles": profiles, "settings": settings.model_dump()},
+                               indent=1) + "\n")
+
+
+def _read_run(path: Path) -> tuple[dict, GenerationSettings]:
+    data = json.loads(path.read_text())
+    if "settings" in data:
+        return data.get("profiles", {}), GenerationSettings.model_validate(data["settings"])
+    # Written before the settings existed (until 2026-10-29): one flat dict of the flags,
+    # with "on" / "low" for thinking.
+    profiles = {k: v for k, v in data.items() if k in _PROFILE_FLAGS and v}
+    flags = {k: v == "on" if v in ("on", "low") else v for k, v in data.items()
+             if k in _SETTING_FLAGS and v is not None}
+    return profiles, GenerationSettings.model_validate(flags)
+
+
+def _show_settings(settings: GenerationSettings) -> None:
+    """One line with the values that differ from the defaults, so a run says how it differs."""
+    changed = {k: v for k, v in settings.model_dump().items() if getattr(DEFAULTS, k) != v}
+    if changed:
+        print("settings: " + ", ".join(f"{k}={v}" for k, v in changed.items()), flush=True)
+
+
+def _deps(workspace: Path, batch_dir: Path, profiles: dict,
+          settings: GenerationSettings = DEFAULTS) -> Deps:
+    """The nodes' dependencies: a model per role (from `profiles`, else [llm.roles]) and the
+    tunable values from `settings`."""
+    config = config_for("generate", profiles.get("profile"), workspace)
+    plan_config = _optional_role("plan", profiles.get("plan_profile"), workspace)
+    oracle_config = _optional_role("oracle", profiles.get("oracle_profile"), workspace)
+    repair_config = _optional_role("repair", profiles.get("repair_profile"), workspace)
     for writer in (config, repair_config):
         if oracle_config and writer and (oracle_config.provider, oracle_config.base_url) == (
                 writer.provider, writer.base_url):
@@ -112,12 +180,8 @@ def _deps(workspace: Path, batch_dir: Path, settings: dict) -> Deps:
                              "oracle")
     return Deps(workspace=workspace, batch_dir=batch_dir, config=config,
                 plan_config=plan_config, oracle_config=oracle_config,
-                repair_config=repair_config,
-                repair_thinking=settings.get("repair_thinking", "on") == "on",
-                plan_thinking=settings.get("plan_thinking", "on") == "on",
-                thinking=settings.get("thinking") == "on",
-                mode=settings.get("mode", "learn"), on_update=_progress,
-                on_stream=_receiving)
+                repair_config=repair_config, on_update=_progress, on_stream=_receiving,
+                **{name: getattr(settings, name) for name in DEPS_FIELDS})
 
 
 def _optional_role(role: str, profile: str | None, workspace: Path):
@@ -133,11 +197,14 @@ def _item(args, workspace: Path, build) -> int:
     existing = sorted((workspace / "batches").glob(f"*_p3-{args.batch}"))
     batch_dir = (existing[-1] if existing
                  else workspace / "batches" / f"{date.today()}_p3-{args.batch}")
-    deps = _deps(workspace, batch_dir, vars(args))
+    settings = resolve(workspace, _given(args))
+    deps = _deps(workspace, batch_dir, _profiles(args), settings)
     oracle = f", oracle {deps.oracle_config.name}" if deps.oracle_config else ""
     oracle += f", repair {deps.repair_config.name}" if deps.repair_config else ""
-    print(f"{item.id}: {deps.config.name} ({deps.config.model}, thinking {args.thinking}"
+    thinking = "on" if settings.thinking else "low"
+    print(f"{item.id}: {deps.config.name} ({deps.config.model}, thinking {thinking}"
           f"{oracle}) -> {batch_dir.relative_to(workspace)}", flush=True)
+    _show_settings(settings)
     final: dict = {}
     for update in build.build_item(deps).stream({"item": item}, stream_mode="updates"):
         for node, change in update.items():
@@ -162,29 +229,32 @@ def _batch(args, workspace: Path, build) -> int:
             raise ValueError(f"a batch labelled {args.batch} exists: resume it or choose "
                              "another label")
         batch_dir = workspace / "batches" / f"{date.today()}_p3-{args.batch}"
-        settings = {k: getattr(args, k) for k in (
-            "profile", "plan_profile", "plan_thinking", "oracle_profile", "repair_profile",
-            "repair_thinking", "thinking", "mode", "parallel")}
+        # Resolved once here and saved: the whole batch runs with the same values, even
+        # if [generation] changes before a resume.
+        profiles, settings = _profiles(args), resolve(workspace, _given(args))
         (drafts / batch_dir.name).mkdir(parents=True)
-        (drafts / batch_dir.name / "run.json").write_text(json.dumps(settings, indent=1))
+        _write_run(drafts / batch_dir.name / "run.json", profiles, settings)
         pending = {"lectures": args.lectures, "preferences": args.prefs,
-                   "count": args.count, "max_count": args.max_count}
+                   "count": args.count, "max_count": settings.max_count}
     else:
         found = sorted(drafts.glob(f"*_p3-{args.batch}/checkpoint.sqlite"))
         if not found:
             raise ValueError(f"no planned batch labelled {args.batch}")
         batch_dir = workspace / "batches" / found[-1].parent.name
-        settings = json.loads((found[-1].parent / "run.json").read_text())
-        # e.g. finish a batch with another model; kept for later resumes
-        changed = {k: getattr(args, k) for k in ("profile", "oracle_profile", "repair_profile")
-                   if getattr(args, k)}
-        if changed:
-            settings.update(changed)
-            (found[-1].parent / "run.json").write_text(json.dumps(settings, indent=1))
+        run_file = found[-1].parent / "run.json"
+        profiles, settings = _read_run(run_file)
+        # e.g. finish a batch with another model, or with one more repair round; the
+        # changes are saved, so later resumes keep them.
+        new_profiles, given = _profiles(args), _given(args)
+        if new_profiles or given:
+            profiles.update(new_profiles)
+            settings = resolve(workspace, given, base=settings)
+            _write_run(run_file, profiles, settings)
         pending = None  # set by the owner's decision below
-    deps = _deps(workspace, batch_dir, settings)
-    config = {"configurable": {"thread_id": batch_dir.name},
-              "max_concurrency": settings["parallel"]}
+    _show_settings(settings)
+    deps = _deps(workspace, batch_dir, profiles, settings)
+    parallel = settings.parallel or default_parallel()
+    config = {"configurable": {"thread_id": batch_dir.name}, "max_concurrency": parallel}
     with SqliteSaver.from_conn_string(str(deps.drafts / "checkpoint.sqlite")) as saver:
         app = build.build_batch(deps, saver)
         decision = ({"approve": True} if getattr(args, "approve", False)
@@ -228,7 +298,7 @@ def _batch(args, workspace: Path, build) -> int:
                     raise ValueError(f"{plan_file.name} cannot be approved: {'; '.join(found)}."
                                      " Fix it, then resume with --approve again")
                 pending = Command(resume={"action": "approve", "plan": plan})
-                print(f"generating {len(plan)} items, {settings['parallel']} at a time",
+                print(f"generating {len(plan)} items, {parallel} at a time",
                       flush=True)
             else:
                 pending = Command(resume={"action": "revise", "feedback": answer["feedback"]})

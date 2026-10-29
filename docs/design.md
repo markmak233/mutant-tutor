@@ -880,7 +880,23 @@ Design approved 2026-10-28 (owner):
   review, 2026-10-29). Which types a batch mixes (e.g. debugging exercises) is
   left to the preferences, not a fixed rule.
 - Logs: `llm_calls.jsonl` with the node as purpose; one `generation.jsonl` per batch
-  (item, rounds, outcome, failure reasons).
+  (item, rounds, outcome, failure reasons, and the settings it ran with).
+- Generation settings (owner-approved 2026-10-29; owner: keep tuning possible later,
+  including from a GUI): every tunable value is a field of `GenerationSettings`
+  (`graph/settings.py`) with its default, description and bounds: repair rounds, the round
+  the repair model takes over from, the temperature step, thinking per role, token limits,
+  the per-item token budget, context size, plan size, parallelism, mode. Three sources,
+  later ones winning: the defaults (the measured values; `Deps` takes its defaults from
+  them, so tests and scripts run like the CLI), workspace.toml `[generation]` (the owner by
+  hand now, a GUI later; the pipeline reads workspace.toml and never writes it), and the
+  run's flags (`--set name=value`, plus the older named flags). Unknown names and values
+  out of range are errors that name them. A batch saves what it resolved in run.json, so
+  every resume runs with the same values even if `[generation]` changed; `resume --set`
+  changes them for the rest of the batch. Each item's log line carries them, so a model
+  comparison can tell its arms apart, and an arm is just a set of `--set` values.
+  `schemas/generation-settings.schema.json` is the form a GUI renders (descriptions,
+  types, bounds). Per-model values (`reasoning_effort`, `timeout_s`) stay in
+  `[llm.profiles]`.
 - Built in three steps: one item generate -> validate -> repair -> save (done); then plan
   with the interrupt, preferences and parallel items (done); then the oracle in its own
   context (done 2026-10-29, below; without an `oracle` role `generate` writes the whole

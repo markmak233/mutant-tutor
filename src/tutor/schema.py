@@ -227,10 +227,15 @@ def _subdirs(path: Path) -> set[str]:
 
 def json_schemas() -> dict[str, dict]:
     """The models as JSON Schema, by file name: for assistants that do not run Python and
-    for phase 3's structured output, so all of them read the same definition."""
+    for phase 3's structured output, so all of them read the same definition; and the
+    generation settings, for a settings form (imported here: graph.settings uses this
+    module, so a top-level import would be circular)."""
+    from tutor.graph.settings import settings_schema
+
     return {
         "metadata.schema.json": Metadata.model_json_schema(),
         "manifest.schema.json": Manifest.model_json_schema(),
+        "generation-settings.schema.json": settings_schema(),
     }
 
 
