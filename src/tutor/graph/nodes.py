@@ -67,7 +67,10 @@ class Deps:
     max_rounds: int = 3  # repair rounds after the first draft
     item_token_budget: int = 400_000  # input + output tokens per item, all rounds
     context_chars: int = 120_000  # above this a lecture is sliced to the item's slides
-    max_tokens: int = 32_000  # per reply
+    max_tokens: int = 32_000  # per reply, when the model thinks (reasoning counts as output)
+    # Without thinking a draft is 4-7k tokens; a DeepSeek reply that ran away filled all
+    # 32k (2026-10-29), so a lower cap halves what such a reply costs.
+    max_tokens_no_thinking: int = 16_000
     # Off by default: with thinking on, GLM-5.3 (Flash and full) spent the whole 32k output
     # on reasoning and was cut off before the answer, 9-10 min per call (2026-10-28,
     # docs/design.md); thinking low passed in one round in about a minute.
@@ -184,7 +187,8 @@ def _ask(state: ItemState, deps: Deps, user: str, purpose: str, round_: int,
         {"role": "user", "content": user},
     ]
     reply = deps.chat(config, messages, purpose=purpose, log_path=deps.llm_log,
-                      max_tokens=deps.max_tokens, response_schema=DRAFT_SCHEMA,
+                      max_tokens=deps.max_tokens if thinking else deps.max_tokens_no_thinking,
+                      response_schema=DRAFT_SCHEMA,
                       thinking=thinking,
                       temperature=min(round_ * deps.repair_temperature_step, 0.8),
                       **_streaming(state, deps))
