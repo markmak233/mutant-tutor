@@ -467,7 +467,10 @@ def write_draft(draft: ExerciseDraft, exercise_id: str,
         solution / "test_oracle.py": draft.test_oracle_py,
     }
     for name, content in draft.data_files.items():
-        files[exercise / _data_path(name)] = content
+        target = exercise / _data_path(name)
+        if target in files:  # "a.csv" and "./a.csv"
+            raise DraftError(f"data file {name!r} is given twice")
+        files[target] = content
     dropped = {}  # every mutant that cannot be applied, so one repair round fixes them all
     for mutant in draft.mutants:
         try:
@@ -484,9 +487,10 @@ def write_draft(draft: ExerciseDraft, exercise_id: str,
 
 
 def _data_path(name: str) -> PurePosixPath:
+    # Checked after PurePosixPath has normalised it: "./hints.md" is hints.md.
     path = PurePosixPath(name)
     if (path.is_absolute() or ".." in path.parts or not path.parts or name.startswith("~")
-            or any(part.startswith(".") for part in path.parts) or name in OWN_FILES
+            or any(part.startswith(".") for part in path.parts) or str(path) in OWN_FILES
             or path.suffix == ".py"):
         raise DraftError(f"data file {name!r}: give a relative path inside the exercise "
                          "folder, not a Python file or one of student.py / test_student.py "

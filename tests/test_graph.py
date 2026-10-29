@@ -151,10 +151,16 @@ def test_the_batch_mode_sets_how_much_a_debugging_question_explains():
 
 
 @pytest.mark.parametrize("name", ["../escape.txt", "/etc/x", "~/x", "student.py", "run.py",
-                                  ".hidden/x"])
+                                  ".hidden/x", "./hints.md", "data//../hints.md"])
 def test_data_files_stay_inside_the_exercise(tmp_path, name):
     d = ExerciseDraft.model_validate(draft(data_files={name: "x"}))
     with pytest.raises(DraftError, match="relative path inside the exercise"):
+        write_draft(d, "sum-list", tmp_path / "round-0")
+
+
+def test_two_names_for_one_data_file_are_refused(tmp_path):
+    d = ExerciseDraft.model_validate(draft(data_files={"a.csv": "1", "./a.csv": "2"}))
+    with pytest.raises(DraftError, match="given twice"):
         write_draft(d, "sum-list", tmp_path / "round-0")
 
 
