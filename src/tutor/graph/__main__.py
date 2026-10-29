@@ -77,6 +77,9 @@ def main(argv: list[str] | None = None) -> int:
                        help="on: the model reasons at length (slower; GLM gets cut off)")
         p.add_argument("--mode", choices=["learn", "review"], default="learn")
     plan.add_argument("--parallel", type=int, default=default_parallel())
+    plan.add_argument("--plan-profile", help="profile that plans (default: plan role)")
+    plan.add_argument("--plan-thinking", choices=["low", "on"], default="on",
+                      help="whether the planning model reasons first (default: on)")
     args = parser.parse_args(argv)
     try:
         from tutor.graph import build
@@ -96,7 +99,7 @@ def main(argv: list[str] | None = None) -> int:
 
 def _deps(workspace: Path, batch_dir: Path, settings: dict) -> Deps:
     config = config_for("generate", settings.get("profile"), workspace)
-    plan_config = _optional_role("plan", None, workspace)
+    plan_config = _optional_role("plan", settings.get("plan_profile"), workspace)
     oracle_config = _optional_role("oracle", settings.get("oracle_profile"), workspace)
     repair_config = _optional_role("repair", settings.get("repair_profile"), workspace)
     for writer in (config, repair_config):
@@ -111,6 +114,7 @@ def _deps(workspace: Path, batch_dir: Path, settings: dict) -> Deps:
                 plan_config=plan_config, oracle_config=oracle_config,
                 repair_config=repair_config,
                 repair_thinking=settings.get("repair_thinking", "on") == "on",
+                plan_thinking=settings.get("plan_thinking", "on") == "on",
                 thinking=settings.get("thinking") == "on",
                 mode=settings.get("mode", "learn"), on_update=_progress,
                 on_stream=_receiving)
@@ -159,8 +163,8 @@ def _batch(args, workspace: Path, build) -> int:
                              "another label")
         batch_dir = workspace / "batches" / f"{date.today()}_p3-{args.batch}"
         settings = {k: getattr(args, k) for k in (
-            "profile", "oracle_profile", "repair_profile", "repair_thinking", "thinking", "mode",
-            "parallel")}
+            "profile", "plan_profile", "plan_thinking", "oracle_profile", "repair_profile",
+            "repair_thinking", "thinking", "mode", "parallel")}
         (drafts / batch_dir.name).mkdir(parents=True)
         (drafts / batch_dir.name / "run.json").write_text(json.dumps(settings, indent=1))
         pending = {"lectures": args.lectures, "preferences": args.prefs,

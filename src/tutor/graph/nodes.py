@@ -76,6 +76,9 @@ class Deps:
     # unchanged prompt got the identical draft back, round after round (2026-10-29).
     repair_temperature_step: float = 0.2
     plan_config: llm.LLMConfig | None = None  # the `plan` role; default: config
+    # Planning reasons first: one short reply per batch, so thinking costs little, and
+    # DeepSeek-V4-Pro without it wrote vague checks and ignored a preference (2026-10-29).
+    plan_thinking: bool = True
     # The `repair` role: a larger model for the repair rounds from `stronger_repair_from` on,
     # where the cheap model fails most (it cannot tell which side of a failure is wrong).
     # None: the generating model repairs too.
@@ -571,7 +574,7 @@ def plan_batch(state: BatchState, deps: Deps) -> BatchState:
                     {"role": "user", "content": prompts.plan_prompt(**inputs, problems=problems)}]
         reply = deps.chat(config, messages, purpose="plan", log_path=deps.llm_log,
                           max_tokens=deps.max_tokens, response_schema=PLAN_SCHEMA,
-                          thinking=deps.thinking)
+                          thinking=deps.plan_thinking)
         try:
             items = BatchPlan.model_validate_json(reply.text).items
         except ValidationError as e:

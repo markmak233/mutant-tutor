@@ -816,6 +816,16 @@ Design approved 2026-10-28 (owner):
   First try with DeepSeek-V4-Pro (thinking off) did not fix that item either, and lost a
   round copying the oracle's code, which rule 4's failure shows, into the oracle
   interface; the message now says not to.
+- Planning thinks (2026-10-29). The plan is one short reply per batch, so reasoning costs
+  little (about $0.03 with DeepSeek-V4-Pro). Week 5 planned three ways: GLM-5.3-Flash at its
+  lowest reasoning repeated a word count the coverage table had dropped; Pro with thinking
+  off wrote vague checks and gave one file-level item of six against a preference to mix;
+  Pro with thinking on dropped the repeat, chose the slides' "one problem in DataFrame and
+  SQL" practice, mixed the interfaces and named edge cases, but left out the schema point.
+  `plan_thinking` is on by default; `--plan-profile` picks the planner for one batch. The
+  first week 5 batch (GLM plan, Flash writing, Pro repairing with thinking, GPT oracle)
+  saved 6 of 6: two after a Flash repair, four rescued by one Pro repair each, about $0.39
+  in all at peak prices.
 - Batch (step 2, approved 2026-10-28): `plan` (LLM) reads coverage.md, one line per cached
   page (PDF page, footer, title), the existing exercise ids and the owner's preferences,
   and returns `count` PlanItems with a reason each; code checks the count, unique and new

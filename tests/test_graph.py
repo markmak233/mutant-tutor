@@ -259,6 +259,7 @@ class BatchModel:
     def __call__(self, config, messages, *, purpose, log_path, max_tokens, response_schema,
                  thinking, temperature=0.0, **streaming):
         self.purposes.append(purpose)
+        self.thinking = thinking
         if purpose == "plan":
             self.last_plan_request = messages[1]["content"]
             return Reply(self.plans.pop(0), 800, 200, 0.1, "stop")
@@ -281,6 +282,7 @@ def test_plan_problems_are_found_by_code():
 def test_a_plan_breaking_the_rules_is_asked_for_again_with_the_problems(workspace):
     model = BatchModel(plan_json("a", lecture="L9"), plan_json("a"))
     update = nodes.plan_batch({"lectures": ["L1"], "count": 1}, deps(workspace, model))
+    assert model.thinking is True  # planning reasons first, unlike generating
     assert model.purposes == ["plan", "plan"]
     assert "lecture 'L9' is not one of ['L1']" in model.last_plan_request
     assert (update["plan"][0]["lecture"], update["plan_problems"]) == ("L1", [])
@@ -565,6 +567,9 @@ def test_the_oracle_must_come_from_another_provider(workspace):
         _deps(workspace, workspace / "batches" / "b", {})
     d = _deps(workspace, workspace / "batches" / "b", {"oracle_profile": "gpt"})
     assert d.oracle_config.name == "gpt"
+    d = _deps(workspace, workspace / "batches" / "b",
+              {"oracle_profile": "gpt", "plan_profile": "glm-full"})
+    assert d.plan_config.name == "glm-full"
 
 
 def test_the_progress_line_says_what_the_oracle_node_did(capsys):
