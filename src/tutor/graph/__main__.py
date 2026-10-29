@@ -242,7 +242,7 @@ def _item(args, workspace: Path, build) -> int:
         print(f"request {e.request_id} waits for the assistant: answer it "
               f"(python -m tutor.exchange show {e.request_id}), then run this again")
         return WAITING
-    if final.get("usage"):
+    if final.get("usage", {}).get("input"):  # none from an assistant
         print(f"  {_usage_text(final['usage'])}")
     if final.get("outcome") == "saved":
         write_manifest(deps, [item])
@@ -417,8 +417,9 @@ def _progress(exercise: str, node: str, change: dict) -> None:
     elif node in ("generate", "repair"):
         state = "format error" if change.get("format_error") else "draft ready"
         by = f", {change['model']}" if change.get("model") else ""
-        text = (f"{node} (round {change['round']}{by}): {state}, "
-                f"{change['tokens']:,} tokens so far")
+        # An assistant reports no tokens: leave the count out rather than print 0.
+        tokens = f", {change['tokens']:,} tokens so far" if change["tokens"] else ""
+        text = f"{node} (round {change['round']}{by}): {state}{tokens}"
     elif node == "oracle":
         if not change:
             return  # no oracle role: the generating model wrote it

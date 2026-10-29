@@ -784,11 +784,18 @@ def _models_of(deps: Deps, ids: set[str]) -> str | None:
     return "; ".join(dict.fromkeys(models)) or None
 
 
+def model_label(config: llm.LLMConfig) -> str:
+    """e.g. "deepseek: deepseek-v4-flash", or "cc: claude-code (assistant)" when a coding
+    assistant answered (assistant mode), so a manifest or log says who wrote what."""
+    label = f"{config.name}: {config.model}"
+    return label + " (assistant)" if config.provider == "assistant" else label
+
+
 def _model_names(deps: Deps) -> str:
     """e.g. "deepseek: deepseek-v4-flash; oracle gpt-terra: gpt-6.1-terra"."""
-    names = f"{deps.config.name}: {deps.config.model}"
+    names = model_label(deps.config)
     if deps.oracle_config:
-        names += f"; oracle {deps.oracle_config.name}: {deps.oracle_config.model}"
+        names += f"; oracle {model_label(deps.oracle_config)}"
     return names
 
 
@@ -832,15 +839,15 @@ def _log(state: ItemState, deps: Deps, outcome: str, error: str | None = None) -
         "attempts": state.get("attempts", []),
         "tokens": state.get("tokens", 0),
         "usage": state.get("usage", {"input": 0, "cached": 0, "output": 0}),
-        "model": f"{deps.config.name}: {deps.config.model}",
+        "model": model_label(deps.config),
         # What this item ran with, so a comparison of runs can tell configurations apart.
         "settings": {name: getattr(deps, name) for name in DEPS_FIELDS},
     }
     if deps.oracle_config:
-        line["oracle_model"] = f"{deps.oracle_config.name}: {deps.oracle_config.model}"
+        line["oracle_model"] = model_label(deps.oracle_config)
     if deps.repair_config and any(a.get("model") == deps.repair_config.name
                                   for a in state.get("attempts", [])):
-        line["repair_model"] = f"{deps.repair_config.name}: {deps.repair_config.model}"
+        line["repair_model"] = model_label(deps.repair_config)
     if error:
         line["error"] = error
     with _LOG_LOCK:

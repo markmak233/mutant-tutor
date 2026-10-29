@@ -930,6 +930,11 @@ def test_an_assistant_batch_pauses_for_answers_and_replays_to_the_end(workspace)
     assert [r["outcome"] for r in nodes.latest_results(final["results"])] == ["saved"]
     assert (d.batch_dir / "exercises" / "sum-list" / "student.py").is_file()
     assert len(checks) == 1
+    # Who wrote it is on record: the manifest and the log name the assistant as such.
+    manifest = Manifest.model_validate_json((d.batch_dir / "manifest.json").read_text())
+    assert manifest.model == "cc: cc (assistant)"
+    log = json.loads((d.batch_dir / "generation.jsonl").read_text().splitlines()[-1])
+    assert log["model"] == "cc: cc (assistant)"
 
 
 def test_a_validation_report_is_reused_for_the_same_files(tmp_path):

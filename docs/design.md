@@ -1121,7 +1121,16 @@ Plus) acting as the model for vision, planning, generation, oracle, repair and h
   profile for both is still refused (the requests would mix).
 - Instructions for the assistant: `docs/assistant-mode.md` (setup, the run / answer /
   run-again loop, answering from the request alone, oracle requests in a fresh context,
-  plan approval left to the owner). Planned next: a thin MCP server over the same files.
+  plan approval left to the owner).
+- Self-test 2026-10-29: Claude Code (this repo's assistant) answered one real week-5 item
+  through the files, with no API: the first draft failed the safety check (a spy using a
+  variable attribute name), the repair request was answered, and round 1 was VALID (6/6
+  mutants killed, oracle and partitions ok) and saved. Two fixes came of it: manifests and
+  logs mark an assistant's model "(assistant)", and token counts an assistant cannot
+  report are left out instead of printed as 0.
+- MCP server: deferred (owner, 2026-10-29). The files work for an assistant that can run
+  commands and read PNGs; an MCP layer (list / get with the image / submit) is built only
+  if Codex cannot read the PNGs or the permission prompts get in the way, or with the GUI.
 
 ## Code execution safety
 
