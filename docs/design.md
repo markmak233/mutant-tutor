@@ -894,7 +894,10 @@ Design approved 2026-10-28 (owner):
   knowledge points. A slice is chosen by label, not by a query, so it is deterministic and the owner
   sees exactly which pages went in. For a local model, raising the context length it is
   loaded with (8192 on the owner's Mac so far; the model supports more, at the cost of
-  memory) comes before slicing.
+  memory) comes before slicing. A page of the item's slides that is `pending` or `partial`
+  stops the item with its page numbers (a formula or diagram may be missing, and no test
+  can show the question is faithful to the slide); such pages elsewhere are left out. Slides
+  the lecture has no footer for stop the item too (both from an outside review, 2026-10-29).
 - Every generated batch mixes function-level and file-level exercises (see "Exercise interfaces").
 
 ## RAG

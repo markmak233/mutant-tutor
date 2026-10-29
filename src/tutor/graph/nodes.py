@@ -49,6 +49,7 @@ ORACLE_SCHEMA = OracleDraft.model_json_schema()
 OWN_FILES = {"student.py", "test_student.py", "hints.md"}
 REPO = Path(__file__).resolve().parents[3]
 PLAN_RETRIES = 2  # extra plan calls when the plan breaks a rule checked here
+UNREAD = ("pending", "partial")  # cached pages whose transcription is missing or cut off
 _LOG_LOCK = threading.Lock()  # items run in parallel threads and share the batch log
 
 
@@ -123,17 +124,29 @@ class Deps:
 # --- retrieve_context -------------------------------------------------------------------
 
 def retrieve_context(state: ItemState, deps: Deps) -> ItemState:
-    """The lecture's cached pages, whole if they fit, else the item's slides only."""
+    """The lecture's cached pages, whole if they fit, else the item's slides only.
+
+    A page of the item's slides that is not fully read (pending: its image is not
+    transcribed and the text layer stands in; partial: cut off) stops the item, naming the
+    pages: a formula or diagram may be missing, and no test can show the question is
+    faithful to the slide. Such pages elsewhere in the lecture are left out."""
     item = state["item"]
     path = cache.cache_path(deps.workspace, deps.workspace / "lectures" / f"{item.lecture}.pdf")
     entries = sorted(cache.load(path).values(), key=lambda e: e.number)
     if not entries:
         raise FileNotFoundError(f"no cached pages for {item.lecture}: run python -m "
                                 f"tutor.materials --vision lectures")
-    if sum(len(e.body) for e in entries) > deps.context_chars:
-        low, high = _slide_range(item.slides)
-        entries = [e for e in entries if e.label and low <= _slide(e.label) <= high]
-    return {"context": "\n\n".join(_section(e) for e in entries)}
+    low, high = _slide_range(item.slides)
+    slides = [e for e in entries if e.label and low <= _slide(e.label) <= high]
+    too_long = sum(len(e.body) for e in entries) > deps.context_chars
+    # A lecture without slide footers cannot be checked, only sent whole.
+    if not slides and (too_long or any(e.label for e in entries)):
+        raise ValueError(f"no page of {item.lecture} has a slide footer in {item.slides}")
+    if unread := [e.number for e in slides if e.read in UNREAD]:
+        raise ValueError(f"{item.lecture} pages {unread} (slides {item.slides}) are not fully "
+                         f"read: run python -m tutor.materials --vision lectures")
+    chosen = slides if too_long else [e for e in entries if e.read not in UNREAD]
+    return {"context": "\n\n".join(_section(e) for e in chosen)}
 
 
 def _section(e: cache.Entry) -> str:

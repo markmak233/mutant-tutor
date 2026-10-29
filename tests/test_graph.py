@@ -166,6 +166,26 @@ def test_retrieve_context_takes_the_whole_lecture_or_the_item_slides(workspace):
         "## p.3 · slide 1.3", "## p.4 · slide 1.4"]
 
 
+@pytest.mark.parametrize("read", ["pending", "partial"])
+def test_slides_not_fully_read_stop_the_item_and_other_unread_pages_are_left_out(
+        workspace, read):
+    path = cache.cache_path(workspace, workspace / "lectures" / "L1.pdf")
+    entries = [cache.Entry(n, f"1.{n}", read if n in (4, 6) else "text", f"h{n}",
+                           f"page {n} text") for n in range(1, 7)]
+    cache.save(path, cache.render("L1.pdf", entries))
+    with pytest.raises(ValueError, match=r"L1 pages \[4\] \(slides 1.3-1.4\) are not fully"):
+        nodes.retrieve_context({"item": ITEM}, deps(workspace, None))
+    item = ITEM.model_copy(update={"slides": "1.2-1.3"})
+    context = nodes.retrieve_context({"item": item}, deps(workspace, None))["context"]
+    assert "page 3 text" in context and "page 4" not in context and "page 6" not in context
+
+
+def test_slides_the_lecture_does_not_have_stop_the_item(workspace):
+    item = ITEM.model_copy(update={"slides": "9.1-9.4"})
+    with pytest.raises(ValueError, match="no page of L1 has a slide footer in 9.1-9.4"):
+        nodes.retrieve_context({"item": item}, deps(workspace, None))
+
+
 def test_the_model_gets_the_rules_conventions_pages_and_the_schema(workspace):
     model = FakeModel(json.dumps(draft()))
     update = nodes.generate({"item": ITEM, "context": "## p.3 · slide 1.3\npage 3 text"},
