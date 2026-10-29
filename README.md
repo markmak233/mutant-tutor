@@ -8,12 +8,12 @@ deterministic checks before anyone sees it**. No LLM judges whether an exercise 
 
 It started as revision for a big data management course, inspired by its course
 materials (none are included here), and is built as an AI engineering portfolio project:
-the next phases generate exercises with an LLM (LangGraph generate → validate → repair
-loop) and ground them in course material (hybrid RAG).
+exercises are generated from the lecture slides by a LangGraph pipeline (plan → generate →
+validate → repair), and the next phase grounds them in course material with hybrid RAG.
 
-**Status:** phases 1 and 2a (validation harness, MRJob / DataFrame / Hadoop support) are
-complete, and a first batch of hand-checked course exercises is validated. Generation and RAG
-are next.
+**Status:** the validation harness (phases 1, 2a) is complete, and LLM generation (phase
+3a) works end to end: two course weeks were generated with it, every saved exercise VALID.
+Checks that need the learner's own work (3b), a hint command (3c) and RAG (4) are next.
 
 ## Why validation comes first
 
@@ -74,6 +74,40 @@ file, a command-line parameter) and `station-condition-share` (MRJob on a local 
 order inversion, where a mutant that forgets the partitioner passes with one reducer and is
 caught with two).
 
+## How exercises are generated
+
+```
+plan (reads the course's coverage table) -> the owner approves or sends it back
+  -> for each exercise, in parallel:
+     generate -> oracle (a second model) -> validate --VALID--> save
+        ^                                     |
+        +------------ repair <---- failed ----+   (up to 3 rounds, then discard)
+```
+
+The validator above is the only judge; the models only write. What makes the loop work,
+each added after a measured failure (details and numbers in [`docs/design.md`](docs/design.md)):
+
+- **An independent oracle.** The generating model writes `oracle.py` only as an interface;
+  a model from another provider fills it in from the question alone, never seeing the
+  reference. Rule 4 then compares two independent readings of the question, and a
+  disagreement points at an ambiguous question, not only at a wrong reference. It has
+  caught real bugs (a reference that crashed on empty input) that a same-model oracle shared.
+- **Repair that can see and decide.** Repair gets pytest's failing assertions, not just a
+  count; writes a `diagnosis` before any file; and, when the reference fails a test, is told
+  whether the reference agrees with the oracle, i.e. which side is likely wrong. A cheap
+  model drafts; a larger one with thinking takes over from the second repair.
+- **Small fixes in code, not prompts.** A mutant that cannot be applied is dropped while
+  three remain; a whole oracle is cut to an interface; error messages say what to change.
+- **Cost.** Prompts are ordered so the provider's cache serves the shared part (system
+  prompt, course pages, example exercise): 54-93% of input tokens per batch.
+
+Each role (plan, generate, repair, oracle, and vision for reading slides) is a profile in
+the workspace's `workspace.toml`, so any OpenAI-compatible models can be combined, local or
+cloud; the one rule is that the oracle comes from another provider than the models that
+write the exercise. One week of exercises (6 items, DeepSeek-V4-Flash drafting, V4-Pro
+repairing, GPT writing the oracles): 6 of 6 VALID, 4 of them rescued by the larger model,
+about $0.07 per valid exercise. Samples are small.
+
 ## Quick start
 
 > **Setting up from scratch?** Follow [`docs/setup/bigdata.md`](docs/setup/bigdata.md):
@@ -125,9 +159,9 @@ A gitleaks pre-commit hook blocks secrets and absolute home-directory paths
 
 The aim is to help students understand their course topics better: turn the lecture
 material you study from into exercises you can run, check and learn from at your own
-pace (automatic generation is phase 3; today exercises are drafted with an AI assistant
-and checked by the validator). The material and the exercises stay on your own machine;
-only LLM calls leave it. This is a personal project, not affiliated with any university or course, and
+pace: exercises are generated from the slides and checked by the validator before you
+see them. The material and the exercises stay on your own machine; only LLM calls (the
+slides' text and images, and the generated code) leave it. This is a personal project, not affiliated with any university or course, and
 it is provided as is (see [LICENSE](LICENSE)).
 
 ## Running exercise code is not sandboxed
@@ -151,11 +185,13 @@ src/tutor/
   config.py        find the workspace, refuse unsafe locations, load .env
   envcheck.py      check the machine against the workspace's [requires]
   execution.py     run pytest in a temp dir, subprocess + timeout, kill the whole process group
-  llm.py           a small client for OpenAI-compatible APIs (local LM Studio, GLM, OpenAI)
+  llm.py           a small client for OpenAI-compatible APIs (LM Studio, GLM, OpenAI,
+                   DeepSeek): roles -> profiles, structured output, streaming, call log
   materials/       course PDFs -> a per-page markdown cache, image slides via a vision model;
                    `python -m tutor.materials`
   graph/           phase 3 generation with LangGraph: plan -> owner approves -> generate,
-                   validate, repair per exercise, in parallel; `python -m tutor.graph`
+                   oracle by a second model, validate, repair, per exercise in parallel;
+                   `python -m tutor.graph`
   schema.py        the batch format (metadata.json, manifest.json); `python -m tutor.schema`
   validation/      rule 0 (format), a static safety check, rules 1-5 and the api check;
                    `python -m tutor.validation`
@@ -175,10 +211,10 @@ Phase numbers match `docs/design.md`.
 - **2** Golden exercises: a first batch of 10 course exercises (validated; being solved by
   hand to run the full loop)
 - **2b** Code-tracing exercises ("what does this print and why")
-- **3a** LLM generation: static check on generated code, slide reading with a cached text
-  layer and vision transcription (done), LangGraph plan → owner approval → generate →
-  validate → repair, exercises in parallel (working, first course batch generated), an
-  oracle written by a second model, then a container for isolation
+- **3a** ✅ LLM generation: static check on generated code, slide reading with a cached
+  text layer and vision transcription, LangGraph plan → owner approval → generate → oracle
+  by a second model → validate → repair, exercises in parallel, two course weeks generated
+  (a container for running generated code is moved to a later phase)
 - **3b** Checks that need a learner's real work: held-out solutions and mistakes, an LLM
   judge of teaching quality calibrated against the learner's ratings
 - **3c** Hint command: rules, mutant matching, then an LLM, never revealing the answer
