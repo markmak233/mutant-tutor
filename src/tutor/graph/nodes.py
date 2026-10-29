@@ -18,7 +18,7 @@ import subprocess
 import textwrap
 import threading
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass
 from datetime import date, datetime
 from pathlib import Path, PurePosixPath
 
@@ -39,7 +39,7 @@ from tutor.graph.state import (
 )
 from tutor.materials import cache
 from tutor.schema import Manifest, SourceRef
-from tutor.validation.checks import Status, ValidationReport, validate
+from tutor.validation.checks import RuleResult, Status, ValidationReport, validate
 from tutor.validation.exercise import load_exercise
 from tutor.validation.safety import CORE_IMPORTS, find_hazards, workspace_allow_imports
 
@@ -57,6 +57,12 @@ _LOG_LOCK = threading.Lock()  # items run in parallel threads and share the batc
 class DraftError(Exception):
     """The reply could not be turned into exercise files (a format failure, not a
     validation failure)."""
+
+
+def check_round(exercise: Path, solution: Path) -> ValidationReport:
+    """The validator on one round's files; rule 4 runs even when rule 1 fails, since which
+    side the oracle agrees with tells repair what to fix."""
+    return validate(load_exercise(exercise, solution), oracle_on_failure=True)
 
 
 @dataclass(frozen=True)
@@ -88,9 +94,7 @@ class Deps:
     # None: the generating model writes the whole oracle, as hand drafting does.
     oracle_config: llm.LLMConfig | None = None
     chat: Callable = llm.chat
-    check: Callable[[Path, Path], ValidationReport] = field(
-        default=lambda exercise, solution: validate(load_exercise(exercise, solution),
-                                                    oracle_on_failure=True))
+    check: Callable[[Path, Path], ValidationReport] = check_round
     # Called with (exercise id, node, update) after every node of an item, for progress.
     on_update: Callable[[str, str, dict], None] | None = None
     # Exercise replies arrive streamed: a reply that keeps coming is never cut off by the
@@ -586,14 +590,52 @@ def discard(state: ItemState, deps: Deps) -> ItemState:
     return {"outcome": "discarded"}
 
 
-def item_summary(item: PlanItem, final: ItemState | None, error: str | None = None) -> dict:
-    """One item's result for the batch state (plain data, it is checkpointed)."""
+def item_summary(item: PlanItem, final: ItemState | None, error: str | None = None,
+                 waiting: str | None = None) -> dict:
+    """One item's result for the batch state (plain data, it is checkpointed). `waiting`:
+    the id of the assistant request the item stopped at (assistant mode); the batch runs
+    the item again once it is answered."""
     final = final or {}
-    return {"id": item.id, "lecture": item.lecture, "slides": item.slides,
-            "outcome": "error" if error else final.get("outcome", "discarded"),
-            "rounds": final.get("round", 0), "tokens": final.get("tokens", 0),
-            "usage": final.get("usage", {"input": 0, "cached": 0, "output": 0}),
-            "last_failure": error or final.get("failure")}
+    outcome = "error" if error else "waiting" if waiting else final.get("outcome", "discarded")
+    summary = {"id": item.id, "lecture": item.lecture, "slides": item.slides,
+               "outcome": outcome,
+               "rounds": final.get("round", 0), "tokens": final.get("tokens", 0),
+               "usage": final.get("usage", {"input": 0, "cached": 0, "output": 0}),
+               "last_failure": error or (f"waiting for request {waiting}" if waiting
+                                         else final.get("failure"))}
+    if waiting:
+        summary["request"] = waiting
+    return summary
+
+
+def latest_results(results: list[dict]) -> list[dict]:
+    """Each item's last result, in first-run order: the batch state only appends, and an
+    item run again after waiting for an assistant has an older "waiting" result."""
+    last = {r["id"]: r for r in results}
+    return [last[i] for i in dict.fromkeys(r["id"] for r in results)]
+
+
+def reusing_reports(check: Callable[[Path, Path], ValidationReport],
+                    folder: Path) -> Callable[[Path, Path], ValidationReport]:
+    """`check`, remembering each report by the exact files it checked. In assistant mode an
+    item runs again from its start after every answer (replay); without this, every
+    earlier round's validation (minutes of Spark) would run again too."""
+    def cached(exercise: Path, solution: Path) -> ValidationReport:
+        digest = hashlib.sha256()
+        for root in (exercise, solution):
+            for path in sorted(p for p in root.rglob("*") if p.is_file()):
+                digest.update(str(path.relative_to(root)).encode() + b"\0" + path.read_bytes())
+        stored = folder / f"{digest.hexdigest()[:20]}.json"
+        if stored.is_file():
+            data = json.loads(stored.read_text())
+            return ValidationReport(data["exercise_id"], [
+                RuleResult(**{**r, "status": Status(r["status"])}) for r in data["results"]])
+        report = check(exercise, solution)
+        folder.mkdir(parents=True, exist_ok=True)
+        stored.write_text(json.dumps({"exercise_id": report.exercise_id, "results": [
+            {**asdict(r), "status": r.status.value} for r in report.results]}))
+        return report
+    return cached
 
 
 def write_manifest(deps: Deps, items: list[PlanItem], notes: str | None = None,

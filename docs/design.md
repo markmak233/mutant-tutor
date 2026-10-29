@@ -1107,9 +1107,20 @@ Plus) acting as the model for vision, planning, generation, oracle, repair and h
 - Vision: one `--vision` run writes a request for every page to transcribe (the page as
   PNG) and goes on, instead of stopping at the first; the next run stores the answers as
   transcriptions (exit code 3: requests are waiting).
-- Planned next: the batch pausing
-  once for all items' requests with validation reports reused on replay, instructions
-  for the assistant (`docs/assistant-mode.md`), then a thin MCP server over the same files.
+- Batch: an item that stops at a request ends as "waiting" (not an error); the batch's
+  `answers` node, after each round of items, pauses once for all of them (an interrupt
+  next to the plan approval), and after the answers sends only those items again, which
+  replay their answered calls. Validation reports are kept by a hash of the round's files
+  while any role is an assistant, so a replay does not run earlier rounds' Spark again.
+  A plan waiting for an answer stops the batch, and `resume` replays it. `item` and
+  `resume` exit with code 3 while requests wait.
+- One assistant for both the exercise and the oracle (owner, 2026-10-29: allowed, with a
+  reminder): a second profile of the same assistant (same `model`, its own queue) passes
+  the oracle rule, and the CLI prints that its requests must be answered in a fresh
+  context that has not seen the answer, being less independent than two providers. One
+  profile for both is still refused (the requests would mix).
+- Planned next: instructions for the assistant (`docs/assistant-mode.md`), then a thin
+  MCP server over the same files.
 
 ## Code execution safety
 

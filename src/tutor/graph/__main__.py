@@ -36,7 +36,16 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from tutor.config import WorkspaceError, load_env, load_workspace
-from tutor.graph.nodes import Deps, blocking_problems, existing_ids, write_manifest
+from tutor.exchange import AwaitingAnswer
+from tutor.graph.nodes import (
+    Deps,
+    blocking_problems,
+    check_round,
+    existing_ids,
+    latest_results,
+    reusing_reports,
+    write_manifest,
+)
 from tutor.graph.settings import (
     DEFAULTS,
     DEPS_FIELDS,
@@ -48,6 +57,7 @@ from tutor.graph.state import BatchPlan, PlanItem
 from tutor.llm import LLMError, config_for, roles
 
 _CONTINUE = object()  # resume a run that stopped midway (nothing new to send)
+WAITING = 3  # exit code: assistant requests wait for an answer (assistant mode)
 # Flags that choose a model for a role: kept with the batch, outside the settings.
 _PROFILE_FLAGS = ("profile", "plan_profile", "oracle_profile", "repair_profile")
 # The older named flags that set a settings field (same name); "on" / "low" mean True / False.
@@ -174,14 +184,30 @@ def _deps(workspace: Path, batch_dir: Path, profiles: dict,
         if oracle_config and writer and (oracle_config.provider, oracle_config.base_url) == (
                 writer.provider, writer.base_url):
             # One provider's models share training data and habits: not an independent
-            # reading.
+            # reading. One assistant profile for both would also mix their requests.
+            extra = (" (one assistant may do both through a second profile, answered in a "
+                     "fresh context: docs/assistant-mode.md)"
+                     if oracle_config.provider == "assistant" else "")
             raise ValueError(f"the oracle ({oracle_config.name}) and {writer.name}, which "
-                             "writes the exercise, come from one provider; choose another "
-                             "oracle")
+                             f"writes the exercise, come from one provider; choose another "
+                             f"oracle{extra}")
+        if (oracle_config and writer and oracle_config.provider == writer.provider ==
+                "assistant" and oracle_config.model == writer.model):
+            # Allowed (owner, 2026-10-29), but the reader is the same assistant: say so.
+            print(f"note: {writer.model} writes the exercise and, through "
+                  f"{oracle_config.name}, the oracle; answer the oracle requests in a fresh "
+                  f"context that has not seen the exercise's answer. Less independent than "
+                  f"two providers.", flush=True)
+    roles_used = [c for c in (config, plan_config, oracle_config, repair_config) if c]
+    extra = {}
+    if any(c.provider == "assistant" for c in roles_used):
+        # Items replay from their start after each answer: keep validation reports.
+        drafts = workspace / "batches" / ".drafts" / batch_dir.name / "checks"
+        extra["check"] = reusing_reports(check_round, drafts)
     return Deps(workspace=workspace, batch_dir=batch_dir, config=config,
                 plan_config=plan_config, oracle_config=oracle_config,
                 repair_config=repair_config, on_update=_progress, on_stream=_receiving,
-                **{name: getattr(settings, name) for name in DEPS_FIELDS})
+                **extra, **{name: getattr(settings, name) for name in DEPS_FIELDS})
 
 
 def _optional_role(role: str, profile: str | None, workspace: Path):
@@ -206,10 +232,16 @@ def _item(args, workspace: Path, build) -> int:
           f"{oracle}) -> {batch_dir.relative_to(workspace)}", flush=True)
     _show_settings(settings)
     final: dict = {}
-    for update in build.build_item(deps).stream({"item": item}, stream_mode="updates"):
-        for node, change in update.items():
-            final.update(change or {})
-            _progress(item.id, node, change or {})
+    try:
+        for update in build.build_item(deps).stream({"item": item}, stream_mode="updates"):
+            for node, change in update.items():
+                final.update(change or {})
+                _progress(item.id, node, change or {})
+    except AwaitingAnswer as e:
+        # Run the same command again once answered: the item replays up to here.
+        print(f"request {e.request_id} waits for the assistant: answer it "
+              f"(python -m tutor.exchange show {e.request_id}), then run this again")
+        return WAITING
     if final.get("usage"):
         print(f"  {_usage_text(final['usage'])}")
     if final.get("outcome") == "saved":
@@ -259,21 +291,36 @@ def _batch(args, workspace: Path, build) -> int:
         app = build.build_batch(deps, saver)
         decision = ({"approve": True} if getattr(args, "approve", False)
                     else {"feedback": args.feedback} if getattr(args, "feedback", None) else None)
+        # Assistant mode: a resume first tells a batch paused for answers to go on, once;
+        # if it pauses again in the same run, the new requests are reported instead.
+        answered = args.command != "resume"
         while True:
-            if pending is not None and pending is not _CONTINUE:
-                for update in app.stream(pending, config, stream_mode="updates"):
-                    if "plan" in update:
-                        print(f"plan: {len(update['plan']['plan'])} items", flush=True)
-            snapshot = app.get_state(config)
+            try:
+                if pending is not None and pending is not _CONTINUE:
+                    for update in app.stream(pending, config, stream_mode="updates"):
+                        if "plan" in update:
+                            print(f"plan: {len(update['plan']['plan'])} items", flush=True)
+                snapshot = app.get_state(config)
+                if snapshot.next and not any(task.interrupts for task in snapshot.tasks):
+                    # Not waiting for the owner: an earlier run stopped midway. Continue it;
+                    # items that finished keep their results and are not run again.
+                    print(f"continuing the stopped run at: {', '.join(snapshot.next)}",
+                          flush=True)
+                    pending = _CONTINUE
+                    for _ in app.stream(None, config, stream_mode="updates"):
+                        pass
+                    continue
+            except AwaitingAnswer as e:
+                # The plan itself waits for an assistant (items catch their own requests):
+                # the batch stops here and `resume` replays the plan call once answered.
+                return _report_waiting([e.request_id], args.batch)
             if not snapshot.next:
                 return _summary(snapshot.values.get("results", []), batch_dir, workspace)
-            if not any(task.interrupts for task in snapshot.tasks):
-                # Not waiting for the owner: an earlier run stopped midway. Continue it;
-                # items that finished keep their results and are not run again.
-                print(f"continuing the stopped run at: {', '.join(snapshot.next)}", flush=True)
-                pending = _CONTINUE
-                for _ in app.stream(None, config, stream_mode="updates"):
-                    pass
+            if requests := _waiting_requests(snapshot):
+                if answered:
+                    return _report_waiting(requests, args.batch)
+                answered = True
+                pending = Command(resume={"answered": True})
                 continue
             plan_file = deps.drafts / "plan.json"
             plan, edited = _owner_plan(deps.drafts, snapshot.values["plan"])
@@ -302,6 +349,20 @@ def _batch(args, workspace: Path, build) -> int:
                       flush=True)
             else:
                 pending = Command(resume={"action": "revise", "feedback": answer["feedback"]})
+
+
+def _waiting_requests(snapshot) -> list[str]:
+    """The request ids a batch paused for in assistant mode (the `answers` node's
+    interrupt), or [] when it paused for something else (the plan approval)."""
+    return [rid for task in snapshot.tasks for pause in task.interrupts
+            if isinstance(pause.value, dict) for rid in pause.value.get("waiting", [])]
+
+
+def _report_waiting(requests: list[str], batch: str) -> int:
+    print(f"{len(requests)} requests wait for the assistant: {', '.join(requests)}\n"
+          f"Answer them (python -m tutor.exchange list; docs/assistant-mode.md), then run "
+          f"python -m tutor.graph resume --batch {batch}")
+    return WAITING
 
 
 def _ask() -> dict | None:
@@ -395,6 +456,7 @@ def _usage_text(usage: dict[str, int]) -> str:
 
 
 def _summary(results: list[dict], batch_dir: Path, workspace: Path) -> int:
+    results = latest_results(results)  # an item run again after waiting: its last result
     print(f"\n{batch_dir.relative_to(workspace)}:")
     total = {"input": 0, "cached": 0, "output": 0}
     for r in results:

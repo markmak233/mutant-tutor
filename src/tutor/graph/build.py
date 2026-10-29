@@ -13,7 +13,15 @@ A batch:
 
     plan -> approve (interrupt: the owner approves or sends it back) --back--> plan
                 |
-                +--approved--> item x N (the graph above, in parallel) --> collect
+                +--approved--> item x N (the graph above, in parallel) --> answers
+                                  ^                                          |
+                                  +-- items waiting, once answered ----------+
+                                                          nothing waiting --> collect
+
+`answers` matters only in assistant mode (tutor/exchange.py): an item that stopped at an
+unanswered request is "waiting"; the batch pauses once for all of them (an interrupt the
+CLI reports), and after the answers it runs those items again, replaying their answered
+calls.
 """
 
 from __future__ import annotations
@@ -21,6 +29,7 @@ from __future__ import annotations
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Send, interrupt
 
+from tutor.exchange import AwaitingAnswer
 from tutor.graph import nodes
 from tutor.graph.nodes import Deps
 from tutor.graph.state import BatchState, ItemState, PlanItem
@@ -82,6 +91,9 @@ def build_batch(deps: Deps, checkpointer):
                     final.update(change or {})
                     if deps.on_update:
                         deps.on_update(plan_item.id, node, change or {})
+        except AwaitingAnswer as e:
+            # Not an error: an assistant has a request to answer; the item runs again then.
+            return {"results": [nodes.item_summary(plan_item, final, waiting=e.request_id)]}
         except Exception as e:  # noqa: BLE001 - one item must never stop the others
             # The model unreachable, a name clash, a reply that breaks the client: this
             # item is reported as an error, the others run on and collect still runs.
@@ -90,14 +102,33 @@ def build_batch(deps: Deps, checkpointer):
             return {"results": [nodes.item_summary(plan_item, final, error)]}
         return {"results": [nodes.item_summary(plan_item, final)]}
 
+    def waiting(state: BatchState) -> list[dict]:
+        return [r for r in nodes.latest_results(state.get("results", []))
+                if r["outcome"] == "waiting"]
+
+    def answers(state: BatchState) -> BatchState:
+        # Runs once all items of a round have stopped. With requests waiting it pauses the
+        # batch; `resume` continues here when they are answered.
+        if found := waiting(state):
+            interrupt({"waiting": [r["request"] for r in found]})
+        return {}
+
+    def after_answers(state: BatchState):
+        if found := waiting(state):
+            ids = {r["id"] for r in found}
+            return [Send("item", {"item": p}) for p in state["plan"] if p["id"] in ids]
+        return "collect"
+
     graph = StateGraph(BatchState)
     graph.add_node("plan", lambda s: nodes.plan_batch(s, deps))
     graph.add_node("approve", approve)
     graph.add_node("item", item)
+    graph.add_node("answers", answers)
     graph.add_node("collect", lambda s: nodes.collect(s, deps))
     graph.add_edge(START, "plan")
     graph.add_edge("plan", "approve")
     graph.add_conditional_edges("approve", after_approve, ["plan", "item"])
-    graph.add_edge("item", "collect")
+    graph.add_edge("item", "answers")
+    graph.add_conditional_edges("answers", after_answers, ["item", "collect"])
     graph.add_edge("collect", END)
     return graph.compile(checkpointer=checkpointer)

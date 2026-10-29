@@ -884,3 +884,77 @@ def test_a_differential_test_that_cannot_run_is_not_called_a_disagreement(worksp
     state.update(nodes.write_oracle(state, d))
     failure = nodes.validate_draft(state, d)["failure"]
     assert "cannot run" in failure and "it never saw your reference" not in failure
+
+
+# --- assistant mode: the batch pauses for answers and replays -------------------------------
+
+def answer_waiting(queue, replies: dict) -> list[str]:
+    """Act as the assistant: answer every waiting request by its purpose."""
+    from tutor.exchange import store_answer
+
+    answered = []
+    for request in queue.waiting():
+        purpose = re.search(r"- for: (\w+)", request.read_text())[1]
+        store_answer(queue, request.stem, replies[purpose])
+        answered.append(purpose)
+    return answered
+
+
+def test_an_assistant_batch_pauses_for_answers_and_replays_to_the_end(workspace):
+    pytest.importorskip("langgraph")
+    from langgraph.checkpoint.memory import MemorySaver
+    from langgraph.types import Command
+
+    from tutor.exchange import AwaitingAnswer, Queue
+    from tutor.graph.build import build_batch
+
+    queue = Queue(workspace / ".exchange" / "cc")
+    checks = []
+    d = Deps(workspace=workspace, batch_dir=workspace / "batches" / "2026-10-29_p3-a1",
+             config=LLMConfig("cc", "assistant", "assistant:cc", "cc", queue=queue.root),
+             max_rounds=1,
+             check=nodes.reusing_reports(lambda e, s: checks.append(e) or report(),
+                                         workspace / "checks"))
+    app, config = build_batch(d, MemorySaver()), {"configurable": {"thread_id": "a1"}}
+    with pytest.raises(AwaitingAnswer):  # the plan is the first request
+        app.invoke({"lectures": ["L1"], "count": 1}, config)
+    assert answer_waiting(queue, {"plan": plan_json("sum-list")}) == ["plan"]
+    app.invoke(None, config)  # replays the plan call, then pauses for approval
+    plan = app.get_state(config).values["plan"]
+    app.invoke(Command(resume={"action": "approve", "plan": plan}), config)
+    [pause] = [i.value for t in app.get_state(config).tasks for i in t.interrupts]
+    assert len(pause["waiting"]) == 1  # the item stopped at its draft request
+
+    assert answer_waiting(queue, {"generate": json.dumps(draft())}) == ["generate"]
+    final = app.invoke(Command(resume={"answered": True}), config)
+    assert [r["outcome"] for r in nodes.latest_results(final["results"])] == ["saved"]
+    assert (d.batch_dir / "exercises" / "sum-list" / "student.py").is_file()
+    assert len(checks) == 1
+
+
+def test_a_validation_report_is_reused_for_the_same_files(tmp_path):
+    exercise, solution = tmp_path / "e", tmp_path / "s"
+    for folder in (exercise, solution):
+        folder.mkdir()
+        (folder / "a.py").write_text("x = 1\n")
+    runs = []
+    check = nodes.reusing_reports(lambda e, s: runs.append(1) or report("3"), tmp_path / "c")
+    first, again = check(exercise, solution), check(exercise, solution)
+    assert again == first and again.result("3").status is Status.FAIL and len(runs) == 1
+    (solution / "a.py").write_text("x = 2\n")
+    check(exercise, solution)
+    assert len(runs) == 2  # other files: validated again
+
+
+def test_one_assistant_may_write_the_oracle_through_a_second_profile(workspace, capsys):
+    from tutor.graph.__main__ import _deps
+
+    (workspace / "workspace.toml").write_text(
+        'course = "demo"\n[llm.profiles.cc]\nprovider = "assistant"\n'
+        '[llm.profiles.cc-oracle]\nprovider = "assistant"\nmodel = "cc"\n'
+        '[llm.roles]\ngenerate = "cc"\noracle = "cc-oracle"\n')
+    d = _deps(workspace, workspace / "batches" / "b", {})
+    assert d.oracle_config.name == "cc-oracle"
+    assert "fresh context" in capsys.readouterr().out  # allowed, with a reminder
+    with pytest.raises(ValueError, match="through a second profile"):
+        _deps(workspace, workspace / "batches" / "b", {"oracle_profile": "cc"})
