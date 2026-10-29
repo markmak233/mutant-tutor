@@ -184,3 +184,110 @@ def test_a_guess_prefers_the_mutant_whose_failures_read_most_alike():
     known = {"m01_far": {"test_a": ["KeyError: 'x'"]},
              "m02_near": {"test_a": ["assert ['a', 'b', 'c'] == ['a', 'b']"]}}
     assert [m.mutant for m in mutants.matches(student, known)] == ["m02_near", "m01_far"]
+
+
+# --- layer 3: a model's hint ----------------------------------------------------------------
+
+# Fails test_example only, which no mutant does: layers 1 and 2 have nothing to say.
+UNKNOWN = "def total(xs):\n    return 0 if len(xs) == 3 else sum(xs)\n"
+
+
+class HintChat:
+    """Replies from a queue; keeps every request's messages."""
+
+    def __init__(self, *hints: str):
+        self.replies = [json.dumps({"diagnosis": "returns 0 for three items", "hint": h})
+                        for h in hints]
+        self.calls = []
+
+    def __call__(self, config, messages, *, purpose, log_path, max_tokens, response_schema):
+        from tutor.llm import Reply
+        self.calls.append(list(messages))
+        return Reply(self.replies.pop(0), 900, 80, 0.1, "stop")
+
+
+def model_of(chat):
+    from tutor.hint.llm_hint import HintModel
+    from tutor.llm import LLMConfig
+    return HintModel(LLMConfig("deepseek", "deepseek", "http://x", "deepseek-v4-flash"), chat)
+
+
+def test_a_model_hint_sees_what_the_student_sees_and_never_the_solution(tmp_path):
+    exercise = batch(tmp_path, UNKNOWN)
+    chat = HintChat("Check what your function does for a list of exactly three numbers.")
+    hint = hint_for(exercise, say=lambda _: None, model=model_of(chat))
+    assert (hint.layer, hint.key) == ("llm", "level-1")
+    assert hint.text == "Check what your function does for a list of exactly three numbers."
+    assert "returns 0" not in hint.text  # the diagnosis is never shown
+    system, user = (m["content"] for m in chat.calls[0])
+    assert "Never write the solution" in system and "No code blocks at all" in system
+    assert "0 if len(xs) == 3" in user and "## Hint 1" in user and "test_example" in user
+    assert "return sum(xs)\n" not in user.replace(UNKNOWN, "")  # the reference stays out
+
+
+def test_a_hint_that_gives_code_away_is_asked_for_again_with_the_reason(tmp_path):
+    chat = HintChat("Use this:\n```python\ndef total(xs):\n    return sum(xs)\n```",
+                    "A special case for three items hides the general rule.")
+    hint = hint_for(batch(tmp_path, UNKNOWN), say=lambda _: None, model=model_of(chat))
+    assert hint.text == "A special case for three items hides the general rule."
+    assert "code block of 2 lines" in chat.calls[1][-1]["content"]
+
+
+def test_a_hint_that_gives_code_away_twice_falls_back_to_the_first_error(tmp_path):
+    sneaky = "Like this:\n```python\nt = 0\nfor x in xs:\n    t += x\n```"
+    chat = HintChat(sneaky, sneaky)
+    hint = hint_for(batch(tmp_path, UNKNOWN), say=lambda _: None, model=model_of(chat))
+    assert (hint.layer, hint.key) == ("none", "llm-blocked")
+    assert "test_example" in hint.text and "t += x" not in hint.text
+
+
+def test_code_close_to_the_solution_is_caught_even_with_other_names():
+    from tutor.hint.llm_hint import leak
+    reference = "def top(rdd):\n    return rdd.reduceByKey(lambda a, b: a + b).collect()\n"
+    hint = "Try `rdd.reduceByKey(lambda x, y: x + y).collect()`."
+    assert "close to the solution" in leak(hint, reference, visible="", allowed=0)
+    assert leak("Think about `reduceByKey` versus `groupByKey`.", reference, "", 0) is None
+
+
+@pytest.mark.parametrize(("mode", "level", "allowed"), [
+    ("learn", 3, True), ("learn", 2, False), ("review", 3, False)])
+def test_only_level_3_of_a_learn_batch_may_show_a_corrected_line(mode, level, allowed):
+    from tutor.hint.llm_hint import allowed_lines, leak, system_prompt
+    one_line = "Fix the format:\n```python\nprint(f'{k}\\t{v}')\n```"
+    reason = leak(one_line, "def total(xs):\n    return sum(xs)\n", "", allowed_lines(mode,
+                                                                                    level))
+    assert (reason is None) is allowed
+    assert ("Never show code" in system_prompt(mode, level)) is (mode == "review")
+
+
+def test_a_line_the_student_already_has_may_be_quoted():
+    from tutor.hint.llm_hint import leak
+    reference = "def total(xs):\n    result = sorted(xs)[::-1]\n    return result\n"
+    hint = "Your line `result = sorted(xs)[::-1]` is fine; look at what you return."
+    assert leak(hint, reference, visible=reference, allowed=0) is None
+    assert "repeats a line" in leak(hint, reference, visible="", allowed=0)
+
+
+def test_java_stack_frames_are_left_out_of_the_error():
+    from tutor.hint.llm_hint import first_error
+    output = ("___ test_a ___\nE   py4j.Py4JJavaError: boom\n"
+              "E   \tat org.apache.Spark.run(X.java:1)\nE   ... 12 more\n")
+    assert first_error(output).splitlines() == ["test_a", "E   py4j.Py4JJavaError: boom"]
+
+
+def test_asking_again_with_the_same_code_raises_the_level(tmp_path, monkeypatch):
+    from tutor.hint.__main__ import model_hints_given
+    (tmp_path / "workspace.toml").write_text('course = "demo"\n')
+    monkeypatch.setenv("WORKSPACE_DIR", str(tmp_path))
+    exercise = batch(tmp_path, UNKNOWN)
+    systems = []
+    for n in (1, 2):
+        chat = HintChat(f"hint {n}")
+        level = 1 + model_hints_given(exercise)
+        log_hint(exercise, hint_for(exercise, say=lambda _: None, model=model_of(chat),
+                                    level=level))
+        systems.append(chat.calls[0][0]["content"])
+    assert "Level 1:" in systems[0] and "Level 2" in systems[1]
+    assert model_hints_given(exercise) == 2
+    (exercise / "student.py").write_text(UNKNOWN + "# tried something\n")
+    assert model_hints_given(exercise) == 0  # changed code starts again at level 1

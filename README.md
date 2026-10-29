@@ -167,7 +167,8 @@ The aim is to help students understand their course topics better: turn the lect
 material you study from into exercises you can run, check and learn from at your own
 pace: exercises are generated from the slides and checked by the validator before you
 see them. The material and the exercises stay on your own machine; only LLM calls (the
-slides' text and images, and the generated code) leave it. This is a personal project, not affiliated with any university or course, and
+slides' text and images, the generated code, and your code when you ask a model for a
+hint) leave it. This is a personal project, not affiliated with any university or course, and
 it is provided as is (see [LICENSE](LICENSE)).
 
 ## Running exercise code is not sandboxed
@@ -199,7 +200,8 @@ src/tutor/
                    oracle by a second model, validate, repair, per exercise in parallel;
                    `python -m tutor.graph`
   hint/            hints while solving: rules, then the exercise's known mistakes (its
-                   mutants), never the reference; `python -m tutor.hint`
+                   mutants), then a model's hint checked for giving code away; never the
+                   reference; `python -m tutor.hint`
   schema.py        the batch format (metadata.json, manifest.json); `python -m tutor.schema`
   validation/      rule 0 (format), a static safety check, rules 1-5 and the api check;
                    `python -m tutor.validation`
@@ -225,8 +227,8 @@ Phase numbers match `docs/design.md`.
   (a container for running generated code is moved to a later phase)
 - **3b** Checks that need a learner's real work: held-out solutions and mistakes, an LLM
   judge of teaching quality calibrated against the learner's ratings
-- **3c** Hint command: rules and mutant matching (working), then an LLM, never revealing
-  the answer
+- **3c** Hint command: rules, mutant matching and a model's hint behind a leak check
+  (working); a calibrated judge of hint quality later
 - **4** Hybrid RAG over course material (BM25 + vectors), evaluated with recall@k
 - **5** Evaluation: validity rate, mutant kill rate, cost per valid exercise, with vs without RAG
 

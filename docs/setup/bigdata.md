@@ -216,6 +216,12 @@ by the validator and repaired up to three times; only VALID ones reach the batch
 that stopped midway continues with `resume`; `resume --profile NAME` finishes it with
 another model. `coverage-proposal.md` in the batch lists the coverage.md changes to make.
 
+A `hint` role (e.g. `hint = "deepseek"`) adds a model's hint to `python -m tutor.hint`
+when no rule and no known mistake fits. The model gets your `student.py`, `hints.md`, the
+constraints and the first error, never the solution; a hint that shows solution code is
+rejected and asked for again. Asking again without changing your code gives a more
+specific hint (three levels; a review batch never gets code). `--no-llm` skips the model.
+
 ## 6. Common problems
 
 | Symptom | Cause | Fix |

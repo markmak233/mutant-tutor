@@ -1,19 +1,23 @@
 """A hint for an exercise you are solving (docs/design.md, roadmap 3c).
 
-    python -m tutor.hint <exercise folder>     the folder with your student.py
+    python -m tutor.hint [--no-llm] <exercise folder>     the folder with your student.py
 
 Runs your tests in a temporary copy (student.py is never changed, and the run is not
 recorded as an attempt), then tries the cheapest and most certain layer first:
 1. rules: a known low-level mistake (syntax, full-width punctuation, a TODO left, an RDD
    used like a list, output as tuples, ...) with its line and cause;
 2. known mistakes: your tests fail exactly as one of the exercise's planted mutants does,
-   so you are told that mistake (in a review batch, only what goes wrong).
+   so you are told that mistake (in a review batch, only what goes wrong);
+3. a model's hint, when the workspace names a `hint` model in [llm.roles] (--no-llm skips
+   it): your code goes to that model's provider, the solution never does. Asking again
+   without changing your code gives a more specific hint, up to level 3.
 Otherwise it shows your first real error and points to hints.md. A batch's mode comes from
 its manifest.json. Each hint is logged in the workspace's attempts.jsonl.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 from datetime import datetime
@@ -23,10 +27,12 @@ from tutor.attempts import ATTEMPTS_FILE, exercise_of
 from tutor.config import WorkspaceError, load_env, load_workspace
 from tutor.execution import Outcome, run_pytest
 from tutor.hint import mutants
+from tutor.hint.llm_hint import HintModel, HintRefused, model_hint
 from tutor.hint.rules import Hint, first_rule
+from tutor.llm import LLMError, config_for, roles
 from tutor.testkit import DEFAULT_PARTITIONS, PARTITIONS_ENV
 from tutor.validation.checks import failure_excerpt
-from tutor.validation.exercise import STUDENT_FILE, ExerciseError, load_exercise
+from tutor.validation.exercise import STUDENT_FILE, TEST_FILE, ExerciseError, load_exercise
 
 
 def locate(exercise_dir: Path) -> tuple[Path, str]:
@@ -42,8 +48,10 @@ def locate(exercise_dir: Path) -> tuple[Path, str]:
     return exercise_dir.parent / "solution", "learn"
 
 
-def hint_for(exercise_dir: Path, run_tests=run_pytest, say=print) -> Hint | None:
-    """The hint for the student.py in `exercise_dir`, or None when every test passes."""
+def hint_for(exercise_dir: Path, run_tests=run_pytest, say=print,
+             model: HintModel | None = None, level: int = 1) -> Hint | None:
+    """The hint for the student.py in `exercise_dir`, or None when every test passes.
+    `model` gives layer 3, at `level` (1 + the model hints already given for this code)."""
     solution_dir, mode = locate(exercise_dir)
     ex = load_exercise(exercise_dir, solution_dir)
     timeout = ex.timeout_s
@@ -94,13 +102,50 @@ def hint_for(exercise_dir: Path, run_tests=run_pytest, say=print) -> Hint | None
         else:
             text = f"{how}, where {effect or 'the result differs'}; look for the cause"
         return Hint("mutant", best.mutant, text)
+    key, note = "", ""
+    if model:
+        hints_file = exercise_dir / "hints.md"
+        hints = hints_file.read_text() if hints_file.is_file() else ""
+        # What the student already has: the hint may quote it freely.
+        visible = "\n".join([student.read_text(), (exercise_dir / TEST_FILE).read_text(),
+                             hints, ex.skeleton.read_text()])
+        try:
+            return model_hint(model, student=student.read_text(), hints=hints,
+                              constraints=ex.metadata.get("constraints", {}),
+                              output=result.output, reference=ex.reference.read_text(),
+                              visible=visible, mode=mode, level=level)
+        except HintRefused as e:
+            key = f"llm-{e.kind}"
+            note = f" (no model hint: {e})" if e.kind == "error" else ""
     first = failure_excerpt(result.output, per_test=6, limit=800) or result.output[-800:]
-    return Hint("none", "", "no known mistake matches; your first error:\n" + first
+    return Hint("none", key, f"no known mistake matches{note}; your first error:\n" + first
                 + "\nhints.md has three hints, each more specific than the last.")
 
 
+def code_hash(exercise_dir: Path) -> str:
+    return hashlib.sha256((exercise_dir / STUDENT_FILE).read_bytes()).hexdigest()[:12]
+
+
+def model_hints_given(exercise_dir: Path) -> int:
+    """How many model hints this exercise got for the student.py as it is now."""
+    try:
+        workspace = load_workspace()
+    except WorkspaceError:
+        return 0
+    where = exercise_of(exercise_dir / STUDENT_FILE, workspace.root)
+    path = workspace.attempts_dir / ATTEMPTS_FILE
+    if where is None or not path.is_file():
+        return 0
+    code = code_hash(exercise_dir)
+    lines = (json.loads(line) for line in path.read_text().splitlines() if line.strip())
+    return sum(1 for line in lines if line.get("event") == "hint" and line.get("layer") == "llm"
+               and (line.get("batch"), line.get("exercise")) == where
+               and line.get("code") == code)
+
+
 def log_hint(exercise_dir: Path, hint: Hint | None) -> None:
-    """One line in the workspace's attempts.jsonl, for exercises of a workspace batch."""
+    """One line in the workspace's attempts.jsonl, for exercises of a workspace batch;
+    `code` (a hash of student.py) tells a repeated request from one after a change."""
     try:
         workspace = load_workspace()
     except WorkspaceError:
@@ -111,25 +156,45 @@ def log_hint(exercise_dir: Path, hint: Hint | None) -> None:
     workspace.attempts_dir.mkdir(exist_ok=True)
     line = {"time": datetime.now().isoformat(timespec="seconds"), "batch": where[0],
             "exercise": where[1], "event": "hint",
-            "layer": hint.layer if hint else "passed", "key": hint.key if hint else ""}
+            "layer": hint.layer if hint else "passed", "key": hint.key if hint else "",
+            "code": code_hash(exercise_dir)}
     with open(workspace.attempts_dir / ATTEMPTS_FILE, "a", encoding="utf-8") as f:
         f.write(json.dumps(line) + "\n")
 
 
+def hint_model() -> HintModel | None:
+    """The workspace's `hint` model, or None when [llm.roles] names none."""
+    try:
+        root = load_workspace().root
+        if "hint" not in roles(root):
+            return None
+        return HintModel(config_for("hint", workspace=root),
+                         log_path=root / "logs" / "llm_calls.jsonl")
+    except (WorkspaceError, LLMError) as e:
+        print(f"(no model hint: {e})", file=sys.stderr)
+        return None
+
+
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
+    use_model = "--no-llm" not in args
+    args = [a for a in args if a != "--no-llm"]
     if len(args) != 1:
         print(__doc__.strip().splitlines()[2].strip(), file=sys.stderr)
         return 2
     load_env()
     exercise_dir = Path(args[0]).resolve()
+    model = hint_model() if use_model else None
     try:
-        hint = hint_for(exercise_dir)
+        hint = hint_for(exercise_dir, model=model,
+                        level=1 + (model_hints_given(exercise_dir) if model else 0))
     except ExerciseError as e:
         print(f"stopped: {e}", file=sys.stderr)
         return 1
     print("every test passes; also try TUTOR_PARTITIONS=4 pytest test_student.py"
           if hint is None else f"hint: {hint.text}")
+    if hint and hint.key.startswith("level-") and hint.key != "level-3":
+        print("(ask again without changing your code for a more specific hint)")
     log_hint(exercise_dir, hint)
     return 0
 

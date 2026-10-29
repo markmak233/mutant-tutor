@@ -1421,6 +1421,22 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
    cannot tell apart are reported (an exercise lacking a test). Each request is a line in
    `attempts.jsonl` (event "hint", layer, rule or mutant). First request on a Spark
    exercise about a minute (every mutant runs once), later ones the student's run only.
+   Layer 3 built 2026-10-29 (`tutor/hint/llm_hint.py`, owner-approved design): only when
+   layers 1 and 2 miss, with the workspace's `hint` role (none: the old fallback;
+   `--no-llm` skips it). The model gets student.py (question and code), hints.md, the
+   constraints and the first error without Java frames, never the reference, mutants or
+   oracle. It replies JSON, `diagnosis` first (read by code only, never shown, since it
+   may name the fix) and `hint`. Levels count model hints already logged for the same
+   student.py hash: 1 concept and direction, 2 where, 3 one corrected line for a
+   low-level mistake (learn only; a review batch names the kind, then the place, never
+   code). Leak guard, in two parts (owner: state it in the prompt to make leaks rare, and
+   check deterministically): the prompt lists the rules and says a checker rejects a hint
+   that breaks one; the checker rejects a code block (up to two lines at learn level 3),
+   any reference line of 15+ characters (spaces removed) the student has not seen
+   (student.py, tests, hints.md, skeleton), and code spans with difflib ratio >= 0.8
+   against consecutive reference lines. A rejection is sent back once with its reason;
+   a second one falls back to the first error (`llm-blocked` in attempts.jsonl). Shorter
+   reference lines are not guarded: `sc.stop()`-sized lines would reject honest hints.
    Evaluation 2026-10-29, each of the 32 mutants of the six week-5 Spark exercises as a
    simulated student: first 29/32 named; the misses were one pair the tests cannot tell
    apart and two no-coalesce mutants whose output order varies. With the two rules above
