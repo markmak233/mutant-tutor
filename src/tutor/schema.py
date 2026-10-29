@@ -180,15 +180,17 @@ def check_batch(batch_dir: Path) -> list[str]:
     manifest, exercises/ and solutions/ agree on the exercise ids."""
     found: list[str] = []
     manifest = _load_json(batch_dir / "manifest.json", "manifest.json", found)
-    if manifest is not None:
+    if manifest is not _UNREADABLE:  # a file holding null is checked, and fails
         found += [f"manifest.json: {p}" for p in problems(Manifest, manifest)]
 
     exercise_ids = _subdirs(batch_dir / "exercises")
     solution_ids = _subdirs(batch_dir / "solutions")
     if exercise_ids != solution_ids:
         found.append(f"exercises/ and solutions/ differ: {sorted(exercise_ids ^ solution_ids)}")
-    if isinstance(manifest, dict) and isinstance(manifest.get("exercises"), list):
-        listed = set(manifest["exercises"])
+    listed_ids = manifest.get("exercises") if isinstance(manifest, dict) else None
+    # Compared only when it is a list of ids; any other shape is reported above.
+    if isinstance(listed_ids, list) and all(isinstance(i, str) for i in listed_ids):
+        listed = set(listed_ids)
         if listed != exercise_ids:
             found.append(f"manifest exercises and exercises/ differ: "
                          f"{sorted(listed ^ exercise_ids)}")
@@ -196,7 +198,7 @@ def check_batch(batch_dir: Path) -> list[str]:
     for exercise_id in sorted(solution_ids):
         rel = f"solutions/{exercise_id}/metadata.json"
         metadata = _load_json(batch_dir / rel, rel, found)
-        if metadata is None:
+        if metadata is _UNREADABLE:
             continue
         found += [f"{rel}: {p}" for p in problems(Metadata, metadata)]
         if isinstance(metadata, dict) and metadata.get("id") != exercise_id:
@@ -204,14 +206,17 @@ def check_batch(batch_dir: Path) -> list[str]:
     return found
 
 
-def _load_json(path: Path, label: str, found: list[str]) -> object | None:
+_UNREADABLE = object()  # not None: a file may hold JSON null, which is a problem to report
+
+
+def _load_json(path: Path, label: str, found: list[str]) -> object:
     try:
         return json.loads(path.read_text())
     except FileNotFoundError:
         found.append(f"missing {label}")
     except json.JSONDecodeError as e:
         found.append(f"{label}: not valid JSON: {e}")
-    return None
+    return _UNREADABLE
 
 
 def _subdirs(path: Path) -> set[str]:
