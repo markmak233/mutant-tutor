@@ -1060,8 +1060,9 @@ The exit code alone was not enough (Codex review, 2026-10-25): pytest exits 0 wh
 is skipped and 1 when only a fixture breaks, so a skipping test file let a reference or oracle
 "pass" and a mutant that only broke setup counted as killed. Each run now writes pytest's JUnit
 XML in the temp dir and the counts decide: PASSED needs exit 0, at least one passed test and
-no skipped one; FAILED needs at least one failed assertion; everything else (import errors,
-no tests, skips, setup/teardown errors only) is ERROR. The child starts in its own session and the
+no skipped one; FAILED needs at least one failed assertion in the report; everything else
+(import errors, no tests, skips, setup/teardown errors only, a run that exits before writing
+its report, which counted as FAILED until an outside review, 2026-10-29) is ERROR. The child starts in its own session and the
 whole process group is killed on timeout and after every run, because PySpark starts a JVM
 under pytest that would otherwise be orphaned (a test covers this, and fails if only the parent
 is killed). This is isolation, not a sandbox: the child can still touch other files and the network.

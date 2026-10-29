@@ -143,14 +143,16 @@ def _read_counts(report: Path) -> TestCounts | None:
 def _outcome(returncode: int, counts: TestCounts | None) -> Outcome:
     """Exit code 0 counts as PASSED only if tests really ran and none was skipped: an
     all-skipped run (exit 0) proves nothing, so a reference or oracle test must not pass
-    that way. Exit code 1 counts as FAILED only if an assertion failed: a run where only a
-    fixture broke never checked the code, so it must not count as killing a mutant."""
+    that way. Exit code 1 counts as FAILED only if the report shows a failed test: a run
+    where only a fixture broke, or one that ended before pytest wrote its report (the
+    process exited from inside a test), never checked the code, so it must not count as
+    killing a mutant."""
     if returncode == 0:
         if counts is None or counts.passed == 0 or counts.skipped > 0:
             return Outcome.ERROR
         return Outcome.PASSED
     if returncode == 1:
-        if counts is not None and counts.failed == 0:
+        if counts is None or counts.failed == 0:
             return Outcome.ERROR
         return Outcome.FAILED
     return Outcome.ERROR

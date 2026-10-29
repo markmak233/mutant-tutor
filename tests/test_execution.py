@@ -179,3 +179,13 @@ def test_only_a_fixture_error_is_an_error_not_a_failure(tmp_path):
     assert result.returncode == 1
     assert result.outcome is Outcome.ERROR
     assert (result.counts.failed, result.counts.errors) == (0, 1)
+
+
+def test_a_run_that_ends_before_its_report_is_an_error_not_a_failure(tmp_path):
+    """Exit code 1 with no JUnit report: no failed assertion shows the tests caught anything."""
+    test = write(tmp_path / "test_exit.py", "import os\n\ndef test_a():\n    os._exit(1)\n")
+
+    result = run_pytest({"test_exit.py": test})
+
+    assert (result.returncode, result.counts) == (1, None)
+    assert result.outcome is Outcome.ERROR
