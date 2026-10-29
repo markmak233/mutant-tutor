@@ -861,7 +861,9 @@ Design approved 2026-10-28 (owner):
   validation runs Spark on every core). One failing item (model unreachable, name clash)
   does not stop the others. `collect` writes the manifest once (parallel items never
   write it) with the preferences in `notes`, and `coverage-proposal.md`, the coverage.md
-  changes for the owner to apply. Which types a batch mixes (e.g. debugging exercises) is
+  changes for the owner to apply. Listing a saved item again changes nothing, and the file
+  is replaced in one step, so a resume that runs `collect` again cannot fail on it (outside
+  review, 2026-10-29). Which types a batch mixes (e.g. debugging exercises) is
   left to the preferences, not a fixed rule.
 - Logs: `llm_calls.jsonl` with the node as purpose; one `generation.jsonl` per batch
   (item, rounds, outcome, failure reasons).

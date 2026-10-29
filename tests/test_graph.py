@@ -6,7 +6,7 @@ import re
 import pytest
 
 from tutor.graph import nodes, prompts
-from tutor.graph.nodes import Deps, DraftError, apply_mutant, write_draft
+from tutor.graph.nodes import Deps, DraftError, apply_mutant, write_draft, write_manifest
 from tutor.graph.state import ExerciseDraft, MutantDraft, PlanItem
 from tutor.llm import LLMConfig, Reply
 from tutor.materials import cache
@@ -416,6 +416,20 @@ def test_a_batch_is_planned_sent_back_approved_later_and_generated_in_parallel(w
     assert manifest.exercises == ["sum-list"] and "more debugging" in manifest.notes
     proposal = (d.batch_dir / "coverage-proposal.md").read_text()
     assert "gap-code -> ex:sum-list (p3-w1)" in proposal and "sum-squares" not in proposal
+
+
+def test_listing_saved_items_again_leaves_the_manifest_unchanged(tmp_path):
+    """collect may run twice when a batch resumes after writing the manifest."""
+    d = deps(tmp_path, None)
+    write_manifest(d, [ITEM])
+    first = (d.batch_dir / "manifest.json").read_text()
+    write_manifest(d, [ITEM])
+    assert (d.batch_dir / "manifest.json").read_text() == first
+    other = ITEM.model_copy(update={"id": "sum-squares"})
+    write_manifest(d, [ITEM, other])
+    manifest = Manifest.model_validate_json((d.batch_dir / "manifest.json").read_text())
+    assert manifest.exercises == ["sum-list", "sum-squares"]
+    assert [p.name for p in d.batch_dir.iterdir()] == ["manifest.json"]  # no .partial left
 
 
 def test_without_a_count_the_plan_chooses_up_to_the_maximum():

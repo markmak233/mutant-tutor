@@ -582,13 +582,17 @@ def item_summary(item: PlanItem, final: ItemState | None, error: str | None = No
 def write_manifest(deps: Deps, items: list[PlanItem], notes: str | None = None,
                    model: str | None = None) -> None:
     """List `items` (saved exercises) in the batch manifest, creating it or adding to it.
-    `model`: who generated them (default: the generate model)."""
+    `model`: who generated them (default: the generate model). Listing an item again
+    changes nothing, so a resumed batch can run `collect` twice; the file is replaced in
+    one step, so a crash leaves the old manifest or the new one, never half of one."""
     model = model or _model_names(deps)
+    path = deps.batch_dir / "manifest.json"
+    known = Manifest.model_validate_json(path.read_text()) if path.is_file() else None
+    if known:
+        items = [i for i in items if i.id not in known.exercises]
     if not items:
         return
-    path = deps.batch_dir / "manifest.json"
     path.parent.mkdir(parents=True, exist_ok=True)
-    known = Manifest.model_validate_json(path.read_text()) if path.is_file() else None
     sources = list(known.sources) if known else []
     for item in items:
         source = SourceRef(path=f"lectures/{item.lecture}.pdf", slides=item.slides)
@@ -608,7 +612,9 @@ def write_manifest(deps: Deps, items: list[PlanItem], notes: str | None = None,
             model=model, git_commit=_git_commit(),
             exercises=[i.id for i in items], notes=notes or None)
     Manifest.model_validate(manifest.model_dump())  # the cross-field rules
-    path.write_text(manifest.model_dump_json(indent=2, exclude_none=True) + "\n")
+    partial = path.with_name(path.name + ".partial")
+    partial.write_text(manifest.model_dump_json(indent=2, exclude_none=True) + "\n")
+    partial.replace(path)
 
 
 # --- the batch: plan, owner's decision, collect -----------------------------------------
