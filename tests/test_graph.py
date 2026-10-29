@@ -418,6 +418,46 @@ def test_a_batch_is_planned_sent_back_approved_later_and_generated_in_parallel(w
     assert "gap-code -> ex:sum-list (p3-w1)" in proposal and "sum-squares" not in proposal
 
 
+def test_a_save_that_fails_midway_leaves_nothing_and_a_retry_saves(tmp_path, monkeypatch):
+    d = deps(tmp_path, None)
+    round_dir = tmp_path / "round-0"
+    write_draft(ExerciseDraft.model_validate(draft()), "sum-list", round_dir)
+    state = {"item": ITEM, "round_dir": str(round_dir)}
+    copy = nodes.shutil.copytree
+    calls = []
+
+    def disk_full(source, target):
+        calls.append(target)
+        if len(calls) == 2:
+            raise OSError("No space left on device")
+        return copy(source, target)
+
+    monkeypatch.setattr(nodes.shutil, "copytree", disk_full)
+    with pytest.raises(OSError):
+        nodes.save(state, d)
+    assert not (d.batch_dir / "exercises" / "sum-list").exists()
+    monkeypatch.setattr(nodes.shutil, "copytree", copy)
+    assert nodes.save(state, d) == {"outcome": "saved"}
+    assert (d.batch_dir / "solutions" / "sum-list" / "reference.py").is_file()
+    assert sorted(p.name for p in (d.batch_dir / "exercises").iterdir()) == ["sum-list"]
+
+
+def test_an_item_saved_before_is_not_saved_again_nor_overwritten(tmp_path):
+    """A resume may run an item whose save finished but was never recorded."""
+    d = deps(tmp_path, None)
+    round_dir = tmp_path / "round-0"
+    write_draft(ExerciseDraft.model_validate(draft()), "sum-list", round_dir)
+    state = {"item": ITEM, "round_dir": str(round_dir)}
+    nodes.save(state, d)
+    student = d.batch_dir / "exercises" / "sum-list" / "student.py"
+    student.write_text("# the owner's answer\n")
+    assert nodes.save(state, d) == {"outcome": "saved"}
+    assert student.read_text() == "# the owner's answer\n"
+    (d.batch_dir / "generation.jsonl").unlink()  # not saved by this pipeline: refuse
+    with pytest.raises(FileExistsError, match="never overwrite"):
+        nodes.save(state, d)
+
+
 def test_listing_saved_items_again_leaves_the_manifest_unchanged(tmp_path):
     """collect may run twice when a batch resumes after writing the manifest."""
     d = deps(tmp_path, None)

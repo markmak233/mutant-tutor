@@ -859,7 +859,10 @@ Design approved 2026-10-28 (owner):
   in another terminal or another day. Approved items fan out with `Send` and run the item
   graph in parallel, at most `--parallel` at once (default: CPU cores / 4, 1-4: each
   validation runs Spark on every core). One failing item (model unreachable, name clash)
-  does not stop the others. `collect` writes the manifest once (parallel items never
+  does not stop the others. `save` copies both parts into hidden staging folders and
+  renames them into place, so a failed copy leaves nothing behind; an item saved before
+  whose result was lost (a resume runs it again) counts as saved, its folders untouched
+  (outside review, 2026-10-29). `collect` writes the manifest once (parallel items never
   write it) with the preferences in `notes`, and `coverage-proposal.md`, the coverage.md
   changes for the owner to apply. Listing a saved item again changes nothing, and the file
   is replaced in one step, so a resume that runs `collect` again cannot fail on it (outside

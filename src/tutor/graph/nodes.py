@@ -552,15 +552,41 @@ def route(state: ItemState, deps: Deps) -> str:
 
 def save(state: ItemState, deps: Deps) -> ItemState:
     """Copy the valid round into the batch. The manifest is written once per batch
-    (write_manifest), not here: items run in parallel."""
+    (write_manifest), not here: items run in parallel.
+
+    Both parts are copied into hidden staging folders first and renamed into place after,
+    so a copy that fails leaves nothing a retry trips over. An item saved before whose
+    result was lost (the batch stopped before recording it, and a resume ran it again)
+    is saved already: both folders exist and the batch log says "saved". Its folders are
+    never replaced, since the owner may be solving the exercise."""
     item, src = state["item"], Path(state["round_dir"])
-    for part in ("exercises", "solutions"):
-        target = deps.batch_dir / part / item.id
+    parts = [(src / part / item.id, deps.batch_dir / part / item.id)
+             for part in ("exercises", "solutions")]
+    if all(target.is_dir() for _, target in parts) and _saved_before(deps, item.id):
+        return {"outcome": "saved"}
+    for _, target in parts:
         if target.exists():
             raise FileExistsError(f"{target} exists; never overwrite an exercise")
-        shutil.copytree(src / part / item.id, target)
+    staged = []
+    for source, target in parts:
+        staging = target.with_name(f".{item.id}.saving")  # hidden: not an exercise id
+        if staging.exists():
+            shutil.rmtree(staging)  # left by a copy that failed
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(source, staging)
+        staged.append((staging, target))
+    for staging, target in staged:
+        staging.rename(target)
     _log(state, deps, "saved")
     return {"outcome": "saved"}
+
+
+def _saved_before(deps: Deps, exercise_id: str) -> bool:
+    if not deps.generation_log.is_file():
+        return False
+    lines = (json.loads(line) for line in deps.generation_log.read_text().splitlines())
+    return any(line["exercise"] == exercise_id and line["outcome"] == "saved"
+               for line in lines)
 
 
 def discard(state: ItemState, deps: Deps) -> ItemState:
