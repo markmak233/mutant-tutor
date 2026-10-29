@@ -1222,7 +1222,10 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
   renamed, so attempts keep their ids. "Solved" in a batch's done condition means its must
   exercises; skipped ones need no work and no rating.
 - `attempts.jsonl` gets one line per exercise per test run (time, batch, exercise, mode,
-  result, pass / fail / error counts, first error, partitions, duration). Nothing reads it in
+  result, pass / fail / error / skip counts, first error, partitions, duration). The result
+  is "passed" only when every test ran and passed: a skipped test makes it "incomplete" and
+  Ctrl+C "interrupted" (both counted as passed or not at all until an outside review,
+  2026-10-29). Nothing reads it in
   phase 2; it is kept so review batches can later target weak topics, and as material for
   hint rules and mutants (roadmap 3c). Done 2026-10-25 as a pytest plugin, `tutor/attempts.py`,
   registered through the `pytest11` entry point, so it loads in every pytest run of the venv

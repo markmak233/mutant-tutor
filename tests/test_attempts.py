@@ -90,3 +90,33 @@ def test_runs_outside_the_workspace_are_not_recorded(tmp_path):
     run_pytest_in(elsewhere, tmp_path / "ws")
 
     assert not (tmp_path / "ws" / "attempts").exists()
+
+
+def test_a_run_with_a_skipped_test_is_incomplete_not_passed(tmp_path):
+    exercise = make_workspace(tmp_path)
+    (exercise / "test_student.py").write_text(
+        "import pytest\n\ndef test_ok():\n    assert True\n\n"
+        "@pytest.mark.skip\ndef test_later():\n    pass\n")
+    run_pytest_in(exercise, tmp_path / "ws")
+    [line] = attempts(tmp_path / "ws")
+    assert (line["result"], line["passed"], line["skipped"]) == ("incomplete", 1, 1)
+
+
+def test_a_run_where_every_test_is_skipped_is_still_recorded(tmp_path):
+    exercise = make_workspace(tmp_path)
+    (exercise / "test_student.py").write_text(
+        "import pytest\n\ndef test_a():\n    pytest.skip('no Hadoop here')\n")
+    run_pytest_in(exercise, tmp_path / "ws")
+    [line] = attempts(tmp_path / "ws")
+    assert (line["result"], line["skipped"]) == ("incomplete", 1)
+
+
+def test_an_interrupted_run_is_not_recorded_as_passed(tmp_path):
+    """Ctrl+C after some tests passed: pytest ends with exit status 2 (interrupted)."""
+    exercise = make_workspace(tmp_path)
+    (exercise / "test_student.py").write_text(
+        "def test_ok():\n    assert True\n\n"
+        "def test_stopped():\n    raise KeyboardInterrupt\n")
+    run_pytest_in(exercise, tmp_path / "ws")
+    [line] = attempts(tmp_path / "ws")
+    assert (line["result"], line["passed"]) == ("interrupted", 1)

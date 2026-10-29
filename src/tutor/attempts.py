@@ -7,8 +7,12 @@ repo's own tests are never recorded. One line per exercise per run, e.g.
 
     {"time": "2026-10-25T14:03:11", "batch": "2026-10-25_p2-w2-mapreduce",
      "exercise": "word-count", "mode": "learn", "result": "failed", "passed": 2,
-     "failed": 1, "errors": 0, "first_error": "test_example: AssertionError: got 0 lines...",
+     "failed": 1, "errors": 0, "skipped": 0,
+     "first_error": "test_example: AssertionError: got 0 lines...",
      "partitions": 2, "duration_s": 6.1}
+
+"result" is "error", "failed", "interrupted" (Ctrl+C before the run finished),
+"incomplete" (a test was skipped) or "passed": only a run where every test ran and passed.
 
 Nothing reads the file in phase 2; it is kept for choosing review batches later and as
 material for hint rules and mutants. Recording never changes a test result: any problem
@@ -28,6 +32,7 @@ from pathlib import Path
 from tutor.config import WorkspaceError, load_env, load_workspace
 
 ATTEMPTS_FILE = "attempts.jsonl"
+INTERRUPTED = 2  # pytest.ExitCode.INTERRUPTED, without importing pytest here
 _FIRST_ERROR_CHARS = 300
 
 
@@ -36,6 +41,7 @@ class _Tally:
     passed: int = 0
     failed: int = 0
     errors: int = 0
+    skipped: int = 0
     first_error: str | None = None
 
 
@@ -57,7 +63,9 @@ def pytest_collectreport(report):
 
 
 def pytest_runtest_logreport(report):
-    if report.when == "call":
+    if report.skipped and report.when in ("setup", "call"):
+        _record(report, "skipped")
+    elif report.when == "call":
         if report.passed:
             _record(report, "passed")
         elif report.failed:
@@ -68,7 +76,7 @@ def pytest_runtest_logreport(report):
 
 def pytest_sessionfinish(session, exitstatus):
     try:
-        _write(time.monotonic() - _started)
+        _write(time.monotonic() - _started, interrupted=exitstatus == INTERRUPTED)
     except Exception as e:  # never let bookkeeping break a test run
         warnings.warn(f"could not record the attempt: {e}", stacklevel=1)
 
@@ -90,7 +98,7 @@ def _record(report, kind: str) -> None:
     test_file = _config.rootpath / report.nodeid.split("::")[0]
     tally = _tallies.setdefault(test_file, _Tally())
     setattr(tally, kind, getattr(tally, kind) + 1)
-    if kind != "passed" and tally.first_error is None:
+    if kind not in ("passed", "skipped") and tally.first_error is None:
         tally.first_error = _short_error(report)
 
 
@@ -105,7 +113,7 @@ def _short_error(report) -> str:
     return f"{name}: {' '.join(message.split())}"[:_FIRST_ERROR_CHARS]
 
 
-def _write(duration_s: float) -> None:
+def _write(duration_s: float, interrupted: bool = False) -> None:
     if not _tallies:
         return
     # Tests run from a workspace folder, so the repo's .env is loaded by path.
@@ -122,6 +130,7 @@ def _write(duration_s: float) -> None:
         total.passed += tally.passed
         total.failed += tally.failed
         total.errors += tally.errors
+        total.skipped += tally.skipped
         total.first_error = total.first_error or tally.first_error
     if not by_exercise:
         return  # not a workspace exercise: validator or repo tests
@@ -139,10 +148,11 @@ def _write(duration_s: float) -> None:
                 "batch": batch,
                 "exercise": exercise,
                 "mode": _mode(workspace.batches_dir / batch),
-                "result": _result(tally),
+                "result": _result(tally, interrupted),
                 "passed": tally.passed,
                 "failed": tally.failed,
                 "errors": tally.errors,
+                "skipped": tally.skipped,
                 "first_error": tally.first_error,
                 "partitions": int(os.environ.get("TUTOR_PARTITIONS", "2")),
                 "duration_s": round(duration_s, 1),
@@ -158,9 +168,14 @@ def _mode(batch_dir: Path) -> str | None:
         return None
 
 
-def _result(tally: _Tally) -> str:
+def _result(tally: _Tally, interrupted: bool) -> str:
+    """A failure the run found comes first; "passed" only if every test ran and passed."""
     if tally.errors:
         return "error"
     if tally.failed:
         return "failed"
+    if interrupted:
+        return "interrupted"
+    if tally.skipped:
+        return "incomplete"
     return "passed"
