@@ -11,5 +11,6 @@
     "forbidden_calls": ["groupByKey", "collect"]
   },
   "partition_check": true,
+  "standalone": true,
   "source": "synthetic"
 }

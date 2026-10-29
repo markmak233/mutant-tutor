@@ -2,12 +2,17 @@
 
 0. metadata.json fits the batch format (schema.py); the other rules read their settings
    from it, so they are skipped if it does not.
+safe. Every .py file that validation would run passes the static safety check (safety.py);
+   if one does not, nothing is run.
 1. The reference passes every test.
 2. The skeleton fails them: tests ran and failed, not crashed before running.
 3. Every mutant fails them, so the tests can catch each planted bug.
 4. The reference agrees with oracle.py on random inputs (hypothesis, solution/test_oracle.py).
 5. The reference passes with 1, 2 and 4 partitions (exercises with "partition_check").
 api. The reference respects the exercise's static API constraints (see api.py).
+main. `python student.py` runs on its own (metadata `standalone`): both student.py and the
+   reference have an `if __name__ == "__main__":` block, and for a function exercise the
+   reference run that way exits cleanly (it runs the question's example).
 
 Rules 1-3 and 5 run the exercise's own test file with a different candidate as student.py;
 rule 4 runs the exercise's differential test instead. Neither needs to know whether the
@@ -16,15 +21,23 @@ exercise is function-level or file-level: that lives in the exercise's test file
 
 from __future__ import annotations
 
+import ast
+import re
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
-from tutor.execution import DEFAULT_TIMEOUT_S, Outcome, RunResult, run_pytest
+from tutor.execution import Outcome, RunResult, copied_files, links, run_pytest, run_script
 from tutor.schema import Metadata, problems
 from tutor.testkit import COMBINER_ENV, DEFAULT_PARTITIONS, PARTITIONS_ENV
-from tutor.validation.api import count_uses, find_violations
-from tutor.validation.exercise import ExerciseFiles
+from tutor.validation.api import count_uses, find_violations, is_main_block
+from tutor.validation.exercise import STUDENT_FILE, ExerciseFiles
+from tutor.validation.safety import (
+    allowed_imports,
+    config_files,
+    find_hazards,
+    workspace_allow_imports,
+)
 
 # Spark tests read PARTITIONS_ENV as their number of partitions / input files (design.md).
 PARTITION_COUNTS = (1, 2, 4)
@@ -33,17 +46,20 @@ PARTITION_COUNTS = (1, 2, 4)
 class Status(Enum):
     OK = "ok"
     FAIL = "FAIL"
-    SKIPPED = "skip"  # not run because rule 0 or 1 failed
+    SKIPPED = "skip"  # not run because rule 0, safe or 1 failed
     NOT_APPLICABLE = "n/a"  # does not apply to this exercise; does not affect validity
 
 
 @dataclass(frozen=True)
 class RuleResult:
-    rule: str  # "0" to "5", or "api"
+    rule: str  # "0", "safe", "1" to "5", or "api"
     name: str
     status: Status
     detail: str
     duration_s: float
+    # What failed, from pytest's output (failure_excerpt), for whoever must fix it: the
+    # generation pipeline's repair round. The CLI report shows `detail` only.
+    excerpt: str = ""
 
 
 @dataclass(frozen=True)
@@ -59,9 +75,13 @@ class ValidationReport:
         return next(r for r in self.results if r.rule == rule)
 
 
-def validate(ex: ExerciseFiles, timeout_s: float | None = None) -> ValidationReport:
+def validate(ex: ExerciseFiles, timeout_s: float | None = None,
+             oracle_on_failure: bool = False) -> ValidationReport:
     """timeout_s per pytest run: the argument, else metadata `timeout_s` (Hadoop exercises
-    need minutes, since every job costs 7-9 s), else DEFAULT_TIMEOUT_S."""
+    need minutes, since every job costs 7-9 s), else DEFAULT_TIMEOUT_S.
+    `oracle_on_failure`: when the reference fails its tests, still run rule 4. The oracle
+    does not use the tests, so whether the reference agrees with it tells which side of
+    the disagreement is likely wrong; the generation pipeline tells repair."""
     fmt = check_format(ex)
     if fmt.status is not Status.OK:
         # Every other rule reads metadata (timeout, partitions, constraints), so none of
@@ -69,32 +89,54 @@ def validate(ex: ExerciseFiles, timeout_s: float | None = None) -> ValidationRep
         reason = "skipped: metadata.json must fit the batch format first"
         return ValidationReport(ex.exercise_id, [
             fmt,
-            RuleResult("1", "reference passes", Status.SKIPPED, reason, 0.0),
-            *_skipped_test_rules(reason),
-            RuleResult("api", "api constraints", Status.SKIPPED, reason, 0.0),
+            RuleResult("safe", "static safety", Status.SKIPPED, reason, 0.0),
+            *_skipped_after_safety(reason),
+        ])
+    safe = check_safety(ex)
+    if safe.status is not Status.OK:
+        # Code that fails the safety check is never run, not even the reference.
+        return ValidationReport(ex.exercise_id, [
+            fmt, safe, *_skipped_after_safety("skipped: the code must pass the safety check"),
         ])
     if timeout_s is None:
-        timeout_s = float(ex.metadata.get("timeout_s", DEFAULT_TIMEOUT_S))
+        timeout_s = ex.timeout_s
     reference = check_reference_passes(ex, timeout_s)
     if reference.status is not Status.OK:
         # A failing reference means the tests or the exercise are wrong, so the rules that
         # run tests would prove nothing; skipping them also saves the runs. The static API
         # check does not depend on the tests, so it still runs.
+        skipped = _skipped_test_rules("skipped: the reference must pass first")
+        if oracle_on_failure:
+            skipped = [check_matches_oracle(ex, timeout_s) if r.rule == "4" else r
+                       for r in skipped]
         return ValidationReport(ex.exercise_id, [
             fmt,
+            safe,
             reference,
-            *_skipped_test_rules("skipped: the reference must pass first"),
+            *skipped,
             check_api_constraints(ex),
+            check_main(ex, timeout_s),
         ])
     return ValidationReport(ex.exercise_id, [
         fmt,
+        safe,
         reference,
         check_skeleton_fails(ex, timeout_s),
         check_mutants_killed(ex, timeout_s),
         check_matches_oracle(ex, timeout_s),
         check_distribution(ex, timeout_s),
         check_api_constraints(ex),
+        check_main(ex, timeout_s),
     ])
+
+
+def _skipped_after_safety(reason: str) -> list[RuleResult]:
+    return [
+        RuleResult("1", "reference passes", Status.SKIPPED, reason, 0.0),
+        *_skipped_test_rules(reason),
+        RuleResult("api", "api constraints", Status.SKIPPED, reason, 0.0),
+        RuleResult("main", "runs on its own", Status.SKIPPED, reason, 0.0),
+    ]
 
 
 def _skipped_test_rules(reason: str) -> list[RuleResult]:
@@ -113,12 +155,86 @@ def check_format(ex: ExerciseFiles) -> RuleResult:
     return RuleResult("0", "format", Status.OK, "metadata.json fits the batch format", 0.0)
 
 
+def check_safety(ex: ExerciseFiles) -> RuleResult:
+    """Every .py file a run copies in, subfolders included, since pytest collects tests and
+    conftest.py files recursively (student.py is the owner's and is replaced in every
+    run), and every solution file that validation runs."""
+    try:
+        allowed = allowed_imports(ex.metadata["framework"],
+                                  workspace_allow_imports(ex.exercise_dir))
+    except ValueError as e:
+        return RuleResult("safe", "static safety", Status.FAIL, str(e), 0.0)
+    linked = links({n: p for n, p in ex.run_files(ex.skeleton).items() if n != STUDENT_FILE})
+    if linked:  # checked first: a link may point outside the exercise, or into a loop
+        return RuleResult("safe", "static safety", Status.FAIL, "; ".join(
+            f"{name} is a link, not allowed in an exercise" for name in linked), 0.0)
+    copied = _copied(ex)
+    files = {name: path for name, path in copied.items() if name.endswith(".py")}
+    solution_files = [ex.reference, ex.skeleton, *ex.mutants, ex.oracle, ex.oracle_test]
+    for path in filter(None, solution_files):
+        files[f"{path.parent.name}/{path.name}"] = path
+    found = [f"{name} is not allowed in an exercise (pytest runs it on its own)"
+             for name in config_files(copied)]
+    for name, path in files.items():
+        found += [f"{name} {hazard}" for hazard in find_hazards(path.read_text(), allowed)]
+    if found:
+        return RuleResult("safe", "static safety", Status.FAIL, "; ".join(found), 0.0)
+    return RuleResult("safe", "static safety", Status.OK, f"{len(files)} files checked", 0.0)
+
+
+def _copied(ex: ExerciseFiles) -> dict[str, Path]:
+    """The files a run copies into its directory, by their path there, without student.py."""
+    return copied_files({name: path for name, path in ex.run_files(ex.skeleton).items()
+                         if name != STUDENT_FILE})
+
+
+def check_main(ex: ExerciseFiles, timeout_s: float) -> RuleResult:
+    """Rule main: what a student types first, `python student.py`, does something.
+    Static for both interfaces; a function exercise's reference is also run (no arguments,
+    in a temp copy), since its main block calls the student's function on the example."""
+    standalone = ex.metadata.get("standalone")
+    if standalone is None:  # an exercise written before the rule (2026-10-29)
+        return RuleResult("main", "runs on its own", Status.NOT_APPLICABLE,
+                          "standalone not set: an exercise from before this rule", 0.0)
+    if standalone is False:
+        return RuleResult("main", "runs on its own", Status.NOT_APPLICABLE,
+                          "standalone: false (a framework launches it; no main of its own)",
+                          0.0)
+    missing = [name for name, path in (("student.py", ex.skeleton), ("reference.py",
+                                                                     ex.reference))
+               if not has_main_block(path.read_text())]
+    if missing:
+        return RuleResult("main", "runs on its own", Status.FAIL,
+                          f"{' and '.join(missing)} lack an `if __name__ == \"__main__\":` "
+                          f"block: `python student.py` must run on its own", 0.0)
+    if ex.metadata.get("interface") != "function":
+        # A program taking its paths from sys.argv (the slides' form); the tests run it.
+        return RuleResult("main", "runs on its own", Status.OK,
+                          "a program run as `python student.py <input> <output>`", 0.0)
+    r = run_script(ex.run_files(ex.reference), STUDENT_FILE, timeout_s)
+    if r.outcome is Outcome.PASSED:
+        return RuleResult("main", "runs on its own", Status.OK,
+                          "`python student.py` ran the example (reference)", r.duration_s)
+    return RuleResult("main", "runs on its own", Status.FAIL,
+                      f"`python student.py` with the reference: {r.outcome.value}, exit code "
+                      f"{r.returncode}", r.duration_s, r.output[-1500:])
+
+
+def has_main_block(source: str) -> bool:
+    """A module-level `if __name__ == "__main__":` (either side of the ==)."""
+    try:
+        return any(is_main_block(node) for node in ast.parse(source).body)
+    except SyntaxError:
+        return False
+
+
 def check_reference_passes(ex: ExerciseFiles, timeout_s: float) -> RuleResult:
     r = _run(ex, ex.reference, timeout_s, DEFAULT_PARTITIONS)
     if r.outcome is Outcome.PASSED:
         return RuleResult("1", "reference passes", Status.OK, _summary(r), r.duration_s)
     detail = f"reference {r.outcome.value}: {_summary(r)}"
-    return RuleResult("1", "reference passes", Status.FAIL, detail, r.duration_s)
+    return RuleResult("1", "reference passes", Status.FAIL, detail, r.duration_s,
+                      failure_excerpt(r.output))
 
 
 def check_skeleton_fails(ex: ExerciseFiles, timeout_s: float) -> RuleResult:
@@ -131,7 +247,8 @@ def check_skeleton_fails(ex: ExerciseFiles, timeout_s: float) -> RuleResult:
         detail = f"skeleton errors before any test runs (import/syntax?): {_summary(r)}"
     else:
         detail = "skeleton timed out"
-    return RuleResult("2", "skeleton fails", Status.FAIL, detail, r.duration_s)
+    excerpt = failure_excerpt(r.output) if r.outcome is Outcome.ERROR else ""
+    return RuleResult("2", "skeleton fails", Status.FAIL, detail, r.duration_s, excerpt)
 
 
 def check_mutants_killed(ex: ExerciseFiles, timeout_s: float) -> RuleResult:
@@ -193,7 +310,8 @@ def check_matches_oracle(ex: ExerciseFiles, timeout_s: float) -> RuleResult:
         detail = f"differential test cannot run: {_summary(r)}"
     else:
         detail = "differential test timed out: lower max_examples in test_oracle.py"
-    return RuleResult("4", "matches oracle", Status.FAIL, detail, r.duration_s)
+    return RuleResult("4", "matches oracle", Status.FAIL, detail, r.duration_s,
+                      failure_excerpt(r.output))
 
 
 def check_distribution(ex: ExerciseFiles, timeout_s: float) -> RuleResult:
@@ -220,7 +338,8 @@ def check_distribution(ex: ExerciseFiles, timeout_s: float) -> RuleResult:
         duration += r.duration_s
         if r.outcome is not Outcome.PASSED:
             detail = f"reference {r.outcome.value} {description}: {_summary(r)}"
-            return RuleResult("5", "distribution", Status.FAIL, detail, duration)
+            return RuleResult("5", "distribution", Status.FAIL, detail, duration,
+                              failure_excerpt(r.output))
     passed = []
     if partition_check:
         passed.append(f"{', '.join(map(str, PARTITION_COUNTS))} partitions")
@@ -263,6 +382,40 @@ def _summary(r: RunResult) -> str:
     """pytest's last line, e.g. "4 passed in 8.7s"."""
     lines = [line.strip("= ") for line in r.output.splitlines() if line.strip()]
     return lines[-1] if lines else "(no output)"
+
+
+_SECTION = re.compile(r"^_{3,} (.+?) _{3,}$")
+_TEST_LOCATION = re.compile(r"^test_\w+\.py:\d+")
+_ABSOLUTE_PATH = re.compile(r"(?:/[^\s/'\"]+)+/([^\s/'\"]+)")
+
+
+def failure_blocks(output: str, per_test: int = 12) -> list[tuple[str, list[str]]]:
+    """(failing test, its lines) from `pytest -q` output: the test's line in the test file
+    and pytest's `E` lines (the assertion and what differed), without the tracebacks
+    through testkit or Spark and their warnings. Absolute paths are cut to the file name:
+    they name the machine's user, and the text may go to a model."""
+    blocks: list[tuple[str, list[str]]] = []
+    current: list[str] | None = None
+    for line in output.splitlines():
+        if line.startswith("="):  # "short test summary info", warnings, the last line
+            current = None
+            continue
+        header = _SECTION.match(line)
+        if header:
+            current = []
+            blocks.append((header.group(1), current))
+        elif current is not None and len(current) < per_test and (
+                line.startswith("E ") or _TEST_LOCATION.match(line)):
+            current.append(_ABSOLUTE_PATH.sub(r"\1", line.rstrip()))
+    return [(name, lines) for name, lines in blocks if lines]
+
+
+def failure_excerpt(output: str, per_test: int = 12, limit: int = 2500) -> str:
+    """failure_blocks as text, for whoever must fix the failure (the generation pipeline's
+    repair round)."""
+    text = "\n".join("\n".join([name, *lines])
+                     for name, lines in failure_blocks(output, per_test))
+    return text if len(text) <= limit else text[:limit] + "\n..."
 
 
 def _falsifying_example(r: RunResult, limit: int = 300) -> str:

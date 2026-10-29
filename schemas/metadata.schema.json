@@ -6,6 +6,7 @@
       "properties": {
         "forbidden_calls": {
           "default": [],
+          "description": "Names that must not be used as a method or function, e.g. \"groupByKey\".",
           "items": {
             "minLength": 1,
             "type": "string"
@@ -15,6 +16,7 @@
         },
         "forbidden_imports": {
           "default": [],
+          "description": "Modules that must not be imported, submodules included, e.g. \"pyspark.sql\".",
           "items": {
             "minLength": 1,
             "type": "string"
@@ -24,6 +26,7 @@
         },
         "required_definitions": {
           "default": [],
+          "description": "Functions or methods the code must define (def, or an MRStep keyword), e.g. \"mapper_final\", or \"AuctionStats.run\" for a method of a class. Not API calls the code should make.",
           "items": {
             "minLength": 1,
             "type": "string"
@@ -33,6 +36,7 @@
         },
         "required_any": {
           "default": [],
+          "description": "Groups of names the code defines (as in required_definitions); at least one group must be fully defined, e.g. [[\"combiner\"], [\"mapper_init\", \"mapper_final\"]]. Not API calls.",
           "items": {
             "items": {
               "minLength": 1,
@@ -46,6 +50,7 @@
         },
         "count_uses": {
           "default": [],
+          "description": "Names whose uses are counted for the report, never limited, e.g. \"MRStep\".",
           "items": {
             "minLength": 1,
             "type": "string"
@@ -183,7 +188,7 @@
     },
     "entry_point": {
       "items": {
-        "minLength": 1,
+        "pattern": "^[A-Za-z_]\\w*(\\.[A-Za-z_]\\w*)?$",
         "type": "string"
       },
       "minItems": 1,
@@ -234,6 +239,19 @@
       "minItems": 1,
       "title": "Mutant Partitions",
       "type": "array"
+    },
+    "standalone": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "student.py and reference.py run with `python <file>.py`: a function exercise has an `if __name__ == \"__main__\":` block that runs the question's example and prints the result; a file exercise one that reads its paths from sys.argv. False only for code a framework launches that has no main of its own (a Hadoop submission, a project's entry point). Left out: an exercise from before this rule.",
+      "title": "Standalone"
     },
     "source": {
       "anyOf": [

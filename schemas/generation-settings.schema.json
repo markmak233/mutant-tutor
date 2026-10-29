@@ -1,0 +1,118 @@
+{
+  "additionalProperties": false,
+  "properties": {
+    "max_rounds": {
+      "default": 3,
+      "description": "Repair rounds after the first draft; an item still invalid after them is discarded.",
+      "maximum": 5,
+      "minimum": 0,
+      "title": "Max Rounds",
+      "type": "integer"
+    },
+    "stronger_repair_from": {
+      "default": 2,
+      "description": "The repair round from which the `repair` role's model takes over; the generating model repairs before it. 1: the larger model does every repair.",
+      "maximum": 5,
+      "minimum": 1,
+      "title": "Stronger Repair From",
+      "type": "integer"
+    },
+    "repair_temperature_step": {
+      "default": 0.2,
+      "description": "Repair round N asks at temperature N x step (at most 0.8); the first draft asks at 0.",
+      "maximum": 0.4,
+      "minimum": 0,
+      "title": "Repair Temperature Step",
+      "type": "number"
+    },
+    "thinking": {
+      "default": false,
+      "description": "The generating model reasons at length before writing the exercise.",
+      "title": "Thinking",
+      "type": "boolean"
+    },
+    "repair_thinking": {
+      "default": true,
+      "description": "The `repair` role's model reasons first.",
+      "title": "Repair Thinking",
+      "type": "boolean"
+    },
+    "plan_thinking": {
+      "default": true,
+      "description": "The planning model reasons first.",
+      "title": "Plan Thinking",
+      "type": "boolean"
+    },
+    "oracle_thinking": {
+      "default": false,
+      "description": "The oracle's model reasons first.",
+      "title": "Oracle Thinking",
+      "type": "boolean"
+    },
+    "max_tokens": {
+      "default": 32000,
+      "description": "Output tokens per reply when the model thinks (its reasoning counts as output).",
+      "maximum": 128000,
+      "minimum": 2000,
+      "title": "Max Tokens",
+      "type": "integer"
+    },
+    "max_tokens_no_thinking": {
+      "default": 16000,
+      "description": "Output tokens per reply when the model does not think.",
+      "maximum": 128000,
+      "minimum": 2000,
+      "title": "Max Tokens No Thinking",
+      "type": "integer"
+    },
+    "item_token_budget": {
+      "default": 400000,
+      "description": "Input and output tokens per item over all rounds; repairs stop once it is spent.",
+      "minimum": 20000,
+      "title": "Item Token Budget",
+      "type": "integer"
+    },
+    "context_chars": {
+      "default": 120000,
+      "description": "Characters of course pages a prompt may hold; a longer lecture is cut to the item's slides.",
+      "minimum": 10000,
+      "title": "Context Chars",
+      "type": "integer"
+    },
+    "max_count": {
+      "default": 6,
+      "description": "At most this many exercises when the plan chooses how many.",
+      "maximum": 20,
+      "minimum": 1,
+      "title": "Max Count",
+      "type": "integer"
+    },
+    "parallel": {
+      "anyOf": [
+        {
+          "maximum": 8,
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Exercises generated at once; empty: one per four CPU cores, 1 to 4 (each validation runs Spark on every core).",
+      "title": "Parallel"
+    },
+    "mode": {
+      "default": "learn",
+      "description": "learn: questions may explain the cause of a bug; review: only its symptom.",
+      "enum": [
+        "learn",
+        "review"
+      ],
+      "title": "Mode",
+      "type": "string"
+    }
+  },
+  "title": "GenerationSettings",
+  "type": "object"
+}

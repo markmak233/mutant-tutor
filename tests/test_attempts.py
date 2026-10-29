@@ -59,6 +59,34 @@ def test_a_run_in_an_exercise_folder_is_recorded(tmp_path):
     assert line["first_error"].startswith("test_wrong: AssertionError: adds wrong")
 
 
+def test_the_first_error_is_stored_without_terminal_colours():
+    from types import SimpleNamespace
+
+    from tutor.attempts import _short_error
+    coloured = "AssertionError: assert ['\x1b[33m(age + 10)\x1b[39;49;00m'] == ['age10']"
+    report = SimpleNamespace(nodeid="test_student.py::test_columns", longrepr=SimpleNamespace(
+        reprcrash=SimpleNamespace(message=coloured)))
+    assert _short_error(report) == (
+        "test_columns: AssertionError: assert ['(age + 10)'] == ['age10']")
+
+
+def test_a_failing_run_keeps_its_student_py_once_and_a_passing_run_none(tmp_path):
+    exercise = make_workspace(tmp_path)
+    (exercise / "student.py").write_text("def add(a, b):\n    return a * b\n")
+    run_pytest_in(exercise, tmp_path / "ws")
+    run_pytest_in(exercise, tmp_path / "ws")  # the same mistake again
+    (exercise / "test_student.py").write_text("def test_ok():\n    assert True\n")
+    run_pytest_in(exercise, tmp_path / "ws")
+
+    first, again, passing = attempts(tmp_path / "ws")
+    assert first["code"] == again["code"]
+    assert first["code"].startswith("code/2026-10-25_p2-w2/word-count/")
+    kept = tmp_path / "ws" / "attempts" / first["code"]
+    assert kept.read_text() == "def add(a, b):\n    return a * b\n"
+    assert len(list(kept.parent.iterdir())) == 1
+    assert "code" not in passing
+
+
 def test_every_run_appends_a_line(tmp_path):
     exercise = make_workspace(tmp_path, mode=None)
     run_pytest_in(exercise, tmp_path / "ws")
@@ -90,3 +118,33 @@ def test_runs_outside_the_workspace_are_not_recorded(tmp_path):
     run_pytest_in(elsewhere, tmp_path / "ws")
 
     assert not (tmp_path / "ws" / "attempts").exists()
+
+
+def test_a_run_with_a_skipped_test_is_incomplete_not_passed(tmp_path):
+    exercise = make_workspace(tmp_path)
+    (exercise / "test_student.py").write_text(
+        "import pytest\n\ndef test_ok():\n    assert True\n\n"
+        "@pytest.mark.skip\ndef test_later():\n    pass\n")
+    run_pytest_in(exercise, tmp_path / "ws")
+    [line] = attempts(tmp_path / "ws")
+    assert (line["result"], line["passed"], line["skipped"]) == ("incomplete", 1, 1)
+
+
+def test_a_run_where_every_test_is_skipped_is_still_recorded(tmp_path):
+    exercise = make_workspace(tmp_path)
+    (exercise / "test_student.py").write_text(
+        "import pytest\n\ndef test_a():\n    pytest.skip('no Hadoop here')\n")
+    run_pytest_in(exercise, tmp_path / "ws")
+    [line] = attempts(tmp_path / "ws")
+    assert (line["result"], line["skipped"]) == ("incomplete", 1)
+
+
+def test_an_interrupted_run_is_not_recorded_as_passed(tmp_path):
+    """Ctrl+C after some tests passed: pytest ends with exit status 2 (interrupted)."""
+    exercise = make_workspace(tmp_path)
+    (exercise / "test_student.py").write_text(
+        "def test_ok():\n    assert True\n\n"
+        "def test_stopped():\n    raise KeyboardInterrupt\n")
+    run_pytest_in(exercise, tmp_path / "ws")
+    [line] = attempts(tmp_path / "ws")
+    assert (line["result"], line["passed"]) == ("interrupted", 1)

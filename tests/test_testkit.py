@@ -85,6 +85,19 @@ def test_run_program_requires_success_marker(tmp_path):
         run_program(SavesNothing, tmp_path / "in", tmp_path / "out")
 
 
+class SavesIntoFolders:
+    def run(self, input_path, output_path):
+        for name in ("count", "total"):
+            (Path(output_path) / name).mkdir(parents=True)
+            (Path(output_path) / name / "_SUCCESS").touch()
+
+
+def test_run_program_says_where_output_went_when_saved_into_folders(tmp_path):
+    with pytest.raises(AssertionError, match=r"outputPath itself: save it there with one "
+                       r"saveAsTextFile\(outputPath\); it was saved into count/, total/"):
+        run_program(SavesIntoFolders, tmp_path / "in", tmp_path / "out")
+
+
 # --- order="any" -------------------------------------------------------------------------
 
 
@@ -140,6 +153,18 @@ def test_float_tol_applies_only_to_whole_numeric_fields():
     with pytest.raises(AssertionError):  # a tab where a comma belongs
         assert_output(out(["s1\t16.25"]), ["s1,16.25"], float_tol=1e-9)
     assert_output(out(["s1,2024-01,16.250000000001"]), ["s1,2024-01,16.25"], float_tol=1e-9)
+
+
+def test_float_tol_finds_a_full_matching_whatever_the_output_order():
+    """Taking the first line in reach would pair 0.1 with 0.0 and leave 0.0 unmatched."""
+    assert_output(out(["0.1", "0.0"]), ["0.0", "0.2"], float_tol=0.11)
+    with pytest.raises(AssertionError, match="unexpected: .*0.3"):
+        assert_output(out(["0.1", "0.3"]), ["0.0", "0.0"], float_tol=0.11)
+
+
+def test_float_tol_compares_big_counts_exactly():
+    with pytest.raises(AssertionError):
+        assert_output(out(["10000000000000001"]), ["10000000000000000"], float_tol=0.1)
 
 
 def test_optional_quotes_for_mrjob_json_keys():

@@ -24,14 +24,14 @@ container for isolation is fine; deploying the tool as a service is not.
   chat when stuck. Rules live in CLAUDE.md ("Tutoring"): read the code and run the tests first,
   explain the first real error and its concept, direction before code, never touch `student.py`
   or quote `solution/`. Mistakes seen this way feed debugging exercises and mutants. A hint
-  command inside the system follows phase 3 (roadmap 3b).
+  command inside the system follows phase 3 (roadmap 3c).
 - Batch format contract (decided 2026-10-28): drafting batches with Claude Code stays a
   supported way to make exercises after phase 3, next to the LLM pipeline. What both must
   produce is the batch format, defined once in `schema.py` (see "Exercise validation", rule
   0), so the validator, hints, evaluation and GUI never need to know who wrote a batch;
   `manifest.json` `method` and `model` record it. Reason: the first batches were written by
   hand without any check on metadata, and one assistant in one week produced three
-  spellings of the same field. Fields added later (such as 3b's per-mutant misconception
+  spellings of the same field. Fields added later (such as 3c's per-mutant misconception
   line) start optional with a default; making one required comes with a migration script
   for existing batches, never by letting them fail.
 
@@ -108,12 +108,13 @@ smartCodingReview/                       # public repo (the `tutor/` above), cod
 │   ├── config.py                        # P1 reads WORKSPACE_DIR, derives subpaths
 │   ├── envcheck.py                      # P1 checks the workspace's [requires]
 │   ├── execution.py                     # P1 copy to temp dir -> subprocess pytest -> delete
-│   ├── validation/                      # P1 the checks, rule 0 added in P2 (internals designed before coding)
+│   ├── validation/                      # P1 the checks; P2 rule 0, P3a the safety check (internals designed before coding)
 │   ├── testkit.py                       # P2a run a file-level program, read part-*, compare output
 │   ├── attempts.py                      # P2a pytest plugin: one attempts.jsonl line per exercise run
 │   ├── schema.py                        # P2 Pydantic models of metadata.json / manifest.json (rule 0),
 │   │                                    #   P3 parses LLM output into the same models
-│   ├── llm.py                           # P3 thin LLM API client, no LangChain
+│   ├── materials/                       # P3a course files -> per-file md cache (pypdfium2), vision pages
+│   ├── llm.py                           # P3a thin OpenAI-compatible client, standard library only, no LangChain
 │   ├── graph/                           # P3 langgraph dependency added here
 │   ├── rag/                             # P4
 │   └── eval/                            # P5
@@ -144,6 +145,9 @@ smartcodereview-workspace/
     ├── coding_materials/                # labs and projects, read-only
     │   ├── labN/                        # one flat folder each: problem text, data, expected outputs
     │   └── proj2/
+    ├── cache/                           # text of every source file, read once (see "Reading files")
+    │   └── lectures/<file>.md           #   mirrors the source path; one section per page or slide
+    ├── logs/llm_calls.jsonl             # P3a one line per LLM call (purpose, model, tokens, seconds)
     ├── batches/                         # one directory per generation run
     │   ├── 2026-10-27_p2-golden/
     │   │   ├── manifest.json            # phase, date, mode, sources, method, model, git commit, exercises,
@@ -152,6 +156,7 @@ smartcodereview-workspace/
     │   │   │   └── <exercise-id>/
     │   │   │       ├── student.py       # the one file to open: question in the module docstring,
     │   │   │       │                    #   skeleton below; owner writes the answer here
+    │   │   │       ├── question.md      # the docstring as Markdown, made by code (tutor/question.py)
     │   │   │       ├── test_student.py  # run it, no need to read it
     │   │   │       ├── sample_input/    # file-level only: the docstring example as input files
     │   │   │       └── hints.md         # three levels; separate so it is opened only when stuck
@@ -169,6 +174,7 @@ smartcodereview-workspace/
     │   │   └── discarded/               # also: exercises still failing after 3 repairs + log
     │   └── 2026-11-10_p4-rag-2/         # second run on the same day
     ├── attempts/attempts.jsonl          # one line per test run: batch, exercise, time, pass/fail, errors
+    ├── attempts/code/                   # the student.py of each failed run, once per content
     ├── ratings.jsonl                    # one teaching-quality rating per solved exercise
     ├── index/                           # P4 BM25 / vector index, rebuildable
     └── runs/<date>_<label>/             # P5 evaluation outputs
@@ -233,11 +239,99 @@ Decided 2026-10-24 after reading the course's labs and projects.
   output rules, marking points), and can also be generation sources when the user includes
   them (see "Material selection").
 
+Reading files (decided 2026-10-28, pre-phase 3). Every source file is read once into a
+markdown cache, which generation, RAG and an assistant drafting exercises by hand all read
+instead of the original files.
+- Cache: `$WORKSPACE_DIR/cache/<source path>.md`; the lecture folder (`LECTURE_DIR` or
+  `$WORKSPACE_DIR/lectures`) maps to `cache/lectures/` wherever it is, so the pipeline finds
+  a lecture's cache by name (an outside `LECTURE_DIR` passed the config check but could not
+  be cached until an outside review, 2026-10-29). One file per source file, one section per
+  page or slide, headed with the location (`## p.12 · slide 2.10`), followed by a comment
+  with how it was read (text layer or vision model, model name, date) and a hash of that
+  page's content. A page whose hash is unchanged is never read again; a changed file costs
+  only its changed pages. A transcription also records the prompt version
+  (`vision.PROMPT_VERSION`, raised with every prompt change; a test fails if the prompt
+  changes without it), and a vision run transcribes pages made with an older prompt again,
+  except pages marked `corrected` (fixed by hand against the slide), which are listed
+  instead of overwritten (2026-10-28, after 130 pages were left on an old prompt). The hash is of the page content, not of a rendered image, so a
+  library upgrade does not trigger a re-read.
+- Pages that need the vision model (`materials/pdf.py`, revised 2026-10-28 on real data):
+  ignore images that sit at the same position on at least 30% of the pages (logo, template)
+  and images with 5 or more text-layer characters on top of them (a title's shadow effect,
+  a text box's background: the text layer already has their words); flag a page whose
+  remaining images cover at least 5% of it. An image inside a form XObject reports bounds in
+  the form's coordinates, so the form's bounds on the page stand for it. History: the first
+  rule (25%, no text rule) missed a slide of three small code screenshots; 5% without the
+  text rule flagged every section-divider slide. The final rule flagged 162 of 462 pages,
+  caught every code and pseudocode image checked by eye, and left out a code box whose code
+  was in the text layer. A repeated image must also be the same image (by its data hash),
+  and a page with images but no text layer at all (a scan) always needs vision: three
+  different full-page scans in one box counted as decoration and left their pages empty
+  (outside review, 2026-10-29; the 462 lecture pages were flagged exactly as before).
+- Transcription (`materials/vision.py`): a flagged page is rendered to PNG and sent with its
+  text layer; the prompt asks for code, pseudocode and commands verbatim in fenced blocks
+  (pseudocode tagged `text`, symbols such as ← ∈ kept), diagrams as structured text, tables
+  as markdown, decoration (photos, logos, word clouds) as one line, `[?]` for what cannot be
+  read, and no invented links. Python blocks are checked with `ast.parse` (a block that does
+  not parse gets a note, not a rejection). Thinking is turned off (`reasoning_effort:
+  "none"`; transcription is copying) and output is capped at 2048 tokens. A runaway
+  repetition (a unit repeated 8 or more times over at least 400 characters, e.g. `&nbsp;`
+  filling a blank area) is cut with a note, since at temperature 0 a rerun loops the same
+  way; output that hits the cap without a loop is kept as `partial` and done again on the
+  next run. If the model fails, pages done so far are kept and the rest stay `pending`.
+- Measured on the first course (Gemma 4 26B-A4B, local): thinking on took 25-80 s per page
+  with about 85% of output tokens spent on hidden reasoning; thinking off took 4-11 s with
+  equal or better quality (code, pseudocode and commands exact on the six pages read by
+  hand). All 162 image pages: median 7.2 s, about 21 minutes. Weaknesses seen: symbols
+  rewritten to ASCII (fixed by the prompt), an empty `...` continuation line dropped, one
+  wrong description of an example. The pages read by hand stay the reference set for
+  comparing models.
+- Commands: `python -m tutor.materials <file or folder>` (text layer only; image pages
+  `pending`), `--vision` to transcribe pending and partial pages with `LLM_MODEL`; calls go to
+  `$WORKSPACE_DIR/logs/llm_calls.jsonl`. Error bodies quoted there and in error messages
+  have the profile's key and anything key-like (`Bearer ...`, `sk-...`) replaced first, in
+  case a server echoes the request (outside review, 2026-10-29).
+- PDF library: pypdfium2 (Apache / BSD) for text and rendering, plus pdfplumber (MIT) only if
+  RAG needs per-character font data. Compared on the first course's 9 lecture PDFs with
+  PyMuPDF and pdfplumber: pypdfium2 was the only one to merge the characters these slides
+  draw twice (shadow / bold) and keep diagram rows together; all three found the same slide
+  footers; speed does not matter at this size. PyMuPDF (the earlier choice) is AGPL, which
+  would follow the code into a packaged GUI and make the repo's MIT label misleading for
+  reuse, and it offered nothing the other two lack here.
+- Other formats, each library added only when a course has such files (pip-installable,
+  permissive licence, as optional extras such as `tutor[office]`; a missing one is reported
+  with the extra to install, not a crash):
+  - `.pptx`: python-pptx (MIT): text, tables, speaker notes, and pictures as their original
+    bytes with position, which go to the vision model directly. Diagrams drawn from shapes
+    and SmartArt are lost without rendering, which needs LibreOffice or an export to PDF by
+    the user; envcheck reports `soffice` as optional.
+  - `.docx`: python-docx or mammoth (MIT / BSD); saved web pages: BeautifulSoup + markdownify
+    (MIT), keeping LaTeX formulas (not html2text: GPL); `.ipynb`: the standard library's
+    `json` (markdown, code and outputs per cell; output images to the vision model);
+    images: Pillow, with pillow-heif for phone photos; `.xlsx`: openpyxl, read as data like
+    CSV; EPUB: `zipfile` + BeautifulSoup (not ebooklib: AGPL); captions (`.vtt`, `.srt`):
+    standard library; lecture recordings: faster-whisper, much later.
+  - Not read: `.doc`, `.ppt`, Keynote and Google formats (the user exports to PDF, PPTX or
+    DOCX); archives, as above. Office files are zip packages, so file and unpacked sizes are
+    capped before parsing.
+  - Materials container (owner, 2026-10-28): the reader runs on the host first, PDF only
+    (pypdfium2 needs no system install). When office formats need LibreOffice, the reader
+    can also run in a container with no network: source files mounted read-only, the md
+    cache and page images written out, the vision model called from the host on those
+    images. It isolates parser exploits in crafted files and bundles LibreOffice. It does
+    not stop prompt injection: that text is meant to reach the LLM wherever it is parsed,
+    so layer A and the test-run container answer it.
+  - All-in-one converters (MarkItDown, Docling, Unstructured) were considered: they hide
+    page and slide numbers, which sources must record, or bring heavy layout models.
+    MarkItDown may serve as a fallback for formats without a reader.
+
 ## Exercise validation (deterministic, never LLM-judged)
 
 An exercise is valid only if:
 
 0. `metadata.json` matches the `schema.py` model (format).
+safe. Every `.py` file that validation runs passes the static safety check (see "Code
+   execution safety", layer A); otherwise nothing is run.
 1. `reference.py` passes all tests.
 2. `skeleton.py` (the pristine skeleton) fails.
 3. Every mutant in `mutants/` fails.
@@ -312,6 +406,19 @@ Rule 5 and the API check (phase 1g):
   not); both gaps were found by a Codex review on 2026-10-25. Still a static aid, not a proof:
   `getattr` with a built string, `exec` and the like escape it. The same function can later
   check student answers. It runs even when rule 1 fails, since it does not depend on the tests.
+  The `if __name__ == "__main__":` block is left out of it (the demo below, not the solution,
+  may print with a forbidden action such as collect()); the safety check still reads it.
+- Rule `main` (owner, 2026-10-29: every program runs with `python xxx.py`, except code a
+  framework launches with no main of its own): metadata `standalone` true means
+  `student.py` and `reference.py` have an `if __name__ == "__main__":` block. A function
+  exercise's block runs the question's example and prints the result (a Spark one builds
+  and stops its own session), and the rule runs the reference that way in the isolated
+  runner (`execution.run_script`, exit code 0). A file exercise's block takes its paths
+  from sys.argv as the slides' standalone programs do (static check only; the tests run
+  it). `standalone` false (a Hadoop submission, a project's entry point) and unset (an
+  exercise from before the rule) are n/a. The pipeline asks for the block and writes
+  `standalone: true` unless the model chose false. The skeleton's block raises
+  NotImplementedError until the student writes the function, which is expected.
 - Measured 2026-10-24 for rules 1-3, 5 and api: `station-average-rdd` about 29 s,
   `station-max-file` about 61 s.
 
@@ -455,7 +562,10 @@ in two places would drift. Metadata keeps what the validator reads (constraints,
     sides gets the tolerance, every other field must match exactly. The first version
     compared every number in the line by value, so `s01,2024-1` passed for `s1,2024-01`
     (Codex review, 2026-10-25). 0, the default, compares characters, so a required number
-    format is checked.
+    format is checked. Numbers are compared as decimals (as floats two 17-digit counts that
+    differ by one were equal), and unordered lines are matched one to one by augmenting
+    paths, not by taking the first line in reach, which could reject correct output in
+    another order (both from an outside review, 2026-10-29).
   - `per_file` is checked without knowing which key went to which reducer: `expected` is the
     fully sorted output and each part file must be a subsequence of it.
   - Mismatch messages are for the learner, who sees them first: unexpected and missing lines
@@ -529,7 +639,7 @@ too easy`), since yes/no labels compare cleanly with a judge's and need no scale
 assistant writes one JSON line per exercise to the workspace's `ratings.jsonl` (batch,
 exercise, date, clear, fits, taught, targets, remark), one file for all batches so later
 plans read every rating at once. Those ratings are the labels an LLM judge is checked against before
-phase 3 trusts it, and later batches' plans read them (see the [3] preference chat). ContentGen (SIGCSE TS 2026) separates
+it is trusted (roadmap 3b), and later batches' plans read them (see the [3] preference chat). ContentGen (SIGCSE TS 2026) separates
 correctness from contextual fit in the same way, and found that a summary of recently
 covered material in the prompt improved generated questions (a [3] candidate).
 
@@ -557,8 +667,9 @@ In phase 2 Claude Code drafts 3-5 per exercise and the validator plus the owner 
 mutants (unkillable) and ones that crash on import; any bug the owner makes while solving is added as
 a mutant. Phase 3 moves drafting to the LLM pipeline.
 
-Independent checks (decided in principle 2026-10-26, Codex review 4; built at phase 3
-start, design explained first since it touches `validation/`). When question, reference,
+Independent checks (decided in principle 2026-10-26, Codex review 4; the separate oracle
+is built in 3a, the held-out set in 3b once the owner's solutions and mistakes exist; design
+explained first since it touches `validation/`). When question, reference,
 tests, mutants and oracle come from one generation, they can agree with each other and
 still share one misreading of the requirement; killing every planted mutant only shows
 the planted bugs are caught. This already happened by hand: the stripes test rejected the
@@ -579,24 +690,311 @@ solving.
 ## Generation pipeline (LangGraph)
 
 ```
-retrieve_context -> generate_exercise -> validate --pass--> save
-                          ^                  |
-                          +---- repair <--fail (max 3)
-                                             +--over limit--> discard + log
+plan -> [interrupt: owner approves / edits, adds preferences] -> for each plan item:
+  retrieve_context -> generate -> validate --pass--> save
+                         ^           |
+                         +-- repair <-+ fail, round < 3
+                                      + fail, round = 3 --> discard + log
 ```
 
-- LLM output parsed into Pydantic models, the same `schema.py` models that rule 0 checks.
+Design approved 2026-10-28 (owner):
+- Pluggable: nodes are plain functions (state in, partial state out) in `graph/nodes.py`,
+  calling `tutor.llm`; only `graph/build.py` imports `langgraph` (optional dependency group
+  `gen`), and nothing outside `graph/` depends on it. No LangChain. LangGraph is used for
+  what is tedious by hand: interrupt and resume with a SQLite checkpointer in the workspace
+  (approve the plan tomorrow), conditional edges, and state history for debugging.
+- State: sources, preferences, plan (items: knowledge point, slide range, type, interface,
+  framework), and per item the context, draft files, validation report, repair round;
+  outcomes per item for the phase 5 metrics.
+- Nodes: `plan` (LLM; coverage.md gaps + slide titles of the sources + preferences ->
+  BatchPlan, then interrupt), `retrieve_context` (no LLM, see below), `generate` (LLM,
+  structured output), `validate` (no LLM: `tutor.validation` as it is, rule 0 to api),
+  `repair` (LLM; gets the draft and the failing rules' details, not the passing ones, so
+  independent failures such as rule 3 and api are fixed in one round), `save` (moves
+  the exercise into `batches/`, updates the manifest; a `coverage.md` change is proposed to
+  the owner, never written).
+- Drafts are written to `batches/.drafts/` and kept when discarded, to study failures.
+- The draft (`graph/state.py` ExerciseDraft, sent as a JSON Schema; GLM enforces it) asks
+  only for what cannot be derived: skeleton.py is student.py, and a mutant is a list of
+  exact replacements in the reference (`old` must occur once) plus its bug, applied by
+  code. So every mutant differs from the reference by exactly the stated change, its
+  docstring is uniform, and the reply is shorter than 3-6 copies of the reference.
+- Prompt: a stable system part (the repo's format rules, with the safe-check allowlist
+  read from `safety.py`; the `tutor.testkit` API read from the module; the example
+  exercise closest to the item's framework and interface; the workspace's
+  `conventions.md`, the same file a hand-drafting assistant reads), then the item and its
+  course pages, then, when repairing, the last reply and the failures.
+- Stops: 3 repair rounds per item, a token budget per batch, an LLM error stops the current
+  item and keeps the finished ones.
+- Roles in `[llm.roles]`: `plan` = GLM-5.3-Flash with thinking low (see the experiment
+  below); `generate` = DeepSeek-V4-Flash since 2026-10-29 (the week 4 rerun below), with
+  thinking on since 2026-10-30 (the week 7 comparison below); `repair` = V4-Pro from the
+  second repair on; `oracle` = a different model family (GPT, decided 2026-10-28 in place
+  of local Gemma; GLM-5.3 once the OpenAI key expires, measured on week 7), since the same
+  model writing reference and oracle is not an independent check. The CLI refuses an oracle from the generating model's provider.
+- Experiment 2026-10-28, one item (a closure / accumulator debugging exercise from the
+  week 4 slides), same validator:
+
+  | Model, thinking | Rounds | Time | Tokens | Mutants |
+  |---|---|---|---|---|
+  | GLM-5.3-Flash, on | 4 (2 cut off at 32k output) | 28 min | 164k | - |
+  | GLM-5.3, on | stopped after 2 cut-off rounds | 19 min | 92k | - |
+  | GLM-5.3-FlashX, on (old prompt) | 1 | 4.3 min | 46k | good |
+  | GLM-5.3-Flash, low (old prompt) | 2 | 1.7 min | 39k | arbitrary edits |
+  | GLM-5.3-Flash, low | 1 | 1.3 min | 18k | good, two slips |
+  | GLM-5.3, low | 2 | 2.5 min | 42k | best: 3 misconceptions, 1 slip |
+  | gpt-6.1-terra, default | 2 | 1.2 min | 38k (~$0.06) | good, 3 misconceptions |
+
+  With thinking on, GLM spent its whole output on reasoning and was cut off before the
+  answer, so thinking is low by default (`--thinking on` to override). The prompt change
+  that mattered: mutants must be misconceptions of the knowledge point (at most one plain
+  slip), and `source` must cite the pages (a model copied "synthetic" from the example; a
+  code check now rejects it). One item per model, so a direction, not a measurement; phase
+  5 repeats it on whole batches.
+- A reply that cannot be read at all (cut off, not JSON) is not "repaired": the next round
+  asks the item again with what went wrong, since an empty draft gives repair nothing.
+- First real batch (week 4, 6 items, GLM-5.3-Flash, 2026-10-28) and what it changed: one
+  saved, two discarded after three rounds each on the same mutant error (`old` not found:
+  the model wrote other quotes or indentation than its own reference, and the error said
+  only "not found"), and one item crashed the whole run, so collect never ran and two
+  items never started. The crash was local, not the model: the example loader read
+  macOS's `.DS_Store` (binary, git-ignored, so never in CI) from the file-level example;
+  it was first blamed on a GLM reply, until GPT failed at the same byte. Fixes: the
+  example loader reads only the exercise's own text files; any exception in an item is
+  that item's error (logged, the others finish, collect runs); the client decodes replies
+  with replacement (harmless either way); the item graph no longer inherits the batch's
+  checkpointer (it saved every step's models in the batch's SQLite); a mutant error lists
+  every failing mutant with the closest line of the reference, copied exactly; `resume`
+  continues a run that stopped midway without redoing finished items (tested), and
+  `resume --profile` finishes it with another model; the manifest names every model that
+  generated its exercises.
+- Week 4 again with four models (2026-10-28/29, same plan items; small samples): GPT 6/6
+  VALID (about $0.07 each), DeepSeek 5/6 (about 0.06 RMB each, the fastest), GLM-5.3-Flash
+  saved 4 and discarded 2, GLM-5.3 discarded 3 of 3. DeepSeek became the `generate` role.
+  The four discards that were not the model's fault changed two things:
+  - GLM-5.3 lost all three to one mutant each whose `old` it invented (a "placeholder"
+    line not in its reference) and sent back unchanged through three repairs. A mutant
+    that cannot be applied is now left out while at least three others remain
+    (`MIN_MUTANTS`, the schema's minimum): a VALID draft is saved without it, and a draft
+    repaired for another reason is asked to fix it too. The round's `dropped` list goes to
+    `generation.jsonl`. Cost: an exercise may have one mutant fewer, never fewer than
+    three.
+  - DeepSeek put the API calls it wanted used into `required_any`, which lists names the
+    code defines, and could not read that from "must define one of". The constraint
+    fields now carry descriptions, which reach the model in the draft's JSON Schema, and
+    the api messages say the names are defined, not called. There is still no "must call"
+    constraint: what an exercise must use is checked by its tests and `forbidden_calls`.
+- Week 7 with five arms (2026-10-29/30): the same plan of 11 plain-Python items from
+  lectures 7.1-7.2 (stream algorithms) for every arm, arm D on 4 of them. Repairs from the
+  second on are V4-Pro with thinking in every API arm; "s/item" is one item at a time.
+
+  | Arm | Generate (thinking) | Oracle | First-round VALID | Saved | Rounds/item | s/item | Layout |
+  |---|---|---|---|---|---|---|---|
+  | A | V4-Flash, off | GPT | 2/11 | 11/11 | 2.3 | (parallel) | 5/11 |
+  | B | V4-Flash, off | GLM-5.3 | 1/11 | 11/11 | 2.4 | 116 | 9/11 |
+  | C | V4-Pro, on | GPT | 8/11 | 11/11 | 1.4 | 296 | 7/11 |
+  | D | Claude Code (assistant mode) | GPT | 4/4 | 4/4 | 1.0 | 60-120 | 4/4 |
+  | E | V4-Flash, on | GPT | 7/11 | 11/11 | 1.2 | 180 | 10/11 |
+
+  - Thinking mattered, not model size: with thinking off, most first drafts failed rule 1
+    on expected values traced by hand (DGIM bucket states, lossy-counting boundaries);
+    Flash with thinking came close to Pro in about 60% of its time. E needed Pro once
+    (33k of 699k tokens).
+  - The time is reasoning: a Flash draft took 129 s and about 27k output tokens with
+    thinking (about 210 tokens/s), 16 s and 4k without. GLM-5.3 wrote oracles in 9 s
+    without thinking; V4-Pro with thinking took 280 s per draft and 120 s per repair.
+  - GLM-5.3 as the oracle: 19 calls, all usable; its one rule 4 failure was the generating
+    model's own test_oracle.py.
+  - Layout: counted before the examples were rewritten in it (see "Learning rules").
+  - Decided (owner, 2026-10-30): arm E's shape, Flash with thinking, Pro only when Flash's
+    repair fails, so the time stays bounded; GLM-5.3 as the oracle after 2026-11-04. The
+    oracle's thinking became its own setting, `oracle_thinking`, off by default: it
+    followed `thinking`, so turning generation thinking on would have made GLM think. Not
+    yet measured, for the next run: more items in parallel for plain-Python batches
+    (default 3 on 12 cores), a lower thinking effort if DeepSeek offers one, and running
+    mutants in parallel during validation for Spark weeks.
+- What repair is told (2026-10-29). A week 4 item came back word for word through all
+  three repairs: rule 1 said only pytest's last line ("2 failed, 3 passed"), so the model
+  could not see what to fix, and at temperature 0 an unchanged prompt returned the same
+  reply. Now: a failing rule 1, 2 (crash), 4 or 5 carries `failure_excerpt` of pytest's
+  output (each failing test, its line in the test file and the `E` lines, at most 2500
+  characters, absolute paths cut to the file name since the text goes to a model; the CLI
+  report still shows the one-line detail); repair round N asks at temperature 0.2 * N; and
+  a reply identical to the previous one is recorded (`unchanged` in the attempts) and the
+  next repair is told so.
+- Prompt rules added for failures seen on week 4 (2026-10-29), each tied to one: test
+  expected values are worked out by hand from the question on small data, never taken
+  from the reference (a test said 2 bids where the data had 3); a rule 1 failure tells
+  repair that the test can be the wrong side (three repairs had edited a right reference);
+  the reference is written as a good student would, never forcing an API into a role it
+  does not fit (GPT's reference sent a countByKey result back to the cluster to join).
+  Rules stay few and concrete: a longer prompt is followed less closely, and what code can
+  check (constraints, mutants) is checked in code. After the first rule the same item
+  passed rule 1 at once, and the independent oracle caught a real bug in its reference
+  (`reduce()` on an empty input, which the question says gives no lines). The constraint
+  descriptions had named "the entry point" as a required definition, and a model then
+  wrote `AuctionStats.run`, which the api check did not know: it now accepts
+  `Class.method`, the form `entry_point` uses.
+- Prompt order and cache accounting (2026-10-29). Providers cache the longest prompt
+  prefix they have seen, and the item's own lines came before its course pages, so items
+  of one lecture shared only the system prompt (DeepSeek: about 6k of 16k input tokens
+  cached on a first call). Now the system prompt holds what the whole course shares
+  (rules, testkit API, conventions) and the user message gives the course pages, then the
+  example exercise (chosen by framework and interface), then the item; a batch starts its
+  items sorted by lecture, framework and interface. Each item counts input, cached input
+  and output (`usage` in generation.jsonl), and the CLI prints the batch's share served
+  from the cache. Considered: a summary of the lecture instead of its pages, to shrink
+  the prompt; rejected, since exercises must match the slides' code and cite their pages,
+  a summary is one more model output that can be wrong for every item after it, and with
+  caching the pages cost little (output tokens dominate the cost).
+- Streaming (2026-10-29): generate, repair and oracle calls receive the reply in pieces,
+  so `timeout_s` bounds a pause, not a whole long reply, and the CLI shows
+  `receiving: N characters` as it arrives; usage comes from the last piece
+  (`stream_options` only for OpenAI and DeepSeek, which document it). A stream that ends
+  with neither `[DONE]` nor a finish reason is an error, not a reply (outside review,
+  2026-10-29): a cut-off draft was counted as the model's format error. Plan and vision
+  calls are unchanged. The first real run showed why it is worth having: DeepSeek ran away
+  for 32,000 output tokens (cut off, retried) and the progress lines made it visible.
+  A rule 3 failure with a survivor now reminds repair to catch a bug in how the result is
+  computed with a spy, or to replace a mutant whose result equals the reference's (a
+  `groupByKey` then sum mutant had survived three repairs).
+- Who is wrong when rule 1 fails (2026-10-29). A reference and a test disagreeing can be
+  either side's fault, and DeepSeek, unable to tell, sent the same draft back word for
+  word (copying is near-certain even at temperature 0.6). The oracle does not use the
+  tests, so the pipeline validates with `oracle_on_failure`: rule 4 still runs after a
+  rule 1 failure. If the reference agrees with the oracle (an independent reading when
+  the `oracle` role is set), repair is told the tests' expected values are the likely
+  mistake; if not, the disagreement and the oracle's code go to repair as usual. The CLI
+  keeps skipping rules 2-5 after rule 1. Cost: one rule 4 run (15-30 s) per such round.
+- A `repair` role (2026-10-29): a larger model takes over from the second repair
+  (`stronger_repair_from`), since the cheap model fails at diagnosis, not at writing: on
+  the hardest week 4 item DeepSeek-Flash sent drafts back unchanged or half fixed, while
+  GPT generating fixed it in one repair. Each attempt records its model; the manifest
+  names the repair model; the oracle must come from another provider than both writers.
+  First try with DeepSeek-V4-Pro (thinking off) did not fix that item either, and lost a
+  round copying the oracle's code, which rule 4's failure shows, into the oracle
+  interface; the message now says not to.
+- Planning thinks (2026-10-29). The plan is one short reply per batch, so reasoning costs
+  little (about $0.03 with DeepSeek-V4-Pro). Week 5 planned three ways: GLM-5.3-Flash at its
+  lowest reasoning repeated a word count the coverage table had dropped; Pro with thinking
+  off wrote vague checks and gave one file-level item of six against a preference to mix;
+  Pro with thinking on dropped the repeat, chose the slides' "one problem in DataFrame and
+  SQL" practice, mixed the interfaces and named edge cases, but left out the schema point.
+  `plan_thinking` is on by default; `--plan-profile` picks the planner for one batch. The
+  first week 5 batch (GLM plan, Flash writing, Pro repairing with thinking, GPT oracle)
+  saved 6 of 6: two after a Flash repair, four rescued by one Pro repair each, about $0.39
+  in all at peak prices.
+- A diagnosis first, and the oracle's own mistakes (2026-10-29). The draft's first field
+  is `diagnosis`, filled by repairs before any file: what failed, the right result worked
+  out by hand, which file is wrong and why. A scratchpad that works without thinking, and
+  a log of what the model believed. With Flash alone repairing two week 5 items that had
+  needed Pro, one passed (three bugs, each named and fixed in turn) and the other made
+  progress every round instead of being copied back. The Pro-written week 5 batch (2 of 5)
+  showed two faults of the pipeline: Pro wrote whole oracles where an interface was asked
+  for, on every first draft, and the oracle model imported `io`, which the safety check
+  refuses, after which repair asked the generating model, which cannot change that code,
+  three times. Now a whole oracle is cut to an interface in code (signatures and
+  docstrings stay, the oracle model never sees the bodies); the oracle model is given the
+  import allowlist, its oracle is safety-checked in the node, and it rewrites its own
+  oracle once when told what is wrong. The rule 4 note goes with a real disagreement only,
+  not with a differential test that cannot run.
+- Batch (step 2, approved 2026-10-28): `plan` (LLM) reads coverage.md, one line per cached
+  page (PDF page, footer, title), the existing exercise ids and the owner's preferences,
+  and returns `count` PlanItems with a reason each; code checks the count, unique and new
+  ids, lecture names and slide ranges, and asks again (twice at most) with the problems.
+  `approve` is a LangGraph `interrupt`: the CLI shows the plan and writes it to
+  `.drafts/<batch>/plan.json`; the owner approves (with any edits made to that file) or
+  sends it back with feedback, which goes to `plan`. A resume rewrites plan.json only when
+  the model has planned again (`plan.model.json` keeps its last plan), so the owner's
+  edits survive a pause; a batch paused before that file existed keeps its plan.json, and
+  the CLI says when plan.json differs from the model's latest plan. The approved plan, edited or not, must pass the blocking checks
+  (unique and new ids, since two items with one id would share a drafts folder; known
+  lectures; slide ranges), in the CLI and again in `approve`; a count other than the one
+  asked for is the owner's choice (both found in an outside review, 2026-10-29). A SQLite checkpointer in
+  `.drafts/<batch>/` keeps the paused batch, so `python -m tutor.graph resume` continues it
+  in another terminal or another day. Approved items fan out with `Send` and run the item
+  graph in parallel, at most `--parallel` at once (default: CPU cores / 4, 1-4: each
+  validation runs Spark on every core). One failing item (model unreachable, name clash)
+  does not stop the others. `save` copies both parts into hidden staging folders and
+  renames them into place, so a failed copy leaves nothing behind; an item saved before
+  whose result was lost (a resume runs it again) counts as saved, its folders untouched
+  (outside review, 2026-10-29). `collect` writes the manifest once (parallel items never
+  write it) with the preferences in `notes`, and `coverage-proposal.md`, the coverage.md
+  changes for the owner to apply. Listing a saved item again changes nothing, and the file
+  is replaced in one step, so a resume that runs `collect` again cannot fail on it (outside
+  review, 2026-10-29). Which types a batch mixes (e.g. debugging exercises) is
+  left to the preferences, not a fixed rule.
+- Logs: `llm_calls.jsonl` with the node as purpose; one `generation.jsonl` per batch
+  (item, rounds, outcome, failure reasons, and the settings it ran with).
+- Generation settings (owner-approved 2026-10-29; owner: keep tuning possible later,
+  including from a GUI): every tunable value is a field of `GenerationSettings`
+  (`graph/settings.py`) with its default, description and bounds: repair rounds, the round
+  the repair model takes over from, the temperature step, thinking per role, token limits,
+  the per-item token budget, context size, plan size, parallelism, mode. Three sources,
+  later ones winning: the defaults (the measured values; `Deps` takes its defaults from
+  them, so tests and scripts run like the CLI), workspace.toml `[generation]` (the owner by
+  hand now, a GUI later; the pipeline reads workspace.toml and never writes it), and the
+  run's flags (`--set name=value`, plus the older named flags). Unknown names and values
+  out of range are errors that name them. A batch saves what it resolved in run.json, so
+  every resume runs with the same values even if `[generation]` changed; `resume --set`
+  changes them for the rest of the batch. Each item's log line carries them, so a model
+  comparison can tell its arms apart, and an arm is just a set of `--set` values.
+  `schemas/generation-settings.schema.json` is the form a GUI renders (descriptions,
+  types, bounds). Per-model values (`reasoning_effort`, `timeout_s`) stay in
+  `[llm.profiles]`.
+- Built in three steps: one item generate -> validate -> repair -> save (done); then plan
+  with the interrupt, preferences and parallel items (done); then the oracle in its own
+  context (done 2026-10-29, below; without an `oracle` role `generate` writes the whole
+  oracle, as hand drafting does).
+- The independent oracle (approved 2026-10-29). The generating model still writes
+  `test_oracle.py` (how random inputs are built and fed to the program, which is tied to
+  Spark and the file format), but `oracle.py` only as an interface: signatures, a
+  docstring per function saying what goes in and out, `raise NotImplementedError`. A
+  `write_oracle` node between generate / repair and validate gives the oracle model the
+  question (student.py's docstring), that interface and the sample data, never the
+  reference, tests, mutants or hints, and puts its oracle.py into the draft. It is written
+  again only when one of its inputs changes (a hash), so most items cost one extra short
+  call. When rule 4 fails, repair is told that the oracle is an independent reading of
+  the question and gets its code: if the reference is right, the question is ambiguous
+  there and is the thing to fix, which is what an independent reader is for. An
+  interface with bodies, or an oracle the model could not write (missing or unwritten
+  functions, a reply that does not fit), is a failure of the round that goes to repair
+  without validating. Considered: the oracle model also writing `test_oracle.py`;
+  rejected because Spark and file-level harnesses are where generation fails most, and
+  the independence that matters is in the oracle's logic. The manifest and
+  `generation.jsonl` name the oracle model.
+- The LLM never touches the disk or runs code: nodes read the cache and write files, and
+  generated code reaches `batches/` only after `validate` (including `safe`).
+- LLM output parsed into Pydantic models, the same `schema.py` models that rule 0 checks;
+  format failures are counted apart from validation failures.
 - `validate` is pure Python and acts as the judge; repair receives the failure report.
+- `retrieve_context` before RAG (phase 3, decided 2026-10-28): the cache of the batch's
+  `sources`, whole (a lecture is roughly 15-25k tokens). When that does not fit the model's
+  context, a slice instead: the slides that `coverage.md` lists for the batch plan's
+  knowledge points. A slice is chosen by label, not by a query, so it is deterministic and the owner
+  sees exactly which pages went in. For a local model, raising the context length it is
+  loaded with (8192 on the owner's Mac so far; the model supports more, at the cost of
+  memory) comes before slicing. A page of the item's slides that is `pending` or `partial`
+  stops the item with its page numbers (a formula or diagram may be missing, and no test
+  can show the question is faithful to the slide); the item's pages run from its first
+  slide's PDF page to its last, footer or not, and in a lecture without footers every page
+  is the item's. Such pages elsewhere are left out. Slides
+  the lecture has no footer for stop the item too (both from an outside review, 2026-10-29).
 - Every generated batch mixes function-level and file-level exercises (see "Exercise interfaces").
 
 ## RAG
 
-- PyMuPDF parsing, chunking by section / code block, keep source file and page.
+- Reads the per-file md cache (see "Reading files"), not the PDFs; chunking by section / code
+  block, keeping source file, page and slide.
 - Retrieval filters by the batch's `sources` first, so a week-2 batch only draws on week-2
   material; searching the whole course is the fallback, not the default.
 - Hybrid retrieval (BM25 + vectors): API names like `aggregateByKey` are exact-match problems
   that pure vector search handles poorly.
 - Evaluate with 20-30 hand-labelled queries: recall@k for vector-only vs BM25-only vs hybrid.
+  The labels already exist by then (2026-10-28): each knowledge point in `coverage.md` with
+  its slides, and each exercise's `source.pdf_pages`, is a query with its relevant pages.
+- Chunks are the cache's page sections, the same unit phase 3's slices use, so the
+  chunker is not new work.
 - Vector store and embedding model not yet decided (Chroma or FAISS candidates).
 
 ## Evaluation metrics (README results table)
@@ -623,6 +1021,37 @@ deterministic judge, hybrid RAG with recall@k, the phase 5 metrics, the hint lea
     code go to that provider; a local model keeps them on the machine;
   - cost estimate before a batch is generated, and a budget cap that stops the run (the
     user pays), using the call log below.
+  - Local first (decided 2026-10-28, owner): development and vision transcription start on
+    a local model through LM Studio's OpenAI-compatible server; a cloud provider is added
+    later through the same client. Local vision model: Gemma 4 26B-A4B (mixture of
+    experts, about 4B active, about 15 GB, on the owner's M2 Pro with 32 GB); Qwen3.8 27B
+    was dropped (owner: too power-hungry). A 15 GB model and Spark validation compete for
+    memory, so generation and validation do not run at the same time.
+  - First cloud provider (owner, 2026-10-28): Zhipu's bigmodel.cn, OpenAI-compatible at
+    `https://open.bigmodel.cn/api/paas/v4`, with GLM-5.3-Flash (native image input, base64
+    data URLs, 1M context; the owner has free tokens for it). How to minimise thinking
+    differs by provider and model: LM Studio takes `reasoning_effort: "none"`; GLM takes
+    `thinking: {"type": "disabled"}`, but GLM-5.3 models reject it and accept only
+    `reasoning_effort` low / high / max, so the client tries `disabled` and falls back to
+    `low` on a 400. With a cloud model the slide images go to that provider; the README
+    states this data flow.
+  - Several models (owner, 2026-10-28): keys stay in `.env`, one per provider
+    (`ZHIPU_API_KEY=...`); everything else is named profiles in the workspace's
+    `workspace.toml` (`[llm.profiles.<name>]`: provider, model, optional base_url,
+    api_key_env, reasoning_effort, timeout_s), and `[llm.roles]` maps a task (vision,
+    generate, oracle, ...) to a profile, so the oracle can come from a different model than
+    the exercise and phase 5 can compare models; `--profile` overrides for one run. The
+    provider (`lmstudio`, `glm`, `custom`) supplies the default base URL and the thinking
+    switches. A profile holding an `api_key` field or a key-like value is refused, unknown
+    fields are errors, and a missing variable is named in the message. Without an `[llm]`
+    section, `LLM_PROVIDER` / `LLM_MODEL` / `LLM_BASE_URL` / `LLM_API_KEY` act as one
+    profile. Like `[safety]`, the section is the owner's: generation never writes it. Apple Intelligence's on-device model is reachable too, through third-party
+    bridges that serve it as an OpenAI-compatible local API (apfel and similar; not an
+    Apple interface), so the same client can call it with no extra code. It is not a default:
+    about 4096 tokens for input and output together (one week's material and the format spec
+    do not fit), no image input found, one fixed small model, and rate limits for
+    background use. It may serve as one more local arm in the phase 5 model comparison or for
+    short text tasks.
 - [3] Summary of recently covered material in the generation prompt (ContentGen found it
   improved generated questions); built from `coverage.md` and the batch's sources.
 - [3] Call log: one JSONL line per LLM call (node, model, input / output / cached tokens,
@@ -632,7 +1061,8 @@ deterministic judge, hybrid RAG with recall@k, the phase 5 metrics, the hint lea
   example exercises, the week's material), resent on up to 3 repair rounds. Measure cost
   with and without it.
 - [3, prerequisite] Image slides through a vision model, transcribed once and stored in the
-  workspace with slide footer and PDF page; the input side of RAG.
+  workspace with slide footer and PDF page; the input side of RAG. Decided 2026-10-28, see
+  "Reading files".
 - [3] Native structured output (JSON schema / tool use) instead of free text parsed after
   the fact. Count format failures apart from validation failures, or the validity metric
   mixes two causes.
@@ -661,13 +1091,23 @@ deterministic judge, hybrid RAG with recall@k, the phase 5 metrics, the hint lea
     (see "Validity vs teaching quality") gains an optional free-text remark, and the next
     batch's plan reads the ratings and remarks of earlier batches.
 - [3] Batch API for whole-batch generation: not interactive, usually much cheaper.
+- Review of the [3] items (2026-10-28, owner adopted the proposals): adopted, as part of 3a:
+  model access (local first; cost estimate and budget cap once a cloud provider is added),
+  the recent-material summary, the call log, prompt caching as a prompt layout with a long
+  stable prefix now (its cost effect measured once a cloud provider is used), structured
+  output (JSON for the plan, metadata and manifest; if one large JSON with every code file
+  fails often on local models, code files come as separate outputs and are assembled and
+  checked in code; format failures counted apart from validation failures), plan approval,
+  and the preference chat (CLI first). Batch API: backlog until a cloud provider is used.
+  Isolation and vision transcription: decided separately (see their items).
 - [3] Revisit isolation: phase 3 runs LLM-generated code, and the runner is not a sandbox
   (see "Code execution safety"). Decide whether validation of generated batches moves into
   a local container, which changes the "Docker only for reproducibility" decision there
   (allowed by "Local-first": it stays on the machine). Main reason, see the phase 3 note on
   malicious material. Also consider a static check on generated code that rejects network
-  access, subprocesses and reads or writes outside the exercise directory.
-- [3b] Calibrated LLM judge for hint quality only (leaks the answer? right direction?),
+  access, subprocesses and reads or writes outside the exercise directory. Decided
+  2026-10-28: static check first, container later (see "Code execution safety").
+- [3c] Calibrated LLM judge for hint quality only (leaks the answer? right direction?),
   checked against owner-labelled hints before its scores are trusted. Never for validity.
 - [4] Reranker after hybrid retrieval, as one more arm of the recall@k comparison.
 - [5] Personal workflow cost (Codex review 4): steps and minutes from adding lecture files
@@ -680,16 +1120,79 @@ deterministic judge, hybrid RAG with recall@k, the phase 5 metrics, the hint lea
   deterministic validator.
 - [5] Long-context baseline: "without RAG" means the whole week's material in the prompt
   (with caching), not no material, so the comparison shows whether retrieval earns its keep.
+  A third arm (2026-10-28): the labelled page slice from `coverage.md`, i.e. perfect
+  retrieval, the upper bound that shows how far RAG falls short of it.
 - [after 3, optional] MCP server exposing `validate` (and later `hint`) so any coding agent
   can check the exercises it writes.
 - Not proposed: fine-tuning or RL (too little data; model + validator suffices), multi-agent
   debate, GraphRAG, a hosted vector database (a few hundred pages fit local FAISS / Chroma),
   an LLM judging validity (already in "Decisions not to do").
 
+## Assistant mode
+
+Decided 2026-10-29 (owner): the pipeline must also run with no API key at all, with a
+coding assistant on a subscription (Claude Code with Claude Pro / Max, Codex with ChatGPT
+Plus) acting as the model for vision, planning, generation, oracle, repair and hints.
+
+- A profile with `provider = "assistant"` sends nothing over the network
+  (`tutor/exchange.py`). Each call becomes `<workspace>/.exchange/<profile>/requests/<id>.md`
+  (the messages, what to reply, the JSON Schema; images as PNG files beside it) and the
+  caller gets `AwaitingAnswer`. The assistant answers with `python -m tutor.exchange answer
+  ID FILE`, which checks the reply's shape first (one JSON object with the required
+  fields) and keeps it in `answers/<id>.txt`. The id is a hash of the request (purpose,
+  messages, schema), so running again replays every answered call and stops at the first
+  unanswered one (owner chose replay over a LangGraph interrupt per call: simpler, and
+  parallel items can collect their requests into one round of answers).
+- `AwaitingAnswer` is an `LLMError`, so a caller that knows nothing of assistant mode
+  (the hint command) falls back as it does for a model that could not answer, and finds
+  the answer on the next run.
+- An assistant profile's `model` names the assistant (default: the profile name) and its
+  queue is its base URL, so two assistants are as independent as two providers for the
+  oracle rule.
+- Vision: one `--vision` run writes a request for every page to transcribe (the page as
+  PNG) and goes on, instead of stopping at the first; the next run stores the answers as
+  transcriptions (exit code 3: requests are waiting).
+- Batch: an item that stops at a request ends as "waiting" (not an error); the batch's
+  `answers` node, after each round of items, pauses once for all of them (an interrupt
+  next to the plan approval), and after the answers sends only those items again, which
+  replay their answered calls. Validation reports are kept by a hash of the round's files
+  while any role is an assistant, so a replay does not run earlier rounds' Spark again.
+  A plan waiting for an answer stops the batch, and `resume` replays it. `item` and
+  `resume` exit with code 3 while requests wait.
+- One assistant for both the exercise and the oracle (owner, 2026-10-29: allowed, with a
+  reminder): a second profile of the same assistant (same `model`, its own queue) passes
+  the oracle rule, and the CLI prints that its requests must be answered in a fresh
+  context that has not seen the answer, being less independent than two providers. One
+  profile for both is still refused (the requests would mix).
+- Instructions for the assistant: `docs/assistant-mode.md` (setup, the run / answer /
+  run-again loop, answering from the request alone, oracle requests in a fresh context,
+  plan approval left to the owner).
+- Self-test 2026-10-29: Claude Code (this repo's assistant) answered one real week-5 item
+  through the files, with no API: the first draft failed the safety check (a spy using a
+  variable attribute name), the repair request was answered, and round 1 was VALID (6/6
+  mutants killed, oracle and partitions ok) and saved. Two fixes came of it: manifests and
+  logs mark an assistant's model "(assistant)", and token counts an assistant cannot
+  report are left out instead of printed as 0.
+- Codex test 2026-10-29: Codex (desktop app, ChatGPT Plus) answered three vision requests
+  through the files and opened each PNG: one code slide matched the hand-checked
+  transcription (ratio 0.97), a logo diagram was described with details only the image
+  has. So both assistants work with files alone.
+- MCP server: deferred (owner, 2026-10-29). The files work for an assistant that can run
+  commands and read PNGs (both do); an MCP layer (list / get with the image / submit) is
+  built only if permission prompts get in the way, or with the GUI.
+- Open (owner chose to wait, 2026-10-29): the vision prompt does not say what to do with
+  text an image covers on the slide while the text layer still has it. On slide 5.21 a
+  screenshot covers the bullets and the StructType code: GLM filled them in from the text
+  layer, Codex wrote [?] ("cannot read: do not guess") and lost the code. Fix when pages
+  are transcribed again for another reason: a rule to take covered text from the text
+  layer and say it was covered, with PROMPT_VERSION raised (which re-transcribes every
+  page read with the older prompt, hand-corrected ones excepted).
+
 ## Code execution safety
 
-Subprocess + timeout + temporary working directory. Docker only if environment reproducibility
-(Java/Spark) becomes a problem, not for isolation.
+Subprocess + timeout + temporary working directory. Docker was first meant only for
+environment reproducibility (Java/Spark); since 2026-10-28 a container is also the planned
+second isolation layer (see "Where isolation goes").
 
 `execution.run_pytest(files, timeout_s=30)` copies a name -> source mapping into a fresh temp
 dir (so the same tests can run against reference, skeleton or a mutant as `student.py`), runs
@@ -699,8 +1202,9 @@ The exit code alone was not enough (Codex review, 2026-10-25): pytest exits 0 wh
 is skipped and 1 when only a fixture breaks, so a skipping test file let a reference or oracle
 "pass" and a mutant that only broke setup counted as killed. Each run now writes pytest's JUnit
 XML in the temp dir and the counts decide: PASSED needs exit 0, at least one passed test and
-no skipped one; FAILED needs at least one failed assertion; everything else (import errors,
-no tests, skips, setup/teardown errors only) is ERROR. The child starts in its own session and the
+no skipped one; FAILED needs at least one failed assertion in the report; everything else
+(import errors, no tests, skips, setup/teardown errors only, a run that exits before writing
+its report, which counted as FAILED until an outside review, 2026-10-29) is ERROR. The child starts in its own session and the
 whole process group is killed on timeout and after every run, because PySpark starts a JVM
 under pytest that would otherwise be orphaned (a test covers this, and fails if only the parent
 is killed). This is isolation, not a sandbox: the child can still touch other files and the network.
@@ -720,6 +1224,77 @@ the exercise) sits at the validator's entry, `validate()` and `python -m tutor.v
 not in the LangGraph `validate` node. A batch drafted with Claude Code is LLM-written code
 from the same material, so it gets the same protection, and running the validator by hand
 cannot skip it.
+
+Isolation layers (decided 2026-10-28, owner): the material is files the user downloaded
+themselves, so a cheap layer comes first and a stronger one later.
+- A, static safety check (rule `safe`, `validation/safety.py`; done 2026-10-28). Every `.py`
+  file validation runs (the exercise's own files except `student.py`, which is the
+  learner's and is replaced in every run, and every solution file) is read with `ast` and
+  never run. An allowlist, not a denylist: a denylist is never complete, and the first
+  course's 255 exercise files used only 17 modules. Six rules: imports from the allowlist
+  only; `os` / `sys` limited to `os.environ`, `os.path`, `sys.argv / exit / stdin / stdout /
+  stderr / executable`; no `eval`, `exec`, `compile`, `__import__`, `breakpoint`, unless a
+  function's own binding (a parameter, a local) hides the builtin: Python fixes those when
+  it compiles the function, while a module or class binding may come after the use (one
+  file-wide set of bound names let `eval = 0` in one function hide `eval(...)` elsewhere
+  until an outside review, 2026-10-29; the API check got Python's scopes then too); no dunder
+  attribute outside a short list (`__name__`, `__module__`, `__qualname__`, `__init__`,
+  `__class__`, `__doc__`), and `getattr` / `setattr` / `delattr` take a literal name; no
+  literal path starting with `/` or `~` or containing `..` in a file-opening call
+  (`open`, `Path`, Spark readers), no `home()` / `expanduser()`; no shell commands through
+  the frameworks (`RDD.pipe`, MRJob `*_cmd` / `*_pre_filter`). The exercise folder may not
+  hold `conftest.py`, `pytest.ini`, `setup.cfg`, `tox.ini` or `pyproject.toml`, which pytest
+  runs on its own. Both checks cover every file a run copies in, subfolders included
+  (pytest collects tests and conftest.py recursively; checked only at the top until
+  2026-10-29, found in an outside review). A symbolic link anywhere in the exercise is
+  refused before that: the run copies what it points to, which may be outside the
+  exercise (`execution.copied_files` lists a run's files the way copytree copies them, for
+  this check and the hint cache). A failure makes the exercise INVALID and skips every rule that runs
+  code. A file with a syntax error is not a finding: Python cannot run it either, and the
+  rules that run code report it.
+  - The allowlist has three layers: a core in code (pure-computation standard library,
+    `pytest`, `hypothesis`, `tutor`, the exercise's `student` / `oracle`); the modules of
+    the exercise's `framework` (`mrjob`; `pyspark`); and a course's extra modules in
+    `workspace.toml` `[safety] allow_imports`, found by walking up from the exercise. Only
+    the owner edits `workspace.toml` and generation never writes it, so generated code
+    (whose metadata an LLM writes) cannot widen its own allowlist.
+  - It is the only layer that also covers the learner's own `pytest test_student.py`,
+    which runs generated tests outside the validator. Python is too dynamic for a static
+    check to prove code safe: it is a filter that stops the obvious, not a sandbox.
+- B, test-run container: deferred to the generalization phase (second course) and the GUI
+  (owner, 2026-10-28), when courses with riskier libraries and other users arrive. Until
+  then phase 3 runs with layer A and material the user trusts, and a course whose modules
+  are rated medium or high risk (below) is refused rather than run unprotected. Draft:
+  the host orchestrates (validator logic, reports, attempts, hints, GUI, every LLM call)
+  and the container only executes. The one seam is `execution.run_pytest`: its subprocess
+  becomes `docker exec` in a long-lived per-course container (Docker or Podman, one
+  implementation for macOS, Linux and WSL) with the exercise mounted read-only and a
+  writable temp dir, `--network none`, a non-root user, a read-only root file system,
+  memory / CPU / process limits, and a whitelist of environment variables (never `.env` or
+  API keys). Results come back as they do now (exit code, JUnit XML, output), so `checks.py`
+  does not change. The image is built from `workspace.toml` `[requires]`, with envcheck run
+  inside and outside so both use the same versions. On medium / high risk courses the
+  learner's runs go through a command that runs in the container, and attempts are written
+  on the host from its result. Measure the overhead first; if it is too slow on macOS, the
+  fallback is the OS sandboxes coding assistants use (Seatbelt on macOS, bubblewrap on
+  Linux). Costs: debugging needs an editor that attaches to the container; the Docker VM
+  takes memory next to a local LLM.
+- Risk tiers for a course's modules (design for the generalization phase): pure
+  computation (numpy, networkx) is low and runs on the host; file- or URL-capable libraries
+  (pandas `read_csv` takes URLs, numpy `load` unpickles) are medium; system-level ones
+  (`subprocess`, `os.fork`, sockets, an operating-systems course) are high and run only in
+  the container. Which modules a course needs is hard to list by hand, so an LLM may draft
+  `[requires]` and `[safety] allow_imports` at workspace creation, each entry with its
+  source (lab, page), and the owner accepts entry by entry, as for the GUI's `[requires]`
+  draft. A generated exercise that needs an unlisted module fails `safe` and yields a
+  proposal to the owner, never an automatic widening.
+- Other languages (generalization phase, not built): a `language` field in metadata
+  (optional, default `python`); tests stay pytest and run the compiled program as a
+  subprocess, as file-level exercises already do; one safety checker per language chosen
+  by `check_safety` (tree-sitter for most languages, sqlglot for SQL), with per-language
+  allowlists. A few languages built in, others configured by the owner in `workspace.toml`
+  (extension, compile and run commands, allowlist); those commands run, so generation never
+  writes them. A language without a built-in checker needs the container.
 
 ## CI
 
@@ -765,10 +1340,31 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
   both first learning and later review. Validation is identical in both; scaffolding and help differ:
   - `learn`: one week's material, small steps close to the slides, the docstring names the slide
     pages, a fuller skeleton. The tutor explains concepts proactively and gives a line-level fix
-    when asked.
+    when asked. One knowledge point per exercise (decided 2026-10-29): a slide example that
+    chains several ideas becomes several small exercises, or one exercise in parts with their
+    own tests. The owner spent long on W5 `df-udf-closure-debug`: it marked one bug, but the
+    fix also needed a split, a lowercase and a return type the skeleton never had. In both
+    modes a debugging skeleton is the reference with only the bug changed. The plan model
+    sees each existing exercise's title and topic, not only its id, and repeats a solved
+    task with another API only when the new API is the whole point (W5 had planned a fourth
+    word count and a Spark SQL exercise that redid cleaning and per-key averages).
+  - The question (both modes, decided 2026-10-29: the owner rated three week 5 questions
+    unclear, "explanations too long", and found a docstring hard to read) is a title and
+    fixed sections, each label alone on a line: `Concept:` (learn only, at most 3 lines;
+    more goes in hints.md), `Symptom:` (debugging), `Task:`, `Input:`, `Output:`,
+    `Example:`, `Constraints:`, `Slides:`, `Run:`. `question.md` next to student.py is the
+    same text as Markdown, made by code from the docstring (no model, so they never
+    disagree), labels as headings and indented data as code blocks; existing batches get
+    it with `python -m tutor.question BATCH_DIR`. Not hints.md's top, which the owner
+    first suggested: hints.md is opened only when stuck. No validation check of the
+    layout yet: older exercises do not follow it and are not reworked. The four
+    `examples/` questions were rewritten in the layout (2026-10-30), since the prompt's
+    example outweighed its rules: on week 7, DeepSeek Flash without thinking followed the
+    layout in 5 of 11 questions and copied the example's "Run the example:" lines.
   - `review`: one or several weeks mixed, fuller tasks leaning file-level (closer to labs and
     projects), a bare skeleton. The tutor helps only when asked, first naming just the kind of
-    error, and leaves the fix to the owner.
+    error, and leaves the fix to the owner. Exercises may combine knowledge points, as a
+    final exam does.
 - Priority marks (decided 2026-10-28, after the owner found the first batch of 10 too much):
   `manifest.json` may hold `priority` with `must`, `optional` and `skip` lists of exercise
   ids; an exercise not listed counts as must. Claude proposes the marks (exam weight, what
@@ -777,9 +1373,16 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
   renamed, so attempts keep their ids. "Solved" in a batch's done condition means its must
   exercises; skipped ones need no work and no rating.
 - `attempts.jsonl` gets one line per exercise per test run (time, batch, exercise, mode,
-  result, pass / fail / error counts, first error, partitions, duration). Nothing reads it in
+  result, pass / fail / error / skip counts, first error, partitions, duration). The result
+  is "passed" only when every test ran and passed: a skipped test makes it "incomplete" and
+  Ctrl+C "interrupted" (both counted as passed or not at all until an outside review,
+  2026-10-29). A failed or errored run also keeps the student.py it tested, once per
+  content, as `attempts/code/<batch>/<exercise>/<hash>.py`, named in the line's `code`
+  field (owner, 2026-10-29: failures only): without the code a real mistake could not be
+  replayed as a held-out wrong solution (roadmap 3b); the first one, a `selectExpr`
+  without `AS`, was lost that way. Nothing reads it in
   phase 2; it is kept so review batches can later target weak topics, and as material for
-  hint rules and mutants (roadmap 3b). Done 2026-10-25 as a pytest plugin, `tutor/attempts.py`,
+  hint rules and mutants (roadmap 3c). Done 2026-10-25 as a pytest plugin, `tutor/attempts.py`,
   registered through the `pytest11` entry point, so it loads in every pytest run of the venv
   with no file in the workspace (a per-batch conftest.py was the alternative). It writes only
   for test files under `$WORKSPACE_DIR/batches/<batch>/exercises/<exercise>/`, so validator
@@ -811,6 +1414,8 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
    interface with a synthetic example; DataFrame with a synthetic example; rule 5's combiner
    check; `attempts.jsonl`. **Done 2026-10-25.**
 2. Golden exercises, solved by the owner. Run the whole loop by hand before automating it.
+   **Done 2026-10-28** (the first batch's five must exercises solved and rated); the
+   `v0.1.0` release below is still open.
    - Batches from materials the owner picks (see "Material selection"), drafted by Claude Code and
      checked by the validator; the owner solves them in the batch's mode.
    - First batch (approved 2026-10-25): `2026-10-25_p2-w1w2-mapreduce`, mode `learn`, sources
@@ -867,13 +1472,15 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
      baseline set for phase 5. While solving, two light additions (see "Validity vs
      teaching quality" and "Independent checks"): a one-line teaching-quality rating per
      exercise, and the owner's solutions and mistakes kept as the first held-out set.
+     Phase 3a does not wait for this (decided 2026-10-28: it needs no solving data, so it
+     runs alongside the owner's daily solving); 3b does.
    - Batch format contract (decided 2026-10-28, before `v0.1.0`; see "Batch format
      contract" and rule 0), in steps: `schema.py`, `python -m tutor.schema` and the JSON
      Schema export; the existing workspace batches migrated (21 metadata files: `entry_point`
      as a list, `function` replaced by `interface` + `entry_point`; `exercises/` untouched,
      all 21 VALID again); rule 0 in `validate()`, the examples' metadata in the one
-     spelling, tests for a missing, mistyped and unknown field. **Done 2026-10-28.** Still
-     to do: the workspace `AGENTS.md` "Authoring exercises" section.
+     spelling, tests for a missing, mistyped and unknown field; the workspace `AGENTS.md`
+     "Authoring exercises" section. **Done 2026-10-28.**
    - Then release `v0.1.0` (decided 2026-10-26, from a Codex review before going public):
      a `constraints.txt` with the dependency versions CI passed on, a short CHANGELOG, and
      a git tag. Not earlier: before phase 2 is solved, the whole loop has not run once.
@@ -899,9 +1506,20 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
      order, why the combiner is safe, memory needed, then pseudocode), checked against
      rubric points and the exercise's `pseudocode.md`. A code exercise can gain a design
      part after it is solved.
-   Before phase 3 so the generator covers these types too.
-3. LangGraph generate-validate-repair loop. First review the [3] items of "LLM engineering
-   candidates". Prerequisites (from the 2026-10-25 slide review):
+   Before the generation loop (3a) covers every exercise type: the loop starts with code
+   exercises, and these two types join once 2b is done (changed 2026-10-28; it was "before
+   phase 3", which the split of phase 3 made too strict).
+3. LLM generation, in three parts (split 2026-10-28, owner: most of phase 3 needs no
+   solving data, so it does not wait for phase 2 to be solved).
+3a. **Done 2026-10-30** (weeks 4, 5 and 7 generated; the week 7 comparison set the roles).
+   No solving data needed; runs alongside the owner's solving. First review the [3] items
+   of "LLM engineering candidates". In order: isolation layer A (static check); the
+   materials reader with the md cache and vision transcription ("Reading files"), with a
+   minimal `llm.py`; the LangGraph generate-validate-repair loop with the [3] items adopted
+   (model access, structured output, call log, caching, plan approval, preference chat),
+   code exercises first; the oracle written in a separate context (see "Independent
+   checks"). Isolation layer B moved to the generalization phase (2026-10-28).
+   Prerequisites (from the 2026-10-25 slide review):
    image-only slides are read as images (a multimodal model or OCR) before anything is
    generated from them, and every source records slide footer, PDF page and any lab or
    textbook origin, with the exercise's teaching assumptions stated.
@@ -909,11 +1527,18 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
    runs the code it writes. A crafted PDF or web page can carry instructions (prompt
    injection) that make the generated reference, tests or mutants read files such as
    `~/.ssh` or send data out, and the validator would execute them with the user's rights.
-   Before phase 3 ships: validate generated batches isolated from the user's files and
-   without network (see the [3] isolation item), and tell users to generate only from
-   material they trust.
-3b. Hint command, `python -m tutor.hint <exercise>` (decided 2026-10-24, after phase 3 since it
-   needs the LLM client; first review the [3b] items of "LLM engineering candidates").
+   Before phase 3 ships: layer A checks every generated file before it runs, and users
+   are told to generate only from material they trust (changed 2026-10-28: the test-run
+   container, layer B, comes with the generalization phase; until then medium and high
+   risk courses are refused, see "Code execution safety").
+3b. Needs the owner's solving data; starts when the first batch's must exercises are solved:
+   the held-out set of "Independent checks" (the owner's passing solutions must pass, their
+   mistakes must fail), and an LLM judge of teaching quality checked against the owner's
+   ratings before it is trusted (never for validity).
+3c. **Done 2026-10-29.**
+   Hint command, `python -m tutor.hint <exercise>` (decided 2026-10-24, after 3a since it
+   needs the LLM client, and after 3b since its rules come from the owner's real mistakes;
+   numbered 3b until 2026-10-28; first review the [3c] items of "LLM engineering candidates").
    Three layers, cheapest and most certain first:
    - rules, no LLM: known low-level errors (syntax, full-width punctuation, `NotImplementedError`
      left in, PYTHON_VERSION_MISMATCH, leftover SparkContext, tuple-formatted output) -> line and cause;
@@ -926,11 +1551,62 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
    - Evaluation: mutants act as simulated students with a known bug: diagnosis hit rate, leak
      rate, share solved without the LLM, cost per hint. Real tutoring mistakes from phases 1-2
      seed the rules and mutants. Hints only on request, logged in `attempts.jsonl`.
+   Layers 1 and 2 built 2026-10-29 (`tutor/hint/`, owner-approved design): the student's
+   tests run in a temporary copy (student.py untouched, not an attempt); rules see the
+   source and the first failures (eight from tutoring: full-width punctuation, syntax, a
+   forbidden API, Python version mismatch, a TODO left, an RDD used like a list, a
+   SparkContext left running, tuple output, nothing saved to outputPath). Full-width
+   punctuation is named only where Python stops at it, not in comments or strings, where it
+   is valid and would hide the real mistake (outside review, 2026-10-29). A run's
+   signature is which tests fail with which `E` lines (addresses and timings normalised);
+   each mutant's signature is computed once and cached in `solutions/<id>/.hints/`, keyed
+   by a hash of everything the run copies in (tests, data, helpers, the mutant) and the
+   run's timeout and environment (tests and mutant only until an outside review,
+   2026-10-29: changed data kept the old signatures). An exact match quotes the mutant's bug ("<the
+   bug>, <what goes wrong>"); the same failing tests with other values is offered as a
+   guess, the mutant whose assertion lines read most alike first (difflib ratio), since a
+   mistake whose output order varies never matches exactly, even against itself. Several
+   exact matches are all named ("it is one of: ..."). In a review batch only the "what goes
+   wrong" half is shown. Mutants the tests
+   cannot tell apart are reported (an exercise lacking a test). Each request is a line in
+   `attempts.jsonl` (event "hint", layer, rule or mutant). First request on a Spark
+   exercise about a minute (every mutant runs once), later ones the student's run only.
+   Layer 3 built 2026-10-29 (`tutor/hint/llm_hint.py`, owner-approved design): only when
+   layers 1 and 2 miss, with the workspace's `hint` role (none: the old fallback;
+   `--no-llm` skips it). The model gets student.py (question and code), hints.md, the
+   constraints and the first error without Java frames, never the reference, mutants or
+   oracle. It replies JSON, `diagnosis` first (read by code only, never shown, since it
+   may name the fix) and `hint`. Levels count model hints already logged for the same
+   student.py hash: 1 concept and direction, 2 where, 3 one corrected line for a
+   low-level mistake (learn only; a review batch names the kind, then the place, never
+   code). Leak guard, in two parts (owner: state it in the prompt to make leaks rare, and
+   check deterministically): the prompt lists the rules and says a checker rejects a hint
+   that breaks one; the checker rejects a code block (up to two lines at learn level 3),
+   any reference line of 15+ characters (spaces removed) the student has not seen
+   (student.py, tests, hints.md, skeleton), and code spans with difflib ratio >= 0.8
+   against consecutive reference lines. A rejection is sent back once with its reason;
+   a second one falls back to the first error (`llm-blocked` in attempts.jsonl). Shorter
+   reference lines are not guarded: `sc.stop()`-sized lines would reject honest hints.
+   Evaluation 2026-10-29 (the 32 week-5 mutants as students, docstring and comments
+   stripped, layer 2 off, DeepSeek Flash with thinking): 32 hints, none blocked, about
+   $0.001 and 4 s each; about 31 of 32 pointed at the real mistake. Most level 1 hints were
+   more specific than level 1 asks (they named the function, the operator or the fix, in
+   words). Kept as it is (owner, 2026-10-29): a stuck learner gains more from a precise
+   hint, and the guard already keeps code out; not a gap to report.
+   Evaluation 2026-10-29, each of the 32 mutants of the six week-5 Spark exercises as a
+   simulated student: first 29/32 named; the misses were one pair the tests cannot tell
+   apart and two no-coalesce mutants whose output order varies. With the two rules above
+   (name every exact match, rank guesses by similarity): 30/32 named, the other 2 named
+   among the indistinguishable pair, none wrong. Real students' code will differ more from
+   a mutant than a mutant does from itself, so this is an upper bound for layer 2.
 4. Hybrid RAG. First review the [4] items of "LLM engineering candidates".
 5. Evaluation script + README results. First review the [5] items of "LLM engineering
    candidates".
 
 ## Backlog (decided, not scheduled)
+
+- Batch API for whole-batch generation, once a cloud provider is used (see the [3] review in
+  "LLM engineering candidates").
 
 - C1 value-order check: rule 5 also reruns with each key's values shuffled (a runtime
   subclass, like the combiner switch), catching reducers that rely on value order, the
@@ -943,7 +1619,10 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
   instead of defining their own word rule (owner, 2026-10-25). Existing exercises are not
   converted (see "Decisions not to do").
 - Workspace `coverage.md`: before each batch, list the lectures' knowledge points with their
-  status; the next batch is chosen from the gaps (Codex's list: secondary sort, inverted
+  status and their slide ranges (footer numbers; the cache headers map them to PDF pages).
+  Since 2026-10-28 these ranges also select phase 3's slices and label phase 4's retrieval
+  test, so the footer reading must be right (a year in the footer was once read as the
+  slide number); the next batch is chosen from the gaps (Codex's list: secondary sort, inverted
   index / TF-DF, multi-step MRJob and top-k, Spark lineage / cache / repartition, SQL views
   and UDFs; SQL is restricted per exercise, never globally).
 
@@ -961,7 +1640,9 @@ gaps. Each was decided by the owner; change one only with the owner.
   their differences from the course are stated as teaching assumptions in the question and
   metadata `source.assumptions`. The owner prefers more exercises over edited ones, and
   edits would mean re-validating and re-reading material already solved. Decided 2026-10-25.
-  (Exception: an exercise that teaches something wrong, as the stripes test did, is fixed.)
+  (Exception: an exercise that teaches something wrong, as the stripes test did, is fixed.
+  Exception, owner 2026-10-29: rule `main` was added to the unsolved week 3-5 batches and
+  the examples; the solved week 1-2 batch keeps `standalone` unset.)
 - No LLM judges whether an exercise is valid; only the deterministic validator does (see
   "Exercise validation"). LLM feedback on the learner's answers (hints, rubric feedback) is
   a different thing and allowed.
@@ -997,9 +1678,18 @@ gaps. Each was decided by the owner; change one only with the owner.
   GitHub's private vulnerability reporting (repo settings, once public), which keeps them
   out of public issues; nobody should post keys or course material in an issue anyway.
 
+- No deterministic check that a debugging skeleton differs from its reference only at the
+  bug (considered 2026-10-29 after `df-udf-closure-debug`, whose fix needed three steps the
+  skeleton never had). Measured on the three debugging exercises, the changed code lines
+  (comments and docstrings ignored) do not separate it: it changes 2 lines and adds 5,
+  since its reference chains the steps in one expression, while the good
+  `mean-combiner-debug` (-4 +7) and `closure-counter-debug` (-8 +5) change as much or
+  more. The rule is in the generation prompt instead, and the teaching-quality judge (3b)
+  can rate it.
+
 ## Deferred
 
-SQLite, CLI, Docker, error taxonomy (derive categories from real attempt data later).
+SQLite, CLI, Docker (beyond the planned isolation container, see "Code execution safety"), error taxonomy (derive categories from real attempt data later).
 Adaptive learning and exam mode are listed under the later phases below.
 
 Later phases, after phase 5. Order decided 2026-10-26: second course, then adaptive review
@@ -1007,6 +1697,8 @@ Later phases, after phase 5. Order decided 2026-10-26: second course, then adapt
 release; exam mode stays open.
 - Second course: use the tool for another course (other language or framework) to prove
   workspace, testkit and setup recipes are not shaped around one course. A long-term goal.
+  Brings isolation layer B, the module risk tiers and other languages (see "Code execution
+  safety").
 - Adaptive review: use `attempts.jsonl` (failures, run counts, hints used) and `coverage.md`
   to find weak knowledge points and schedule `review`-mode batches with spaced repetition.
 - Packaging and release: `pipx install`, one command to start, CI on macOS and Windows
@@ -1066,13 +1758,14 @@ so it comes late; the adaptive review screens can be built with it.
     commands (arbitrary commands; hallucinated package names can be squatted). A component
     or platform missing from the recipes is reported as needing a new recipe.
   - This partly changes "Check, don't install" (see "Environment"): confirm with the owner
-    when the GUI phase starts. A per-course container image would avoid platform differences but
-    reopens "Docker deferred"; decide it together with the phase 3 isolation question.
+    when the GUI phase starts. The per-course test-run container (layer B, "Code execution
+    safety") arrives with the generalization phase, before the GUI; whether setup also uses
+    it is decided when the GUI phase starts.
 
 ## Open questions
 
-- Default LLM provider and model, and the embedding model (the client itself is
-  provider-agnostic, see "LLM engineering candidates").
+- The embedding model (phase 4). LLMs: local Gemma 4 and bigmodel.cn GLM-5.3-Flash first
+  (decided 2026-10-28, see the [3] model access item); others through the same client.
 
 ## Pseudocode
 

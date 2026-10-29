@@ -13,6 +13,8 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from tutor.execution import DEFAULT_TIMEOUT_S
+
 STUDENT_FILE = "student.py"
 TEST_FILE = "test_student.py"
 ORACLE_FILE = "oracle.py"
@@ -20,7 +22,7 @@ ORACLE_TEST_FILE = "test_oracle.py"
 
 # Never copied into a test run: student.py is replaced by the code under test, and the
 # rest is for people (hints) or left behind by running things by hand.
-_NOT_COPIED = {STUDENT_FILE, "hints.md", "sample_output", "__pycache__"}
+_NOT_COPIED = {STUDENT_FILE, "hints.md", "question.md", "sample_output", "__pycache__"}
 
 
 class ExerciseError(Exception):
@@ -37,6 +39,13 @@ class ExerciseFiles:
     metadata: dict = field(default_factory=dict)  # parsed metadata.json
     oracle: Path | None = None  # plain-Python specification
     oracle_test: Path | None = None  # hypothesis test comparing student.py with the oracle
+
+    @property
+    def timeout_s(self) -> float:
+        """Per pytest run: metadata `timeout_s` (Hadoop exercises need longer), else the
+        runner's default; the format allows null, which means the default."""
+        value = self.metadata.get("timeout_s")
+        return DEFAULT_TIMEOUT_S if value is None else float(value)
 
     def run_files(self, candidate: Path) -> dict[str, Path]:
         """Everything the tests need (test file, sample data, ...), with `candidate`

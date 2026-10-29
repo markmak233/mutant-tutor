@@ -56,6 +56,9 @@ def test_valid_metadata_and_manifest_have_no_problems():
         ({"function": "word_count"}, "function: Extra inputs are not permitted"),
         ({"partion_check": True}, "partion_check: Extra inputs are not permitted"),
         ({"id": "Word_Count"}, "id: String should match pattern"),
+        # Generated metadata once named a call signature as an entry point.
+        ({"entry_point": ["WordCount", "average(sc, rdd)"]},
+         "entry_point.1: String should match pattern"),
     ],
 )
 def test_metadata_field_problems_name_the_field(changes, expected):
@@ -160,3 +163,14 @@ def test_main_exit_codes(tmp_path, capsys):
     assert main(["--export", str(tmp_path / "out")]) == 0
     assert (tmp_path / "out" / "metadata.schema.json").is_file()
     assert "INVALID (1 problems)" in capsys.readouterr().out
+
+
+def test_check_batch_reports_null_files_and_wrong_shapes_without_crashing(tmp_path):
+    batch = make_batch(tmp_path / "b", ["word-count"])
+    (batch / "manifest.json").write_text("null")
+    (batch / "solutions" / "word-count" / "metadata.json").write_text("null")
+    found = check_batch(batch)
+    assert any(line.startswith("manifest.json: ") for line in found), found
+    assert any(line.startswith("solutions/word-count/metadata.json: ") for line in found)
+    (batch / "manifest.json").write_text(json.dumps(manifest(exercises=[{"id": "x"}])))
+    assert any("exercises" in line for line in check_batch(batch))

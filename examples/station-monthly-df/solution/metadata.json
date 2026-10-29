@@ -12,5 +12,6 @@
     "forbidden_imports": ["pandas", "numpy"]
   },
   "partition_check": true,
+  "standalone": true,
   "source": "synthetic"
 }

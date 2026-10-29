@@ -22,6 +22,9 @@ SCHEMA_VERSION = 1
 SCHEMA_DIR = Path(__file__).resolve().parents[2] / "schemas"  # the repo's schemas/
 
 Name = Annotated[str, Field(min_length=1)]
+# A function or class name, or Class.run for file-level Spark (which names have a dot is
+# checked in Metadata). Generated metadata once put a call signature here.
+EntryPoint = Annotated[str, Field(pattern=r"^[A-Za-z_]\w*(\.[A-Za-z_]\w*)?$")]
 
 
 class _Strict(BaseModel):
@@ -34,11 +37,24 @@ class _Strict(BaseModel):
 class Constraints(_Strict):
     """Static API constraints, checked with `ast` by validation/api.py."""
 
-    forbidden_calls: list[Name] = []
-    forbidden_imports: list[Name] = []
-    required_definitions: list[Name] = []
-    required_any: list[Annotated[list[Name], Field(min_length=1)]] = []
-    count_uses: list[Name] = []
+    # The descriptions reach the generating model through the JSON Schema: without them a
+    # model once put API calls it wanted used into required_any and could not tell why
+    # that failed.
+    forbidden_calls: list[Name] = Field(default=[], description=(
+        'Names that must not be used as a method or function, e.g. "groupByKey".'))
+    forbidden_imports: list[Name] = Field(default=[], description=(
+        'Modules that must not be imported, submodules included, e.g. "pyspark.sql".'))
+    required_definitions: list[Name] = Field(default=[], description=(
+        "Functions or methods the code must define (def, or an MRStep keyword), e.g. "
+        '"mapper_final", or "AuctionStats.run" for a method of a class. Not API calls the '
+        "code should make."))
+    required_any: list[Annotated[list[Name], Field(min_length=1)]] = Field(
+        default=[], description=(
+            "Groups of names the code defines (as in required_definitions); at least one "
+            'group must be fully defined, e.g. [["combiner"], ["mapper_init", '
+            '"mapper_final"]]. Not API calls.'))
+    count_uses: list[Name] = Field(default=[], description=(
+        'Names whose uses are counted for the report, never limited, e.g. "MRStep".'))
 
 
 class Source(_Strict):
@@ -65,12 +81,23 @@ class Metadata(_Strict):
     framework: Literal["python", "mrjob", "pyspark-rdd", "pyspark-df"]
     runner: Literal["inline", "hadoop"] | None = None
     # What the tests call: function names, an MRJob class, or "Class.run" for Spark.
-    entry_point: Annotated[list[Name], Field(min_length=1)]
+    entry_point: Annotated[list[EntryPoint], Field(min_length=1)]
     constraints: Constraints = Constraints()
     partition_check: bool = False
     combiner_check: bool = False
     timeout_s: Annotated[float, Field(gt=0)] | None = None
     mutant_partitions: Annotated[list[Annotated[int, Field(ge=1)]], Field(min_length=1)] = [2]
+    # `python student.py` runs on its own (validation rule "main"): a function exercise runs
+    # the question's example and prints the result; a file exercise is a program taking its
+    # paths from the command line, as the slides write them. False: code a framework
+    # launches with no main of its own (a Hadoop submission, a project's entry point).
+    # None: written before the rule (2026-10-29), not checked; the pipeline sets True.
+    standalone: Annotated[bool | None, Field(description=(
+        "student.py and reference.py run with `python <file>.py`: a function exercise has "
+        "an `if __name__ == \"__main__\":` block that runs the question's example and prints "
+        "the result; a file exercise one that reads its paths from sys.argv. False only for "
+        "code a framework launches that has no main of its own (a Hadoop submission, a "
+        "project's entry point). Left out: an exercise from before this rule."))] = None
     source: Literal["synthetic"] | Source
 
     @model_validator(mode="after")
@@ -164,15 +191,17 @@ def check_batch(batch_dir: Path) -> list[str]:
     manifest, exercises/ and solutions/ agree on the exercise ids."""
     found: list[str] = []
     manifest = _load_json(batch_dir / "manifest.json", "manifest.json", found)
-    if manifest is not None:
+    if manifest is not _UNREADABLE:  # a file holding null is checked, and fails
         found += [f"manifest.json: {p}" for p in problems(Manifest, manifest)]
 
     exercise_ids = _subdirs(batch_dir / "exercises")
     solution_ids = _subdirs(batch_dir / "solutions")
     if exercise_ids != solution_ids:
         found.append(f"exercises/ and solutions/ differ: {sorted(exercise_ids ^ solution_ids)}")
-    if isinstance(manifest, dict) and isinstance(manifest.get("exercises"), list):
-        listed = set(manifest["exercises"])
+    listed_ids = manifest.get("exercises") if isinstance(manifest, dict) else None
+    # Compared only when it is a list of ids; any other shape is reported above.
+    if isinstance(listed_ids, list) and all(isinstance(i, str) for i in listed_ids):
+        listed = set(listed_ids)
         if listed != exercise_ids:
             found.append(f"manifest exercises and exercises/ differ: "
                          f"{sorted(listed ^ exercise_ids)}")
@@ -180,7 +209,7 @@ def check_batch(batch_dir: Path) -> list[str]:
     for exercise_id in sorted(solution_ids):
         rel = f"solutions/{exercise_id}/metadata.json"
         metadata = _load_json(batch_dir / rel, rel, found)
-        if metadata is None:
+        if metadata is _UNREADABLE:
             continue
         found += [f"{rel}: {p}" for p in problems(Metadata, metadata)]
         if isinstance(metadata, dict) and metadata.get("id") != exercise_id:
@@ -188,14 +217,17 @@ def check_batch(batch_dir: Path) -> list[str]:
     return found
 
 
-def _load_json(path: Path, label: str, found: list[str]) -> object | None:
+_UNREADABLE = object()  # not None: a file may hold JSON null, which is a problem to report
+
+
+def _load_json(path: Path, label: str, found: list[str]) -> object:
     try:
         return json.loads(path.read_text())
     except FileNotFoundError:
         found.append(f"missing {label}")
     except json.JSONDecodeError as e:
         found.append(f"{label}: not valid JSON: {e}")
-    return None
+    return _UNREADABLE
 
 
 def _subdirs(path: Path) -> set[str]:
@@ -206,10 +238,15 @@ def _subdirs(path: Path) -> set[str]:
 
 def json_schemas() -> dict[str, dict]:
     """The models as JSON Schema, by file name: for assistants that do not run Python and
-    for phase 3's structured output, so all of them read the same definition."""
+    for phase 3's structured output, so all of them read the same definition; and the
+    generation settings, for a settings form (imported here: graph.settings uses this
+    module, so a top-level import would be circular)."""
+    from tutor.graph.settings import settings_schema
+
     return {
         "metadata.schema.json": Metadata.model_json_schema(),
         "manifest.schema.json": Manifest.model_json_schema(),
+        "generation-settings.schema.json": settings_schema(),
     }
 
 

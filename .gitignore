@@ -35,3 +35,6 @@ derby.log
 
 # OS
 .DS_Store
+
+# The hint command's cache of mutant signatures (python -m tutor.hint)
+.hints/

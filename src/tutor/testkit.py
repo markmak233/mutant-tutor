@@ -16,8 +16,10 @@ import os
 import re
 import sys
 import warnings
+from collections import Counter
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
+from decimal import Decimal
 from pathlib import Path
 
 from tutor.config import load_env
@@ -94,7 +96,15 @@ def run_program(program, input_dir: Path | str, output_dir: Path | str, *params)
         _stop_leftover_spark()
     # Spark writes _SUCCESS when saving finished; without this check a program that saves
     # nothing would pass a test that expects empty output.
-    assert (Path(output_dir) / "_SUCCESS").exists(), "no output was saved to outputPath"
+    out = Path(output_dir)
+    if not (out / "_SUCCESS").exists():
+        saved = sorted(f"{p.parent.relative_to(out)}/" for p in out.glob("*/**/_SUCCESS"))
+        # A program that saved into folders of outputPath otherwise reads as one that
+        # saved nothing (a generated exercise lost three repairs to that).
+        raise AssertionError(
+            "no output was saved to outputPath itself: save it there with one "
+            f"saveAsTextFile(outputPath); it was saved into {', '.join(saved)} instead"
+            if saved else "no output was saved to outputPath")
     return read_output(output_dir)
 
 
@@ -313,7 +323,9 @@ def _same(a: str, b: str, float_tol: float) -> bool:
     for field_a, field_b in zip(_FIELD_SEPARATOR.split(a), _FIELD_SEPARATOR.split(b),
                                 strict=True):
         if _NUMBER.fullmatch(field_a) and _NUMBER.fullmatch(field_b):
-            if abs(float(field_a) - float(field_b)) > float_tol:
+            # Decimal, not float: two 17-digit counts that differ by one are both
+            # 1e16 as floats.
+            if abs(Decimal(field_a) - Decimal(field_b)) > Decimal(repr(float_tol)):
                 return False
         elif field_a != field_b:
             return False
@@ -321,20 +333,48 @@ def _same(a: str, b: str, float_tol: float) -> bool:
 
 
 def _assert_same_multiset(got: list[str], expected: list[str], float_tol: float) -> None:
-    unmatched = list(expected)
-    extra = []
-    for line in got:
-        match = next((i for i, e in enumerate(unmatched) if _same(line, e, float_tol)), None)
-        if match is None:
-            extra.append(line)
-        else:
-            del unmatched[match]
+    extra, unmatched = _left_over(got, expected, float_tol)
     if extra or unmatched:
         raise AssertionError(
             f"got {len(got)} lines, expected {len(expected)}\n"
             f"  unexpected: {_show(extra)}\n"
             f"  missing:    {_show(unmatched)}"
         )
+
+
+def _left_over(got: list[str], expected: list[str],
+               float_tol: float) -> tuple[list[str], list[str]]:
+    """The lines of each side that a largest one-to-one matching leaves out. With a
+    tolerance, taking the first expected line in reach is not enough: 0.1 may take 0.0
+    from 0.0, which only 0.1 could match ([0.1, 0.0] against [0.0, 0.2], tolerance 0.11),
+    so lines left over are given a chance to take a match away (augmenting paths)."""
+    if float_tol == 0:
+        return (list((Counter(got) - Counter(expected)).elements()),
+                list((Counter(expected) - Counter(got)).elements()))
+    owner: dict[int, int] = {}  # expected index -> the got index matched to it
+
+    def take(g: int, tried: set[int]) -> bool:
+        for e, line in enumerate(expected):
+            if e not in tried and _same(got[g], line, float_tol):
+                tried.add(e)
+                if e not in owner or take(owner[e], tried):
+                    owner[e] = g
+                    return True
+        return False
+
+    left = [g for g in range(len(got)) if not _take_free(g, got, expected, owner, float_tol)]
+    extra = [got[g] for g in left if not take(g, set())]
+    return extra, [line for e, line in enumerate(expected) if e not in owner]
+
+
+def _take_free(g: int, got: list[str], expected: list[str], owner: dict[int, int],
+               float_tol: float) -> bool:
+    """The first pass: a free expected line in reach, if there is one."""
+    for e, line in enumerate(expected):
+        if e not in owner and _same(got[g], line, float_tol):
+            owner[e] = g
+            return True
+    return False
 
 
 def _assert_same_sequence(got: list[str], expected: list[str], float_tol: float) -> None:

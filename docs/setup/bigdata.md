@@ -139,6 +139,109 @@ python -m tutor.envcheck     # one line per [requires] entry, with a hint for ea
 Exercises are generated into `batches/` inside the workspace. Until phase 3 (LLM generation),
 they are drafted with Claude Code from the lectures and checked with `python -m tutor.validation`.
 
+### Reading the lectures into text (optional)
+
+```bash
+python -m tutor.materials "$WORKSPACE_DIR/lectures"            # text layer, about a second
+python -m tutor.materials --vision "$WORKSPACE_DIR/lectures"   # also slides that are images
+```
+
+The text goes to `$WORKSPACE_DIR/cache/lectures/<file>.pdf.md`, one section per page; a page
+is read again only when it changes. Slides that are images (code screenshots, pseudocode,
+diagrams) stay marked `pending` until a run with `--vision` transcribes them with a vision
+model through an OpenAI-compatible API. A local model keeps the slides on your machine:
+
+1. Install [LM Studio](https://lmstudio.ai), download a vision model (tested: Gemma 4
+   26B-A4B, about 15 GB; needs about 32 GB of memory), and start the server on its
+   Developer page (or `lms server start`).
+2. Name the model in `workspace.toml` and give it the `vision` role:
+   ```toml
+   [llm.profiles.gemma-local]
+   provider = "lmstudio"                    # base URL http://localhost:1234/v1
+   model = "google/gemma-4-26b-a4b-qat"     # the id LM Studio shows
+
+   [llm.roles]
+   vision = "gemma-local"
+   ```
+
+A cloud model is one more profile. Its key goes in `.env` only, and the profile names the
+variable (a key written into `workspace.toml` is refused):
+
+```toml
+[llm.profiles.glm-flash]
+provider = "glm"                            # Zhipu bigmodel.cn
+model = "glm-5.3-flash"
+api_key_env = "ZHIPU_API_KEY"               # .env: ZHIPU_API_KEY=...
+```
+
+Use it for one run with `--vision --profile glm-flash`, or make it the `vision` role. The
+slide images are then sent to that provider. Other OpenAI-compatible servers use
+`provider = "custom"` with a `base_url`. About 7 s per image page with the local model on an
+M2 Pro; every call is logged in `$WORKSPACE_DIR/logs/llm_calls.jsonl` (never the key).
+
+### Generating exercises (optional, phase 3)
+
+Needs the lectures read into the cache (above), a model for the `generate` and `plan`
+roles, and the `gen` extra:
+
+```bash
+pip install -e ".[bigdata,dev,gen]"
+```
+
+```toml
+[llm.roles]
+generate = "glm-flash"
+plan = "glm-flash"
+```
+
+OpenAI is `provider = "openai"` with `api_key_env = "OPENAI_API_KEY"` (the key in `.env`).
+An `oracle` role (e.g. `oracle = "gpt-terra"`, another provider than `generate`) has that
+model write each exercise's oracle from the question alone, so validation rule 4 compares
+two independent readings; without it the generating model writes the oracle too.
+DeepSeek is `provider = "deepseek"` (e.g. `model = "deepseek-v4-flash"`,
+`api_key_env = "DEEPSEEK_API_KEY"`); its API has only JSON mode, so the schema goes into the
+prompt and the validator still checks the reply.
+
+```bash
+python -m tutor.graph plan --lectures Lecture_4.1-Spark_I Lecture_4.2-Spark_II --batch w4 \
+    --prefs "one or two debugging exercises"
+# shows the plan and pauses; edit batches/.drafts/<batch>/plan.json if you like, then
+python -m tutor.graph resume --batch w4 --approve      # or --feedback "..."
+```
+
+The plan takes the knowledge points marked `gap-code` in the workspace's `coverage.md`
+(one exercise each, at most `--max-count`, or exactly `--count`) and follows the course
+facts in `conventions.md`. Approved exercises are generated a few at a time, each checked
+by the validator and repaired up to three times; only VALID ones reach the batch. A run
+that stopped midway continues with `resume`; `resume --profile NAME` finishes it with
+another model. `coverage-proposal.md` in the batch lists the coverage.md changes to make.
+
+Tunable values (repair rounds, thinking per role, token limits, ...) have defaults; to
+change them for every batch, add a `[generation]` table (the names, meanings and bounds are
+in `src/tutor/graph/settings.py` and `schemas/generation-settings.schema.json`), or change
+one run with `--set`:
+
+```toml
+[generation]
+max_rounds = 3
+stronger_repair_from = 1    # the repair model from the first repair on
+```
+
+```bash
+python -m tutor.graph plan ... --set max_rounds=2
+python -m tutor.graph resume --batch w4 --set max_rounds=4   # for the rest of the batch
+```
+
+No API key: a profile with `provider = "assistant"` lets a coding assistant (Claude Code,
+Codex) answer every call as request files; `docs/assistant-mode.md` has the setup and the
+loop it follows.
+
+A `hint` role (e.g. `hint = "deepseek"`) adds a model's hint to `python -m tutor.hint`
+when no rule and no known mistake fits. The model gets your `student.py`, `hints.md`, the
+constraints and the first error, never the solution; a hint that shows solution code is
+rejected and asked for again. Asking again without changing your code gives a more
+specific hint (three levels; a review batch never gets code). `--no-llm` skips the model.
+
 ## 6. Common problems
 
 | Symptom | Cause | Fix |

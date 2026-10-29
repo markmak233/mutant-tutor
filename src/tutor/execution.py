@@ -72,22 +72,72 @@ def run_pytest(
     deleted afterwards; the source files are never modified.
     """
     with tempfile.TemporaryDirectory(prefix="tutor-run-") as tmp:
-        workdir = Path(tmp)
-        for name, source in files.items():
-            target = workdir / name
-            if source.is_dir():
-                shutil.copytree(source, target)
-            else:
-                shutil.copy2(source, target)
+        workdir = _copy_in(files, Path(tmp))
         return _run_in(workdir, timeout_s, env or {})
 
 
-def _run_in(workdir: Path, timeout_s: float, extra_env: Mapping[str, str]) -> RunResult:
+def run_script(
+    files: Mapping[str, Path],
+    script: str,
+    timeout_s: float = DEFAULT_TIMEOUT_S,
+    env: Mapping[str, str] | None = None,
+) -> RunResult:
+    """`python <script>` with no arguments, in a fresh temp dir holding `files`, the way a
+    student runs `python student.py` in the exercise folder; isolated like run_pytest.
+    PASSED: exit code 0; anything else is ERROR (or TIMEOUT)."""
+    with tempfile.TemporaryDirectory(prefix="tutor-run-") as tmp:
+        workdir = _copy_in(files, Path(tmp))
+        return _run_in(workdir, timeout_s, env or {}, [sys.executable, script])
+
+
+def _copy_in(files: Mapping[str, Path], workdir: Path) -> Path:
+    for name, source in files.items():
+        target = workdir / name
+        if source.is_dir():
+            shutil.copytree(source, target)
+        else:
+            shutil.copy2(source, target)
+    return workdir
+
+
+def copied_files(files: Mapping[str, Path]) -> dict[str, Path]:
+    """Every file run_pytest copies in for `files`, by its path in the run directory:
+    directories whole, with links followed as copytree follows them."""
+    found = {}
+    for name, source in files.items():
+        if not source.is_dir():
+            found[name] = source
+            continue
+        for root, dirs, names in os.walk(source, followlinks=True):
+            dirs.sort()
+            for file in sorted(names):
+                path = Path(root) / file
+                found[f"{name}/{path.relative_to(source).as_posix()}"] = path
+    return found
+
+
+def links(files: Mapping[str, Path]) -> list[str]:
+    """The symbolic links among `files` and inside their directories, by path in the run
+    directory; run_pytest would copy what each one points to."""
+    found = []
+    for name, source in files.items():
+        if source.is_symlink():
+            found.append(name)
+        elif source.is_dir():
+            for root, dirs, names in os.walk(source):  # not into linked directories
+                found += [f"{name}/{(Path(root) / n).relative_to(source).as_posix()}"
+                          for n in sorted(dirs + names) if (Path(root) / n).is_symlink()]
+    return found
+
+
+def _run_in(workdir: Path, timeout_s: float, extra_env: Mapping[str, str],
+            script: list[str] | None = None) -> RunResult:
+    """Run pytest in `workdir`, or the command `script` (a Python file run directly)."""
     # sys.executable: the project venv, so student code can import pyspark and mrjob.
     # no:cacheprovider: no .pytest_cache; the temp dir is discarded anyway.
     # --junitxml: the counts that tell "all passed" from "all skipped" (see _outcome).
-    cmd = [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
-           f"--junitxml={REPORT_FILE}"]
+    cmd = script or [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
+                     f"--junitxml={REPORT_FILE}"]
     # PYSPARK_PYTHON: Spark workers otherwise start the `python3` on PATH, which may be a
     # different minor version than the driver (PYTHON_VERSION_MISMATCH).
     env = {
@@ -111,6 +161,9 @@ def _run_in(workdir: Path, timeout_s: float, extra_env: Mapping[str, str]) -> Ru
         return RunResult(Outcome.TIMEOUT, None, time.monotonic() - start, output)
     duration = time.monotonic() - start
     _kill_group(proc.pid)  # leftovers such as a JVM that was never stopped
+    if script:  # no test report: the exit code is the whole answer
+        outcome = Outcome.PASSED if proc.returncode == 0 else Outcome.ERROR
+        return RunResult(outcome, proc.returncode, duration, output)
     counts = _read_counts(workdir / REPORT_FILE)
     return RunResult(_outcome(proc.returncode, counts), proc.returncode, duration, output,
                      counts)
@@ -143,14 +196,16 @@ def _read_counts(report: Path) -> TestCounts | None:
 def _outcome(returncode: int, counts: TestCounts | None) -> Outcome:
     """Exit code 0 counts as PASSED only if tests really ran and none was skipped: an
     all-skipped run (exit 0) proves nothing, so a reference or oracle test must not pass
-    that way. Exit code 1 counts as FAILED only if an assertion failed: a run where only a
-    fixture broke never checked the code, so it must not count as killing a mutant."""
+    that way. Exit code 1 counts as FAILED only if the report shows a failed test: a run
+    where only a fixture broke, or one that ended before pytest wrote its report (the
+    process exited from inside a test), never checked the code, so it must not count as
+    killing a mutant."""
     if returncode == 0:
         if counts is None or counts.passed == 0 or counts.skipped > 0:
             return Outcome.ERROR
         return Outcome.PASSED
     if returncode == 1:
-        if counts is not None and counts.failed == 0:
+        if counts is None or counts.failed == 0:
             return Outcome.ERROR
         return Outcome.FAILED
     return Outcome.ERROR

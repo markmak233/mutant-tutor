@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from tutor.config import load_env
+from tutor.execution import DEFAULT_TIMEOUT_S
 from tutor.schema import Metadata, problems
 from tutor.validation import ExerciseError, Status, load_exercise, validate
 from tutor.validation.__main__ import format_report, main
@@ -85,6 +86,7 @@ def make_exercise(tmp_path, *, tests=TESTS, reference=REFERENCE, skeleton=SKELET
     (exercise / "student.py").write_text(skeleton)
     (exercise / "hints.md").write_text("# Hints\n")
     for name, text in (extra_files or {}).items():
+        (exercise / name).parent.mkdir(parents=True, exist_ok=True)
         (exercise / name).write_text(text)
     (solution / "metadata.json").write_text(json.dumps({**METADATA, **(metadata or {})}))
     (solution / "reference.py").write_text(reference)
@@ -135,9 +137,59 @@ def test_metadata_that_breaks_the_format_skips_every_other_rule(tmp_path, metada
     assert report.result("0").status is Status.FAIL
     assert expected in report.result("0").detail
     others = [r for r in report.results if r.rule != "0"]
-    assert [r.status for r in others] == [Status.SKIPPED] * 6
+    assert [r.status for r in others] == [Status.SKIPPED] * 8
     assert all(r.duration_s == 0.0 for r in others)
     assert not report.valid
+
+
+@pytest.mark.parametrize(
+    ("extra_files", "expected"),
+    [
+        ({"test_student.py": TESTS + "import socket\n"},
+         "test_student.py line 8: import of 'socket'"),
+        ({"conftest.py": ""}, "conftest.py is not allowed in an exercise"),
+        # pytest collects subfolders too, and the run copies them whole.
+        ({"data/helper.py": "import subprocess\n"},
+         "data/helper.py line 1: import of 'subprocess'"),
+        ({"data/conftest.py": ""}, "data/conftest.py is not allowed in an exercise"),
+    ],
+)
+def test_unsafe_code_is_never_run(tmp_path, extra_files, expected):
+    """The safety check runs before any test: a hazard skips every rule that runs code."""
+    report = run(make_exercise(tmp_path, extra_files=extra_files))
+
+    assert report.result("safe").status is Status.FAIL
+    assert expected in report.result("safe").detail
+    later = [r for r in report.results if r.rule not in ("0", "safe")]
+    assert [r.status for r in later] == [Status.SKIPPED] * 7
+    assert all(r.duration_s == 0.0 for r in later)
+    assert not report.valid
+
+
+def test_a_link_in_the_exercise_is_never_run(tmp_path):
+    """A run copies what a link points to, which may be outside the exercise."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "conftest.py").write_text("import subprocess\n")
+    exercise, solution = make_exercise(tmp_path, extra_files={"data/a.csv": "1\n"})
+    (exercise / "data" / "more").symlink_to(outside, target_is_directory=True)
+    report = run((exercise, solution))
+    assert report.result("safe").status is Status.FAIL
+    assert "data/more is a link" in report.result("safe").detail
+
+
+def test_a_null_timeout_means_the_default(tmp_path):
+    """The format allows timeout_s: null; validation must not turn it into float(None)."""
+    exercise, solution = make_exercise(tmp_path, metadata={"timeout_s": None})
+    assert load_exercise(exercise, solution).timeout_s == DEFAULT_TIMEOUT_S
+    assert run((exercise, solution)).valid
+
+
+def test_a_mutant_is_checked_too(tmp_path):
+    mutants = {"m01_sub": "import os\nos.system('echo hi')\n" + MUTANT_SUB}
+    report = run(make_exercise(tmp_path, mutants=mutants))
+
+    assert "mutants/m01_sub.py line 2: os.system is not allowed" in report.result("safe").detail
 
 
 def test_examples_fit_the_batch_format():
@@ -169,6 +221,21 @@ def test_broken_reference_skips_the_rules_that_run_tests(tmp_path):
     assert report.result("1").status is Status.FAIL
     assert [report.result(r).status for r in ("2", "3", "4", "5")] == [Status.SKIPPED] * 4
     assert not report.valid
+
+
+def test_rule_4_can_still_run_to_tell_which_side_of_a_rule_1_failure_is_wrong(tmp_path):
+    """A test with a wrong expected value: the reference fails it but agrees with the oracle.
+    A wrong reference: it fails the test and disagrees with the oracle."""
+    wrong_test = TESTS.replace("== 5", "== 6")
+    report = validate(load_exercise(*make_exercise(tmp_path / "a", tests=wrong_test)),
+                      oracle_on_failure=True)
+    assert report.result("1").status is Status.FAIL
+    assert report.result("4").status is Status.OK
+    assert [report.result(r).status for r in ("2", "3", "5")] == [Status.SKIPPED] * 3
+    wrong = "def add(a, b):\n    return a * b\n"
+    report = validate(load_exercise(*make_exercise(tmp_path / "b", reference=wrong)),
+                      oracle_on_failure=True)
+    assert report.result("4").status is Status.FAIL and not report.valid
 
 
 def test_skeleton_that_passes_breaks_rule_2(tmp_path):
@@ -408,6 +475,13 @@ def test_local_variable_with_a_forbidden_name_is_not_a_use():
     assert find_violations(source, {"forbidden_calls": ["count"]}) == []
 
 
+def test_a_parameter_of_one_function_does_not_hide_the_builtin_in_another():
+    source = "def g(sorted):\n    return sorted\n\nx = sorted([2, 1])\n"
+    assert find_violations(source, {"forbidden_calls": ["sorted"]}) == ["line 4: uses sorted"]
+    own = "def sorted(xs):\n    return xs\n\nx = sorted([2, 1])\n"  # their own sort
+    assert find_violations(own, {"forbidden_calls": ["sorted"]}) == []
+
+
 def test_allowed_code_has_no_violations():
     source = "def f(rdd):\n    return rdd.reduceByKey(max)\n"
     assert find_violations(source, {"forbidden_calls": ["groupByKey", "collect"]}) == []
@@ -432,7 +506,8 @@ def test_similar_module_name_is_not_forbidden():
 def test_required_definitions():
     source = "class J:\n    def mapper_init(self):\n        pass\n"
     constraints = {"required_definitions": ["mapper_init", "mapper_final"]}
-    assert find_violations(source, constraints) == ["must define mapper_final"]
+    assert find_violations(source, constraints) == [
+        "must define mapper_final (a name the code defines, not a call)"]
 
 
 COMBINE = {"required_any": [["combiner"], ["mapper_init", "mapper_final"]]}
@@ -456,7 +531,8 @@ def test_required_any_is_met_by_any_one_group(source):
 ])
 def test_required_any_ignores_keywords_outside_mrstep_or_set_to_none(source):
     assert find_violations(source, COMBINE) == [
-        "must define one of: combiner | mapper_init + mapper_final"
+        "must define one of: combiner | mapper_init + mapper_final "
+        "(names the code defines, not calls)"
     ]
 
 
@@ -464,7 +540,8 @@ def test_required_any_needs_a_whole_group():
     """mapper_init alone is half of in-mapper combining, and there is no combiner."""
     source = "class J:\n    def mapper_init(self):\n        pass\n"
     assert find_violations(source, COMBINE) == [
-        "must define one of: combiner | mapper_init + mapper_final"
+        "must define one of: combiner | mapper_init + mapper_final "
+        "(names the code defines, not calls)"
     ]
 
 
@@ -540,8 +617,9 @@ def test_cli_saves_the_report_as_json(tmp_path):
 
     assert data["exercise_id"] == "demo"
     assert data["valid"] is False
-    assert [r["rule"] for r in data["results"]] == ["0", "1", "2", "3", "4", "5", "api"]
-    assert data["results"][3]["status"] == "FAIL"  # zero mutants fails rule 3
+    assert [r["rule"] for r in data["results"]] == ["0", "safe", "1", "2", "3", "4", "5", "api",
+                                                 "main"]
+    assert data["results"][4]["status"] == "FAIL"  # zero mutants fails rule 3
     assert "validated_at" in data and "tool_commit" in data
 
     (solution / "mutants" / "m01_sub.py").write_text(MUTANT_SUB)
@@ -569,3 +647,101 @@ def test_examples_are_valid(name):
     report = validate(exercise)
 
     assert report.valid, format_report(report)
+
+
+PYTEST_OUTPUT = """\
+FF.                                                                      [100%]
+=================================== FAILURES ===================================
+__________________________ test_example_from_question __________________________
+
+    def test_example_from_question(tmp_path):
+>       assert_output(out, expected)
+
+test_student.py:30: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+/srv/someone/project/src/tutor/testkit.py:197: in assert_output
+    _compare(got, want)
+E           AssertionError: got 5 lines, expected 5
+E             unexpected: ['RECORDS\t4']
+E             missing:    ['RECORDS\t5']
+
+/srv/someone/project/src/tutor/testkit.py:333: AssertionError
+----------------------------- Captured stderr call -----------------------------
+/srv/someone/.venv/lib/python3.11/site-packages/pyspark/shuffle.py:65: UserWarning: x
+_____________________________ test_bad_lines ___________________________________
+E       ValueError: could not convert string to float: '/srv/someone/data/x.csv'
+test_student.py:57: ValueError
+=========================== short test summary info ============================
+FAILED test_student.py::test_example_from_question - AssertionError: got 5 li...
+FAILED test_student.py::test_bad_lines - ValueError: could not...
+2 failed, 1 passed in 12.92s
+"""
+
+
+def test_the_failure_excerpt_keeps_what_a_fix_needs_and_no_home_paths():
+    from tutor.validation.checks import failure_excerpt
+
+    assert failure_excerpt(PYTEST_OUTPUT) == (
+        "test_example_from_question\n"
+        "test_student.py:30:\n"
+        "E           AssertionError: got 5 lines, expected 5\n"
+        "E             unexpected: ['RECORDS\t4']\n"
+        "E             missing:    ['RECORDS\t5']\n"
+        "test_bad_lines\n"
+        "E       ValueError: could not convert string to float: 'x.csv'\n"
+        "test_student.py:57: ValueError")
+    assert "someone" not in failure_excerpt(PYTEST_OUTPUT)
+    assert len(failure_excerpt(PYTEST_OUTPUT, limit=40)) == 40 + len("\n...")
+
+
+def test_required_definitions_accepts_a_method_named_with_its_class():
+    """The form metadata entry_point uses for file-level programs: Class.run."""
+    source = "class AuctionStats:\n    def run(self, a, b):\n        pass\n"
+    assert find_violations(source, {"required_definitions": ["AuctionStats.run", "run"]}) == []
+    assert find_violations(source, {"required_definitions": ["Other.run"]}) == [
+        "must define Other.run (a name the code defines, not a call)"]
+
+
+# --- rule main: `python student.py` runs on its own --------------------------------------
+
+MAIN = '\n\nif __name__ == "__main__":\n    print(add(2, 3))  # the question\'s example\n'
+
+
+@pytest.mark.parametrize(("standalone", "reference", "skeleton", "status", "expected"), [
+    (None, REFERENCE, SKELETON, Status.NOT_APPLICABLE, "from before this rule"),
+    (False, REFERENCE, SKELETON, Status.NOT_APPLICABLE, "a framework launches it"),
+    (True, REFERENCE + MAIN, SKELETON + MAIN, Status.OK, "ran the example"),
+    (True, REFERENCE + MAIN, SKELETON, Status.FAIL, "student.py lack"),
+    (True, REFERENCE + '\n\nif __name__ == "__main__":\n    print(add(2))\n', SKELETON + MAIN,
+     Status.FAIL, "error, exit code 1"),
+])
+def test_student_py_must_run_on_its_own(tmp_path, standalone, reference, skeleton, status,
+                                        expected):
+    metadata = {} if standalone is None else {"standalone": standalone}
+    report = run(make_exercise(tmp_path, reference=reference, skeleton=skeleton,
+                               metadata=metadata))
+    rule = report.result("main")
+    assert (rule.status, expected in rule.detail) == (status, True), rule.detail
+    if status is Status.FAIL and "exit code" in expected:
+        assert "TypeError" in rule.excerpt  # what the run printed, for whoever fixes it
+
+
+@pytest.mark.parametrize(("source", "found"), [
+    ('if __name__ == "__main__":\n    main()\n', True),
+    ("if '__main__' == __name__:\n    main()\n", True),
+    ("def f():\n    if __name__ == '__main__':\n        pass\n", False),  # not module level
+    ("x = 1\n", False),
+])
+def test_a_main_block_is_found_at_module_level_only(source, found):
+    from tutor.validation.checks import has_main_block
+    assert has_main_block(source) is found
+
+
+def test_the_main_block_is_not_held_to_the_solutions_constraints():
+    """The demo may print with collect(); the solution above it may not."""
+    source = ("def f(rdd):\n    return rdd.map(str)\n\n"
+              'if __name__ == "__main__":\n    print(f(rdd).collect())\n')
+    assert find_violations(source, {"forbidden_calls": ["collect"]}) == []
+    assert find_violations(source.replace("rdd.map(str)", "rdd.collect()"),
+                           {"forbidden_calls": ["collect"]}) == ["line 2: uses collect"]
+    assert count_uses(source, ["collect"]) == {"collect": 0}
