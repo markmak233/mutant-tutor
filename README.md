@@ -106,9 +106,15 @@ the workspace's `workspace.toml`, so any OpenAI-compatible models can be combine
 cloud; the one rule is that the oracle comes from another provider than the models that
 write the exercise. With no API key at all, a coding assistant on a subscription (Claude
 Code, Codex) can answer every call as request files: see
-[`docs/assistant-mode.md`](docs/assistant-mode.md). One week of exercises (6 items, DeepSeek-V4-Flash drafting, V4-Pro
-repairing, GPT writing the oracles): 6 of 6 VALID, 4 of them rescued by the larger model,
-about $0.07 per valid exercise. Samples are small.
+[`docs/assistant-mode.md`](docs/assistant-mode.md).
+
+Measured on one week of stream algorithms (11 exercises, the same plan for every setup, all
+11 saved by each): with thinking off, DeepSeek-V4-Flash's first draft was VALID for 2 of 11,
+the rest needed one or two repairs; with thinking on, 7 of 11, close to V4-Pro's 8 of 11 in
+about 60% of its time (3 min against 5 per exercise). The difference is reasoning, not model
+size: most failed first drafts had expected test values traced wrongly by hand. GLM-5.3 as
+the oracle wrote 19 of 19 usable oracles in 9 s each. Samples are small; the full table is in
+[`docs/design.md`](docs/design.md) ("Week 7 with five arms").
 
 ## Quick start
 
@@ -220,17 +226,17 @@ Phase numbers match `docs/design.md`.
 - **1** ✅ Environment + validation harness, two synthetic examples
 - **2a** ✅ Harness extensions: shared test helpers, MRJob (inline and local Hadoop),
   DataFrame, combiner-off check, attempt log, two more synthetic examples
-- **2** Golden exercises: a first batch of 10 course exercises (validated; being solved by
-  hand to run the full loop)
+- **2** ✅ Golden exercises: a first batch of 10 course exercises, validated, its must
+  exercises solved by hand and rated to run the full loop (the `v0.1.0` release still open)
 - **2b** Code-tracing exercises ("what does this print and why")
 - **3a** ✅ LLM generation: static check on generated code, slide reading with a cached
   text layer and vision transcription, LangGraph plan → owner approval → generate → oracle
-  by a second model → validate → repair, exercises in parallel, two course weeks generated
+  by a second model → validate → repair, exercises in parallel, three course weeks generated
   (a container for running generated code is moved to a later phase)
 - **3b** Checks that need a learner's real work: held-out solutions and mistakes, an LLM
   judge of teaching quality calibrated against the learner's ratings
-- **3c** Hint command: rules, mutant matching and a model's hint behind a leak check
-  (working); a calibrated judge of hint quality later
+- **3c** ✅ Hint command: rules, mutant matching and a model's hint behind a leak check;
+  a calibrated judge of hint quality later
 - **4** Hybrid RAG over course material (BM25 + vectors), evaluated with recall@k
 - **5** Evaluation: validity rate, mutant kill rate, cost per valid exercise, with vs without RAG
 

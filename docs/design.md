@@ -174,6 +174,7 @@ smartcodereview-workspace/
     │   │   └── discarded/               # also: exercises still failing after 3 repairs + log
     │   └── 2026-11-10_p4-rag-2/         # second run on the same day
     ├── attempts/attempts.jsonl          # one line per test run: batch, exercise, time, pass/fail, errors
+    ├── attempts/code/                   # the student.py of each failed run, once per content
     ├── ratings.jsonl                    # one teaching-quality rating per solved exercise
     ├── index/                           # P4 BM25 / vector index, rebuildable
     └── runs/<date>_<label>/             # P5 evaluation outputs
@@ -726,10 +727,11 @@ Design approved 2026-10-28 (owner):
 - Stops: 3 repair rounds per item, a token budget per batch, an LLM error stops the current
   item and keeps the finished ones.
 - Roles in `[llm.roles]`: `plan` = GLM-5.3-Flash with thinking low (see the experiment
-  below); `generate` = DeepSeek since 2026-10-29 (the week 4 rerun below); `oracle` = a
-  different model family (GPT, decided 2026-10-28 in place of local Gemma; GLM-5.3-Flash
-  once the OpenAI key expires), since the same model writing reference and oracle is not
-  an independent check. The CLI refuses an oracle from the generating model's provider.
+  below); `generate` = DeepSeek-V4-Flash since 2026-10-29 (the week 4 rerun below), with
+  thinking on since 2026-10-30 (the week 7 comparison below); `repair` = V4-Pro from the
+  second repair on; `oracle` = a different model family (GPT, decided 2026-10-28 in place
+  of local Gemma; GLM-5.3 once the OpenAI key expires, measured on week 7), since the same
+  model writing reference and oracle is not an independent check. The CLI refuses an oracle from the generating model's provider.
 - Experiment 2026-10-28, one item (a closure / accumulator debugging exercise from the
   week 4 slides), same validator:
 
@@ -782,6 +784,35 @@ Design approved 2026-10-28 (owner):
     fields now carry descriptions, which reach the model in the draft's JSON Schema, and
     the api messages say the names are defined, not called. There is still no "must call"
     constraint: what an exercise must use is checked by its tests and `forbidden_calls`.
+- Week 7 with five arms (2026-10-29/30): the same plan of 11 plain-Python items from
+  lectures 7.1-7.2 (stream algorithms) for every arm, arm D on 4 of them. Repairs from the
+  second on are V4-Pro with thinking in every API arm; "s/item" is one item at a time.
+
+  | Arm | Generate (thinking) | Oracle | First-round VALID | Saved | Rounds/item | s/item | Layout |
+  |---|---|---|---|---|---|---|---|
+  | A | V4-Flash, off | GPT | 2/11 | 11/11 | 2.3 | (parallel) | 5/11 |
+  | B | V4-Flash, off | GLM-5.3 | 1/11 | 11/11 | 2.4 | 116 | 9/11 |
+  | C | V4-Pro, on | GPT | 8/11 | 11/11 | 1.4 | 296 | 7/11 |
+  | D | Claude Code (assistant mode) | GPT | 4/4 | 4/4 | 1.0 | 60-120 | 4/4 |
+  | E | V4-Flash, on | GPT | 7/11 | 11/11 | 1.2 | 180 | 10/11 |
+
+  - Thinking mattered, not model size: with thinking off, most first drafts failed rule 1
+    on expected values traced by hand (DGIM bucket states, lossy-counting boundaries);
+    Flash with thinking came close to Pro in about 60% of its time. E needed Pro once
+    (33k of 699k tokens).
+  - The time is reasoning: a Flash draft took 129 s and about 27k output tokens with
+    thinking (about 210 tokens/s), 16 s and 4k without. GLM-5.3 wrote oracles in 9 s
+    without thinking; V4-Pro with thinking took 280 s per draft and 120 s per repair.
+  - GLM-5.3 as the oracle: 19 calls, all usable; its one rule 4 failure was the generating
+    model's own test_oracle.py.
+  - Layout: counted before the examples were rewritten in it (see "Learning rules").
+  - Decided (owner, 2026-10-30): arm E's shape, Flash with thinking, Pro only when Flash's
+    repair fails, so the time stays bounded; GLM-5.3 as the oracle after 2026-11-04. The
+    oracle's thinking became its own setting, `oracle_thinking`, off by default: it
+    followed `thinking`, so turning generation thinking on would have made GLM think. Not
+    yet measured, for the next run: more items in parallel for plain-Python batches
+    (default 3 on 12 cores), a lower thinking effort if DeepSeek offers one, and running
+    mutants in parallel during validation for Spark weeks.
 - What repair is told (2026-10-29). A week 4 item came back word for word through all
   three repairs: rule 1 said only pytest's last line ("2 failed, 3 passed"), so the model
   could not see what to fix, and at temperature 0 an unchanged prompt returned the same
@@ -1326,7 +1357,10 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
     disagree), labels as headings and indented data as code blocks; existing batches get
     it with `python -m tutor.question BATCH_DIR`. Not hints.md's top, which the owner
     first suggested: hints.md is opened only when stuck. No validation check of the
-    layout yet: older exercises do not follow it and are not reworked.
+    layout yet: older exercises do not follow it and are not reworked. The four
+    `examples/` questions were rewritten in the layout (2026-10-30), since the prompt's
+    example outweighed its rules: on week 7, DeepSeek Flash without thinking followed the
+    layout in 5 of 11 questions and copied the example's "Run the example:" lines.
   - `review`: one or several weeks mixed, fuller tasks leaning file-level (closer to labs and
     projects), a bare skeleton. The tutor helps only when asked, first naming just the kind of
     error, and leaves the fix to the owner. Exercises may combine knowledge points, as a
@@ -1342,7 +1376,11 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
   result, pass / fail / error / skip counts, first error, partitions, duration). The result
   is "passed" only when every test ran and passed: a skipped test makes it "incomplete" and
   Ctrl+C "interrupted" (both counted as passed or not at all until an outside review,
-  2026-10-29). Nothing reads it in
+  2026-10-29). A failed or errored run also keeps the student.py it tested, once per
+  content, as `attempts/code/<batch>/<exercise>/<hash>.py`, named in the line's `code`
+  field (owner, 2026-10-29: failures only): without the code a real mistake could not be
+  replayed as a held-out wrong solution (roadmap 3b); the first one, a `selectExpr`
+  without `AS`, was lost that way. Nothing reads it in
   phase 2; it is kept so review batches can later target weak topics, and as material for
   hint rules and mutants (roadmap 3c). Done 2026-10-25 as a pytest plugin, `tutor/attempts.py`,
   registered through the `pytest11` entry point, so it loads in every pytest run of the venv
@@ -1376,6 +1414,8 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
    interface with a synthetic example; DataFrame with a synthetic example; rule 5's combiner
    check; `attempts.jsonl`. **Done 2026-10-25.**
 2. Golden exercises, solved by the owner. Run the whole loop by hand before automating it.
+   **Done 2026-10-28** (the first batch's five must exercises solved and rated); the
+   `v0.1.0` release below is still open.
    - Batches from materials the owner picks (see "Material selection"), drafted by Claude Code and
      checked by the validator; the owner solves them in the batch's mode.
    - First batch (approved 2026-10-25): `2026-10-25_p2-w1w2-mapreduce`, mode `learn`, sources
@@ -1471,7 +1511,8 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
    phase 3", which the split of phase 3 made too strict).
 3. LLM generation, in three parts (split 2026-10-28, owner: most of phase 3 needs no
    solving data, so it does not wait for phase 2 to be solved).
-3a. No solving data needed; runs alongside the owner's solving. First review the [3] items
+3a. **Done 2026-10-30** (weeks 4, 5 and 7 generated; the week 7 comparison set the roles).
+   No solving data needed; runs alongside the owner's solving. First review the [3] items
    of "LLM engineering candidates". In order: isolation layer A (static check); the
    materials reader with the md cache and vision transcription ("Reading files"), with a
    minimal `llm.py`; the LangGraph generate-validate-repair loop with the [3] items adopted
@@ -1494,7 +1535,8 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
    the held-out set of "Independent checks" (the owner's passing solutions must pass, their
    mistakes must fail), and an LLM judge of teaching quality checked against the owner's
    ratings before it is trusted (never for validity).
-3c. Hint command, `python -m tutor.hint <exercise>` (decided 2026-10-24, after 3a since it
+3c. **Done 2026-10-29.**
+   Hint command, `python -m tutor.hint <exercise>` (decided 2026-10-24, after 3a since it
    needs the LLM client, and after 3b since its rules come from the owner's real mistakes;
    numbered 3b until 2026-10-28; first review the [3c] items of "LLM engineering candidates").
    Three layers, cheapest and most certain first:
