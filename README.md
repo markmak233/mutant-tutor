@@ -104,7 +104,9 @@ each added after a measured failure (details and numbers in [`docs/design.md`](d
 Each role (plan, generate, repair, oracle, and vision for reading slides) is a profile in
 the workspace's `workspace.toml`, so any OpenAI-compatible models can be combined, local or
 cloud; the one rule is that the oracle comes from another provider than the models that
-write the exercise. One week of exercises (6 items, DeepSeek-V4-Flash drafting, V4-Pro
+write the exercise. With no API key at all, a coding assistant on a subscription (Claude
+Code, Codex) can answer every call as request files: see
+[`docs/assistant-mode.md`](docs/assistant-mode.md). One week of exercises (6 items, DeepSeek-V4-Flash drafting, V4-Pro
 repairing, GPT writing the oracles): 6 of 6 VALID, 4 of them rescued by the larger model,
 about $0.07 per valid exercise. Samples are small.
 

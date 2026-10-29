@@ -1119,8 +1119,9 @@ Plus) acting as the model for vision, planning, generation, oracle, repair and h
   the oracle rule, and the CLI prints that its requests must be answered in a fresh
   context that has not seen the answer, being less independent than two providers. One
   profile for both is still refused (the requests would mix).
-- Planned next: instructions for the assistant (`docs/assistant-mode.md`), then a thin
-  MCP server over the same files.
+- Instructions for the assistant: `docs/assistant-mode.md` (setup, the run / answer /
+  run-again loop, answering from the request alone, oracle requests in a fresh context,
+  plan approval left to the owner). Planned next: a thin MCP server over the same files.
 
 ## Code execution safety
 

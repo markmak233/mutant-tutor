@@ -232,6 +232,10 @@ python -m tutor.graph plan ... --set max_rounds=2
 python -m tutor.graph resume --batch w4 --set max_rounds=4   # for the rest of the batch
 ```
 
+No API key: a profile with `provider = "assistant"` lets a coding assistant (Claude Code,
+Codex) answer every call as request files; `docs/assistant-mode.md` has the setup and the
+loop it follows.
+
 A `hint` role (e.g. `hint = "deepseek"`) adds a model's hint to `python -m tutor.hint`
 when no rule and no known mistake fits. The model gets your `student.py`, `hints.md`, the
 constraints and the first error, never the solution; a hint that shows solution code is
