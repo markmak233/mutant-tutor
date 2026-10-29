@@ -240,7 +240,10 @@ Decided 2026-10-24 after reading the course's labs and projects.
 Reading files (decided 2026-10-28, pre-phase 3). Every source file is read once into a
 markdown cache, which generation, RAG and an assistant drafting exercises by hand all read
 instead of the original files.
-- Cache: `$WORKSPACE_DIR/cache/<source path>.md`, one file per source file, one section per
+- Cache: `$WORKSPACE_DIR/cache/<source path>.md`; the lecture folder (`LECTURE_DIR` or
+  `$WORKSPACE_DIR/lectures`) maps to `cache/lectures/` wherever it is, so the pipeline finds
+  a lecture's cache by name (an outside `LECTURE_DIR` passed the config check but could not
+  be cached until an outside review, 2026-10-29). One file per source file, one section per
   page or slide, headed with the location (`## p.12 · slide 2.10`), followed by a comment
   with how it was read (text layer or vision model, model name, date) and a hash of that
   page's content. A page whose hash is unchanged is never read again; a changed file costs

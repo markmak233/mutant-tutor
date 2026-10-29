@@ -1,7 +1,8 @@
 """python -m tutor.materials [--vision [--profile NAME]] <file or folder> ...
 
 Reads every PDF given (a folder: the PDFs directly in it) into the workspace's cache,
-`$WORKSPACE_DIR/cache/<path>.md`. Pages whose content is unchanged since the last run are
+`$WORKSPACE_DIR/cache/<path>.md` (`cache/lectures/<file>.md` for the lecture folder,
+`LECTURE_DIR` or `$WORKSPACE_DIR/lectures`). Pages whose content is unchanged since the last run are
 not read again. Image pages are marked `pending` until a run with `--vision` transcribes
 them with the workspace's `vision` model ([llm.roles] in workspace.toml, or `--profile` to
 pick another; see tutor.llm); calls are logged in
@@ -37,7 +38,8 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     load_env()
     try:
-        workspace = load_workspace().root
+        loaded = load_workspace()
+        workspace = loaded.root
         config = config_for("vision", profile, workspace) if vision else None
     except (WorkspaceError, LLMError) as e:
         print(f"setup: {e}", file=sys.stderr)
@@ -52,9 +54,10 @@ def main(argv: list[str] | None = None) -> int:
             print(f"skipped {source}: only PDF files are read for now")
             continue
         try:
-            target = cache.cache_path(workspace, source)
+            target = cache.cache_path(workspace, source, loaded.lecture_dir)
         except ValueError:
-            print(f"skipped {source}: not inside the workspace {workspace}", file=sys.stderr)
+            print(f"skipped {source}: not inside the workspace {workspace} or the lecture "
+                  f"folder {loaded.lecture_dir}", file=sys.stderr)
             status = 1
             continue
         pages = read_pdf(source)

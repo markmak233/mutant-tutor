@@ -133,7 +133,7 @@ def retrieve_context(state: ItemState, deps: Deps) -> ItemState:
     last, so a page without a footer between them counts; in a lecture without footers
     every page does. Such pages elsewhere in the lecture are left out."""
     item = state["item"]
-    path = cache.cache_path(deps.workspace, deps.workspace / "lectures" / f"{item.lecture}.pdf")
+    path = cache.lecture_cache(deps.workspace, item.lecture)
     entries = sorted(cache.load(path).values(), key=lambda e: e.number)
     if not entries:
         raise FileNotFoundError(f"no cached pages for {item.lecture}: run python -m "
@@ -761,7 +761,7 @@ def _model_names(deps: Deps) -> str:
 
 def page_titles(workspace: Path, lecture: str) -> str:
     """One line per cached page: PDF page, slide footer and its first line of text."""
-    path = cache.cache_path(workspace, workspace / "lectures" / f"{lecture}.pdf")
+    path = cache.lecture_cache(workspace, lecture)
     lines = [f"{lecture}:"]
     for e in sorted(cache.load(path).values(), key=lambda e: e.number):
         title = next((t for t in (line.strip().strip("#").strip() for line in e.body.splitlines())

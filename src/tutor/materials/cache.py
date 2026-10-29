@@ -58,11 +58,24 @@ def outdated(entry: Entry, prompt: str | None) -> bool:
             and not entry.corrected)
 
 
-def cache_path(workspace: Path, source: Path) -> Path:
-    """cache/<path relative to the workspace>.md, keeping the source's extension so that
-    `x.pdf` and a later `x.pptx` do not share a cache file."""
-    relative = source.resolve().relative_to(workspace.resolve())
+def cache_path(workspace: Path, source: Path, lecture_dir: Path | None = None) -> Path:
+    """cache/<path>.md, keeping the source's extension so that `x.pdf` and a later `x.pptx`
+    do not share a cache file. A source in the lecture folder (LECTURE_DIR, default
+    <workspace>/lectures) maps to cache/lectures/<path inside it> wherever that folder is,
+    so a lecture's cache is found by its name (lecture_cache); any other source must be
+    inside the workspace (ValueError) and mirrors its path there."""
+    resolved = source.resolve()
+    lectures = (lecture_dir or workspace / "lectures").resolve()
+    if resolved.is_relative_to(lectures):
+        relative = Path("lectures") / resolved.relative_to(lectures)
+    else:
+        relative = resolved.relative_to(workspace.resolve())
     return workspace / "cache" / relative.with_name(relative.name + ".md")
+
+
+def lecture_cache(workspace: Path, lecture: str) -> Path:
+    """The cache of lecture `lecture` (e.g. "L4"), read from <lecture folder>/L4.pdf."""
+    return workspace / "cache" / "lectures" / f"{lecture}.pdf.md"
 
 
 def update(pages: list[Page], old: dict[int, Entry], transcribe: Transcriber | None = None,
