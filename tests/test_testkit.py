@@ -155,6 +155,18 @@ def test_float_tol_applies_only_to_whole_numeric_fields():
     assert_output(out(["s1,2024-01,16.250000000001"]), ["s1,2024-01,16.25"], float_tol=1e-9)
 
 
+def test_float_tol_finds_a_full_matching_whatever_the_output_order():
+    """Taking the first line in reach would pair 0.1 with 0.0 and leave 0.0 unmatched."""
+    assert_output(out(["0.1", "0.0"]), ["0.0", "0.2"], float_tol=0.11)
+    with pytest.raises(AssertionError, match="unexpected: .*0.3"):
+        assert_output(out(["0.1", "0.3"]), ["0.0", "0.0"], float_tol=0.11)
+
+
+def test_float_tol_compares_big_counts_exactly():
+    with pytest.raises(AssertionError):
+        assert_output(out(["10000000000000001"]), ["10000000000000000"], float_tol=0.1)
+
+
 def test_optional_quotes_for_mrjob_json_keys():
     """MRJob writes keys as JSON; with optional_quotes both forms are accepted."""
     assert_output(out(['"zounds,a"\t0.5']), ["zounds,a\t0.5"], optional_quotes=True)

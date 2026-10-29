@@ -541,7 +541,10 @@ in two places would drift. Metadata keeps what the validator reads (constraints,
     sides gets the tolerance, every other field must match exactly. The first version
     compared every number in the line by value, so `s01,2024-1` passed for `s1,2024-01`
     (Codex review, 2026-10-25). 0, the default, compares characters, so a required number
-    format is checked.
+    format is checked. Numbers are compared as decimals (as floats two 17-digit counts that
+    differ by one were equal), and unordered lines are matched one to one by augmenting
+    paths, not by taking the first line in reach, which could reject correct output in
+    another order (both from an outside review, 2026-10-29).
   - `per_file` is checked without knowing which key went to which reducer: `expected` is the
     fully sorted output and each part file must be a subsequence of it.
   - Mismatch messages are for the learner, who sees them first: unexpected and missing lines
