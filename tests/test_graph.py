@@ -186,6 +186,19 @@ def test_slides_not_fully_read_stop_the_item_and_other_unread_pages_are_left_out
     assert "page 3 text" in context and "page 4" not in context and "page 6" not in context
 
 
+@pytest.mark.parametrize("labels", [
+    {3: "1.3", 5: "1.4"},  # page 4 has no footer but sits inside the item's slides
+    {},  # no footers at all: any page may be the item's
+])
+def test_an_unread_page_without_a_footer_is_not_dropped_silently(workspace, labels):
+    path = cache.cache_path(workspace, workspace / "lectures" / "L1.pdf")
+    entries = [cache.Entry(n, labels.get(n), "pending" if n == 4 else "text", f"h{n}",
+                           f"page {n} text") for n in range(1, 7)]
+    cache.save(path, cache.render("L1.pdf", entries))
+    with pytest.raises(ValueError, match=r"L1 pages \[4\]"):
+        nodes.retrieve_context({"item": ITEM}, deps(workspace, None))
+
+
 def test_slides_the_lecture_does_not_have_stop_the_item(workspace):
     item = ITEM.model_copy(update={"slides": "9.1-9.4"})
     with pytest.raises(ValueError, match="no page of L1 has a slide footer in 9.1-9.4"):

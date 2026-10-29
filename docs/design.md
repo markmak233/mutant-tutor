@@ -899,7 +899,9 @@ Design approved 2026-10-28 (owner):
   loaded with (8192 on the owner's Mac so far; the model supports more, at the cost of
   memory) comes before slicing. A page of the item's slides that is `pending` or `partial`
   stops the item with its page numbers (a formula or diagram may be missing, and no test
-  can show the question is faithful to the slide); such pages elsewhere are left out. Slides
+  can show the question is faithful to the slide); the item's pages run from its first
+  slide's PDF page to its last, footer or not, and in a lecture without footers every page
+  is the item's. Such pages elsewhere are left out. Slides
   the lecture has no footer for stop the item too (both from an outside review, 2026-10-29).
 - Every generated batch mixes function-level and file-level exercises (see "Exercise interfaces").
 
