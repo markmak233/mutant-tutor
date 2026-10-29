@@ -87,8 +87,10 @@ def workspace_allow_imports(start: Path) -> frozenset[str]:
     return frozenset()
 
 
-def config_files(exercise_dir: Path) -> list[str]:
-    return sorted(p.name for p in exercise_dir.iterdir() if p.name in CONFIG_FILES)
+def config_files(names: Iterable[str]) -> list[str]:
+    """The pytest configuration files among `names` (paths inside the run directory): pytest
+    reads a conftest.py in a subfolder as well as at the top."""
+    return sorted(n for n in names if n.rsplit("/", 1)[-1] in CONFIG_FILES)
 
 
 def find_hazards(source: str, allowed: frozenset[str]) -> list[str]:

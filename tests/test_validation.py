@@ -85,6 +85,7 @@ def make_exercise(tmp_path, *, tests=TESTS, reference=REFERENCE, skeleton=SKELET
     (exercise / "student.py").write_text(skeleton)
     (exercise / "hints.md").write_text("# Hints\n")
     for name, text in (extra_files or {}).items():
+        (exercise / name).parent.mkdir(parents=True, exist_ok=True)
         (exercise / name).write_text(text)
     (solution / "metadata.json").write_text(json.dumps({**METADATA, **(metadata or {})}))
     (solution / "reference.py").write_text(reference)
@@ -146,6 +147,10 @@ def test_metadata_that_breaks_the_format_skips_every_other_rule(tmp_path, metada
         ({"test_student.py": TESTS + "import socket\n"},
          "test_student.py line 8: import of 'socket'"),
         ({"conftest.py": ""}, "conftest.py is not allowed in an exercise"),
+        # pytest collects subfolders too, and the run copies them whole.
+        ({"data/helper.py": "import subprocess\n"},
+         "data/helper.py line 1: import of 'subprocess'"),
+        ({"data/conftest.py": ""}, "data/conftest.py is not allowed in an exercise"),
     ],
 )
 def test_unsafe_code_is_never_run(tmp_path, extra_files, expected):

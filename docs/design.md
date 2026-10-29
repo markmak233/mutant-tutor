@@ -1089,7 +1089,9 @@ themselves, so a cheap layer comes first and a stronger one later.
   (`open`, `Path`, Spark readers), no `home()` / `expanduser()`; no shell commands through
   the frameworks (`RDD.pipe`, MRJob `*_cmd` / `*_pre_filter`). The exercise folder may not
   hold `conftest.py`, `pytest.ini`, `setup.cfg`, `tox.ini` or `pyproject.toml`, which pytest
-  runs on its own. A failure makes the exercise INVALID and skips every rule that runs
+  runs on its own. Both checks cover every file a run copies in, subfolders included
+  (pytest collects tests and conftest.py recursively; checked only at the top until
+  2026-10-29, found in an outside review). A failure makes the exercise INVALID and skips every rule that runs
   code. A file with a syntax error is not a finding: Python cannot run it either, and the
   rules that run code report it.
   - The allowlist has three layers: a core in code (pure-computation standard library,

@@ -120,10 +120,9 @@ def test_a_malformed_allow_list_is_an_error(tmp_path):
         workspace_allow_imports(tmp_path)
 
 
-def test_pytest_config_files_are_reported(tmp_path):
-    for name in ("conftest.py", "pytest.ini", "test_student.py"):
-        (tmp_path / name).write_text("")
-    assert config_files(tmp_path) == ["conftest.py", "pytest.ini"]
+def test_pytest_config_files_are_reported_in_subfolders_too():
+    names = ["conftest.py", "pytest.ini", "test_student.py", "data/conftest.py", "data/a.csv"]
+    assert config_files(names) == ["conftest.py", "data/conftest.py", "pytest.ini"]
 
 
 def test_the_examples_pass():

@@ -149,26 +149,40 @@ def check_format(ex: ExerciseFiles) -> RuleResult:
 
 
 def check_safety(ex: ExerciseFiles) -> RuleResult:
-    """The exercise's own .py files (student.py is the owner's and is replaced in every
-    run) and every solution file that validation runs."""
+    """Every .py file a run copies in, subfolders included, since pytest collects tests and
+    conftest.py files recursively (student.py is the owner's and is replaced in every
+    run), and every solution file that validation runs."""
     try:
         allowed = allowed_imports(ex.metadata["framework"],
                                   workspace_allow_imports(ex.exercise_dir))
     except ValueError as e:
         return RuleResult("safe", "static safety", Status.FAIL, str(e), 0.0)
-    files = {
-        p.name: p for p in sorted(ex.exercise_dir.glob("*.py")) if p.name != STUDENT_FILE
-    }
+    copied = _copied(ex)
+    files = {name: path for name, path in copied.items() if name.endswith(".py")}
     solution_files = [ex.reference, ex.skeleton, *ex.mutants, ex.oracle, ex.oracle_test]
     for path in filter(None, solution_files):
         files[f"{path.parent.name}/{path.name}"] = path
     found = [f"{name} is not allowed in an exercise (pytest runs it on its own)"
-             for name in config_files(ex.exercise_dir)]
+             for name in config_files(copied)]
     for name, path in files.items():
         found += [f"{name} {hazard}" for hazard in find_hazards(path.read_text(), allowed)]
     if found:
         return RuleResult("safe", "static safety", Status.FAIL, "; ".join(found), 0.0)
     return RuleResult("safe", "static safety", Status.OK, f"{len(files)} files checked", 0.0)
+
+
+def _copied(ex: ExerciseFiles) -> dict[str, Path]:
+    """The files a run copies into its directory, by their path there, without student.py."""
+    found = {}
+    for name, path in ex.run_files(ex.skeleton).items():
+        if name == STUDENT_FILE:
+            continue
+        if path.is_dir():
+            found.update({f"{name}/{p.relative_to(path).as_posix()}": p
+                          for p in sorted(path.rglob("*")) if p.is_file()})
+        else:
+            found[name] = path
+    return found
 
 
 def check_reference_passes(ex: ExerciseFiles, timeout_s: float) -> RuleResult:
