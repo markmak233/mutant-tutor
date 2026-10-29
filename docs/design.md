@@ -1373,7 +1373,9 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
    tests run in a temporary copy (student.py untouched, not an attempt); rules see the
    source and the first failures (eight from tutoring: full-width punctuation, syntax, a
    forbidden API, Python version mismatch, a TODO left, an RDD used like a list, a
-   SparkContext left running, tuple output, nothing saved to outputPath). A run's
+   SparkContext left running, tuple output, nothing saved to outputPath). Full-width
+   punctuation is named only where Python stops at it, not in comments or strings, where it
+   is valid and would hide the real mistake (outside review, 2026-10-29). A run's
    signature is which tests fail with which `E` lines (addresses and timings normalised);
    each mutant's signature is computed once and cached in `solutions/<id>/.hints/`, keyed
    by a hash of the tests and the mutant. An exact match quotes the mutant's bug ("<the

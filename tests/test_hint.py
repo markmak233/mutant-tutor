@@ -83,13 +83,19 @@ def test_a_review_batch_hears_only_what_goes_wrong(tmp_path):
 
 
 def test_rules_come_before_known_mistakes(tmp_path):
-    hint = hint_for(batch(tmp_path, SKIPS_FIRST.replace("t = 0", "t = 0  # 总和，从零开始")),
+    hint = hint_for(batch(tmp_path, SKIPS_FIRST.replace("t += x", "t += x，")),
                     say=lambda _: None)
     assert (hint.layer, hint.key) == ("rule", "full-width")
-    assert "line 2: '，' should be ','" in hint.text
+    assert "line 4: '，' should be ','" in hint.text
     todo = hint_for(batch(tmp_path / "b", "def total(xs):\n    raise NotImplementedError\n"),
                     say=lambda _: None)
     assert todo.key == "todo-left"
+
+
+def test_full_width_punctuation_in_comments_and_strings_is_not_a_mistake(tmp_path):
+    commented = SKIPS_FIRST.replace("t = 0", "t = 0  # 总和，从零开始")
+    commented = '"""求和：返回总数。"""\n' + commented
+    assert hint_for(batch(tmp_path, commented), say=lambda _: None).key == "m01_skip_first"
 
 
 def test_a_forbidden_api_is_named(tmp_path):

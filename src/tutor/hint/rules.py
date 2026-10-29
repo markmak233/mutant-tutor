@@ -35,10 +35,15 @@ class Rule:
 
 
 def _full_width(source: str, _output: str) -> str | None:
-    for number, line in enumerate(source.splitlines(), 1):
-        for char in line:
-            if char in FULL_WIDTH:
-                return f"line {number}: {char!r} should be {FULL_WIDTH[char]!r}"
+    """Only the character Python stops at: in comments and strings full-width punctuation
+    is fine, and a hint about it would hide the real mistake."""
+    try:
+        ast.parse(source)
+    except SyntaxError as e:
+        found = re.search(r"U\+([0-9A-F]{4,6})", e.msg)
+        char = chr(int(found[1], 16)) if found else ""
+        if char in FULL_WIDTH:
+            return f"line {e.lineno}: {char!r} should be {FULL_WIDTH[char]!r}"
     return None
 
 
