@@ -73,6 +73,15 @@ def test_mutant_signatures_are_computed_once(tmp_path):
     runs = CountingRuns()
     hint_for(exercise, run_tests=runs, say=lambda _: None)
     assert runs.calls == 2  # the changed mutant runs again
+    (exercise / "data").mkdir()
+    (exercise / "data" / "input.csv").write_text("1,2\n")
+    runs = CountingRuns()
+    hint_for(exercise, run_tests=runs, say=lambda _: None)
+    assert runs.calls == 3  # new test data: every mutant runs again
+    (exercise / "data" / "input.csv").write_text("1,2,3\n")
+    runs = CountingRuns()
+    hint_for(exercise, run_tests=runs, say=lambda _: None)
+    assert runs.calls == 3  # changed test data too
 
 
 def test_a_review_batch_hears_only_what_goes_wrong(tmp_path):

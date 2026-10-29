@@ -4,7 +4,8 @@ Every mutant of an exercise is one planted mistake with its bug written in its d
 ("<the bug>, <what goes wrong>"). A run's signature is which tests fail and with which
 assertion lines; a student whose signature equals a mutant's most likely made that mistake.
 Mutant signatures are computed once per exercise and kept in solutions/<id>/.hints/, keyed
-by a hash of the tests and the mutant, so a changed file is run again. The student sees the
+by a hash of everything the run copies in (tests, data, helpers, the mutant) and the run's
+settings, so a change to any of them runs the mutant again. The student sees the
 mutant's description, never its code.
 """
 
@@ -21,7 +22,7 @@ from pathlib import Path
 
 from tutor.execution import RunResult
 from tutor.validation.checks import failure_blocks
-from tutor.validation.exercise import TEST_FILE, ExerciseFiles
+from tutor.validation.exercise import ExerciseFiles
 
 CACHE = Path(".hints") / "signatures.json"
 Signature = dict[str, list[str]]  # failing test -> its assertion lines, normalised
@@ -44,18 +45,19 @@ def _normal(line: str) -> str:
 
 def mutant_signatures(ex: ExerciseFiles, solution_dir: Path,
                       run: Callable[[Path], RunResult],
-                      on_run: Callable[[str], None] | None = None) -> dict[str, Signature]:
-    """Each mutant's signature, from the cache when its tests and code are unchanged.
-    `run(candidate)` runs the exercise's tests with `candidate` as student.py."""
+                      on_run: Callable[[str], None] | None = None,
+                      settings: str = "") -> dict[str, Signature]:
+    """Each mutant's signature, from the cache when nothing its run depends on changed.
+    `run(candidate)` runs the exercise's tests with `candidate` as student.py; `settings`
+    is what else shapes a run (timeout, environment)."""
     path = solution_dir / CACHE
     try:
         cached = json.loads(path.read_text())
     except (OSError, json.JSONDecodeError):
         cached = {}
-    tests = (ex.exercise_dir / TEST_FILE).read_bytes()
     result, changed = {}, False
     for mutant in ex.mutants:
-        key = hashlib.sha256(tests + mutant.read_bytes()).hexdigest()
+        key = _key(ex.run_files(mutant), settings)
         entry = cached.get(mutant.stem)
         if not entry or entry.get("key") != key:
             if on_run:
@@ -67,6 +69,17 @@ def mutant_signatures(ex: ExerciseFiles, solution_dir: Path,
         path.parent.mkdir(exist_ok=True)
         path.write_text(json.dumps(cached, indent=1) + "\n")
     return result
+
+
+def _key(files: dict[str, Path], settings: str) -> str:
+    digest = hashlib.sha256(settings.encode())
+    for name, source in sorted(files.items()):
+        parts = ([(f"{name}/{p.relative_to(source).as_posix()}", p)
+                  for p in sorted(source.rglob("*")) if p.is_file()]
+                 if source.is_dir() else [(name, source)])
+        for inside, part in parts:
+            digest.update(inside.encode() + b"\0" + part.read_bytes() + b"\0")
+    return digest.hexdigest()
 
 
 @dataclass(frozen=True)

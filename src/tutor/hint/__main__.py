@@ -66,7 +66,8 @@ def hint_for(exercise_dir: Path, run_tests=run_pytest, say=print) -> Hint | None
         ran.append(name)
         say(f"(first hint here: running the known mistake {name} once)")
 
-    known = mutants.mutant_signatures(ex, solution_dir, run, on_run=running)
+    known = mutants.mutant_signatures(ex, solution_dir, run, on_run=running,
+                                      settings=json.dumps([timeout, env]))
     if ran:
         for a, b in mutants.indistinguishable(known):
             say(f"(note on the exercise: its tests cannot tell {a} from {b})")

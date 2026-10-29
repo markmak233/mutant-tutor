@@ -1378,7 +1378,9 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
    is valid and would hide the real mistake (outside review, 2026-10-29). A run's
    signature is which tests fail with which `E` lines (addresses and timings normalised);
    each mutant's signature is computed once and cached in `solutions/<id>/.hints/`, keyed
-   by a hash of the tests and the mutant. An exact match quotes the mutant's bug ("<the
+   by a hash of everything the run copies in (tests, data, helpers, the mutant) and the
+   run's timeout and environment (tests and mutant only until an outside review,
+   2026-10-29: changed data kept the old signatures). An exact match quotes the mutant's bug ("<the
    bug>, <what goes wrong>"); the same failing tests with other values is offered as a
    guess, the mutant whose assertion lines read most alike first (difflib ratio), since a
    mistake whose output order varies never matches exactly, even against itself. Several
