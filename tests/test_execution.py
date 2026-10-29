@@ -189,3 +189,18 @@ def test_a_run_that_ends_before_its_report_is_an_error_not_a_failure(tmp_path):
 
     assert (result.returncode, result.counts) == (1, None)
     assert result.outcome is Outcome.ERROR
+
+
+def test_copied_files_follow_links_as_the_run_does(tmp_path):
+    from tutor.execution import copied_files, links
+
+    target = tmp_path / "target"
+    target.mkdir()
+    (target / "x.py").write_text("")
+    data = tmp_path / "data"
+    data.mkdir()
+    (data / "a.csv").write_text("1\n")
+    (data / "more").symlink_to(target, target_is_directory=True)
+    assert copied_files({"data": data}) == {"data/a.csv": data / "a.csv",
+                                             "data/more/x.py": data / "more" / "x.py"}
+    assert links({"data": data}) == ["data/more"]

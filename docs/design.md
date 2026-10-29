@@ -1106,7 +1106,10 @@ themselves, so a cheap layer comes first and a stronger one later.
   hold `conftest.py`, `pytest.ini`, `setup.cfg`, `tox.ini` or `pyproject.toml`, which pytest
   runs on its own. Both checks cover every file a run copies in, subfolders included
   (pytest collects tests and conftest.py recursively; checked only at the top until
-  2026-10-29, found in an outside review). A failure makes the exercise INVALID and skips every rule that runs
+  2026-10-29, found in an outside review). A symbolic link anywhere in the exercise is
+  refused before that: the run copies what it points to, which may be outside the
+  exercise (`execution.copied_files` lists a run's files the way copytree copies them, for
+  this check and the hint cache). A failure makes the exercise INVALID and skips every rule that runs
   code. A file with a syntax error is not a finding: Python cannot run it either, and the
   rules that run code report it.
   - The allowlist has three layers: a core in code (pure-computation standard library,

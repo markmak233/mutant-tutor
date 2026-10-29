@@ -82,6 +82,36 @@ def run_pytest(
         return _run_in(workdir, timeout_s, env or {})
 
 
+def copied_files(files: Mapping[str, Path]) -> dict[str, Path]:
+    """Every file run_pytest copies in for `files`, by its path in the run directory:
+    directories whole, with links followed as copytree follows them."""
+    found = {}
+    for name, source in files.items():
+        if not source.is_dir():
+            found[name] = source
+            continue
+        for root, dirs, names in os.walk(source, followlinks=True):
+            dirs.sort()
+            for file in sorted(names):
+                path = Path(root) / file
+                found[f"{name}/{path.relative_to(source).as_posix()}"] = path
+    return found
+
+
+def links(files: Mapping[str, Path]) -> list[str]:
+    """The symbolic links among `files` and inside their directories, by path in the run
+    directory; run_pytest would copy what each one points to."""
+    found = []
+    for name, source in files.items():
+        if source.is_symlink():
+            found.append(name)
+        elif source.is_dir():
+            for root, dirs, names in os.walk(source):  # not into linked directories
+                found += [f"{name}/{(Path(root) / n).relative_to(source).as_posix()}"
+                          for n in sorted(dirs + names) if (Path(root) / n).is_symlink()]
+    return found
+
+
 def _run_in(workdir: Path, timeout_s: float, extra_env: Mapping[str, str]) -> RunResult:
     # sys.executable: the project venv, so student code can import pyspark and mrjob.
     # no:cacheprovider: no .pytest_cache; the temp dir is discarded anyway.

@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
-from tutor.execution import Outcome, RunResult, run_pytest
+from tutor.execution import Outcome, RunResult, copied_files, links, run_pytest
 from tutor.schema import Metadata, problems
 from tutor.testkit import COMBINER_ENV, DEFAULT_PARTITIONS, PARTITIONS_ENV
 from tutor.validation.api import count_uses, find_violations
@@ -157,6 +157,10 @@ def check_safety(ex: ExerciseFiles) -> RuleResult:
                                   workspace_allow_imports(ex.exercise_dir))
     except ValueError as e:
         return RuleResult("safe", "static safety", Status.FAIL, str(e), 0.0)
+    linked = links({n: p for n, p in ex.run_files(ex.skeleton).items() if n != STUDENT_FILE})
+    if linked:  # checked first: a link may point outside the exercise, or into a loop
+        return RuleResult("safe", "static safety", Status.FAIL, "; ".join(
+            f"{name} is a link, not allowed in an exercise" for name in linked), 0.0)
     copied = _copied(ex)
     files = {name: path for name, path in copied.items() if name.endswith(".py")}
     solution_files = [ex.reference, ex.skeleton, *ex.mutants, ex.oracle, ex.oracle_test]
@@ -173,16 +177,8 @@ def check_safety(ex: ExerciseFiles) -> RuleResult:
 
 def _copied(ex: ExerciseFiles) -> dict[str, Path]:
     """The files a run copies into its directory, by their path there, without student.py."""
-    found = {}
-    for name, path in ex.run_files(ex.skeleton).items():
-        if name == STUDENT_FILE:
-            continue
-        if path.is_dir():
-            found.update({f"{name}/{p.relative_to(path).as_posix()}": p
-                          for p in sorted(path.rglob("*")) if p.is_file()})
-        else:
-            found[name] = path
-    return found
+    return copied_files({name: path for name, path in ex.run_files(ex.skeleton).items()
+                         if name != STUDENT_FILE})
 
 
 def check_reference_passes(ex: ExerciseFiles, timeout_s: float) -> RuleResult:

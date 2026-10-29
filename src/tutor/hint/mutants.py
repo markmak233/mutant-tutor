@@ -20,7 +20,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from tutor.execution import RunResult
+from tutor.execution import RunResult, copied_files
 from tutor.validation.checks import failure_blocks
 from tutor.validation.exercise import ExerciseFiles
 
@@ -73,12 +73,8 @@ def mutant_signatures(ex: ExerciseFiles, solution_dir: Path,
 
 def _key(files: dict[str, Path], settings: str) -> str:
     digest = hashlib.sha256(settings.encode())
-    for name, source in sorted(files.items()):
-        parts = ([(f"{name}/{p.relative_to(source).as_posix()}", p)
-                  for p in sorted(source.rglob("*")) if p.is_file()]
-                 if source.is_dir() else [(name, source)])
-        for inside, part in parts:
-            digest.update(inside.encode() + b"\0" + part.read_bytes() + b"\0")
+    for inside, path in copied_files(files).items():
+        digest.update(inside.encode() + b"\0" + path.read_bytes() + b"\0")
     return digest.hexdigest()
 
 
