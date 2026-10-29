@@ -71,6 +71,16 @@ def hint_for(exercise_dir: Path, run_tests=run_pytest, say=print) -> Hint | None
         for a, b in mutants.indistinguishable(known):
             say(f"(note on the exercise: its tests cannot tell {a} from {b})")
     found = mutants.matches(mutants.signature(result.output), known)
+    exact = [m for m in found if m.exact]
+    if len(exact) > 1:
+        # The tests cannot tell these mistakes apart, so neither can a hint.
+        described = [mutants.bug_of(solution_dir / "mutants" / f"{m.mutant}.py")
+                     for m in exact]
+        parts = [bug if mode == "learn" else (effect or "the result differs")
+                 for bug, effect in described]
+        return Hint("mutant", "|".join(m.mutant for m in exact),
+                    "your tests fail exactly as several known mistakes do; it is one of: "
+                    + "; ".join(parts))
     if found:
         best = found[0]
         bug, effect = mutants.bug_of(solution_dir / "mutants" / f"{best.mutant}.py")

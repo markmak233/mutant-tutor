@@ -11,6 +11,7 @@ mutant's description, never its code.
 from __future__ import annotations
 
 import ast
+import difflib
 import hashlib
 import json
 import re
@@ -72,13 +73,21 @@ def mutant_signatures(ex: ExerciseFiles, solution_dir: Path,
 class Match:
     mutant: str
     exact: bool  # same failing tests with the same assertion lines, not just the same tests
+    similarity: float = 1.0  # of the assertion lines, 0-1
 
 
 def matches(student: Signature, mutants: dict[str, Signature]) -> list[Match]:
-    """Exact matches first; a mutant whose run failed nothing never matches."""
-    found = [Match(name, sig == student) for name, sig in mutants.items()
-             if sig and set(sig) == set(student)]
-    return sorted(found, key=lambda m: not m.exact)
+    """Mutants failing the same tests, exact matches first, then by how alike the assertion
+    lines read: a mistake whose output order varies (no coalesce) never matches exactly,
+    even against itself. A mutant whose run failed nothing never matches."""
+    found = [Match(name, sig == student, _similarity(sig, student))
+             for name, sig in mutants.items() if sig and set(sig) == set(student)]
+    return sorted(found, key=lambda m: (not m.exact, -m.similarity, m.mutant))
+
+
+def _similarity(a: Signature, b: Signature) -> float:
+    return difflib.SequenceMatcher(None, json.dumps(a, sort_keys=True),
+                                   json.dumps(b, sort_keys=True)).ratio()
 
 
 def indistinguishable(mutants: dict[str, Signature]) -> list[tuple[str, str]]:

@@ -143,3 +143,20 @@ def test_a_hint_in_a_workspace_batch_is_logged(tmp_path, monkeypatch):
     line = json.loads((tmp_path / "attempts" / "attempts.jsonl").read_text())
     assert (line["event"], line["layer"], line["key"], line["exercise"]) == (
         "hint", "mutant", "m01_skip_first", "sum-list")
+
+
+def test_mistakes_the_tests_cannot_tell_apart_are_all_named(tmp_path):
+    exercise = batch(tmp_path, SKIPS_FIRST)
+    twin = exercise.parent.parent / "solutions" / "sum-list" / "mutants" / "m03_drop_head.py"
+    twin.write_text('"""Mutant: drops the head of the list, so the first value is lost."""\n'
+                    "def total(xs):\n    return sum(xs[1:])\n")
+    hint = hint_for(exercise, say=lambda _: None)
+    assert hint.key == "m01_skip_first|m03_drop_head"
+    assert "one of: starts at the second element; drops the head of the list" in hint.text
+
+
+def test_a_guess_prefers_the_mutant_whose_failures_read_most_alike():
+    student = {"test_a": ["assert ['b', 'a'] == ['a', 'b']"]}
+    known = {"m01_far": {"test_a": ["KeyError: 'x'"]},
+             "m02_near": {"test_a": ["assert ['a', 'b', 'c'] == ['a', 'b']"]}}
+    assert [m.mutant for m in mutants.matches(student, known)] == ["m02_near", "m01_far"]

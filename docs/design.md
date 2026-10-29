@@ -1368,10 +1368,19 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
    each mutant's signature is computed once and cached in `solutions/<id>/.hints/`, keyed
    by a hash of the tests and the mutant. An exact match quotes the mutant's bug ("<the
    bug>, <what goes wrong>"); the same failing tests with other values is offered as a
-   guess. In a review batch only the "what goes wrong" half is shown. Mutants the tests
+   guess, the mutant whose assertion lines read most alike first (difflib ratio), since a
+   mistake whose output order varies never matches exactly, even against itself. Several
+   exact matches are all named ("it is one of: ..."). In a review batch only the "what goes
+   wrong" half is shown. Mutants the tests
    cannot tell apart are reported (an exercise lacking a test). Each request is a line in
    `attempts.jsonl` (event "hint", layer, rule or mutant). First request on a Spark
    exercise about a minute (every mutant runs once), later ones the student's run only.
+   Evaluation 2026-10-29, each of the 32 mutants of the six week-5 Spark exercises as a
+   simulated student: first 29/32 named; the misses were one pair the tests cannot tell
+   apart and two no-coalesce mutants whose output order varies. With the two rules above
+   (name every exact match, rank guesses by similarity): 30/32 named, the other 2 named
+   among the indistinguishable pair, none wrong. Real students' code will differ more from
+   a mutant than a mutant does from itself, so this is an upper bound for layer 2.
 4. Hybrid RAG. First review the [4] items of "LLM engineering candidates".
 5. Evaluation script + README results. First review the [5] items of "LLM engineering
    candidates".
