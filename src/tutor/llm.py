@@ -15,6 +15,10 @@ roles (vision, generate, ...) say which profile a task uses:
     [llm.roles]
     vision = "gemma-local"
 
+    [llm.profiles.claude-code]
+    provider = "assistant"                 # no API: a coding assistant answers request
+                                           # files in <workspace>/.exchange/claude-code/
+
 Keys live only in the environment (`.env`), never in the TOML: a profile with an `api_key`
 field or a key-like value is refused. Without an [llm] section, LLM_PROVIDER / LLM_MODEL /
 LLM_BASE_URL / LLM_API_KEY form a single default profile.
@@ -53,6 +57,10 @@ PROVIDERS = {
     "deepseek": ("https://api.deepseek.com",
                  ({"thinking": {"type": "disabled"}}, {"reasoning_effort": "none"})),
     "custom": (None, ()),  # any other OpenAI-compatible server; base_url required
+    # No server: a coding assistant answers request files (tutor/exchange.py). Its "model"
+    # names the assistant (default: the profile name), so two profiles of one assistant
+    # (one for the oracle) are recognised as the same reader.
+    "assistant": (None, ()),
 }
 # Providers that send token usage in a streamed reply's last piece when asked to with
 # stream_options (documented); others stream without the option, which may be refused.
@@ -76,6 +84,7 @@ class LLMConfig:
     api_key: str | None = field(default=None, repr=False)  # repr=False: never in a traceback
     timeout_s: float = 300.0
     thinking_off: tuple[dict, ...] = ()  # request fields to try, in order
+    queue: Path | None = None  # an assistant profile's request folder (provider "assistant")
 
 
 @dataclass(frozen=True)
@@ -107,7 +116,7 @@ def config_for(role: str, profile: str | None = None, workspace: Path | None = N
     if name not in profiles:
         raise LLMError(f"workspace.toml has no [llm.profiles.{name}]; "
                        f"profiles: {', '.join(sorted(profiles)) or 'none'}")
-    return _from_profile(name, profiles[name], env)
+    return _from_profile(name, profiles[name], env, workspace)
 
 
 def roles(workspace: Path | None = None) -> dict[str, str]:
@@ -122,7 +131,8 @@ def _llm_section(workspace: Path | None) -> dict:
         return tomllib.load(f).get("llm", {})
 
 
-def _from_profile(name: str, data: dict, env: Mapping[str, str]) -> LLMConfig:
+def _from_profile(name: str, data: dict, env: Mapping[str, str],
+                  workspace: Path | None = None) -> LLMConfig:
     where = f"[llm.profiles.{name}]"
     if "api_key" in data or any(isinstance(v, str) and KEY_LIKE.match(v) for v in data.values()):
         raise LLMError(f"{where} holds a key: keys belong in .env, named by api_key_env")
@@ -132,6 +142,12 @@ def _from_profile(name: str, data: dict, env: Mapping[str, str]) -> LLMConfig:
     provider = data.get("provider")
     if provider not in PROVIDERS:
         raise LLMError(f"{where} provider must be one of {', '.join(PROVIDERS)}")
+    if provider == "assistant":
+        # Its "base_url" is the queue's name, so the oracle check (another provider than
+        # the writer) tells two assistant profiles apart by their queues.
+        queue = workspace / ".exchange" / name if workspace else None
+        return LLMConfig(name, provider, f"assistant:{name}", data.get("model", name),
+                         queue=queue)
     if not data.get("model"):
         raise LLMError(f"{where} needs a model")
     default_url, thinking_off = PROVIDERS[provider]
@@ -178,6 +194,8 @@ def chat(config: LLMConfig, messages: list[dict], *, purpose: str,
          response_schema: dict | None = None, stream: bool = False,
          on_progress: Callable[[int], None] | None = None) -> Reply:
     """One chat completion. `purpose` names the caller in the call log (e.g. "vision").
+    An assistant profile answers from its request files instead (tutor/exchange.py): the
+    stored answer, or AwaitingAnswer after writing the request.
     `thinking=False` turns a reasoning model's hidden thinking off (or as low as the model
     allows), for tasks such as copying text from an image that need none.
     `response_schema` (a JSON Schema) asks for structured output: the reply text is then
@@ -186,6 +204,13 @@ def chat(config: LLMConfig, messages: list[dict], *, purpose: str,
     validates it, since a cut-off reply is not valid JSON.
     `stream=True` receives the reply in pieces: `timeout_s` then bounds each pause, not the
     whole reply, and `on_progress` is called with the characters received so far."""
+    if config.provider == "assistant":
+        from tutor import exchange  # imported here: exchange builds on this module
+
+        start = time.monotonic()
+        reply = exchange.ask(config, messages, purpose, response_schema)  # or AwaitingAnswer
+        _log(log_path, purpose, config, reply, time.monotonic() - start, None)
+        return reply
     openai = config.provider == "openai"
     body = {"model": config.model, "messages": messages}
     if not openai:

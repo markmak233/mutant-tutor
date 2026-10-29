@@ -1083,6 +1083,31 @@ deterministic judge, hybrid RAG with recall@k, the phase 5 metrics, the hint lea
   debate, GraphRAG, a hosted vector database (a few hundred pages fit local FAISS / Chroma),
   an LLM judging validity (already in "Decisions not to do").
 
+## Assistant mode
+
+Decided 2026-10-29 (owner): the pipeline must also run with no API key at all, with a
+coding assistant on a subscription (Claude Code with Claude Pro / Max, Codex with ChatGPT
+Plus) acting as the model for vision, planning, generation, oracle, repair and hints.
+
+- A profile with `provider = "assistant"` sends nothing over the network
+  (`tutor/exchange.py`). Each call becomes `<workspace>/.exchange/<profile>/requests/<id>.md`
+  (the messages, what to reply, the JSON Schema; images as PNG files beside it) and the
+  caller gets `AwaitingAnswer`. The assistant answers with `python -m tutor.exchange answer
+  ID FILE`, which checks the reply's shape first (one JSON object with the required
+  fields) and keeps it in `answers/<id>.txt`. The id is a hash of the request (purpose,
+  messages, schema), so running again replays every answered call and stops at the first
+  unanswered one (owner chose replay over a LangGraph interrupt per call: simpler, and
+  parallel items can collect their requests into one round of answers).
+- `AwaitingAnswer` is an `LLMError`, so a caller that knows nothing of assistant mode
+  (the hint command) falls back as it does for a model that could not answer, and finds
+  the answer on the next run.
+- An assistant profile's `model` names the assistant (default: the profile name) and its
+  queue is its base URL, so two assistants are as independent as two providers for the
+  oracle rule.
+- Planned next: vision requests for every pending page in one run, the batch pausing
+  once for all items' requests with validation reports reused on replay, instructions
+  for the assistant (`docs/assistant-mode.md`), then a thin MCP server over the same files.
+
 ## Code execution safety
 
 Subprocess + timeout + temporary working directory. Docker was first meant only for
