@@ -1128,9 +1128,20 @@ Plus) acting as the model for vision, planning, generation, oracle, repair and h
   mutants killed, oracle and partitions ok) and saved. Two fixes came of it: manifests and
   logs mark an assistant's model "(assistant)", and token counts an assistant cannot
   report are left out instead of printed as 0.
+- Codex test 2026-10-29: Codex (desktop app, ChatGPT Plus) answered three vision requests
+  through the files and opened each PNG: one code slide matched the hand-checked
+  transcription (ratio 0.97), a logo diagram was described with details only the image
+  has. So both assistants work with files alone.
 - MCP server: deferred (owner, 2026-10-29). The files work for an assistant that can run
-  commands and read PNGs; an MCP layer (list / get with the image / submit) is built only
-  if Codex cannot read the PNGs or the permission prompts get in the way, or with the GUI.
+  commands and read PNGs (both do); an MCP layer (list / get with the image / submit) is
+  built only if permission prompts get in the way, or with the GUI.
+- Open (owner chose to wait, 2026-10-29): the vision prompt does not say what to do with
+  text an image covers on the slide while the text layer still has it. On slide 5.21 a
+  screenshot covers the bullets and the StructType code: GLM filled them in from the text
+  layer, Codex wrote [?] ("cannot read: do not guess") and lost the code. Fix when pages
+  are transcribed again for another reason: a rule to take covered text from the text
+  layer and say it was covered, with PROMPT_VERSION raised (which re-transcribes every
+  page read with the older prompt, hand-corrected ones excepted).
 
 ## Code execution safety
 
