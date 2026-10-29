@@ -52,8 +52,8 @@ Files (fields of the JSON you return):
 - student_py: the question in the module docstring, then the skeleton: imports, the
   function or class signatures, and `raise NotImplementedError` (or `pass` with a TODO)
   where the student writes code. The question is a title line, then these sections in
-  this order, each starting with its label alone on a line at column 0 (the example
-  exercise below predates this layout; follow this one):
+  this order, each starting with its label alone on a line at column 0, as in the example
+  exercise below:
     Concept:      learn mode only, at most 3 lines on the idea the exercise practises;
                   longer explanation belongs in hints_md
     Symptom:      debugging only: the program is wrong and how that shows
