@@ -455,6 +455,13 @@ def test_local_variable_with_a_forbidden_name_is_not_a_use():
     assert find_violations(source, {"forbidden_calls": ["count"]}) == []
 
 
+def test_a_parameter_of_one_function_does_not_hide_the_builtin_in_another():
+    source = "def g(sorted):\n    return sorted\n\nx = sorted([2, 1])\n"
+    assert find_violations(source, {"forbidden_calls": ["sorted"]}) == ["line 4: uses sorted"]
+    own = "def sorted(xs):\n    return xs\n\nx = sorted([2, 1])\n"  # their own sort
+    assert find_violations(own, {"forbidden_calls": ["sorted"]}) == []
+
+
 def test_allowed_code_has_no_violations():
     source = "def f(rdd):\n    return rdd.reduceByKey(max)\n"
     assert find_violations(source, {"forbidden_calls": ["groupByKey", "collect"]}) == []

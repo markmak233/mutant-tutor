@@ -88,8 +88,21 @@ def test_what_exercises_really_use_passes():
     assert find_hazards(source, MRJOB) == []
 
 
-def test_a_local_name_shadowing_a_builtin_is_not_the_builtin():
-    assert find_hazards("def compile(x):\n    return x\ncompile(1)", MRJOB) == []
+def test_only_a_functions_own_binding_hides_a_builtin():
+    assert find_hazards("def f(compile):\n    return compile(1)\n", MRJOB) == []
+    assert find_hazards("def f():\n    eval = len\n    return eval('x')\n", MRJOB) == []
+
+
+@pytest.mark.parametrize("source", [
+    "def g():\n    eval = 0\n\neval('1+1')\n",  # another function's local
+    "eval('1+1')\neval = 0\n",  # a module binding after the use
+    "def compile(x):\n    return x\n\ncompile('x', 'f', 'exec')\n",  # one before it
+    "def f(eval=eval):\n    return eval('1+1')\n",  # the default is the builtin
+    "class A:\n    exec = print\n\n    def m(self):\n        exec('x')\n",
+    "f = lambda exec: exec\nexec('x')\n",
+])
+def test_a_builtin_is_found_wherever_no_function_binding_hides_it(source):
+    assert any("is not allowed" in h for h in find_hazards(source, MRJOB))
 
 
 def test_frameworks_add_their_own_modules():

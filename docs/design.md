@@ -1090,7 +1090,11 @@ themselves, so a cheap layer comes first and a stronger one later.
   never run. An allowlist, not a denylist: a denylist is never complete, and the first
   course's 255 exercise files used only 17 modules. Six rules: imports from the allowlist
   only; `os` / `sys` limited to `os.environ`, `os.path`, `sys.argv / exit / stdin / stdout /
-  stderr / executable`; no `eval`, `exec`, `compile`, `__import__`, `breakpoint`; no dunder
+  stderr / executable`; no `eval`, `exec`, `compile`, `__import__`, `breakpoint`, unless a
+  function's own binding (a parameter, a local) hides the builtin: Python fixes those when
+  it compiles the function, while a module or class binding may come after the use (one
+  file-wide set of bound names let `eval = 0` in one function hide `eval(...)` elsewhere
+  until an outside review, 2026-10-29; the API check got Python's scopes then too); no dunder
   attribute outside a short list (`__name__`, `__module__`, `__qualname__`, `__init__`,
   `__class__`, `__doc__`), and `getattr` / `setattr` / `delattr` take a literal name; no
   literal path starting with `/` or `~` or containing `..` in a file-opening call

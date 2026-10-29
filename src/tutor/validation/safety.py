@@ -27,6 +27,7 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from tutor.config import WORKSPACE_FILE
+from tutor.validation.api import builtin_uses
 
 # Pure-computation standard library, the test tools, and the exercise's own modules.
 CORE_IMPORTS = frozenset({
@@ -102,13 +103,11 @@ def find_hazards(source: str, allowed: frozenset[str]) -> list[str]:
         # report it (a skeleton or mutant that errors before any test runs).
         return []
     module_aliases = _module_aliases(tree)
-    bound = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)
-             and isinstance(n.ctx, ast.Store)} | {
-        n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef | ast.ClassDef)}
-    found: list[str] = []
+    found = [f"line {n.lineno}: {n.id} is not allowed"
+             for n in builtin_uses(tree, FORBIDDEN_BUILTINS, static_only=True)]
     for node in ast.walk(tree):
         found += [f"line {node.lineno}: {m}" for m in _node_hazards(node, allowed,
-                                                                     module_aliases, bound)]
+                                                                     module_aliases)]
     return sorted(set(found), key=lambda m: (int(m.split(":")[0].split()[1]), m))
 
 
@@ -125,7 +124,7 @@ def _module_aliases(tree: ast.AST) -> dict[str, str]:
     return aliases
 
 
-def _node_hazards(node: ast.AST, allowed, module_aliases, bound) -> list[str]:
+def _node_hazards(node: ast.AST, allowed, module_aliases) -> list[str]:
     if isinstance(node, ast.Import):
         return [f"import of '{a.name}' is not allowed" for a in node.names
                 if a.name.split(".")[0] not in allowed]
@@ -143,8 +142,6 @@ def _node_hazards(node: ast.AST, allowed, module_aliases, bound) -> list[str]:
     if isinstance(node, ast.Attribute):
         return _attribute_hazards(node, module_aliases)
     if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
-        if node.id in FORBIDDEN_BUILTINS and node.id not in bound:
-            return [f"{node.id} is not allowed"]
         if node.id.startswith("__") and node.id.endswith("__") and node.id not in DUNDER_NAMES:
             return [f"{node.id} is not allowed"]
         return []
