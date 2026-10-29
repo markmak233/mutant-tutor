@@ -94,6 +94,20 @@ def test_small_code_images_count_and_images_under_text_do_not(tmp_path):
     assert [p.needs_vision for p in read_pdf(pdf)] == [True, False]
 
 
+def test_different_images_in_the_same_place_are_not_decoration(tmp_path):
+    """Three slides, each with its own picture in the same box: not a repeated logo."""
+    pdf = make_pdf(tmp_path / "l.pdf", [
+        {"lines": [f"Figure {n}"], "images": [(name, 0, 20, 720, 380)]}
+        for n, name in enumerate(["Red", "Blue", "Red"], 1)])
+    assert [p.needs_vision for p in read_pdf(pdf)] == [True, True, True]
+
+
+def test_scanned_pages_without_a_text_layer_need_vision(tmp_path):
+    """The same full-page image on every page, and no text: there is nothing else to read."""
+    pdf = make_pdf(tmp_path / "l.pdf", [{"images": [("Red", 0, 0, 720, 540)]}] * 4)
+    assert [p.needs_vision for p in read_pdf(pdf)] == [True] * 4
+
+
 def test_hash_follows_text_and_image_data(tmp_path):
     base = read_pdf(lecture(tmp_path / "a.pdf"))
     again = read_pdf(lecture(tmp_path / "b.pdf"))

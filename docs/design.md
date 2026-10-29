@@ -259,7 +259,10 @@ instead of the original files.
   rule (25%, no text rule) missed a slide of three small code screenshots; 5% without the
   text rule flagged every section-divider slide. The final rule flagged 162 of 462 pages,
   caught every code and pseudocode image checked by eye, and left out a code box whose code
-  was in the text layer.
+  was in the text layer. A repeated image must also be the same image (by its data hash),
+  and a page with images but no text layer at all (a scan) always needs vision: three
+  different full-page scans in one box counted as decoration and left their pages empty
+  (outside review, 2026-10-29; the 462 lecture pages were flagged exactly as before).
 - Transcription (`materials/vision.py`): a flagged page is rendered to PNG and sent with its
   text layer; the prompt asks for code, pseudocode and commands verbatim in fenced blocks
   (pseudocode tagged `text`, symbols such as ← ∈ kept), diagrams as structured text, tables

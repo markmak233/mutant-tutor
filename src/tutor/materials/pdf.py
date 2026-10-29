@@ -4,9 +4,10 @@ For each page: its text layer, its label (the slide or page number printed in th
 whether it needs the vision model, and a hash of its content.
 
 A page needs the vision model when images that carry content cover at least VISION_SHARE
-of it. Two kinds of image carry none: decoration repeated at the same place on many pages
-(logo, template), and images with text-layer characters on top (a title's shadow effect, a
-text box's background), whose words the text layer already has. Measured on the first
+of it, or when it has images and no text layer at all (a scan). Two kinds of image carry
+none: the same image repeated at the same place on many pages (logo, template), and images
+with text-layer characters on top (a title's shadow effect, a text box's background), whose
+words the text layer already has. Measured on the first
 course's lectures: a 25% threshold missed a slide of three small code screenshots; 5%
 without the text rule also flagged every section-divider slide; 5% with it caught every
 code and pseudocode image checked by eye and flagged 162 of 462 pages.
@@ -47,7 +48,7 @@ class _Raw:
     text: str
     label: str | None
     area: float
-    boxes: list[tuple[tuple[int, int, int, int], float]]  # rounded box, its area
+    boxes: list[tuple[tuple[int, int, int, int], str, float]]  # rounded box, image hash, area
     image_data: bytes
 
 
@@ -57,14 +58,17 @@ def read_pdf(path: Path) -> list[Page]:
         raws = [_read_page(page) for page in pdf]
     finally:
         pdf.close()
-    counts = Counter(box for raw in raws for box in {b for b, _ in raw.boxes})
-    repeated = {b for b, n in counts.items() if n >= max(3, REPEATED_SHARE * len(raws))}
+    # The same image at the same place: three scanned pages share a box, not an image.
+    counts = Counter(key for raw in raws for key in {(b, h) for b, h, _ in raw.boxes})
+    repeated = {k for k, n in counts.items() if n >= max(3, REPEATED_SHARE * len(raws))}
     pages = []
     for number, raw in enumerate(raws, 1):
-        image_area = sum(area for box, area in raw.boxes if box not in repeated)
+        image_area = sum(area for box, h, area in raw.boxes if (box, h) not in repeated)
         digest = hashlib.sha256(raw.text.encode() + raw.image_data).hexdigest()[:16]
+        # A page with images and no text layer at all (a scan) has nothing else to read.
+        scanned = bool(raw.boxes) and not raw.text
         pages.append(Page(number, raw.label, raw.text,
-                          image_area / raw.area >= VISION_SHARE, digest))
+                          scanned or image_area / raw.area >= VISION_SHARE, digest))
     return pages
 
 
@@ -104,7 +108,9 @@ def _read_page(page) -> _Raw:
         covered = sum(left <= x <= right and bottom <= y <= top for x, y in centres)
         if covered >= TEXT_ON_IMAGE:
             continue
+        image_data = b"".join(bytes(image.get_data(decode_simple=False)) for image in images)
         boxes.append(((round(left), round(bottom), round(right), round(top)),
+                      hashlib.sha256(image_data).hexdigest()[:16],
                       abs(right - left) * abs(top - bottom)))
-        data += b"".join(bytes(image.get_data(decode_simple=False)) for image in images)
+        data += image_data
     return _Raw(text, labels[-1] if labels else None, width * height, boxes, data)
