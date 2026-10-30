@@ -1383,24 +1383,40 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
     sees each existing exercise's title and topic, not only its id, and repeats a solved
     task with another API only when the new API is the whole point (W5 had planned a fourth
     word count and a Spark SQL exercise that redid cleaning and per-key averages).
-  - The question (both modes, decided 2026-10-29: the owner rated three week 5 questions
-    unclear, "explanations too long", and found a docstring hard to read) is a title and
-    fixed sections, each label alone on a line: `Concept:` (learn only, at most 3 lines;
-    more goes in hints.md), `Symptom:` (debugging), `Task:`, `Input:`, `Output:`,
-    `Example:`, `Constraints:`, `Slides:`, `Run:`. `question.md` next to student.py is the
-    same text as Markdown, made by code from the docstring (no model, so they never
-    disagree), labels as headings and indented data as code blocks; existing batches get
-    it with `python -m tutor.question BATCH_DIR`. It ends with "How to run" (owner,
-    2026-10-30): `cd` into the exercise's folder, `pytest test_student.py`,
-    `python student.py`, and the hint command, with the real folder: absolute for a
-    workspace exercise (private; it pastes anywhere), from the repository's folder for an
-    example (public files hold no absolute path). A draft has no such block, since its
-    folder is temporary; `save` writes it as it moves the exercise into the batch. Not hints.md's top, which the owner
-    first suggested: hints.md is opened only when stuck. No validation check of the
-    layout yet: older exercises do not follow it and are not reworked. The four
-    `examples/` questions were rewritten in the layout (2026-10-30), since the prompt's
-    example outweighed its rules: on week 7, DeepSeek Flash without thinking followed the
-    layout in 5 of 11 questions and copied the example's "Run the example:" lines.
+  - The question (both modes, decided 2026-10-29) is a title and fixed sections, each
+    label alone on a line: `Concept:` (learn only), `Symptom:` (debugging), `Task:`,
+    `Input:`, `Output:`, `Example:`, `Constraints:`, `Slides:`, `Run:`. Explanation goes
+    in Concept, never into Task, which stays one or two sentences.
+  - Concept (owner, 2026-10-30) is the knowledge point's condensed lecture, so the student
+    need not go back and forth between slides and question: at most `concept_lines`
+    lines (a generation setting, default 50), opening with an introduction of at most 3
+    lines (what the technique does and why it is needed), then how it works in the
+    slides' words, naming the slides each part comes from; a slide's own example may be
+    shown on other data than the exercise's. Never solution code or how to write this
+    exercise: that is the hints' job, in levels. It was at most 3 lines from 2026-10-29,
+    after three week 5 questions were rated unclear, "explanations too long"; the owner
+    later explained the trouble was reading a docstring without layout, with the concept
+    mixed into the task, not the length: week 1-2 questions were longer (314 words on
+    average against 275) and all rated clear. Those three ratings carry a note saying so,
+    so the teaching-quality judge (3b) is not calibrated against them as unclear content.
+    The examples' Concepts show the shape (general knowledge in place of slides).
+  - `question.md` next to student.py is the same text as Markdown, made by code from the
+    docstring (no model, so they never disagree), labels as headings; existing batches
+    get it with `python -m tutor.question BATCH_DIR`. Code blocks only in Example and Run,
+    where there is something to copy; elsewhere indented text becomes plain lines (owner,
+    2026-10-30: a page of grey boxes is harder to read). It ends with "How to run"
+    (owner, 2026-10-30): `cd` into the exercise's folder, `pytest test_student.py`,
+    `python student.py`, `hints.md` and the hint command, with the real folder: absolute
+    for a workspace exercise (private; it pastes anywhere), from the repository's folder
+    for an example (public files hold no absolute path). The hints line is written by
+    code because a model may forget it (week 7 blind comparison). A draft has no such
+    block, since its folder is temporary; `save` writes it as it moves the exercise into
+    the batch. Not hints.md's top, which the owner first suggested: hints.md is opened only
+    when stuck. No validation check of the layout yet: older exercises do not follow it
+    and are not reworked. The four `examples/` questions were rewritten in the layout
+    (2026-10-30), since the prompt's example outweighed its rules: on week 7, DeepSeek
+    Flash without thinking followed the layout in 5 of 11 questions and copied the
+    example's "Run the example:" lines.
   - `review`: one or several weeks mixed, fuller tasks leaning file-level (closer to labs and
     projects), a bare skeleton. The tutor helps only when asked, first naming just the kind of
     error, and leaves the fix to the owner. Exercises may combine knowledge points, as a
