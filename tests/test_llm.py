@@ -252,6 +252,22 @@ def test_deepseek_gets_json_mode_with_the_schema_in_the_prompt(sent):
     assert json.dumps(schema) in body["messages"][-1]["content"]
 
 
+def test_a_profile_can_set_how_deep_thinking_goes(tmp_path, sent):
+    ws = workspace(tmp_path, '[llm.profiles.flash-low]\nprovider = "deepseek"\n'
+                             'model = "deepseek-v4-flash"\nreasoning_effort_on = "low"\n'
+                             '[llm.roles]\ngenerate = "flash-low"\n')
+    config = config_for("generate", workspace=ws, environ={})
+    chat(config, [], purpose="generate", thinking=True)
+    chat(config, [], purpose="generate", thinking=False)
+    on, off = (json.loads(request.data) for request, *_ in sent)
+    assert on["reasoning_effort"] == "low" and "thinking" not in on
+    assert off["thinking"] == {"type": "disabled"} and "reasoning_effort" not in off
+    # without the field, thinking keeps the model's default depth
+    chat(LLMConfig("p", "deepseek", "https://api.deepseek.com", "deepseek-v4-flash"), [],
+         purpose="generate", thinking=True)
+    assert "reasoning_effort" not in json.loads(sent[2][0].data)
+
+
 def test_lm_studio_turns_thinking_off_with_reasoning_effort_none(sent):
     chat(LLMConfig("p", "lmstudio", "http://x/v1", "gemma",
                    thinking_off=({"reasoning_effort": "none"},)), [], purpose="vision",
