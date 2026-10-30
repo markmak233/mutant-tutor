@@ -349,7 +349,14 @@ safe. Every `.py` file that validation runs passes the static safety check (see 
    `testkit.run_mrjob` runs a subclass whose `MRStep`s have no combiner functions (explicit
    `steps()` included). Not on `hadoop`: the task processes run the student's own script, so a
    combiner removed in the test process would still run there; reducer counts cover those
-   exercises. Tests may also call `run_mrjob(..., combiner=False)` themselves, so a student's
+   exercises. Since 2026-10-30 (backlog C1) every MRJob exercise on the inline runner, with
+   no metadata flag, also reruns with `TUTOR_VALUE_ORDER=reversed`: reducers and combiners
+   get each key's values in reverse order. Hadoop promises no value order; the inline
+   runner keeps the input files' order (not sorted, as the backlog entry had guessed:
+   values 5, 25 from one file and 30, 10, 200 from another arrived as 5, 25, 30, 10, 200),
+   so a reducer taking its first value as the earliest passed every inline run. Reversed,
+   not shuffled, so any two values change order and a failure repeats. All 14 week 1-3
+   exercises stayed VALID; the one `hadoop` exercise is skipped, as for the combiner. Tests may also call `run_mrjob(..., combiner=False)` themselves, so a student's
    reducer that relies on the combiner (the classic broken mean) fails their own tests, not
    only the reference check. Neither flag: "n/a".
    - Plain Python: not applicable.
@@ -1383,7 +1390,12 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
     `Example:`, `Constraints:`, `Slides:`, `Run:`. `question.md` next to student.py is the
     same text as Markdown, made by code from the docstring (no model, so they never
     disagree), labels as headings and indented data as code blocks; existing batches get
-    it with `python -m tutor.question BATCH_DIR`. Not hints.md's top, which the owner
+    it with `python -m tutor.question BATCH_DIR`. It ends with "How to run" (owner,
+    2026-10-30): `cd` into the exercise's folder, `pytest test_student.py`,
+    `python student.py`, and the hint command, with the real folder: absolute for a
+    workspace exercise (private; it pastes anywhere), from the repository's folder for an
+    example (public files hold no absolute path). A draft has no such block, since its
+    folder is temporary; `save` writes it as it moves the exercise into the batch. Not hints.md's top, which the owner
     first suggested: hints.md is opened only when stuck. No validation check of the
     layout yet: older exercises do not follow it and are not reworked. The four
     `examples/` questions were rewritten in the layout (2026-10-30), since the prompt's
@@ -1642,10 +1654,7 @@ design is, and share the Hadoop counters).
 - Batch API for whole-batch generation, once a cloud provider is used (see the [3] review in
   "LLM engineering candidates").
 
-- C1 value-order check: rule 5 also reruns with each key's values shuffled (a runtime
-  subclass, like the combiner switch), catching reducers that rely on value order, the
-  reason secondary sort exists. First verify that mrjob's inline runner delivers values
-  sorted (it sorts whole map-output lines), which would hide such bugs today.
+- C1 value-order check: done 2026-10-30, see rule 5 in "Exercise validation".
 - C2 algorithm-quality warnings (see "Correctness vs algorithm quality"), later Hadoop
   counters (map output records, combine input / output) to report how much a combiner cut.
 - C3 tokenizer: the course's labs hand out a fixed tokenizing line (a `re.split` over

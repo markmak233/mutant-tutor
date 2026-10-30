@@ -225,7 +225,8 @@ Phase numbers match `docs/design.md`.
 
 - **1** ✅ Environment + validation harness, two synthetic examples
 - **2a** ✅ Harness extensions: shared test helpers, MRJob (inline and local Hadoop),
-  DataFrame, combiner-off check, attempt log, two more synthetic examples
+  DataFrame, combiner-off and reversed-value-order checks, attempt log, two more synthetic
+  examples
 - **2** ✅ Golden exercises: a first batch of 10 course exercises, validated, its must
   exercises solved by hand and rated to run the full loop (the `v0.1.0` release still open)
 - **2b** Code-tracing exercises ("what does this print and why")
@@ -248,8 +249,6 @@ Maybe: adaptive review, spaced `review` batches for the weak knowledge points in
 attempt log (batches are started by hand for now).
 
 Decided, next to 3b:
-- A value-order check, before more MapReduce exercises are solved: rerun with each key's
-  values shuffled, to catch reducers that rely on an order Hadoop does not give
 - A calibrated judge of hint quality, after 3b, whose judge it reuses: does a hint give the
   answer away, does it point the right way
 - Algorithm-quality warnings, with 2b's design exercises (e.g. how much a combiner cut),
