@@ -809,10 +809,38 @@ Design approved 2026-10-28 (owner):
   - Decided (owner, 2026-10-30): arm E's shape, Flash with thinking, Pro only when Flash's
     repair fails, so the time stays bounded; GLM-5.3 as the oracle after 2026-11-04. The
     oracle's thinking became its own setting, `oracle_thinking`, off by default: it
-    followed `thinking`, so turning generation thinking on would have made GLM think. Not
-    yet measured, for the next run: more items in parallel for plain-Python batches
-    (default 3 on 12 cores), a lower thinking effort if DeepSeek offers one, and running
-    mutants in parallel during validation for Spark weeks.
+    followed `thinking`, so turning generation thinking on would have made GLM think.
+  - Speed, measured 2026-10-30 on the same 11 items (owner asked for tests, not guesses):
+
+    | Setup | Wall time | First-round VALID | Flash draft | Output tokens | Layout |
+    |---|---|---|---|---|---|
+    | E, one at a time (high effort) | 1983 s | 7/11 | 129 s | - | 10/11 |
+    | high effort, 8 in parallel | 441 s | 8/11 | 119 s | 369k | 10/11 |
+    | low effort, 8 in parallel | 211 s | 7/11 | 90 s | 261k | 11/11 |
+
+    Eight requests at once did not slow DeepSeek (about 215 tokens/s each), so a batch
+    takes about as long as its slowest item. DeepSeek's `reasoning_effort` has three
+    levels, low / high / max, default high (medium counts as high); a profile's new
+    `reasoning_effort_on` sets the level used when thinking is on. Low drafted 24% faster,
+    repaired in 31 s instead of 104, with 29% fewer output tokens and the same first-round
+    rate on this sample (one run each; part of the 211 against 441 s is that no low item
+    needed a third round). Question quality per setup goes to the owner's blind comparison.
+    The examples' rewrite showed too: 10 and 11 of 11 questions in the layout, against 5
+    of 11 for arm A.
+  - Validation runs its independent checks at once (after the reference passes: skeleton,
+    each mutant, oracle, the partition runs, main), under process-wide caps on child runs:
+    heavy runs, which start a JVM (Spark, the Hadoop runner, any framework not yet
+    classified), default a third of the cores (`TUTOR_MAX_HEAVY_RUNS`); light runs (plain
+    Python, MRJob inline) half the cores (`TUTOR_MAX_RUNS`). Heavy or light is derived from
+    metadata `framework` and `runner`, never declared by an exercise (a model could get
+    it wrong); a test fails when the format allows a framework the table does not list. A Spark exercise took 47 s
+    instead of 96, a file-level one 27 instead of 65. The cap matters: with 8 or 12 runs
+    at once the exercise's hypothesis run passed its 30 s timeout and the exercise came
+    out INVALID; 4 and 6 took the same time, 4 with 10 s to spare. Checked: all 70 week 7
+    exercises (plain Python, every arm) still VALID; `pytest -m spark` passes in 217 s
+    instead of 462; the Hadoop exercise of week 3 took 94 s instead of 211; and 2 Hadoop
+    and 13 Spark exercises validated at once in one process, as a batch does, came out
+    VALID twice (about 400 s, against over 20 minutes one after another).
 - What repair is told (2026-10-29). A week 4 item came back word for word through all
   three repairs: rule 1 said only pytest's last line ("2 failed, 3 passed"), so the model
   could not see what to fix, and at temperature 0 an unchanged prompt returned the same
@@ -1698,7 +1726,12 @@ release; exam mode stays open.
 - Second course: use the tool for another course (other language or framework) to prove
   workspace, testkit and setup recipes are not shaped around one course. A long-term goal.
   Brings isolation layer B, the module risk tiers and other languages (see "Code execution
-  safety").
+  safety"). A new framework's weight for the executor's caps (heavy: a JVM or similar per
+  run) moves from the code's table to the course's `workspace.toml`, decided when the
+  framework is set up, by measuring a smoke run (start-up time, peak memory, a `java` child,
+  cores used), and confirmed by the owner like a `[requires]` entry (owner, 2026-10-30). A
+  model may propose which frameworks the slides use, never how heavy they are; an
+  unmeasured framework counts as heavy.
 - Adaptive review: use `attempts.jsonl` (failures, run counts, hints used) and `coverage.md`
   to find weak knowledge points and schedule `review`-mode batches with spaced repetition.
 - Packaging and release: `pipx install`, one command to start, CI on macOS and Windows
