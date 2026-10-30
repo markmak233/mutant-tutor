@@ -239,6 +239,22 @@ Phase numbers match `docs/design.md`.
   a calibrated judge of hint quality later
 - **4** Hybrid RAG over course material (BM25 + vectors), evaluated with recall@k
 - **5** Evaluation: validity rate, mutant kill rate, cost per valid exercise, with vs without RAG
+- **6** Second course: another language or framework, to prove nothing is shaped around one
+  course; brings the container for running generated code
+- **7** Local GUI: a web app on the CLI's functions, localhost only; solving stays in the IDE.
+  Then packaging and release: `pipx install`, one command to start, CI on macOS and Windows
+
+Maybe: adaptive review, spaced `review` batches for the weak knowledge points in the
+attempt log (batches are started by hand for now).
+
+Decided, next to 3b:
+- A value-order check, before more MapReduce exercises are solved: rerun with each key's
+  values shuffled, to catch reducers that rely on an order Hadoop does not give
+- A calibrated judge of hint quality, after 3b, whose judge it reuses: does a hint give the
+  answer away, does it point the right way
+- Algorithm-quality warnings, with 2b's design exercises (e.g. how much a combiner cut),
+  reported, never failing an exercise
+- `v0.1.0`: pinned dependency versions, a changelog and a tag, closing phase 2
 
 ## How it is built
 

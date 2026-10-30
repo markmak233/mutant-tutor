@@ -1633,6 +1633,12 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
 
 ## Backlog (decided, not scheduled)
 
+Order agreed 2026-10-30, around 3b: C1 first (small, and before the owner solves the
+week 3 MapReduce batch, so an exercise relying on value order is fixed before it is
+solved), then 3b, then the hint-quality judge of [3c] (it reuses 3b's judge and needs
+real hint requests from solving week 7), then 2b together with C2 (both ask how good a
+design is, and share the Hadoop counters).
+
 - Batch API for whole-batch generation, once a cloud provider is used (see the [3] review in
   "LLM engineering candidates").
 
@@ -1715,14 +1721,22 @@ gaps. Each was decided by the owner; change one only with the owner.
   more. The rule is in the generation prompt instead, and the teaching-quality judge (3b)
   can rate it.
 
+- No exam mode (owner, 2026-10-30; it was "reconsider later" since 2026-10-24). Review
+  mode already gives exam-style practice: fuller tasks, knowledge points combined, help
+  only when asked. A real exam mode would need a locked-down exam platform with a built-in
+  code editor, a different product from a tutor that leaves solving to the IDE. Practice
+  batches stay free of exam pressure (a write-everything-before-the-first-test-run rule
+  was turned down, 2026-10-24).
+
 ## Deferred
 
 SQLite, CLI, Docker (beyond the planned isolation container, see "Code execution safety"), error taxonomy (derive categories from real attempt data later).
-Adaptive learning and exam mode are listed under the later phases below.
+Adaptive learning is listed under the later phases below; exam mode is not done.
 
-Later phases, after phase 5. Order decided 2026-10-26: second course, then adaptive review
-(just before the GUI or built together with it), then the local GUI, then packaging and
-release; exam mode stays open.
+Later phases, after phase 5 (order decided 2026-10-26, numbered 2026-10-30): phase 6 the
+second course, phase 7 the local GUI, then packaging and release. Adaptive review is a
+maybe, not a phase (owner, 2026-10-30: batches are started by hand for now); exam mode
+is not done (see "Decisions not to do").
 - Second course: use the tool for another course (other language or framework) to prove
   workspace, testkit and setup recipes are not shaped around one course. A long-term goal.
   Brings isolation layer B, the module risk tiers and other languages (see "Code execution
@@ -1732,15 +1746,12 @@ release; exam mode stays open.
   cores used), and confirmed by the owner like a `[requires]` entry (owner, 2026-10-30). A
   model may propose which frameworks the slides use, never how heavy they are; an
   unmeasured framework counts as heavy.
-- Adaptive review: use `attempts.jsonl` (failures, run counts, hints used) and `coverage.md`
+- Adaptive review (a maybe): use `attempts.jsonl` (failures, run counts, hints used) and `coverage.md`
   to find weak knowledge points and schedule `review`-mode batches with spaced repetition.
 - Packaging and release: `pipx install`, one command to start, CI on macOS and Windows
   (WSL) as well, versioned releases after `v0.1.0`.
-- Exam mode (timed, no hints): not excluded, reconsider later. Practice batches stay free
-  of exam pressure (a write-everything-before-the-first-test-run rule was turned down,
-  2026-10-24).
 
-Local GUI (after the second course and adaptive review, just before packaging and release;
+Local GUI (phase 7: after the second course, just before packaging and release;
 discussed 2026-10-26). It sits on top of the files and functions the earlier phases build,
 so it comes late; the adaptive review screens can be built with it.
 - Shape: a local web app (FastAPI backend reusing the CLI functions, which a later MCP server
