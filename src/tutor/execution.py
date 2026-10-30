@@ -12,6 +12,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import xml.etree.ElementTree as ET
 from collections.abc import Mapping
@@ -21,6 +22,34 @@ from pathlib import Path
 
 DEFAULT_TIMEOUT_S = 30.0
 REPORT_FILE = "tutor-pytest-report.xml"  # pytest's JUnit XML, written inside the temp dir
+# How many child runs may be alive at once in this process. Validation runs its checks in
+# parallel and a batch validates several exercises at once, so one cap holds for all of
+# them, and there are two: a heavy run starts a JVM that uses every core (Spark, Hadoop),
+# a light one is plain Python in one process. Heavy default: a third of the cores (4 on 12):
+# measured 2026-10-30 on a Spark exercise, 4 and 6 at once took the same 47 s, 8 and 12
+# pushed its hypothesis run past the 30 s timeout, a false INVALID; 2 Hadoop and 13 Spark
+# exercises validated together twice, all VALID. Light default: half the cores.
+# TUTOR_MAX_HEAVY_RUNS and TUTOR_MAX_RUNS override them (read once, at the first run).
+MAX_HEAVY_RUNS_ENV = "TUTOR_MAX_HEAVY_RUNS"
+MAX_RUNS_ENV = "TUTOR_MAX_RUNS"
+_slots: dict[bool, threading.BoundedSemaphore] = {}  # heavy? -> its cap
+_slots_lock = threading.Lock()
+
+
+def max_runs(heavy: bool) -> int:
+    raw = os.environ.get(MAX_HEAVY_RUNS_ENV if heavy else MAX_RUNS_ENV, "")
+    if raw.strip().isdigit() and int(raw) > 0:
+        return int(raw)
+    return max(1, (os.cpu_count() or 3) // (3 if heavy else 2))
+
+
+def _slot(heavy: bool) -> threading.BoundedSemaphore:
+    """The process-wide cap for this kind of run; a run waits for a free slot before its
+    timeout starts."""
+    with _slots_lock:
+        if heavy not in _slots:
+            _slots[heavy] = threading.BoundedSemaphore(max_runs(heavy))
+        return _slots[heavy]
 
 
 class Outcome(Enum):
@@ -61,6 +90,7 @@ def run_pytest(
     files: Mapping[str, Path],
     timeout_s: float = DEFAULT_TIMEOUT_S,
     env: Mapping[str, str] | None = None,
+    heavy: bool = True,
 ) -> RunResult:
     """Copy `files` into a fresh temp dir and run pytest there.
 
@@ -70,8 +100,9 @@ def run_pytest(
     `env` adds environment variables for this run only, e.g. {"TUTOR_PARTITIONS": "4"}.
     The temp dir, and anything the run leaves behind (spark-warehouse/, caches), is
     deleted afterwards; the source files are never modified.
+    `heavy`: the run starts a JVM (see ExerciseFiles.heavy); unknown code counts as heavy.
     """
-    with tempfile.TemporaryDirectory(prefix="tutor-run-") as tmp:
+    with _slot(heavy), tempfile.TemporaryDirectory(prefix="tutor-run-") as tmp:
         workdir = _copy_in(files, Path(tmp))
         return _run_in(workdir, timeout_s, env or {})
 
@@ -81,11 +112,12 @@ def run_script(
     script: str,
     timeout_s: float = DEFAULT_TIMEOUT_S,
     env: Mapping[str, str] | None = None,
+    heavy: bool = True,
 ) -> RunResult:
     """`python <script>` with no arguments, in a fresh temp dir holding `files`, the way a
     student runs `python student.py` in the exercise folder; isolated like run_pytest.
     PASSED: exit code 0; anything else is ERROR (or TIMEOUT)."""
-    with tempfile.TemporaryDirectory(prefix="tutor-run-") as tmp:
+    with _slot(heavy), tempfile.TemporaryDirectory(prefix="tutor-run-") as tmp:
         workdir = _copy_in(files, Path(tmp))
         return _run_in(workdir, timeout_s, env or {}, [sys.executable, script])
 

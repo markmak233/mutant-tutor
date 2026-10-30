@@ -25,6 +25,15 @@ ORACLE_TEST_FILE = "test_oracle.py"
 _NOT_COPIED = {STUDENT_FILE, "hints.md", "question.md", "sample_output", "__pycache__"}
 
 
+# How heavy a framework's test runs are, for the executor's caps (execution.py). Light:
+# plain Python in one process. Heavy: a JVM per run (Spark). An MRJob exercise on the
+# Hadoop runner is heavy too. A framework in neither set counts as heavy, so a new one is
+# slow rather than wrong until it is measured; tests check every framework the format
+# allows is listed here.
+LIGHT_FRAMEWORKS = frozenset({"python", "mrjob"})
+HEAVY_FRAMEWORKS = frozenset({"pyspark-rdd", "pyspark-df"})
+
+
 class ExerciseError(Exception):
     """A required file is missing or malformed. The message names it."""
 
@@ -46,6 +55,13 @@ class ExerciseFiles:
         runner's default; the format allows null, which means the default."""
         value = self.metadata.get("timeout_s")
         return DEFAULT_TIMEOUT_S if value is None else float(value)
+
+    @property
+    def heavy(self) -> bool:
+        """Its test runs start a JVM (Spark, or the Hadoop runner), or its framework is
+        unknown: they run under the executor's lower cap."""
+        return (self.metadata.get("framework") not in LIGHT_FRAMEWORKS
+                or self.metadata.get("runner") == "hadoop")
 
     def run_files(self, candidate: Path) -> dict[str, Path]:
         """Everything the tests need (test file, sample data, ...), with `candidate`

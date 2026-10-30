@@ -745,3 +745,29 @@ def test_the_main_block_is_not_held_to_the_solutions_constraints():
     assert find_violations(source.replace("rdd.map(str)", "rdd.collect()"),
                            {"forbidden_calls": ["collect"]}) == ["line 2: uses collect"]
     assert count_uses(source, ["collect"]) == {"collect": 0}
+
+
+def test_every_framework_the_format_allows_is_light_or_heavy():
+    """Adding a framework to the format is the moment to decide how heavy its runs are;
+    an unlisted one would silently count as heavy."""
+    from typing import get_args
+
+    from tutor.validation.exercise import HEAVY_FRAMEWORKS, LIGHT_FRAMEWORKS
+
+    allowed = set(get_args(Metadata.model_fields["framework"].annotation))
+    assert allowed == LIGHT_FRAMEWORKS | HEAVY_FRAMEWORKS
+    assert not LIGHT_FRAMEWORKS & HEAVY_FRAMEWORKS
+
+
+@pytest.mark.parametrize(("metadata", "heavy"), [
+    ({"framework": "python"}, False),
+    ({"framework": "mrjob", "runner": "inline"}, False),
+    ({"framework": "mrjob", "runner": "hadoop"}, True),
+    ({"framework": "pyspark-df"}, True),
+    ({"framework": "flink"}, True),  # unknown: heavy until measured
+])
+def test_an_exercise_is_heavy_when_its_runs_start_a_jvm(metadata, heavy):
+    from tutor.validation.exercise import ExerciseFiles
+
+    ex = ExerciseFiles("x", Path("."), Path("r.py"), Path("s.py"), (), metadata)
+    assert ex.heavy is heavy

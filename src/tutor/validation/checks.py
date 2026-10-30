@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import ast
 import re
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -117,17 +118,28 @@ def validate(ex: ExerciseFiles, timeout_s: float | None = None,
             check_api_constraints(ex),
             check_main(ex, timeout_s),
         ])
-    return ValidationReport(ex.exercise_id, [
-        fmt,
-        safe,
-        reference,
-        check_skeleton_fails(ex, timeout_s),
-        check_mutants_killed(ex, timeout_s),
-        check_matches_oracle(ex, timeout_s),
-        check_distribution(ex, timeout_s),
-        check_api_constraints(ex),
-        check_main(ex, timeout_s),
+    # The reference passes, so the remaining runs are independent of each other: run them
+    # at once (a Spark exercise took 47 s instead of 96, 2026-10-30). The report keeps the
+    # rule order.
+    skeleton, mutants, oracle, distribution, main = _in_parallel([
+        lambda: check_skeleton_fails(ex, timeout_s),
+        lambda: check_mutants_killed(ex, timeout_s),
+        lambda: check_matches_oracle(ex, timeout_s),
+        lambda: check_distribution(ex, timeout_s),
+        lambda: check_main(ex, timeout_s),
     ])
+    return ValidationReport(ex.exercise_id, [
+        fmt, safe, reference, skeleton, mutants, oracle, distribution,
+        check_api_constraints(ex), main,
+    ])
+
+
+def _in_parallel(calls: list) -> list:
+    """Call each function on its own thread and return the results in the same order.
+    Every test run is a child process in its own temp dir; execution.py caps how many run
+    at a time across the process, so the threads only wait."""
+    with ThreadPoolExecutor(max_workers=max(1, len(calls))) as pool:
+        return [future.result() for future in [pool.submit(call) for call in calls]]
 
 
 def _skipped_after_safety(reason: str) -> list[RuleResult]:
@@ -211,7 +223,7 @@ def check_main(ex: ExerciseFiles, timeout_s: float) -> RuleResult:
         # A program taking its paths from sys.argv (the slides' form); the tests run it.
         return RuleResult("main", "runs on its own", Status.OK,
                           "a program run as `python student.py <input> <output>`", 0.0)
-    r = run_script(ex.run_files(ex.reference), STUDENT_FILE, timeout_s)
+    r = run_script(ex.run_files(ex.reference), STUDENT_FILE, timeout_s, heavy=ex.heavy)
     if r.outcome is Outcome.PASSED:
         return RuleResult("main", "runs on its own", Status.OK,
                           "`python student.py` ran the example (reference)", r.duration_s)
@@ -260,25 +272,25 @@ def check_mutants_killed(ex: ExerciseFiles, timeout_s: float) -> RuleResult:
             "no mutants: nothing shows the tests can catch a bug", 0.0,
         )
     counts = ex.metadata.get("mutant_partitions", [DEFAULT_PARTITIONS])
-    survived: list[str] = []
-    broken: list[str] = []
-    duration = 0.0
-    for mutant in ex.mutants:
-        verdict = "survived"
+
+    def verdict(mutant: Path) -> tuple[str, float]:
+        # One mutant's partition counts in turn: the first that catches it ends the runs.
+        spent = 0.0
         for partitions in counts:
             r = _run(ex, mutant, timeout_s, partitions)
-            duration += r.duration_s
+            spent += r.duration_s
             # TIMEOUT counts as killed: a mutant that hangs is caught by the time limit.
             if r.outcome in (Outcome.FAILED, Outcome.TIMEOUT):
-                verdict = "killed"
-                break
+                return "killed", spent
             if r.outcome is Outcome.ERROR:
-                verdict = "broken"
-                break
-        if verdict == "survived":
-            survived.append(mutant.stem)
-        elif verdict == "broken":
-            broken.append(mutant.stem)
+                return "broken", spent
+        return "survived", spent
+
+    # Mutants are independent of each other, so they run at once.
+    verdicts = _in_parallel([lambda m=m: verdict(m) for m in ex.mutants])
+    survived = [m.stem for m, (v, _) in zip(ex.mutants, verdicts, strict=True) if v == "survived"]
+    broken = [m.stem for m, (v, _) in zip(ex.mutants, verdicts, strict=True) if v == "broken"]
+    duration = sum(spent for _, spent in verdicts)
 
     killed = len(ex.mutants) - len(survived) - len(broken)
     parts = [f"{killed}/{len(ex.mutants)} killed"]
@@ -301,7 +313,7 @@ def check_matches_oracle(ex: ExerciseFiles, timeout_s: float) -> RuleResult:
             "no oracle.py / test_oracle.py: nothing compares the reference with an "
             "independent specification", 0.0,
         )
-    r = run_pytest(ex.differential_files(), timeout_s)
+    r = run_pytest(ex.differential_files(), timeout_s, heavy=ex.heavy)
     if r.outcome is Outcome.PASSED:
         return RuleResult("4", "matches oracle", Status.OK, _summary(r), r.duration_s)
     if r.outcome is Outcome.FAILED:
@@ -332,10 +344,12 @@ def check_distribution(ex: ExerciseFiles, timeout_s: float) -> RuleResult:
                  if n != DEFAULT_PARTITIONS]
     if combiner_check:
         runs.append(("with the combiner off", DEFAULT_PARTITIONS, {COMBINER_ENV: "off"}))
-    duration = 0.0
-    for description, partitions, env in runs:
-        r = _run(ex, ex.reference, timeout_s, partitions, env)
-        duration += r.duration_s
+    # The runs are independent, so they go at once; the first failure in this order is
+    # reported, as when they ran one after another.
+    results = _in_parallel([lambda n=partitions, e=env: _run(ex, ex.reference, timeout_s, n, e)
+                            for _, partitions, env in runs])
+    duration = sum(r.duration_s for r in results)
+    for (description, _, _), r in zip(runs, results, strict=True):
         if r.outcome is not Outcome.PASSED:
             detail = f"reference {r.outcome.value} {description}: {_summary(r)}"
             return RuleResult("5", "distribution", Status.FAIL, detail, duration,
@@ -375,7 +389,7 @@ def _run(
     extra_env: dict[str, str] | None = None,
 ) -> RunResult:
     env = {PARTITIONS_ENV: str(partitions), **(extra_env or {})}
-    return run_pytest(ex.run_files(candidate), timeout_s, env)
+    return run_pytest(ex.run_files(candidate), timeout_s, env, heavy=ex.heavy)
 
 
 def _summary(r: RunResult) -> str:
