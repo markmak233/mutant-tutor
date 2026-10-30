@@ -1,6 +1,8 @@
 """question.md: the question in student.py's docstring, as Markdown."""
 
-from tutor.question import main, question_markdown
+from pathlib import Path
+
+from tutor.question import main, question_markdown, run_block, write_question
 
 QUESTION = '''"""Average temperature per station with Spark SQL
 
@@ -61,4 +63,21 @@ def test_a_batch_gets_question_md_from_student_py_or_the_skeleton(tmp_path):
     assert main([str(tmp_path)]) == 0
     assert (tmp_path / "exercises" / "a" / "question.md").read_text().startswith("# Average")
     # the owner's half-edited student.py does not parse: the skeleton's question is used
-    assert (tmp_path / "exercises" / "b" / "question.md").read_text() == "# B question\n"
+    assert (tmp_path / "exercises" / "b" / "question.md").read_text().startswith(
+        "# B question\n")
+
+
+def test_how_to_run_names_the_exercise_folder(tmp_path):
+    outside = tmp_path / "batches" / "b1" / "exercises" / "sum-list"
+    block = run_block(outside)
+    assert f'cd "{outside.resolve()}"' in block  # a workspace exercise: its absolute path
+    assert "pytest test_student.py" in block and "python -m tutor.hint" in block
+    inside = Path(__file__).resolve().parents[1] / "examples" / "station-average-rdd" / "exercise"
+    assert 'cd "examples/station-average-rdd/exercise"' in run_block(inside)  # never absolute
+
+
+def test_a_draft_question_has_no_how_to_run(tmp_path):
+    write_question(QUESTION, tmp_path)
+    assert "How to run" not in (tmp_path / "question.md").read_text()
+    write_question(QUESTION, tmp_path, location=tmp_path)
+    assert "## How to run" in (tmp_path / "question.md").read_text()

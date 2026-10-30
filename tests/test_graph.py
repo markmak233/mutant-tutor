@@ -660,6 +660,9 @@ def test_the_oracle_model_sees_the_question_and_interface_never_the_reference(wo
     assert "only the interface" in model.calls[0][1][0]["content"]  # the generating model
     saved = d.batch_dir / "solutions" / "sum-list" / "oracle.py"
     assert saved.read_text() == FILLED
+    # the saved question's "How to run" names the batch folder, not the draft's
+    question = (d.batch_dir / "exercises" / "sum-list" / "question.md").read_text()
+    assert f'cd "{(d.batch_dir / "exercises" / "sum-list").resolve()}"' in question
     log = json.loads((d.batch_dir / "generation.jsonl").read_text())
     assert log["oracle_model"] == "gpt-terra: gpt-6.1-terra"
 

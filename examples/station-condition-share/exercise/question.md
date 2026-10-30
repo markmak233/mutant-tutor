@@ -96,3 +96,15 @@ pytest test_student.py      (Hadoop, about 25 s)
 ```
 
 Stuck? hints.md has useful functions and three levels of hints.
+
+## How to run
+
+With the repository's virtual environment active:
+
+```bash
+cd "examples/station-condition-share/exercise"
+pytest test_student.py      # the tests
+python student.py           # the program, with the arguments Run shows, if any
+```
+
+Stuck? From the repository's folder: `python -m tutor.hint "examples/station-condition-share/exercise"`

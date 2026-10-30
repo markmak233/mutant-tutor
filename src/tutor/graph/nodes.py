@@ -38,7 +38,7 @@ from tutor.graph.state import (
     PlanItem,
 )
 from tutor.materials import cache
-from tutor.question import QUESTION_FILE, question_markdown
+from tutor.question import QUESTION_FILE, question_markdown, write_question
 from tutor.schema import Manifest, SourceRef
 from tutor.validation.checks import RuleResult, Status, ValidationReport, validate
 from tutor.validation.exercise import load_exercise
@@ -579,6 +579,9 @@ def save(state: ItemState, deps: Deps) -> ItemState:
             shutil.rmtree(staging)  # left by a copy that failed
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copytree(source, staging)
+        if source.parent.name == "exercises" and (staging / "student.py").is_file():
+            # The question's "How to run" names the folder it will have from now on.
+            write_question((staging / "student.py").read_text(), staging, location=target)
         staged.append((staging, target))
     for staging, target in staged:
         staging.rename(target)

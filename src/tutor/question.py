@@ -17,6 +17,7 @@ import textwrap
 from pathlib import Path
 
 QUESTION_FILE = "question.md"
+REPO = Path(__file__).resolve().parents[2]
 
 # A section label at the start of a line: "Input:", "Example (min_readings = 2):",
 # "Run the tests:". Only labels starting with these words, so a sentence with a colon
@@ -103,10 +104,37 @@ def _fence(block: list[str]) -> list[str]:
     return ["```text", *block, "```"]
 
 
-def write_question(student_source: str, exercise_dir: Path) -> bool:
-    """Write exercise_dir/question.md; False (nothing written) when there is no question."""
+def run_block(location: Path) -> str:
+    """How to run the exercise from a terminal (owner, 2026-10-30): its folder, the tests,
+    the program, a hint. A workspace exercise shows its absolute path, which pastes anywhere
+    (the workspace is private); one inside the repository shows a path from the
+    repository's folder, since public files never hold a real absolute path."""
+    location = location.resolve()
+    try:
+        shown = location.relative_to(REPO).as_posix()
+    except ValueError:
+        shown = str(location)
+    return (
+        "\n## How to run\n\n"
+        "With the repository's virtual environment active:\n\n"
+        "```bash\n"
+        f'cd "{shown}"\n'
+        "pytest test_student.py      # the tests\n"
+        "python student.py           # the program, with the arguments Run shows, if any\n"
+        "```\n\n"
+        f'Stuck? From the repository\'s folder: `python -m tutor.hint "{shown}"`\n'
+    )
+
+
+def write_question(student_source: str, exercise_dir: Path,
+                   location: Path | None = None) -> bool:
+    """Write exercise_dir/question.md; False (nothing written) when there is no question.
+    `location`: where the exercise lives for good, for the "How to run" block (none
+    while it is still a draft, whose folder is temporary)."""
     text = question_markdown(student_source)
     if text:
+        if location is not None:
+            text += run_block(location)
         (exercise_dir / QUESTION_FILE).write_text(text)
     return bool(text)
 
@@ -123,7 +151,7 @@ def main(argv: list[str]) -> int:
         # student.py holds the question in every batch (week 1-3 skeletons are code only);
         # the skeleton is the fallback when the owner's half-edited student.py does not parse.
         sources = [exercise / "student.py", solution / "skeleton.py"]
-        written = any(path.is_file() and write_question(path.read_text(), exercise)
+        written = any(path.is_file() and write_question(path.read_text(), exercise, exercise)
                       for path in sources)
         print(f"{solution.name}: {'question.md' if written else 'no question'}")
     return 0
