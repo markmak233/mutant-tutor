@@ -32,14 +32,15 @@ def average_by_station_sql(spark, readings, min_readings):
 '''
 
 
-def test_labels_become_headings_and_indented_data_code_blocks():
+def test_labels_become_headings_and_only_examples_and_commands_code_blocks():
     md = question_markdown(QUESTION)
     assert md.startswith("# Average temperature per station with Spark SQL\n")
     for heading in ("Concept", "Task", "Input", "Example (min_readings = 2)", "Constraints",
                     "Run the tests"):
         assert f"\n## {heading}\n" in md
-    # text aligned under a label's inline text stays aligned, in one code block
-    assert "```text\nspark      a SparkSession\nreadings   a DataFrame" in md
+    # outside Example and Run, indented text is plain lines, not a code block
+    assert "spark      a SparkSession  \nreadings   a DataFrame" in md
+    assert md.count("```text") == 1  # the example only
     # one code block across the blank line inside the indented example
     assert '```text\ninput   [("s1", 10.0), ("s1", 20.0)]\n\noutput  [("s1", 15.0)]\n```' in md
     assert "- Use spark.sql; no groupBy,  \nno agg." in md  # a wrapped list item, not code
@@ -72,6 +73,7 @@ def test_how_to_run_names_the_exercise_folder(tmp_path):
     block = run_block(outside)
     assert f'cd "{outside.resolve()}"' in block  # a workspace exercise: its absolute path
     assert "pytest test_student.py" in block and "python -m tutor.hint" in block
+    assert "`hints.md` in this folder" in block  # never left to the model to mention
     inside = Path(__file__).resolve().parents[1] / "examples" / "station-average-rdd" / "exercise"
     assert 'cd "examples/station-average-rdd/exercise"' in run_block(inside)  # never absolute
 

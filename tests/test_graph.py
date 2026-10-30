@@ -163,6 +163,13 @@ def test_the_batch_mode_sets_how_much_a_debugging_question_explains():
     assert "symptom only" in prompts.item_prompt(ITEM, "", "review")
 
 
+def test_the_concept_limit_is_a_setting_and_the_concept_a_condensed_lecture():
+    assert "at most\n                  50 lines" in prompts.system_prompt("")
+    assert "at most\n                  20 lines" in prompts.system_prompt("", concept_lines=20)
+    assert "condensed lecture" in prompts.item_prompt(ITEM, "", "learn")
+    assert "No Concept section" in prompts.item_prompt(ITEM, "", "review")
+
+
 def test_the_batch_mode_sets_how_much_one_planned_exercise_combines():
     def plan(mode):
         return prompts.plan_prompt(["L1"], "", "", [], "", None, mode=mode)

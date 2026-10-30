@@ -2,9 +2,17 @@
 
 ## Concept
 
-A standalone Spark program takes its input and output paths from the command line, reads  
-text with sc.textFile and writes with saveAsTextFile; lines it cannot parse are filtered  
-out, so one bad record does not fail the job.
+A standalone Spark program runs from the command line on whole input directories and  
+writes an output directory, so it has to read raw text, survive bad lines, and format  
+what it writes itself.  
+How it works (general Spark knowledge; a course exercise names its slides here):  
+the program takes its input and output paths from sys.argv and creates its own  
+SparkContext. sc.textFile(path) gives one record per line of every file in the  
+directory, header lines and blank lines included. Parsing turns each line into a  
+(key, value) record; a line that cannot be parsed is dropped rather than allowed to  
+raise, since one exception fails the whole job. saveAsTextFile(path) writes one part  
+file per partition, each record as str(record), so records are formatted as text first.  
+Spark refuses to write into an output directory that already exists.
 
 ## Task
 
@@ -13,10 +21,8 @@ to outputPath.
 
 ## Input
 
-Every file in inputPath. Each line is
-```text
+Every file in inputPath. Each line is  
 station,date,temperature          e.g.  s1,2024-01-05,12.5
-```
 
 Skip these lines without crashing:
 - the header line "station,date,temperature" (it may start every file)
@@ -27,10 +33,8 @@ Fields may have spaces around them: " s1 , 2024-01-05 , 12.5 " is a reading for 
 
 ## Output
 
-Save with saveAsTextFile to outputPath, one line per station:
-```text
+Save with saveAsTextFile to outputPath, one line per station:  
 station<TAB>max_temperature       e.g.  s1  12.5
-```
 
 Format the temperature with one decimal place, exactly like Python's f"{t:.1f}"  
 (12.5, -3.0, 3.1 for 3.14159). Line order does not matter. A station appears only if it  
@@ -83,4 +87,4 @@ pytest test_student.py      # the tests
 python student.py           # the program, with the arguments Run shows, if any
 ```
 
-Stuck? From the repository's folder: `python -m tutor.hint "examples/station-max-file/exercise"`
+Stuck? `hints.md` in this folder has three levels of hints, each more specific; or, from the repository's folder: `python -m tutor.hint "examples/station-max-file/exercise"`

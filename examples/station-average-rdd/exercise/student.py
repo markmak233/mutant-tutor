@@ -1,8 +1,17 @@
 """Average temperature per station (PySpark RDD)
 
 Concept:
-reduceByKey combines a key's values inside each partition before the shuffle, so its
-function must give the same answer however the values are grouped.
+An average per key needs every value of the key, but shipping all values to one place
+(groupByKey) moves the whole dataset across the network. reduceByKey avoids that by
+combining values before the shuffle, as long as the combining function allows it.
+How it works (general Spark knowledge; a course exercise names its slides here):
+reduceByKey(f) first combines the values of each key inside every partition, then sends
+one partial result per key and partition across the network, and combines those. Spark
+may group a key's values in any way and in any order, so f must be associative and
+commutative: f(f(a, b), c) == f(a, f(b, c)) and f(a, b) == f(b, a). A sum or a maximum
+qualifies; "the average of two values" does not, since averages of averages weigh the
+values unevenly. The values do not have to be plain numbers: any value type works if f
+combines it correctly in any grouping. The result has exactly one record per key.
 
 Task:
 Implement average_by_station(readings): the average temperature of every station.

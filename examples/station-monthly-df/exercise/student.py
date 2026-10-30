@@ -1,9 +1,17 @@
 """Monthly average temperature per station (PySpark DataFrame, file input/output)
 
 Concept:
-With the DataFrame API you describe the result (filter, groupBy, agg, orderBy) and Spark
-plans how to compute it; casting a column turns values it cannot parse into nulls, which
-a filter then drops.
+The DataFrame API describes the result, not the steps: you say which rows to keep,
+how to group them and how to order them, and Spark plans how to compute it, cleaning
+included.
+How it works (general Spark knowledge; a course exercise names its slides here):
+reading CSV with a header gives named string columns; trim removes spaces around values.
+Casting a column to a number turns every value it cannot parse into null, so one filter
+on "not null" drops all unusable rows at once. groupBy(...).agg(...) computes per-group
+values such as count and avg; a condition on an aggregate is a filter after the agg.
+orderBy sorts across all partitions, with one direction per column. Writing produces one
+part file per partition of the DataFrame being written, so the number of partitions at
+that moment decides how many files appear.
 
 Task:
 Write a Spark program with the DataFrame API that writes the average temperature of every

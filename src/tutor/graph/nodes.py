@@ -87,6 +87,7 @@ class Deps:
     stronger_repair_from: int = DEFAULTS.stronger_repair_from
     repair_thinking: bool = DEFAULTS.repair_thinking
     oracle_thinking: bool = DEFAULTS.oracle_thinking
+    concept_lines: int = DEFAULTS.concept_lines
     plan_config: llm.LLMConfig | None = None  # the `plan` role; default: config
     # The `repair` role: a larger model for the repair rounds from `stronger_repair_from` on,
     # where the cheap model fails most (it cannot tell which side of a failure is wrong).
@@ -197,7 +198,8 @@ def _ask(state: ItemState, deps: Deps, user: str, purpose: str, round_: int,
     messages = [
         {"role": "system", "content": prompts.system_prompt(
             conventions.read_text() if conventions.is_file() else "",
-            oracle_interface=deps.oracle_config is not None)},
+            oracle_interface=deps.oracle_config is not None,
+            concept_lines=deps.concept_lines)},
         {"role": "user", "content": user},
     ]
     reply = deps.chat(config, messages, purpose=purpose, log_path=deps.llm_log,

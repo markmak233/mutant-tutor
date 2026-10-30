@@ -1,9 +1,17 @@
 """Maximum temperature per station from CSV files (PySpark RDD, file input/output)
 
 Concept:
-A standalone Spark program takes its input and output paths from the command line, reads
-text with sc.textFile and writes with saveAsTextFile; lines it cannot parse are filtered
-out, so one bad record does not fail the job.
+A standalone Spark program runs from the command line on whole input directories and
+writes an output directory, so it has to read raw text, survive bad lines, and format
+what it writes itself.
+How it works (general Spark knowledge; a course exercise names its slides here):
+the program takes its input and output paths from sys.argv and creates its own
+SparkContext. sc.textFile(path) gives one record per line of every file in the
+directory, header lines and blank lines included. Parsing turns each line into a
+(key, value) record; a line that cannot be parsed is dropped rather than allowed to
+raise, since one exception fails the whole job. saveAsTextFile(path) writes one part
+file per partition, each record as str(record), so records are formatted as text first.
+Spark refuses to write into an output directory that already exists.
 
 Task:
 Write a Spark program that writes the highest temperature of each station in inputPath

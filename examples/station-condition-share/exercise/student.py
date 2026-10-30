@@ -1,9 +1,17 @@
 """Share of each weather condition per station (MRJob on Hadoop, order inversion)
 
 Concept:
-Order inversion: give a station's total a key that sorts before its (station, condition)
-keys and reaches the same reducer, so the reducer knows the total before the pair counts
-arrive and computes each share without storing them.
+A share needs a total and a count at the same time, but a reducer sees its keys one
+after another and must not keep a whole station's counts in memory. Order inversion
+makes the total arrive first, so every share can be computed as its count streams by.
+How it works (general MapReduce knowledge; a course exercise names its slides here):
+the mapper emits, besides each (station, condition) count, a contribution to the
+station's total under a special key that sorts before all of that station's pair keys.
+Two things must hold for it to work: the special key and the pair keys of one station
+must reach the same reducer (a partitioner on the station alone), and the sort order must
+put the special key first. The reducer then remembers only the current station's total
+and divides each pair's count by it. A combiner can add up counts and totals early,
+since sums can be combined in any order.
 
 Task:
 Write an MRJob job that outputs, for every station, the (station, condition) pairs whose

@@ -26,6 +26,7 @@ _LABEL = re.compile(
     r"^((?:Concept|Symptom|Task|Your|Input|Output|Example|Examples|Constraints|Order|"
     r"Parameter|Parameters|Slides|Source|Teaching|Notes|Run)\b[^:{}]{0,40}):(?:\s+(.*))?$")
 _LIST_ITEM = re.compile(r"^\s*(?:[-*]|\d+[.)])\s")
+COPYABLE = ("Example", "Run")  # sections whose indented lines become code blocks
 
 
 def question_markdown(student_source: str) -> str:
@@ -38,24 +39,28 @@ def question_markdown(student_source: str) -> str:
         return ""
     title, *lines = doc.splitlines()
     out = [f"# {title.strip()}", ""]
-    i, in_list = 0, False
+    i, in_list, copyable = 0, False, False
     while i < len(lines):
         line = lines[i]
         label = _LABEL.match(line)
         if label:
             out += ["", f"## {label.group(1)}", ""]
             rest, in_list = label.group(2), False
+            # Code blocks only where there is something to copy: the example (code, sample
+            # data) and the commands. Elsewhere indented text is plain lines, since a page
+            # of grey boxes is harder to read (owner, 2026-10-30).
+            copyable = label.group(1).startswith(COPYABLE)
             i += 1
             if rest:
                 # Lines aligned under the inline text ("Input:  spark -- ...\n        rows")
-                # keep that alignment, so they go in a code block together with it.
+                # belong to it: one code block where copyable, else plain lines.
                 start, block = line.index(rest), [rest]
                 while i < len(lines) and lines[i].startswith(" ") and lines[i].strip():
                     block.append(lines[i][start:] if lines[i][:start].isspace()
                                  else lines[i].strip())
                     i += 1
                 if len(block) > 1:
-                    out += _fence(block) + [""]
+                    out += (_fence(block) if copyable else [b.strip() for b in block]) + [""]
                 else:  # a sentence that may go on in the next lines
                     out.append(_command(rest))
             continue
@@ -71,7 +76,10 @@ def question_markdown(student_source: str) -> str:
                     and lines[i + 1].startswith("    "))):
                 block.append(lines[i])
                 i += 1
-            out += _fence(textwrap.dedent("\n".join(block)).splitlines()) + [""]
+            if copyable:
+                out += _fence(textwrap.dedent("\n".join(block)).splitlines()) + [""]
+            else:  # plain lines, left-aligned: Markdown reads 4 spaces as a code block
+                out += [b.strip() for b in block] + [""]
             continue
         in_list = bool(_LIST_ITEM.match(line)) or (in_list and bool(line.strip()))
         out.append(line.strip())
@@ -122,7 +130,8 @@ def run_block(location: Path) -> str:
         "pytest test_student.py      # the tests\n"
         "python student.py           # the program, with the arguments Run shows, if any\n"
         "```\n\n"
-        f'Stuck? From the repository\'s folder: `python -m tutor.hint "{shown}"`\n'
+        "Stuck? `hints.md` in this folder has three levels of hints, each more specific; "
+        f'or, from the repository\'s folder: `python -m tutor.hint "{shown}"`\n'
     )
 
 
