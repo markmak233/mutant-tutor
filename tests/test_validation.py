@@ -442,7 +442,9 @@ def test_combiner_check(tmp_path, combine, reduce, status):
     if status is Status.FAIL:
         assert "with the combiner off" in report.result("5").detail
     else:
-        assert report.result("5").detail == "reference passes with the combiner off"
+        # every inline MRJob exercise also reruns with its values reversed
+        assert report.result("5").detail == (
+            "reference passes with the combiner off and with each key's values reversed")
 
 
 # --- static API constraints -------------------------------------------------------------
@@ -771,3 +773,39 @@ def test_an_exercise_is_heavy_when_its_runs_start_a_jvm(metadata, heavy):
 
     ex = ExerciseFiles("x", Path("."), Path("r.py"), Path("s.py"), (), metadata)
     assert ex.heavy is heavy
+
+
+def test_rule_5_reverses_value_order_for_an_inline_mrjob_exercise(tmp_path):
+    """No metadata flag needed: a reducer relying on the inline runner's value order fails."""
+    from tutor.validation.checks import check_distribution
+    from tutor.validation.exercise import ExerciseFiles
+
+    exercise, solution = tmp_path / "exercise", tmp_path / "solution"
+    exercise.mkdir()
+    solution.mkdir()
+    (solution / "reference.py").write_text(
+        "from mrjob.job import MRJob\n\n\n"
+        "class FirstIsEarliest(MRJob):\n"
+        "    def mapper(self, _, line):\n"
+        "        station, day = line.split(',')\n"
+        "        yield station, int(day)\n\n"
+        "    def reducer(self, station, days):\n"
+        "        yield station, next(iter(days))  # the first value as the earliest\n\n\n"
+        "if __name__ == '__main__':\n"
+        "    FirstIsEarliest.run()\n")
+    (exercise / "test_student.py").write_text(
+        "from tutor.testkit import assert_output, run_mrjob, write_inputs\n"
+        "from student import FirstIsEarliest\n\n\n"
+        "def test_earliest_day(tmp_path):\n"
+        "    inp = write_inputs(tmp_path / 'in', ['s1,1', 's1,2', 's1,3'], files=1)\n"
+        "    assert_output(run_mrjob(FirstIsEarliest, inp, tmp_path / 'out'), ['\"s1\"\\t1'])\n")
+    ex = ExerciseFiles("first", exercise, solution / "reference.py", solution / "reference.py",
+                       (), {"framework": "mrjob", "runner": "inline"})
+    result = check_distribution(ex, timeout_s=60)
+    assert result.status is Status.FAIL
+    assert "reverse order" in result.detail
+
+    on_hadoop = ExerciseFiles("first", exercise, solution / "reference.py",
+                              solution / "reference.py", (), {"framework": "mrjob",
+                                                             "runner": "hadoop"})
+    assert check_distribution(on_hadoop, timeout_s=60).status is Status.NOT_APPLICABLE

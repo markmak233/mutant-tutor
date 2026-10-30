@@ -30,7 +30,7 @@ from pathlib import Path
 
 from tutor.execution import Outcome, RunResult, copied_files, links, run_pytest, run_script
 from tutor.schema import Metadata, problems
-from tutor.testkit import COMBINER_ENV, DEFAULT_PARTITIONS, PARTITIONS_ENV
+from tutor.testkit import COMBINER_ENV, DEFAULT_PARTITIONS, PARTITIONS_ENV, VALUE_ORDER_ENV
 from tutor.validation.api import count_uses, find_violations, is_main_block
 from tutor.validation.exercise import STUDENT_FILE, ExerciseFiles
 from tutor.validation.safety import (
@@ -327,15 +327,18 @@ def check_matches_oracle(ex: ExerciseFiles, timeout_s: float) -> RuleResult:
 
 
 def check_distribution(ex: ExerciseFiles, timeout_s: float) -> RuleResult:
-    """The result must not depend on how the work is distributed. Two checks, each switched
-    on in metadata:
-    - partition_check: the reference passes at every partition count (rule 1 already ran
-      the default, so only the others run here);
-    - combiner_check (MRJob, inline runner): it passes with the combiner removed, since
-      Hadoop may run a combiner zero, one or many times."""
+    """The result must not depend on how the work is distributed. Three checks:
+    - partition_check (metadata): the reference passes at every partition count (rule 1
+      already ran the default, so only the others run here);
+    - combiner_check (metadata; MRJob, inline runner): it passes with the combiner removed,
+      since Hadoop may run a combiner zero, one or many times;
+    - every MRJob exercise on the inline runner: it passes with each key's values in
+      reverse order, since Hadoop gives a reducer its values in no promised order."""
     partition_check = ex.metadata.get("partition_check", False)
     combiner_check = ex.metadata.get("combiner_check", False)
-    if not (partition_check or combiner_check):
+    value_order = (ex.metadata.get("framework") == "mrjob"
+                   and ex.metadata.get("runner") != "hadoop")
+    if not (partition_check or combiner_check or value_order):
         return RuleResult("5", "distribution", Status.NOT_APPLICABLE,
                           "no partition_check or combiner_check in metadata", 0.0)
     runs = []  # (description, partitions, extra env)
@@ -344,6 +347,9 @@ def check_distribution(ex: ExerciseFiles, timeout_s: float) -> RuleResult:
                  if n != DEFAULT_PARTITIONS]
     if combiner_check:
         runs.append(("with the combiner off", DEFAULT_PARTITIONS, {COMBINER_ENV: "off"}))
+    if value_order:
+        runs.append(("with each key's values in reverse order", DEFAULT_PARTITIONS,
+                     {VALUE_ORDER_ENV: "reversed"}))
     # The runs are independent, so they go at once; the first failure in this order is
     # reported, as when they ran one after another.
     results = _in_parallel([lambda n=partitions, e=env: _run(ex, ex.reference, timeout_s, n, e)
@@ -359,6 +365,8 @@ def check_distribution(ex: ExerciseFiles, timeout_s: float) -> RuleResult:
         passed.append(f"{', '.join(map(str, PARTITION_COUNTS))} partitions")
     if combiner_check:
         passed.append("the combiner off")
+    if value_order:
+        passed.append("each key's values reversed")
     detail = f"reference passes with {' and with '.join(passed)}"
     return RuleResult("5", "distribution", Status.OK, detail, duration)
 

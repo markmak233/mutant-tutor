@@ -397,6 +397,52 @@ def test_mrjob_without_combiner_is_inline_only(tmp_path):
         run_mrjob(job, tmp_path, tmp_path / "out", runner="hadoop", combiner=False)
 
 
+# The reducer takes its first value as the earliest reading: right only in the order the
+# inline runner happens to keep (the input files'), which Hadoop does not promise.
+FIRST_IS_EARLIEST = '''
+from mrjob.job import MRJob
+
+
+class FirstIsEarliest(MRJob):
+    def mapper(self, _, line):
+        station, day = line.split(",")
+        yield station, int(day)
+
+    def reducer(self, station, days):
+        yield station, next(iter(days))
+
+
+if __name__ == "__main__":
+    FirstIsEarliest.run()
+'''
+
+
+def test_mrjob_reversed_values_expose_a_reducer_that_relies_on_their_order(
+        tmp_path, monkeypatch):
+    job = load_job(tmp_path, FIRST_IS_EARLIEST, "FirstIsEarliest")
+    inp = write_inputs(tmp_path / "in", ["s1,1", "s1,2", "s1,3"], files=1)
+
+    assert_output(run_mrjob(job, inp, tmp_path / "out1"), ['"s1"\t1'])
+    monkeypatch.setenv("TUTOR_VALUE_ORDER", "reversed")  # what the validator sets
+    assert_output(run_mrjob(job, inp, tmp_path / "out2"), ['"s1"\t3'])
+
+
+def test_mrjob_reversed_values_leave_an_order_free_job_unchanged(tmp_path, monkeypatch):
+    """TopK sums with its combiner and reducer and sorts before taking the top k."""
+    monkeypatch.setenv("TUTOR_VALUE_ORDER", "reversed")
+    job = load_job(tmp_path, TOP_K, "TopK")
+    result = run_mrjob(job, write_inputs(tmp_path / "in", TEXT), tmp_path / "out",
+                       jobconf={"myjob.settings.k": 2})
+    assert_output(result, ['"a"\t6', '"b"\t5'], order="total")
+
+
+def test_mrjob_reversed_values_are_inline_only(tmp_path, monkeypatch):
+    monkeypatch.setenv("TUTOR_VALUE_ORDER", "reversed")
+    job = load_job(tmp_path, TOP_K, "TopK")
+    with pytest.raises(ValueError, match="inline"):
+        run_mrjob(job, tmp_path, tmp_path / "out", runner="hadoop")
+
+
 def test_mrjob_unknown_runner_is_an_error(tmp_path):
     with pytest.raises(ValueError):
         run_mrjob(object, tmp_path, tmp_path / "out", runner="local")
