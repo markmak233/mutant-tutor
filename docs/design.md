@@ -1393,7 +1393,11 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
     lines (what the technique does and why it is needed), then how it works in the
     slides' words, naming the slides each part comes from; a slide's own example may be
     shown on other data than the exercise's. Never solution code or how to write this
-    exercise: that is the hints' job, in levels. It was at most 3 lines from 2026-10-29,
+    exercise: that is the hints' job, in levels. Pseudocode may appear (owner, 2026-10-30):
+    the algorithm's steps as the slides give them, language-neutral, in a fenced `text`
+    block (`for i = 1..d: increment CMS[i][h_i(x)]`); not runnable Python, and not the
+    exercise's function names, signature or edge cases. Decided after week 7 was written,
+    which was left as it is. It was at most 3 lines from 2026-10-29,
     after three week 5 questions were rated unclear, "explanations too long"; the owner
     later explained the trouble was reading a docstring without layout, with the concept
     mixed into the task, not the length: week 1-2 questions were longer (314 words on
@@ -1401,7 +1405,8 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
     so the teaching-quality judge (3b) is not calibrated against them as unclear content.
     The examples' Concepts show the shape (general knowledge in place of slides).
   - `question.md` next to student.py is the same text as Markdown, made by code from the
-    docstring (no model, so they never disagree), labels as headings; existing batches
+    docstring (no model, so they never disagree), labels as headings (the plain layout the
+    pipeline still writes; the format below replaces it for hand-made questions); existing batches
     get it with `python -m tutor.question BATCH_DIR`. Code blocks only in Example and Run,
     where there is something to copy; elsewhere indented text becomes plain lines (owner,
     2026-10-30: a page of grey boxes is harder to read). It ends with "How to run"
@@ -1417,6 +1422,35 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
     (2026-10-30), since the prompt's example outweighed its rules: on week 7, DeepSeek
     Flash without thinking followed the layout in 5 of 11 questions and copied the
     example's "Run the example:" lines.
+  - `question.md` format (owner, 2026-10-30, on the week 7 questions): use what Markdown
+    offers, with a visible hierarchy, since the student reads question.md, not the
+    docstring. Top to bottom:
+    1. `# title`; a quote line with lecture, slides, mode, type and difficulty; a contents
+       line linking the sections; a rule (`---`).
+    2. `## Concept` in `###` parts: "Why it is needed" (the introduction, at most 3 lines),
+       then one part per idea, its slides in the heading. Steps as numbered lists (nested
+       for sub-steps) or pseudocode in a `text` block (see Concept above), properties as
+       bullets, comparisons and traces as tables, the key
+       claim in a quote. Proofs, analyses, failed attempts and optional extensions folded
+       in `<details>` with a `<summary>`, so the main line stays short.
+    3. A rule; `## Task` (one or two sentences, names as inline code); `## Input` as a
+       parameter table; `## Output`; `## Example`, a code block with the input and output,
+       plus a step-by-step table when the example is a trace; `## Constraints` as a
+       numbered list with the key words bold; `## Slides` with the assumptions in a quote.
+    4. A rule; `## How to run`: one bash block (`cd`, `pytest test_student.py`,
+       `python student.py`) and a "Stuck?" quote with the hint command in a bash block. The
+       separate `Run` section is folded in: the two repeated each other.
+    Math is LaTeX: `$...$` inline, `$$...$$` on its own lines for a display formula (not
+    inside a list item, where renderers differ), variables included ($n$, $k$). `\lbrace`
+    and `\rbrace`, not `\{ \}` (a Markdown escape on some renderers). Python expressions
+    that say what the code computes (`len(stream) / k`) stay inline code. Paragraphs are
+    plain Markdown paragraphs, without the hard line breaks of the plain layout. Checked
+    with KaTeX, which VS Code's preview uses: week 7's 358 formulas, no failure. Not used:
+    GitHub alerts (`> [!NOTE]`) and footnotes, which VS Code's preview may not render.
+    Status: week 7 (`2026-10-30_p3-w7-low`) was written by hand in this format, its
+    Concepts from the slides; the pipeline still writes the plain layout, and
+    `python -m tutor.question` on a hand-made batch would overwrite it. How the pipeline
+    produces the format is open.
   - `review`: one or several weeks mixed, fuller tasks leaning file-level (closer to labs and
     projects), a bare skeleton. The tutor helps only when asked, first naming just the kind of
     error, and leaves the fix to the owner. Exercises may combine knowledge points, as a
@@ -1757,6 +1791,22 @@ gaps. Each was decided by the owner; change one only with the owner.
 
 SQLite, CLI, Docker (beyond the planned isolation container, see "Code execution safety"), error taxonomy (derive categories from real attempt data later).
 Adaptive learning is listed under the later phases below; exam mode is not done.
+
+Translated `question.md` (candidate, owner 2026-10-30; not built). Why not now: an
+assistant in the IDE already explains or translates a question on request, so nothing
+needs building yet. Revisit together with how the pipeline produces the `question.md`
+format (see "Learning rules").
+- Shape: `question.<lang>.md` next to `question.md`. The English file stays the only
+  source. A translation call runs after validation; the tests never read the question
+  text, so a translation cannot change whether an exercise is valid. Languages are listed
+  in `workspace.toml`, English only by default; the repository's examples stay English.
+- Deterministic check: inline code, LaTeX, code blocks, commands, slide numbers and links
+  must be identical in both files, which catches a changed expression or a dropped rule.
+- Points to settle: translated headings change the contents links' anchors (use fixed
+  `<a id>` anchors or keep headings in English); technical terms keep the English word on
+  first use (exams use it); whether to translate only Concept and keep Task, Input,
+  Output, Example and Constraints in English (the rules read as an exam states them, with
+  no mistranslated rule); whether `hints.md` and `tutor.hint` follow.
 
 Later phases, after phase 5 (order decided 2026-10-26, numbered 2026-10-30): phase 6 the
 second course, phase 7 the local GUI, then packaging and release. Adaptive review is a
