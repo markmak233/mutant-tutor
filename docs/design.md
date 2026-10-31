@@ -632,7 +632,11 @@ the reducer, several reducers). So the two are judged separately:
 Validity vs teaching quality (decided 2026-10-26, Codex review 4). VALID says the tests,
 reference and mutants agree; it does not say the exercise is good to learn from. Teaching
 quality is a separate score that never replaces or overrides validity, on four points:
-- clear: one reading of the question, inputs and outputs fully specified;
+- clear: someone who has never met the content can learn it from the question: after
+  reading it they understand it and have at least an idea how to start (owner,
+  2026-10-31; it read "one reading of the question, inputs and outputs fully specified"
+  until the judge, held to that, missed all five of the owner's n: the owner had meant
+  understandable, not specified);
 - fits the material: matches how the lectures and labs present the idea (the stripes
   case below is a failure of this);
 - within what has been taught: no API or idea from later weeks; partly checkable
@@ -777,6 +781,11 @@ flags, all stated (letter names, a tie-break, top-k, pairs without a common frie
 and 4: none. The oracle mattered: 15 of DeepSeek-V4-Pro's 57 "mistakes" (12 in weeks
 4-5) were correct solutions, which would have been false "tests miss a bug" flags;
 gpt-terra wrote one such in 33.
+Fixed the same day (owner), by the rule that an exercise teaching something wrong is
+fixed: `lossy-counting` got two tests and `counting-bloom-filter` one (neither solved
+yet), after which the held-out check flags nothing there; the two DGIM questions
+(solved, so tests unchanged) got an assumption naming the departure from the slides.
+Their slides flags remain, as they should: the departure is now stated.
 
 ## Generation pipeline (LangGraph)
 
@@ -1714,7 +1723,7 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
       checks").
    2. **Done 2026-10-31.** Model-written held-out candidates, the oracle deciding
       disagreements ("Independent checks", step 2).
-   3. Teaching-quality judge, in `tutor/judge/`, outside `validation/` so that package
+   3. **Built 2026-10-31** (as-built below the plan). Teaching-quality judge, in `tutor/judge/`, outside `validation/` so that package
       stays free of LLMs. Input: `question.md` (what the owner reads), skeleton and
       reference (needed for "targets the concept": does the solution need the knowledge
       point?), the item's slides (as generation's `retrieve_context`) and the lectures
@@ -1726,6 +1735,31 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
       n, else it is shown as uncalibrated. Items where judge and owner disagree are listed
       for the owner, whose label can be wrong too. The three week 5 ratings noted as format
       problems are left out of "clear".
+      As built (2026-10-31): `python -m tutor.judge <batch>` writes `quality.json`;
+      `--calibrate [--blind DIR]` judges the 29 rated items (a blind item with the text
+      the owner rated, the arm's batch for skeleton and reference via `arms.json`), and a
+      rating line's `skip_points` keeps a point out (the three week 5 "clear"). One call per
+      exercise; each point's `evidence` comes before its y/n. The lecture context is shared
+      with the held-out writer (`materials/slides.py`).
+      - glm-full said yyyy to all 29, both before and after "clear" was redefined (see
+        "Validity vs teaching quality"): it found none of the owner's five n. gpt-terra
+        found 2 of 5 and marked 10 of 21 owner y as n: not trusted by the agreement bar.
+      - But most of those "false n" were real defects the owner's y had missed:
+        count-min-sketch claimed a never-added item gives 0 (collisions make it
+        positive), and boyer-moore-majority left out slide 6.29's start (first element,
+        count 1), which is what led to the owner's own bug; both fixed. So the judge is a
+        reminder of what to look at, not a rating, and is measured a second way: the
+        owner reviews each flag (judge n where the owner said y or did not rate),
+        answers in `flag-reviews.jsonl`, and the report counts the right ones. First
+        review: 15 of 19 right (clear 10/13, fits 4/5, targets 1/1); the wrong ones a
+        debugging task's intended gap, a layout problem question.md had already solved,
+        and two pedantic points.
+      - The `judge` role is gpt-terra (calibration $0.86; all 38 exercises $1.07). On the
+        five batches it put an n on 34 of 38, 29 flags: some real (counting-bloom-filter's
+        constraints 1 and 2 contradict each other once a never-inserted item collides;
+        lossy-counting keeps the eps*n bound though floor(1/eps) breaks it; dgim-query-
+        estimate's bucket span implies every position is a 1), some wrong (a Boyer-Moore
+        counterexample without a majority), some pedantic. Too many to read each time.
    4. Synthetic defects for calibration: on 2026-10-31 the 29 labels held n only for
       "clear" (5 usable), never for fits, taught or targets, so those three cannot be
       calibrated from real data yet. A few yyyy questions get variants with one defect

@@ -10,16 +10,14 @@ from tutor.heldout_writer import (
     TASKS,
     HeldOutWriteError,
     Writer,
-    _lecture_file,
     code_problems,
     gather,
-    lecture_context,
-    page_groups,
     unfence,
     user_prompt,
     write,
 )
 from tutor.materials import cache
+from tutor.materials.slides import lecture_context, lecture_file, page_groups
 
 SKELETON = '"""Add two numbers."""\n\ndef add(a, b):\n    raise NotImplementedError\n'
 OWNER = "def add(a, b):\n    return a + b  # the owner's answer\n"
@@ -115,9 +113,9 @@ def test_a_lecture_number_matches_its_cache_file_exactly(tmp_path):
     for name in ("Lecture_5-Spark_III.pdf.md", "Lecture_5.2-Spark_IV.pdf.md"):
         (lectures / name).write_text("")
 
-    assert _lecture_file(tmp_path, "5").name == "Lecture_5-Spark_III.pdf.md"
-    assert _lecture_file(tmp_path, "5.2").name == "Lecture_5.2-Spark_IV.pdf.md"
-    assert _lecture_file(tmp_path, "6") is None
+    assert lecture_file(tmp_path, "5").name == "Lecture_5-Spark_III.pdf.md"
+    assert lecture_file(tmp_path, "5.2").name == "Lecture_5.2-Spark_IV.pdf.md"
+    assert lecture_file(tmp_path, "6") is None
 
 
 def test_a_lecture_that_fits_goes_whole_with_the_exercises_pages_marked(tmp_path):
