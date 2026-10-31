@@ -1238,6 +1238,22 @@ deterministic judge, hybrid RAG with recall@k, the phase 5 metrics, the hint lea
   2026-10-28: static check first, container later (see "Code execution safety").
 - [3c] Calibrated LLM judge for hint quality only (leaks the answer? right direction?),
   checked against owner-labelled hints before its scores are trusted. Never for validity.
+  Built 2026-10-31 (`tutor/judge/hints.py`), on simulated students since the owner had
+  asked `tutor.hint` for nothing yet: `simulate` makes two mutants per exercise of a batch
+  play students (their docstring, which names the bug, removed), runs their tests and
+  asks the hint model for the level-1 layer 3 hint; `calibrate` has the judge answer
+  "leaks?" and "right direction?" (evidence first; it sees the real bug and the
+  reference) and scores it against the owner's labels as the teaching judge is scored.
+  - Week 7, 22 hints by deepseek-flash: the owner found all 22 fine for learn mode, even
+    those naming the change in words, so the leak rule is mode-aware: in learn mode only
+    corrected code (or a whole corrected statement) leaks; in review mode naming the
+    place or the change does. gpt-terra agreed on all 22.
+  - With no bad label, nothing showed it could catch one, so 16 bad hints were planted
+    by construction (a hint paired with another exercise's bug; hints naming the change
+    judged as review hints; a corrected line pasted in): it found 10/10 leaks and 6/6
+    wrong directions, with no false flag on the 38. Trusted on this data; planted bad
+    hints are easier than real ones, so real requests (and review-mode batches) should
+    be labelled when they come.
 - [4] Reranker after hybrid retrieval, as one more arm of the recall@k comparison.
 - [5] Personal workflow cost (Codex review 4): steps and minutes from adding lecture files
   to the first exercise, owner minutes spent fixing each exercise, validation wait, and
