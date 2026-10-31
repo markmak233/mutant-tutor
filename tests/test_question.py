@@ -1,5 +1,6 @@
 """question.md: the question in student.py's docstring, as Markdown."""
 
+import json
 from pathlib import Path
 
 from tutor.question import main, question_markdown, run_block, write_question
@@ -83,3 +84,87 @@ def test_a_draft_question_has_no_how_to_run(tmp_path):
     assert "How to run" not in (tmp_path / "question.md").read_text()
     write_question(QUESTION, tmp_path, location=tmp_path)
     assert "## How to run" in (tmp_path / "question.md").read_text()
+
+
+
+# --- the Markdown layout (docs/design.md, "question.md format") --------------------------
+
+MARKDOWN = 'r"""' + r"""# Count the bits
+
+## Concept
+
+### Why it is needed
+
+Counting needs $O(\log n)$ bits.
+
+```text
+## not a heading inside a code block
+```
+
+## Task
+
+Implement `count(bits)`.
+
+## Slides
+
+Lecture 2, slides 2.4-2.5.
+
+## Run
+
+```bash
+python student.py sample_input out
+pytest test_student.py
+```
+
+`sample_input/` holds the example.
+""" + '"""\n\ndef count(bits):\n    raise NotImplementedError\n'
+METADATA = {"source": {"lecture": "Lecture 2", "slides": "2.4-2.5"},
+            "type": "implementation", "difficulty": "easy"}
+
+
+def test_the_markdown_layout_gets_its_frame_from_code(tmp_path):
+    write_question(MARKDOWN, tmp_path, location=tmp_path, metadata=METADATA, mode="learn")
+    md = (tmp_path / "question.md").read_text()
+
+    assert md.startswith("# Count the bits\n\n"
+                         "> **Lecture 2** · slides 2.4-2.5 · learn mode · implementation · easy\n")
+    assert ("**Contents:** [Concept](#concept) · [Task](#task) · [Slides](#slides) · "
+            "[How to run](#how-to-run)") in md
+    assert "$O(\\log n)$" in md  # the raw docstring kept the backslash
+    assert "## not a heading inside a code block" in md
+    # Rules: after the contents, after Concept, before "How to run"; Run folded into it.
+    assert md.count("\n---\n") == 3 and "## Run" not in md
+    assert ("pytest test_student.py      # the tests\npython student.py sample_input out\n```"
+            in md)
+    assert "`sample_input/` holds the example." in md.split("## How to run")[1]
+
+
+def test_a_markdown_draft_has_no_how_to_run_and_works_without_metadata():
+    md = question_markdown(MARKDOWN)
+    assert md.startswith("# Count the bits\n\n**Contents:** [Concept](#concept)")
+    assert "How to run" not in md
+
+
+def test_the_examples_question_md_matches_their_student_py():
+    """question.md is rendered from student.py: a change to one without the other fails."""
+    root = Path(__file__).resolve().parents[1] / "examples"
+    for example in sorted(p for p in root.iterdir() if (p / "exercise").is_dir()):
+        exercise = example / "exercise"
+        metadata = json.loads((example / "solution" / "metadata.json").read_text())
+        rendered = exercise / "question.md"
+        before = rendered.read_text()
+        write_question((exercise / "student.py").read_text(), exercise, location=exercise,
+                       metadata=metadata, mode="learn")
+        try:
+            assert rendered.read_text() == before, example.name
+        finally:
+            rendered.write_text(before)
+
+
+
+def test_a_formulas_bar_in_a_table_row_does_not_split_the_cell():
+    doc = ('r"""# Sizes\n\n## Input\n\n| Parameter | Meaning |\n|---|---|\n'
+           '| `m` | items, $m = |S|$ |\n\nOutside a table $|S|$ stays.\n"""\n')
+    md = question_markdown(doc)
+    assert "| `m` | items, $m = \\vert S\\vert $ |" in md
+    assert "Outside a table $|S|$ stays." in md

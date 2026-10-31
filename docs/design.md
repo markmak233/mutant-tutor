@@ -1493,10 +1493,11 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
     sees each existing exercise's title and topic, not only its id, and repeats a solved
     task with another API only when the new API is the whole point (W5 had planned a fourth
     word count and a Spark SQL exercise that redid cleaning and per-key averages).
-  - The question (both modes, decided 2026-10-29) is a title and fixed sections, each
-    label alone on a line: `Concept:` (learn only), `Symptom:` (debugging), `Task:`,
-    `Input:`, `Output:`, `Example:`, `Constraints:`, `Slides:`, `Run:`. Explanation goes
-    in Concept, never into Task, which stays one or two sentences.
+  - The question (both modes, decided 2026-10-29) is a title and fixed sections: Concept
+    (learn only), Symptom (debugging), Task, Input, Output, Example, Constraints, Slides,
+    Run. Explanation goes in Concept, never into Task, which stays one or two sentences.
+    Until 2026-10-31 each was a label alone on a line (`Task:`, the plain layout); since
+    then generated questions are Markdown headings (see "question.md format" below).
   - Concept (owner, 2026-10-30) is the knowledge point's condensed lecture, so the student
     need not go back and forth between slides and question: at most `concept_lines`
     lines (a generation setting, default 50), opening with an introduction of at most 3
@@ -1558,9 +1559,30 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
     with KaTeX, which VS Code's preview uses: week 7's 358 formulas, no failure. Not used:
     GitHub alerts (`> [!NOTE]`) and footnotes, which VS Code's preview may not render.
     Status: week 7 (`2026-10-30_p3-w7-low`) was written by hand in this format, its
-    Concepts from the slides; the pipeline still writes the plain layout, and
-    `python -m tutor.question` on a hand-made batch would overwrite it. How the pipeline
-    produces the format is open.
+    Concepts from the slides; `python -m tutor.question` would overwrite it, so it is
+    never re-rendered.
+    How the pipeline produces it (owner, 2026-10-31): student.py's docstring is itself the
+    Markdown question, so question.md is still made by code from the one source and the
+    two never disagree (a model writing question.md separately was the other option,
+    against that rule). The model writes the `# title` and the `## ` sections; code adds
+    the line under the title (from metadata.json and the batch mode), the contents line,
+    the rules and "How to run", into which a `## Run` section's commands and notes are
+    folded (`tutor/question.py`; a docstring not starting with `# ` is the plain layout,
+    rendered as before). The docstring is a raw string so LaTeX keeps its backslashes: in
+    a plain one Python reads `\frac` as a form feed and `\neq` as a line break, without
+    an error, so a draft whose docstring holds a backslash and is not raw is a format
+    failure sent to repair. The four examples were rewritten in the layout, since a model
+    follows the example more than the rules, and a test keeps their question.md equal to
+    what student.py renders. The prompt also carries the 3b findings: an algorithm's
+    starting state as the slides give it, no claim stronger than the slides, every
+    departure from the slides as an assumption in Slides, and the Example's output
+    exactly what the reference gives and the tests expect.
+    Trial, 2026-10-31 (one week 7 item, the false positive rate of a Bloom filter,
+    DeepSeek Flash with thinking): VALID in round 0, a raw docstring, every section in
+    place, Concept in slide-headed parts with a pseudocode block and a table, four
+    assumptions stated in Slides, 60 formulas rendering. One flaw: `$m = |S|$` in a table
+    row, where every `|` ends a cell; the renderer now writes `\vert` there. Kept in the
+    private workspace's experiments, not among the batches.
   - `review`: one or several weeks mixed, fuller tasks leaning file-level (closer to labs and
     projects), a bare skeleton. The tutor helps only when asked, first naming just the kind of
     error, and leaves the fix to the owner. Exercises may combine knowledge points, as a

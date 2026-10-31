@@ -15,12 +15,14 @@ from __future__ import annotations
 import ast
 import difflib
 import hashlib
+import io
 import json
 import re
 import shutil
 import subprocess
 import textwrap
 import threading
+import tokenize
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import date, datetime
@@ -420,7 +422,8 @@ def validate_draft(state: ItemState, deps: Deps) -> ItemState:
     if state.get("draft") is not None:
         round_dir_path = deps.drafts / item.id / f"round-{round_}"
         try:
-            exercise, solution, dropped = write_draft(state["draft"], item.id, round_dir_path)
+            exercise, solution, dropped = write_draft(state["draft"], item.id, round_dir_path,
+                                                      deps.mode)
         except DraftError as e:
             failure, format_error = f"format: {e}", True
         else:
@@ -476,11 +479,12 @@ def _report_text(report: ValidationReport) -> str:
                      for r in report.results) + ("\nVALID\n" if report.valid else "\nINVALID\n")
 
 
-def write_draft(draft: ExerciseDraft, exercise_id: str,
-                root: Path) -> tuple[Path, Path, dict[str, str]]:
+def write_draft(draft: ExerciseDraft, exercise_id: str, root: Path,
+                mode: str | None = None) -> tuple[Path, Path, dict[str, str]]:
     """root/exercises/<id> and root/solutions/<id>, laid out like a batch, and the mutants
     left out: one that cannot be applied is left out (name -> why) while MIN_MUTANTS others
-    remain, so one copying slip does not cost the whole exercise; fewer is a format error."""
+    remain, so one copying slip does not cost the whole exercise; fewer is a format error.
+    `mode`: the batch's, for the question's line under the title."""
     if draft.metadata.id != exercise_id:
         raise DraftError(f"metadata.id is {draft.metadata.id!r}, the plan names {exercise_id!r}")
     if draft.metadata.source == "synthetic":
@@ -488,6 +492,10 @@ def write_draft(draft: ExerciseDraft, exercise_id: str,
         # always comes from course pages, which it must cite.
         raise DraftError('metadata.source is "synthetic": give the lecture, slides and PDF '
                          "pages the exercise comes from")
+    if escaped_docstring(draft.student_py):
+        raise DraftError('student.py\'s docstring has a backslash but is not a raw string: '
+                         'Python reads "\\frac" as a form feed and "\\neq" as a line break. '
+                         'Write it as r"""...""" so the LaTeX stays as written')
     if root.exists():
         shutil.rmtree(root)
     exercise, solution = root / "exercises" / exercise_id, root / "solutions" / exercise_id
@@ -507,7 +515,7 @@ def write_draft(draft: ExerciseDraft, exercise_id: str,
         solution / "oracle.py": draft.oracle_py,
         solution / "test_oracle.py": draft.test_oracle_py,
     }
-    question = question_markdown(draft.student_py)
+    question = question_markdown(draft.student_py, metadata.model_dump(mode="json"), mode)
     if question:  # the question again as Markdown, for reading in a previewer
         files[exercise / QUESTION_FILE] = question
     for name, content in draft.data_files.items():
@@ -528,6 +536,24 @@ def write_draft(draft: ExerciseDraft, exercise_id: str,
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content if content.endswith("\n") else content + "\n")
     return exercise, solution, dropped
+
+
+def escaped_docstring(code: str) -> bool:
+    """The module docstring holds a backslash but is not a raw string. In a plain string
+    Python turns "\\frac" into a form feed and "\\neq" into a line break, quietly; the
+    Markdown question's LaTeX needs r\"\"\"...\"\"\" (docs/design.md, "question.md format")."""
+    try:
+        tokens = list(tokenize.generate_tokens(io.StringIO(code).readline))
+    except (tokenize.TokenError, SyntaxError):
+        return False  # code that does not tokenize fails elsewhere, with a clearer message
+    for token in tokens:
+        if token.type in (tokenize.COMMENT, tokenize.NL, tokenize.NEWLINE, tokenize.ENCODING):
+            continue  # comments and blank lines may come before the docstring
+        if token.type != tokenize.STRING:
+            return False  # the module has no docstring
+        prefix = re.match(r"[A-Za-z]*", token.string).group(0).lower()
+        return "\\" in token.string and "r" not in prefix
+    return False
 
 
 def _data_path(name: str) -> PurePosixPath:
@@ -620,8 +646,11 @@ def save(state: ItemState, deps: Deps) -> ItemState:
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copytree(source, staging)
         if source.parent.name == "exercises" and (staging / "student.py").is_file():
-            # The question's "How to run" names the folder it will have from now on.
-            write_question((staging / "student.py").read_text(), staging, location=target)
+            # The question's "How to run" names the folder it will have from now on; the
+            # line under its title comes from the exercise's metadata and the batch mode.
+            metadata = json.loads((src / "solutions" / item.id / "metadata.json").read_text())
+            write_question((staging / "student.py").read_text(), staging, location=target,
+                           metadata=metadata, mode=deps.mode)
         staged.append((staging, target))
     for staging, target in staged:
         staging.rename(target)

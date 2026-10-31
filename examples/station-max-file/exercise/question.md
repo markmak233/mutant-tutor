@@ -1,44 +1,73 @@
 # Maximum temperature per station from CSV files (PySpark RDD, file input/output)
 
+> learn mode · implementation · easy
+
+**Contents:** [Concept](#concept) · [Task](#task) · [Input](#input) · [Output](#output) · [Example](#example) · [Constraints](#constraints) · [Slides](#slides) · [How to run](#how-to-run)
+
+---
+
 ## Concept
 
-A standalone Spark program runs from the command line on whole input directories and  
-writes an output directory, so it has to read raw text, survive bad lines, and format  
-what it writes itself.  
-How it works (general Spark knowledge; a course exercise names its slides here):  
-the program takes its input and output paths from sys.argv and creates its own  
-SparkContext. sc.textFile(path) gives one record per line of every file in the  
-directory, header lines and blank lines included. Parsing turns each line into a  
-(key, value) record; a line that cannot be parsed is dropped rather than allowed to  
-raise, since one exception fails the whole job. saveAsTextFile(path) writes one part  
-file per partition, each record as str(record), so records are formatted as text first.  
-Spark refuses to write into an output directory that already exists.
+### Why it is needed
+
+A standalone Spark program runs from the command line on whole input directories and
+writes an output directory, so it has to read raw text, survive bad lines, and format
+what it writes itself.
+
+### A standalone program (general Spark knowledge; a course exercise names its slides here)
+
+1. Take the input and output paths from `sys.argv` and create the program's own
+   `SparkContext`.
+2. `sc.textFile(path)` gives one record per line of every file in the directory, header
+   lines and blank lines included.
+3. Parse each line into a `(key, value)` record. A line that cannot be parsed is dropped
+   rather than allowed to raise: one exception fails the whole job.
+4. `saveAsTextFile(path)` writes one part file per partition, each record as
+   `str(record)`, so format records as text first.
+
+> Spark refuses to write into an output directory that already exists.
+
+---
 
 ## Task
 
-Write a Spark program that writes the highest temperature of each station in inputPath  
-to outputPath.
+Write a Spark program that writes the highest temperature of each station in `inputPath`
+to `outputPath`.
 
 ## Input
 
-Every file in inputPath. Each line is  
+| Argument | Meaning |
+|---|---|
+| `inputPath` | a directory; every file in it is read |
+| `outputPath` | the directory to create for the result |
+
+Each line of an input file is
+
+```text
 station,date,temperature          e.g.  s1,2024-01-05,12.5
+```
 
 Skip these lines without crashing:
-- the header line "station,date,temperature" (it may start every file)
-- blank lines
-- lines that do not have exactly 3 fields, or have an empty station
-- lines whose temperature is not a number  
-Fields may have spaces around them: " s1 , 2024-01-05 , 12.5 " is a reading for station "s1".
+
+- the header line `station,date,temperature` (it may start every file);
+- blank lines;
+- lines that do not have exactly 3 fields, or have an empty station;
+- lines whose temperature is not a number.
+
+Fields may have spaces around them: ` s1 , 2024-01-05 , 12.5 ` is a reading for station
+`s1`.
 
 ## Output
 
-Save with saveAsTextFile to outputPath, one line per station:  
-station<TAB>max_temperature       e.g.  s1  12.5
+Saved with `saveAsTextFile` to `outputPath`, one line per station:
 
-Format the temperature with one decimal place, exactly like Python's f"{t:.1f}"  
-(12.5, -3.0, 3.1 for 3.14159). Line order does not matter. A station appears only if it  
-has at least one valid reading.
+```text
+station<TAB>max_temperature       e.g.  s1  12.5
+```
+
+The temperature has one decimal place, exactly like Python's `f"{t:.1f}"` (12.5, -3.0,
+3.1 for 3.14159). Line order does not matter. A station appears only if it has at least
+one valid reading.
 
 ## Example
 
@@ -59,23 +88,14 @@ output lines
 
 ## Constraints
 
-- RDD API only (sc.textFile, saveAsTextFile); no DataFrames.
-- Do not use groupByKey.
+1. **RDD API only** (`sc.textFile`, `saveAsTextFile`): no DataFrames.
+2. **No `groupByKey`**.
 
 ## Slides
 
 None: a synthetic example, not from a course.
 
-## Run
-
-```text
-rm -rf sample_output && python student.py sample_input sample_output
-cat sample_output/part-*
-pytest test_student.py
-```
-
-sample_input/ holds the example above; Spark refuses to write into an existing output dir.  
-Stuck? hints.md has useful functions and three levels of hints.
+---
 
 ## How to run
 
@@ -84,7 +104,15 @@ With the repository's virtual environment active:
 ```bash
 cd "examples/station-max-file/exercise"
 pytest test_student.py      # the tests
-python student.py           # the program, with the arguments Run shows, if any
+rm -rf sample_output && python student.py sample_input sample_output
+cat sample_output/part-*
 ```
 
-Stuck? `hints.md` in this folder has three levels of hints, each more specific; or, from the repository's folder: `python -m tutor.hint "examples/station-max-file/exercise"`
+`sample_input/` holds the example above; Spark refuses to write into an existing output directory.
+
+> **Stuck?** `hints.md` in this folder has three levels of hints, each more specific; or ask
+> for a hint from the repository's folder:
+>
+> ```bash
+> python -m tutor.hint "examples/station-max-file/exercise"
+> ```

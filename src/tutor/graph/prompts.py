@@ -54,24 +54,45 @@ Files (fields of the JSON you return):
   which is not from a course.
 - student_py: the question in the module docstring, then the skeleton: imports, the
   function or class signatures, and `raise NotImplementedError` (or `pass` with a TODO)
-  where the student writes code. The question is a title line, then these sections in
-  this order, each starting with its label alone on a line at column 0, as in the example
-  exercise below:
-    Concept:      learn mode only: the knowledge point as a condensed lecture, at most
-                  {concept_lines} lines, so the student need not go back to the slides.
-                  First an introduction of at most 3 lines: what the technique does and
-                  why it is needed; then how it works, in the slides' words and terms,
-                  naming the slides each part comes from; a slide's own example may be
-                  shown on data other than this exercise's. Only what the slides say;
-                  never solution code or how to write this exercise (hints_md's job)
-    Symptom:      debugging only: the program is wrong and how that shows
-    Task:         one or two sentences: what to write or fix
-    Input:  Output:  Example:  Constraints:
-    Slides:       the lecture, slides and PDF pages; teaching assumptions, if any
-    Run:          `python student.py ...`, `pytest test_student.py`, hints.md for help
-  Prose is plain lines at column 0; data, tables and commands are indented by 4 spaces.
-  The question is also saved as question.md with the labels as headings. Explanation goes
-  in Concept, never into Task, which stays one or two sentences. For a debugging exercise
+  where the student writes code. The docstring is a raw string, r\"\"\"...\"\"\", so LaTeX
+  keeps its backslashes. The question is Markdown, read as question.md, as in the example
+  exercise below: a `# <title>` line, then these `## ` sections in this order:
+    ## Concept     learn mode only: the knowledge point as a condensed lecture, at most
+                   {concept_lines} lines, so the student need not go back to the slides.
+                   In `### ` parts: "### Why it is needed" first (at most 3 lines: what
+                   the technique does and why it is needed), then one part per idea, its
+                   slides in the heading ("### The update rule (slides 4.2-4.3)"). In the
+                   slides' words and terms; a slide's own example may be shown on data
+                   other than this exercise's. Steps as a numbered list (nested for
+                   sub-steps) or as pseudocode in a ```text block: the slides' steps,
+                   language-neutral (`for i = 1..d: increment C[i][h_i(x)]`), never
+                   runnable Python and never this exercise's names, signature or edge
+                   cases. Properties as bullets; comparisons and traces as tables; the key
+                   claim as a `> ` quote; proofs, analyses and optional extensions folded
+                   in <details><summary>...</summary> ... </details>. Give an algorithm's
+                   starting state as the slides do (the first candidate, the initial
+                   count). Claim nothing stronger than the slides: a guarantee holds under
+                   its conditions only. Never solution code or how to write this exercise
+                   (hints_md's job)
+    ## Symptom     debugging only: the program is wrong and how that shows
+    ## Task        one or two sentences: what to write or fix; names as `inline code`
+    ## Input       a table: | Parameter | Meaning |
+    ## Output
+    ## Example     a ```text block with the input and the output, which must be exactly
+                   what the reference gives and the tests expect; for a trace, a table of
+                   the steps after it
+    ## Constraints a numbered list, the key words in **bold**
+    ## Slides      the lecture, slides and PDF pages. Every teaching assumption, and every
+                   place the exercise departs from the slides (another rule, boundary,
+                   formula or simplification), as a `> **Assumption:** ...` quote: never a
+                   silent departure
+    ## Run         file interface only: the command line in a ```bash block
+                   (`python student.py <input> <output>`)
+  Do not write the line under the title, a contents line, rules (---) or "How to run":
+  code adds them. Math is LaTeX: $...$ inline, $$...$$ on lines of its own, never inside a
+  list item; \\lbrace and \\rbrace, not \\{ and \\}. Python expressions that say what the
+  code computes stay `inline code`. Paragraphs are plain Markdown paragraphs. Explanation
+  goes in Concept, never into Task, which stays one or two sentences. For a debugging exercise
   the skeleton is the buggy program; whether Symptom also names the cause depends on the
   batch's mode (below). The buggy program is the reference with only the bug changed:
   every other line already works, so fixing the bug is the whole task (no missing steps
