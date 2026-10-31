@@ -30,6 +30,9 @@ EXAMPLE_FOR = {
 }
 DEFAULT_EXAMPLE = "station-average-rdd"
 
+# The generate / repair system prompt: what the validator checks, then each file of the
+# reply (ExerciseDraft's fields) with its rules. {imports}, {oracle} and {concept_lines}
+# are filled in by system_prompt().
 SPEC = """You write programming exercises for a university course, one exercise at a time.
 Each exercise is checked by an automatic validator before anyone sees it; write it so that
 it passes:
@@ -51,19 +54,45 @@ Files (fields of the JSON you return):
   which is not from a course.
 - student_py: the question in the module docstring, then the skeleton: imports, the
   function or class signatures, and `raise NotImplementedError` (or `pass` with a TODO)
-  where the student writes code. The question is a title line, then these sections in
-  this order, each starting with its label alone on a line at column 0, as in the example
-  exercise below:
-    Concept:      learn mode only, at most 3 lines on the idea the exercise practises;
-                  longer explanation belongs in hints_md
-    Symptom:      debugging only: the program is wrong and how that shows
-    Task:         one or two sentences: what to write or fix
-    Input:  Output:  Example:  Constraints:
-    Slides:       the lecture, slides and PDF pages; teaching assumptions, if any
-    Run:          `python student.py ...`, `pytest test_student.py`, hints.md for help
-  Prose is plain lines at column 0; data, tables and commands are indented by 4 spaces.
-  The question is also saved as question.md with the labels as headings, and the student
-  reads it on every exercise: keep it short, the task first. For a debugging exercise
+  where the student writes code. The docstring is a raw string, r\"\"\"...\"\"\", so LaTeX
+  keeps its backslashes. The question is Markdown, read as question.md, as in the example
+  exercise below: a `# <title>` line, then these `## ` sections in this order:
+    ## Concept     learn mode only: the knowledge point as a condensed lecture, at most
+                   {concept_lines} lines, so the student need not go back to the slides.
+                   In `### ` parts: "### Why it is needed" first (at most 3 lines: what
+                   the technique does and why it is needed), then one part per idea, its
+                   slides in the heading ("### The update rule (slides 4.2-4.3)"). In the
+                   slides' words and terms; a slide's own example may be shown on data
+                   other than this exercise's. Steps as a numbered list (nested for
+                   sub-steps) or as pseudocode in a ```text block: the slides' steps,
+                   language-neutral (`for i = 1..d: increment C[i][h_i(x)]`), never
+                   runnable Python and never this exercise's names, signature or edge
+                   cases. Properties as bullets; comparisons and traces as tables; the key
+                   claim as a `> ` quote; proofs, analyses and optional extensions folded
+                   in <details><summary>...</summary> ... </details>. Give an algorithm's
+                   starting state as the slides do (the first candidate, the initial
+                   count). Claim nothing stronger than the slides: a guarantee holds under
+                   its conditions only. Never solution code or how to write this exercise
+                   (hints_md's job)
+    ## Symptom     debugging only: the program is wrong and how that shows
+    ## Task        one or two sentences: what to write or fix; names as `inline code`
+    ## Input       a table: | Parameter | Meaning |
+    ## Output
+    ## Example     a ```text block with the input and the output, which must be exactly
+                   what the reference gives and the tests expect; for a trace, a table of
+                   the steps after it
+    ## Constraints a numbered list, the key words in **bold**
+    ## Slides      the lecture, slides and PDF pages. Every teaching assumption, and every
+                   place the exercise departs from the slides (another rule, boundary,
+                   formula or simplification), as a `> **Assumption:** ...` quote: never a
+                   silent departure
+    ## Run         file interface only: the command line in a ```bash block
+                   (`python student.py <input> <output>`)
+  Do not write the line under the title, a contents line, rules (---) or "How to run":
+  code adds them. Math is LaTeX: $...$ inline, $$...$$ on lines of its own, never inside a
+  list item; \\lbrace and \\rbrace, not \\{ and \\}. Python expressions that say what the
+  code computes stay `inline code`. Paragraphs are plain Markdown paragraphs. Explanation
+  goes in Concept, never into Task, which stays one or two sentences. For a debugging exercise
   the skeleton is the buggy program; whether Symptom also names the cause depends on the
   batch's mode (below). The buggy program is the reference with only the bug changed:
   every other line already works, so fixing the bug is the whole task (no missing steps
@@ -166,11 +195,14 @@ def example(framework: str, interface: str) -> str:
     return "\n\n".join(parts)
 
 
-def system_prompt(conventions: str, oracle_interface: bool = False) -> str:
-    """`oracle_interface`: another model writes the oracle (the `oracle` role is set)."""
+def system_prompt(conventions: str, oracle_interface: bool = False,
+                  concept_lines: int = 50) -> str:
+    """`oracle_interface`: another model writes the oracle (the `oracle` role is set).
+    `concept_lines`: the most lines of a learn-mode Concept (a generation setting)."""
     imports = ", ".join(sorted(m for m in CORE_IMPORTS if not m.startswith("_")))
     spec = SPEC.replace("{imports}", imports).replace(
-        "{oracle}", ORACLE_INTERFACE if oracle_interface else ORACLE_WHOLE)
+        "{oracle}", ORACLE_INTERFACE if oracle_interface else ORACLE_WHOLE).replace(
+        "{concept_lines}", str(concept_lines))
     return "\n\n".join([
         spec,
         "tutor.testkit API:\n" + testkit_api(),
@@ -179,10 +211,12 @@ def system_prompt(conventions: str, oracle_interface: bool = False) -> str:
     ])
 
 
+# The batch mode's line in the item prompt: how much the question explains (decided
+# 2026-10-24; docs/design.md, "Two modes").
 MODES = {
-    "learn": "learn: the student is meeting the topic. The Concept section explains the idea "
-             "in at most 3 lines; a debugging Symptom may name the cause of the bug, not the "
-             "fix. The student's "
+    "learn": "learn: the student is meeting the topic. The Concept section is the knowledge "
+             "point's condensed lecture (see the rules); a debugging Symptom may name the "
+             "cause of the bug, not the fix. The student's "
              "code practises only the knowledge point: steps that are not the point (reading "
              "and cleaning input, formatting output) are given in the skeleton or kept trivial.",
     "review": "review: the student has learnt the topic. No Concept section; a debugging "
@@ -191,6 +225,8 @@ MODES = {
 
 
 def item_prompt(item: PlanItem, context: str, mode: str = "learn") -> str:
+    """The generate prompt for one item, longest-shared part first (see the module
+    docstring): the course pages, the example exercise, then the item itself."""
     return (
         "The course pages (one section per PDF page, `## p.N · slide S`; image slides "
         "were transcribed, so code there is as on the slide):\n\n" + context
@@ -251,6 +287,8 @@ def retry_prompt(item: PlanItem, context: str, failure: str, mode: str = "learn"
     )
 
 
+# The oracle model's system prompt: it reads only the question, the interface and the
+# sample data, so its oracle.py is a reading of the question independent of the reference.
 ORACLE_SPEC = """You write the plain-Python specification (oracle) of a programming exercise:
 the obviously correct, slow-but-simple result that a Spark or MapReduce solution is
 compared against on random inputs. You get the exercise's question, the interface to
@@ -271,11 +309,13 @@ ORACLE_IMPORTS = sorted(m for m in CORE_IMPORTS if not m.startswith("_") and m n
 
 
 def oracle_spec() -> str:
+    """ORACLE_SPEC with the modules an oracle may import filled in."""
     return ORACLE_SPEC.replace("{imports}", ", ".join(ORACLE_IMPORTS))
 
 
 def oracle_prompt(question: str, interface: str, data_files: dict[str, str],
                   sample_chars: int = 2000) -> str:
+    """The oracle model's user message; each sample data file is cut to `sample_chars`."""
     samples = "\n\n".join(
         f"=== {name} ===\n{text[:sample_chars]}" + ("\n..." if len(text) > sample_chars else "")
         for name, text in sorted(data_files.items()))
@@ -286,6 +326,8 @@ def oracle_prompt(question: str, interface: str, data_files: dict[str, str],
     )
 
 
+# The plan model's system prompt: choose knowledge points from coverage.md's gaps, one
+# plan line each; plan_problems() then checks what code can check.
 PLAN_SPEC = """You plan a batch of programming exercises for a university course. Choose
 what to practise; another step writes each exercise.
 

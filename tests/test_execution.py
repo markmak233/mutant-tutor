@@ -204,3 +204,34 @@ def test_copied_files_follow_links_as_the_run_does(tmp_path):
     assert copied_files({"data": data}) == {"data/a.csv": data / "a.csv",
                                              "data/more/x.py": data / "more" / "x.py"}
     assert links({"data": data}) == ["data/more"]
+
+
+def test_the_cap_on_runs_at_once_holds_across_threads(tmp_path, monkeypatch):
+    """Validation runs checks on several threads; never more child runs than the cap."""
+    import threading
+
+    from tutor import execution
+
+    script = write(tmp_path / "slow.py", "import time\ntime.sleep(0.4)\n")
+    monkeypatch.setattr(execution, "_slots", {True: threading.BoundedSemaphore(2)})
+    started = time.monotonic()
+    threads = [threading.Thread(target=execution.run_script, args=({"slow.py": script},
+                                                                   "slow.py"))
+               for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert time.monotonic() - started >= 0.8  # two at a time: at least two rounds of 0.4 s
+
+
+def test_heavy_runs_get_a_third_of_the_cores_and_light_runs_half(monkeypatch):
+    from tutor import execution
+
+    monkeypatch.delenv(execution.MAX_RUNS_ENV, raising=False)
+    monkeypatch.delenv(execution.MAX_HEAVY_RUNS_ENV, raising=False)
+    monkeypatch.setattr(execution.os, "cpu_count", lambda: 12)
+    assert (execution.max_runs(heavy=True), execution.max_runs(heavy=False)) == (4, 6)
+    monkeypatch.setenv(execution.MAX_HEAVY_RUNS_ENV, "2")
+    monkeypatch.setenv(execution.MAX_RUNS_ENV, "zero")  # not a number: the default
+    assert (execution.max_runs(heavy=True), execution.max_runs(heavy=False)) == (2, 6)

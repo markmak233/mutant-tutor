@@ -27,6 +27,8 @@ from tutor.config import load_env
 PARTITIONS_ENV = "TUTOR_PARTITIONS"
 DEFAULT_PARTITIONS = 2
 COMBINER_ENV = "TUTOR_COMBINER"  # "off": run MRJob jobs without their combiner (rule 5)
+# "reversed": each key's values reach reducers and combiners in reverse order (rule 5)
+VALUE_ORDER_ENV = "TUTOR_VALUE_ORDER"
 ORDERS = ("any", "per_file", "total")
 
 os.environ.setdefault("PYSPARK_PYTHON", sys.executable)
@@ -129,6 +131,10 @@ def run_mrjob(
     combiner: Hadoop may run a combiner zero, one or many times, so the result must not
     depend on it (the lecture's "remove the combiner" check). Inline only: Hadoop runs the
     job's own script, so a combiner removed here would still run there.
+
+    TUTOR_VALUE_ORDER=reversed (set by the validator) hands each key's values to reducers
+    and combiners in reverse order: Hadoop promises no order, and a reducer that relies on
+    the inline runner's must not pass. Inline only, for the same reason.
     """
     if runner not in ("inline", "hadoop"):
         raise ValueError(f"runner must be 'inline' or 'hadoop', not {runner!r}")
@@ -137,6 +143,10 @@ def run_mrjob(
         if runner == "hadoop":
             raise ValueError("running without the combiner is supported on runner='inline' only")
         job_cls = _without_combiner(job_cls)
+    if os.environ.get(VALUE_ORDER_ENV) == "reversed":
+        if runner == "hadoop":
+            raise ValueError("reversing value order is supported on runner='inline' only")
+        job_cls = _values_reversed(job_cls)
     input_dir, output_dir = Path(input_dir), Path(output_dir)
     conf = dict(jobconf or {})
     if runner == "inline":
@@ -255,6 +265,40 @@ def _without_combiner(job_cls):
     WithoutCombiner.__module__ = job_cls.__module__
     WithoutCombiner.__qualname__ = job_cls.__qualname__
     return WithoutCombiner
+
+
+def _values_reversed(job_cls):
+    """A subclass of job_cls whose reducers and combiners get each key's values in reverse
+    order. The inline runner keeps the input files' order (checked 2026-10-30: values
+    5, 25 from one file and 30, 10, 200 from another arrived as 5, 25, 30, 10, 200), so a
+    reducer that takes, say, its first value as the earliest passes every inline run and
+    can fail on a cluster. Reversed, not shuffled: any two or more values change order,
+    and a failure repeats."""
+    from mrjob.step import MRStep
+
+    def reversing(function):
+        def with_values_reversed(key, values):
+            return function(key, reversed(list(values)))
+        return with_values_reversed
+
+    class ValuesReversed(job_cls):
+        def steps(self):
+            steps = []
+            for step in super().steps():
+                if isinstance(step, MRStep):
+                    functions = {name: value for name, value in step._steps.items()
+                                 if value is not None}
+                    for name in ("reducer", "combiner"):
+                        if name in functions:
+                            functions[name] = reversing(functions[name])
+                    step = MRStep(**functions)
+                steps.append(step)
+            return steps
+
+    # mrjob finds the job's script through the class's module: keep the student's.
+    ValuesReversed.__module__ = job_cls.__module__
+    ValuesReversed.__qualname__ = job_cls.__qualname__
+    return ValuesReversed
 
 
 def _run_job(job_cls, args: list[str], conf: dict) -> None:

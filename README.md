@@ -225,9 +225,10 @@ Phase numbers match `docs/design.md`.
 
 - **1** ✅ Environment + validation harness, two synthetic examples
 - **2a** ✅ Harness extensions: shared test helpers, MRJob (inline and local Hadoop),
-  DataFrame, combiner-off check, attempt log, two more synthetic examples
+  DataFrame, combiner-off and reversed-value-order checks, attempt log, two more synthetic
+  examples
 - **2** ✅ Golden exercises: a first batch of 10 course exercises, validated, its must
-  exercises solved by hand and rated to run the full loop (the `v0.1.0` release still open)
+  exercises solved by hand and rated to run the full loop
 - **2b** Code-tracing exercises ("what does this print and why")
 - **3a** ✅ LLM generation: static check on generated code, slide reading with a cached
   text layer and vision transcription, LangGraph plan → owner approval → generate → oracle
@@ -239,6 +240,21 @@ Phase numbers match `docs/design.md`.
   a calibrated judge of hint quality later
 - **4** Hybrid RAG over course material (BM25 + vectors), evaluated with recall@k
 - **5** Evaluation: validity rate, mutant kill rate, cost per valid exercise, with vs without RAG
+- **6** Second course: another language or framework, to prove nothing is shaped around one
+  course; brings the container for running generated code
+- **7** Local GUI: a web app on the CLI's functions, localhost only; solving stays in the IDE.
+  Then packaging and release: `pipx install`, one command to start, CI on macOS and Windows
+
+Maybe: adaptive review, spaced `review` batches for the weak knowledge points in the
+attempt log (batches are started by hand for now).
+
+Decided, next to 3b:
+- A calibrated judge of hint quality, after 3b, whose judge it reuses: does a hint give the
+  answer away, does it point the right way
+- Algorithm-quality warnings, with 2b's design exercises (e.g. how much a combiner cut),
+  reported, never failing an exercise
+- `v0.1.0`: pinned dependency versions, a changelog and a tag, once the GUI or the whole
+  backend is done
 
 ## How it is built
 

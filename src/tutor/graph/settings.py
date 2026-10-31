@@ -66,6 +66,15 @@ class GenerationSettings(BaseModel):
     # it did (2026-10-28); without, it wrote all 19 week-7 oracles in 9 s each.
     oracle_thinking: bool = Field(False, description="The oracle's model reasons first.")
 
+    # --- the question -----------------------------------------------------------------
+    # A learn question's Concept is the knowledge point's condensed lecture, so the student
+    # need not go back to the slides (owner, 2026-10-30). It was 3 lines after three week 5
+    # questions were rated "explanations too long", but the trouble there was reading a
+    # docstring without layout, not the length: week 1-2 questions were longer and rated
+    # clear, and question.md now renders the sections.
+    concept_lines: int = Field(50, ge=3, le=120, description=(
+        "The most lines of a learn-mode question's Concept section."))
+
     # --- size limits --------------------------------------------------------------------
     max_tokens: int = Field(32_000, ge=2_000, le=128_000, description=(
         "Output tokens per reply when the model thinks (its reasoning counts as output)."))
@@ -94,7 +103,7 @@ DEFAULTS = GenerationSettings()
 # The fields that are also Deps fields (graph/nodes.py): passed to it, and logged with each
 # item. max_count and parallel act on the whole batch instead.
 DEPS_FIELDS = ("max_rounds", "stronger_repair_from", "repair_temperature_step", "thinking",
-               "repair_thinking", "plan_thinking", "oracle_thinking", "max_tokens",
+               "repair_thinking", "plan_thinking", "oracle_thinking", "concept_lines", "max_tokens",
                "max_tokens_no_thinking", "item_token_budget", "context_chars", "mode")
 
 

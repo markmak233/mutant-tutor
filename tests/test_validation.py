@@ -14,9 +14,18 @@ import pytest
 from tutor.config import load_env
 from tutor.execution import DEFAULT_TIMEOUT_S
 from tutor.schema import Metadata, problems
-from tutor.validation import ExerciseError, Status, load_exercise, validate
+from tutor.validation import ExerciseError, Status, heldout, load_exercise, validate
 from tutor.validation.__main__ import format_report, main
 from tutor.validation.api import count_uses, find_violations
+from tutor.validation.heldout import (
+    CORRECT,
+    MODEL,
+    SLIDES,
+    WRONG,
+    Candidate,
+    check_heldout,
+    model_candidates,
+)
 
 TESTS = (
     "from student import add\n\n"
@@ -442,7 +451,9 @@ def test_combiner_check(tmp_path, combine, reduce, status):
     if status is Status.FAIL:
         assert "with the combiner off" in report.result("5").detail
     else:
-        assert report.result("5").detail == "reference passes with the combiner off"
+        # every inline MRJob exercise also reruns with its values reversed
+        assert report.result("5").detail == (
+            "reference passes with the combiner off and with each key's values reversed")
 
 
 # --- static API constraints -------------------------------------------------------------
@@ -745,3 +756,310 @@ def test_the_main_block_is_not_held_to_the_solutions_constraints():
     assert find_violations(source.replace("rdd.map(str)", "rdd.collect()"),
                            {"forbidden_calls": ["collect"]}) == ["line 2: uses collect"]
     assert count_uses(source, ["collect"]) == {"collect": 0}
+
+
+def test_every_framework_the_format_allows_is_light_or_heavy():
+    """Adding a framework to the format is the moment to decide how heavy its runs are;
+    an unlisted one would silently count as heavy."""
+    from typing import get_args
+
+    from tutor.validation.exercise import HEAVY_FRAMEWORKS, LIGHT_FRAMEWORKS
+
+    allowed = set(get_args(Metadata.model_fields["framework"].annotation))
+    assert allowed == LIGHT_FRAMEWORKS | HEAVY_FRAMEWORKS
+    assert not LIGHT_FRAMEWORKS & HEAVY_FRAMEWORKS
+
+
+@pytest.mark.parametrize(("metadata", "heavy"), [
+    ({"framework": "python"}, False),
+    ({"framework": "mrjob", "runner": "inline"}, False),
+    ({"framework": "mrjob", "runner": "hadoop"}, True),
+    ({"framework": "pyspark-df"}, True),
+    ({"framework": "flink"}, True),  # unknown: heavy until measured
+])
+def test_an_exercise_is_heavy_when_its_runs_start_a_jvm(metadata, heavy):
+    from tutor.validation.exercise import ExerciseFiles
+
+    ex = ExerciseFiles("x", Path("."), Path("r.py"), Path("s.py"), (), metadata)
+    assert ex.heavy is heavy
+
+
+def test_rule_5_reverses_value_order_for_an_inline_mrjob_exercise(tmp_path):
+    """No metadata flag needed: a reducer relying on the inline runner's value order fails."""
+    from tutor.validation.checks import check_distribution
+    from tutor.validation.exercise import ExerciseFiles
+
+    exercise, solution = tmp_path / "exercise", tmp_path / "solution"
+    exercise.mkdir()
+    solution.mkdir()
+    (solution / "reference.py").write_text(
+        "from mrjob.job import MRJob\n\n\n"
+        "class FirstIsEarliest(MRJob):\n"
+        "    def mapper(self, _, line):\n"
+        "        station, day = line.split(',')\n"
+        "        yield station, int(day)\n\n"
+        "    def reducer(self, station, days):\n"
+        "        yield station, next(iter(days))  # the first value as the earliest\n\n\n"
+        "if __name__ == '__main__':\n"
+        "    FirstIsEarliest.run()\n")
+    (exercise / "test_student.py").write_text(
+        "from tutor.testkit import assert_output, run_mrjob, write_inputs\n"
+        "from student import FirstIsEarliest\n\n\n"
+        "def test_earliest_day(tmp_path):\n"
+        "    inp = write_inputs(tmp_path / 'in', ['s1,1', 's1,2', 's1,3'], files=1)\n"
+        "    assert_output(run_mrjob(FirstIsEarliest, inp, tmp_path / 'out'), ['\"s1\"\\t1'])\n")
+    ex = ExerciseFiles("first", exercise, solution / "reference.py", solution / "reference.py",
+                       (), {"framework": "mrjob", "runner": "inline"})
+    result = check_distribution(ex, timeout_s=60)
+    assert result.status is Status.FAIL
+    assert "reverse order" in result.detail
+
+    on_hadoop = ExerciseFiles("first", exercise, solution / "reference.py",
+                              solution / "reference.py", (), {"framework": "mrjob",
+                                                             "runner": "hadoop"})
+    assert check_distribution(on_hadoop, timeout_s=60).status is Status.NOT_APPLICABLE
+
+
+# --- held-out check (roadmap 3b) --------------------------------------------------------
+# The owner's own code judged by an exercise's tests: a passing solution must pass every
+# condition the reference meets, a kept mistake must still be caught.
+
+SWAPPED = "def add(a, b):\n    return b + a\n"  # correct, written differently
+# Right on the tests' small numbers, wrong past 1000: tests pass it, the oracle does not.
+SMALL_ONLY = "def add(a, b):\n    return a + b if abs(a) < 1000 else 0\n"
+
+
+def candidate(tmp_path, kind, code, label=None):
+    path = tmp_path / f"{kind}-{abs(hash(code))}.py"
+    path.write_text(code)
+    return Candidate(kind, label or ("student.py" if kind == CORRECT else "attempt"), path,
+                     path.name)
+
+
+def held_out(exercise_paths, *candidates):
+    """{(kind, check): (status, detail)} for one candidate of each kind at most."""
+    results = check_heldout(load_exercise(*exercise_paths), list(candidates))
+    return {(r.candidate.kind, r.check): (r.status, r.detail) for r in results}
+
+
+def test_a_correct_solution_passes_and_a_mistake_is_caught(tmp_path):
+    found = held_out(make_exercise(tmp_path / "ex"), candidate(tmp_path, CORRECT, SWAPPED),
+                     candidate(tmp_path, WRONG, MUTANT_SUB))
+
+    assert {key: status for key, (status, _) in found.items()} == {
+        (CORRECT, "tests"): Status.OK,
+        (CORRECT, "distribution"): Status.NOT_APPLICABLE,  # no partition_check
+        (CORRECT, "oracle"): Status.OK,
+        (WRONG, "caught"): Status.OK,
+    }
+
+
+def test_a_solution_wrong_only_at_4_partitions_is_flagged_by_rule_5(tmp_path):
+    """The owner's run uses 2 partitions, so it passed; rule 5 tries 1 and 4 as well."""
+    found = held_out(make_partition_exercise(tmp_path / "ex"),
+                     candidate(tmp_path, CORRECT, FIRST_TWO))
+
+    assert found[(CORRECT, "tests")][0] is Status.OK
+    status, detail = found[(CORRECT, "distribution")]
+    assert status is Status.FAIL
+    assert detail.startswith("student.py failed with 4 partition")
+
+
+def test_a_solution_the_tests_pass_but_the_oracle_does_not_is_flagged(tmp_path):
+    """The tests let a wrong solution through: random inputs find what they miss."""
+    found = held_out(make_exercise(tmp_path / "ex"), candidate(tmp_path, CORRECT, SMALL_ONLY))
+
+    assert found[(CORRECT, "tests")][0] is Status.OK
+    status, detail = found[(CORRECT, "oracle")]
+    assert status is Status.FAIL
+    assert detail.startswith("student.py disagrees with the oracle")
+
+
+def test_a_mistake_the_tests_no_longer_catch_is_flagged(tmp_path):
+    found = held_out(make_exercise(tmp_path / "ex"), candidate(tmp_path, WRONG, REFERENCE))
+
+    assert found[(WRONG, "caught")] == (
+        Status.FAIL, "passes the tests now: they no longer catch this mistake")
+
+
+def test_a_passing_solution_that_fails_now_skips_rules_4_and_5(tmp_path):
+    found = held_out(make_exercise(tmp_path / "ex"), candidate(tmp_path, CORRECT, MUTANT_SUB))
+
+    status, detail = found[(CORRECT, "tests")]
+    assert status is Status.FAIL
+    assert "it passed before, so it changed since or the tests did" in detail
+    assert found[(CORRECT, "distribution")][0] is Status.SKIPPED
+    assert found[(CORRECT, "oracle")][0] is Status.SKIPPED
+
+
+def test_held_out_never_runs_an_exercise_that_fails_the_safety_check(tmp_path):
+    exercise = make_exercise(tmp_path / "ex", extra_files={"data/helper.py": "import subprocess\n"})
+    results = check_heldout(load_exercise(*exercise), [candidate(tmp_path, CORRECT, SWAPPED)])
+
+    assert [(r.check, r.status) for r in results] == [("all", Status.SKIPPED)]
+    assert "fails rule safe" in results[0].detail
+    assert results[0].duration_s == 0.0
+
+
+def write_attempts(attempts_dir, *runs):
+    attempts_dir.mkdir(parents=True, exist_ok=True)
+    lines = [run if isinstance(run, str) else json.dumps(run) for run in runs]
+    (attempts_dir / "attempts.jsonl").write_text("\n".join(lines) + "\n")
+
+
+def test_owner_candidates_come_from_the_attempts_log(tmp_path):
+    batch = tmp_path / "batches" / "b1"
+    (batch / "exercises" / "demo").mkdir(parents=True)
+    (batch / "exercises" / "demo" / "student.py").write_text(SWAPPED)
+    attempts = tmp_path / "attempts"
+    (attempts / "code" / "b1" / "demo").mkdir(parents=True)
+    for name in ("aaa", "bbb", "ccc"):
+        (attempts / "code" / "b1" / "demo" / f"{name}.py").write_text(MUTANT_SUB)
+
+    def run(result, time, code=None, batch="b1", exercise="demo"):
+        line = {"time": time, "batch": batch, "exercise": exercise, "result": result}
+        return {**line, "code": f"code/b1/demo/{code}.py"} if code else line
+
+    write_attempts(
+        attempts,
+        run("failed", "2026-10-30T23:35:43", "aaa"),
+        run("failed", "2026-10-30T23:35:50", "aaa"),  # unchanged code: the same copy
+        run("error", "2026-10-30T23:35:32", "bbb"),  # the tests never ran
+        "{\"time\": \"2026-10-30T23:36",  # a half-written line
+        run("failed", "2026-10-30T23:37:00", "ddd"),  # its copy was deleted
+        run("failed", "2026-10-30T23:38:00", "ccc", batch="b2"),  # another batch
+        run("passed", "2026-10-30T23:40:00"),
+    )
+    found = heldout.owner_candidates(batch, "demo", attempts)
+
+    assert [(c.kind, c.label, c.source) for c in found] == [
+        (CORRECT, "student.py", "exercises/demo/student.py"),
+        (WRONG, "attempt 10-30 23:35:43", "attempts/code/b1/demo/aaa.py"),
+    ]
+
+
+def test_without_a_passing_run_the_student_file_is_not_a_correct_solution(tmp_path):
+    batch = tmp_path / "b1"
+    (batch / "exercises" / "demo").mkdir(parents=True)
+    (batch / "exercises" / "demo" / "student.py").write_text(SKELETON)
+    write_attempts(tmp_path / "attempts",
+                   {"time": "2026-10-30T10:00:00", "batch": "b1", "exercise": "demo",
+                    "result": "incomplete"})
+
+    assert heldout.owner_candidates(batch, "demo", tmp_path / "attempts") == []
+    assert heldout.owner_candidates(batch, "demo", tmp_path / "no-attempts") == []
+
+
+def test_heldout_cli_reports_and_saves_only_exercises_with_candidates(tmp_path, monkeypatch,
+                                                                       capsys):
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    (workspace / "workspace.toml").write_text('course = "demo"\n')
+    monkeypatch.setenv("WORKSPACE_DIR", str(workspace))
+    batch = workspace / "batches" / "b1"
+    for exercise_id in ("demo", "other"):
+        exercise, solution = make_exercise(tmp_path / exercise_id,
+                                           metadata={"id": exercise_id})
+        (batch / "exercises").mkdir(parents=True, exist_ok=True)
+        (batch / "solutions").mkdir(exist_ok=True)
+        exercise.rename(batch / "exercises" / exercise_id)
+        solution.rename(batch / "solutions" / exercise_id)
+    (batch / "exercises" / "demo" / "student.py").write_text(SWAPPED)
+    write_attempts(workspace / "attempts",
+                   {"time": "2026-10-31T09:00:00", "batch": "b1", "exercise": "demo",
+                    "result": "passed"})
+
+    assert heldout.main([str(batch)]) == 0
+    out = capsys.readouterr().out
+    assert "other\n  no held-out solutions yet" in out
+    assert "held-out: 0 flagged; 1 exercise(s) without held-out solutions" in out
+    data = json.loads((batch / "solutions" / "demo" / "heldout.json").read_text())
+    assert data["flagged"] == 0
+    assert [(r["kind"], r["check"], r["status"]) for r in data["results"]] == [
+        ("correct", "tests", "ok"), ("correct", "distribution", "n/a"),
+        ("correct", "oracle", "ok")]
+    assert not (batch / "solutions" / "other" / "heldout.json").exists()
+    assert heldout.main([]) == 2
+
+
+# --- held-out step 2: files another model wrote (tutor/heldout_writer.py) ---------------
+# A model may be wrong itself, so where it and the tests disagree, the oracle decides.
+
+FLOAT_SUM = "def add(a, b):\n    return float(a + b)\n"  # right, but not the int the tests want
+INT_REPR_TESTS = "from student import add\n\ndef test_add():\n    assert repr(add(2, 3)) == '5'\n"
+
+
+def by_model(tmp_path, kind, code, note=""):
+    path = tmp_path / f"model-{kind}-{abs(hash(code))}.py"
+    path.write_text(code)
+    return Candidate(kind, f"model {kind}.py", path, path.name, MODEL, note)
+
+
+def test_a_models_files_are_read_with_their_notes(tmp_path):
+    solution = tmp_path / "solution"
+    assert model_candidates(solution) == []  # the writer has not run
+
+    folder = solution / "heldout" / "model"
+    folder.mkdir(parents=True)
+    for name in ("correct.py", "slides.py", "wrong_01.py", "wrong_02.py", "scratch.py"):
+        (folder / name).write_text(REFERENCE)
+    (folder / "meta.json").write_text(json.dumps(
+        {"notes": {"slides.py": "the slides round", "wrong_01.py": "subtracts"}}))
+
+    found = model_candidates(solution)
+    assert [(c.kind, c.label, c.note) for c in found] == [
+        (CORRECT, "model correct.py", ""), (SLIDES, "model slides.py", "the slides round"),
+        (WRONG, "model wrong_01.py", "subtracts"), (WRONG, "model wrong_02.py", "")]
+    assert {c.author for c in found} == {MODEL}
+    assert found[0].source == "solutions/solution/heldout/model/correct.py"
+
+
+def test_a_model_solution_the_tests_reject_but_the_oracle_accepts_is_flagged(tmp_path):
+    found = held_out(make_exercise(tmp_path / "ex", tests=INT_REPR_TESTS),
+                     by_model(tmp_path, CORRECT, FLOAT_SUM))
+
+    status, detail = found[(CORRECT, "tests")]
+    assert status is Status.FAIL
+    assert "agrees with the oracle: the tests may reject a correct answer" in detail
+
+
+def test_a_model_solution_that_the_oracle_rejects_too_is_its_own_mistake(tmp_path):
+    found = held_out(make_exercise(tmp_path / "ex"), by_model(tmp_path, CORRECT, MUTANT_SUB))
+
+    assert found == {(CORRECT, "tests"): (
+        Status.NOT_APPLICABLE, "fails the tests and disagrees with the oracle: the model's own "
+                               "mistake")}
+
+
+@pytest.mark.parametrize(("code", "status", "expected"), [
+    (MUTANT_SUB, Status.OK, "the tests still catch it"),
+    (SMALL_ONLY, Status.FAIL, "the tests miss this mistake: only small"),
+    (SWAPPED, Status.NOT_APPLICABLE, "not a mistake after all (only small)"),
+])
+def test_a_models_mistake_that_passes_counts_only_if_the_oracle_disagrees(tmp_path, code,
+                                                                          status, expected):
+    found = held_out(make_exercise(tmp_path / "ex"), by_model(tmp_path, WRONG, code, "only small"))
+
+    assert found[(WRONG, "caught")][0] is status
+    assert expected in found[(WRONG, "caught")][1]
+
+
+def test_the_slides_way_that_fails_is_flagged_with_the_models_note(tmp_path):
+    exercise = make_exercise(tmp_path / "ex")
+    failing = held_out(exercise, by_model(tmp_path, SLIDES, MUTANT_SUB, "the slides subtract"))
+    passing = held_out(exercise, by_model(tmp_path, SLIDES, SWAPPED))
+
+    status, detail = failing[(SLIDES, "tests")]
+    assert status is Status.FAIL
+    assert "per the model: the slides subtract. Check that the question states it" in detail
+    assert passing[(SLIDES, "tests")][0] is Status.OK
+
+
+def test_a_models_file_that_fails_the_safety_check_is_never_run(tmp_path):
+    unsafe = "import subprocess\n\n" + REFERENCE
+    results = check_heldout(load_exercise(*make_exercise(tmp_path / "ex")),
+                            [by_model(tmp_path, CORRECT, unsafe)])
+
+    assert [(r.check, r.status, r.duration_s) for r in results] == [
+        ("safety", Status.SKIPPED, 0.0)]
+    assert "never run: line 1: import of 'subprocess'" in results[0].detail

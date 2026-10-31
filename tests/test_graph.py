@@ -163,6 +163,13 @@ def test_the_batch_mode_sets_how_much_a_debugging_question_explains():
     assert "symptom only" in prompts.item_prompt(ITEM, "", "review")
 
 
+def test_the_concept_limit_is_a_setting_and_the_concept_a_condensed_lecture():
+    assert "at most\n                   50 lines" in prompts.system_prompt("")
+    assert "at most\n                   20 lines" in prompts.system_prompt("", concept_lines=20)
+    assert "condensed lecture" in prompts.item_prompt(ITEM, "", "learn")
+    assert "No Concept section" in prompts.item_prompt(ITEM, "", "review")
+
+
 def test_the_batch_mode_sets_how_much_one_planned_exercise_combines():
     def plan(mode):
         return prompts.plan_prompt(["L1"], "", "", [], "", None, mode=mode)
@@ -660,6 +667,9 @@ def test_the_oracle_model_sees_the_question_and_interface_never_the_reference(wo
     assert "only the interface" in model.calls[0][1][0]["content"]  # the generating model
     saved = d.batch_dir / "solutions" / "sum-list" / "oracle.py"
     assert saved.read_text() == FILLED
+    # the saved question's "How to run" names the batch folder, not the draft's
+    question = (d.batch_dir / "exercises" / "sum-list" / "question.md").read_text()
+    assert f'cd "{(d.batch_dir / "exercises" / "sum-list").resolve()}"' in question
     log = json.loads((d.batch_dir / "generation.jsonl").read_text())
     assert log["oracle_model"] == "gpt-terra: gpt-6.1-terra"
 
@@ -1010,3 +1020,23 @@ def test_one_assistant_may_write_the_oracle_through_a_second_profile(workspace, 
     assert "fresh context" in capsys.readouterr().out  # allowed, with a reminder
     with pytest.raises(ValueError, match="through a second profile"):
         _deps(workspace, workspace / "batches" / "b", {"oracle_profile": "cc"})
+
+
+
+def test_a_docstring_with_backslashes_must_be_raw(tmp_path):
+    """In a plain string "\frac" is a form feed and "\neq" a line break, silently."""
+    latex = '"""# Sum\n\n$\\frac{a}{b}$\n"""\n\ndef total(xs):\n    raise NotImplementedError\n'
+    with pytest.raises(DraftError, match="not a raw string"):
+        write_draft(ExerciseDraft.model_validate(draft(student_py=latex)), "sum-list",
+                    tmp_path / "r")
+    exercise, _, _ = write_draft(ExerciseDraft.model_validate(draft(student_py="r" + latex)),
+                                 "sum-list", tmp_path / "r", mode="learn")
+    question = (exercise / "question.md").read_text()
+    assert "$\\frac{a}{b}$" in question  # the Markdown layout, its LaTeX intact
+    assert "> **L1** · slides 1.3-1.4 · learn mode · implementation · easy" in question
+
+
+def test_the_prompt_holds_no_mangled_escape():
+    """SPEC is a plain string: a "\r" there would be a carriage return in every prompt."""
+    assert "\r" not in prompts.SPEC and "\\lbrace and \\rbrace" in prompts.SPEC
+    assert 'r"""...""", so LaTeX' in prompts.SPEC

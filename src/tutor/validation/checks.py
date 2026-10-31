@@ -17,19 +17,24 @@ main. `python student.py` runs on its own (metadata `standalone`): both student.
 Rules 1-3 and 5 run the exercise's own test file with a different candidate as student.py;
 rule 4 runs the exercise's differential test instead. Neither needs to know whether the
 exercise is function-level or file-level: that lives in the exercise's test files.
+
+Rules 1, 4 and 5 take an optional `candidate` (the reference unless given), and rule 3's
+verdict on one file is `mutant_verdict`: the held-out check (heldout.py) runs the same
+rules on the owner's own solutions and mistakes.
 """
 
 from __future__ import annotations
 
 import ast
 import re
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
 from tutor.execution import Outcome, RunResult, copied_files, links, run_pytest, run_script
 from tutor.schema import Metadata, problems
-from tutor.testkit import COMBINER_ENV, DEFAULT_PARTITIONS, PARTITIONS_ENV
+from tutor.testkit import COMBINER_ENV, DEFAULT_PARTITIONS, PARTITIONS_ENV, VALUE_ORDER_ENV
 from tutor.validation.api import count_uses, find_violations, is_main_block
 from tutor.validation.exercise import STUDENT_FILE, ExerciseFiles
 from tutor.validation.safety import (
@@ -44,14 +49,18 @@ PARTITION_COUNTS = (1, 2, 4)
 
 
 class Status(Enum):
+    """One rule's outcome; the value is what the report prints."""
+
     OK = "ok"
-    FAIL = "FAIL"
+    FAIL = "FAIL"  # upper case, so a failing rule stands out in the printed report
     SKIPPED = "skip"  # not run because rule 0, safe or 1 failed
     NOT_APPLICABLE = "n/a"  # does not apply to this exercise; does not affect validity
 
 
 @dataclass(frozen=True)
 class RuleResult:
+    """One line of the report: which rule, how it ended, and a one-line reason."""
+
     rule: str  # "0", "safe", "1" to "5", or "api"
     name: str
     status: Status
@@ -64,14 +73,19 @@ class RuleResult:
 
 @dataclass(frozen=True)
 class ValidationReport:
+    """Every rule's result, in rule order."""
+
     exercise_id: str
     results: list[RuleResult]
 
     @property
     def valid(self) -> bool:
+        # A skipped rule counts against validity: it was skipped because an earlier one
+        # failed, so nothing shows it would pass.
         return all(r.status in (Status.OK, Status.NOT_APPLICABLE) for r in self.results)
 
     def result(self, rule: str) -> RuleResult:
+        """The result of one rule by its id ("1", "api", ...)."""
         return next(r for r in self.results if r.rule == rule)
 
 
@@ -117,19 +131,32 @@ def validate(ex: ExerciseFiles, timeout_s: float | None = None,
             check_api_constraints(ex),
             check_main(ex, timeout_s),
         ])
+    # The reference passes, so the remaining runs are independent of each other: run them
+    # at once (a Spark exercise took 47 s instead of 96, 2026-10-30). The report keeps the
+    # rule order.
+    skeleton, mutants, oracle, distribution, main = in_parallel([
+        lambda: check_skeleton_fails(ex, timeout_s),
+        lambda: check_mutants_killed(ex, timeout_s),
+        lambda: check_matches_oracle(ex, timeout_s),
+        lambda: check_distribution(ex, timeout_s),
+        lambda: check_main(ex, timeout_s),
+    ])
     return ValidationReport(ex.exercise_id, [
-        fmt,
-        safe,
-        reference,
-        check_skeleton_fails(ex, timeout_s),
-        check_mutants_killed(ex, timeout_s),
-        check_matches_oracle(ex, timeout_s),
-        check_distribution(ex, timeout_s),
-        check_api_constraints(ex),
-        check_main(ex, timeout_s),
+        fmt, safe, reference, skeleton, mutants, oracle, distribution,
+        check_api_constraints(ex), main,
     ])
 
 
+def in_parallel(calls: list) -> list:
+    """Call each function on its own thread and return the results in the same order.
+    Every test run is a child process in its own temp dir; execution.py caps how many run
+    at a time across the process, so the threads only wait."""
+    with ThreadPoolExecutor(max_workers=max(1, len(calls))) as pool:
+        # Submit all first, then collect in order: results line up with `calls`.
+        return [future.result() for future in [pool.submit(call) for call in calls]]
+
+
+# The skipped rules' lines, so a report always lists every rule, run or not.
 def _skipped_after_safety(reason: str) -> list[RuleResult]:
     return [
         RuleResult("1", "reference passes", Status.SKIPPED, reason, 0.0),
@@ -149,6 +176,7 @@ def _skipped_test_rules(reason: str) -> list[RuleResult]:
 
 
 def check_format(ex: ExerciseFiles) -> RuleResult:
+    """Rule 0: metadata.json against the batch format's schema (schema.py)."""
     found = problems(Metadata, ex.metadata)
     if found:
         return RuleResult("0", "format", Status.FAIL, "metadata.json: " + "; ".join(found), 0.0)
@@ -160,6 +188,7 @@ def check_safety(ex: ExerciseFiles) -> RuleResult:
     conftest.py files recursively (student.py is the owner's and is replaced in every
     run), and every solution file that validation runs."""
     try:
+        # The imports this framework may use, plus any the workspace allows.
         allowed = allowed_imports(ex.metadata["framework"],
                                   workspace_allow_imports(ex.exercise_dir))
     except ValueError as e:
@@ -169,10 +198,13 @@ def check_safety(ex: ExerciseFiles) -> RuleResult:
         return RuleResult("safe", "static safety", Status.FAIL, "; ".join(
             f"{name} is a link, not allowed in an exercise" for name in linked), 0.0)
     copied = _copied(ex)
+    # Every Python file a run would execute: the copied ones, then the solution files
+    # under "<folder>/<name>" so a report tells reference.py from a mutant.
     files = {name: path for name, path in copied.items() if name.endswith(".py")}
     solution_files = [ex.reference, ex.skeleton, *ex.mutants, ex.oracle, ex.oracle_test]
     for path in filter(None, solution_files):
         files[f"{path.parent.name}/{path.name}"] = path
+    # conftest.py, pytest.ini and the like run code or change settings before any test.
     found = [f"{name} is not allowed in an exercise (pytest runs it on its own)"
              for name in config_files(copied)]
     for name, path in files.items():
@@ -200,6 +232,7 @@ def check_main(ex: ExerciseFiles, timeout_s: float) -> RuleResult:
         return RuleResult("main", "runs on its own", Status.NOT_APPLICABLE,
                           "standalone: false (a framework launches it; no main of its own)",
                           0.0)
+    # Both sides need the block: the skeleton is what the student starts from.
     missing = [name for name, path in (("student.py", ex.skeleton), ("reference.py",
                                                                      ex.reference))
                if not has_main_block(path.read_text())]
@@ -211,7 +244,7 @@ def check_main(ex: ExerciseFiles, timeout_s: float) -> RuleResult:
         # A program taking its paths from sys.argv (the slides' form); the tests run it.
         return RuleResult("main", "runs on its own", Status.OK,
                           "a program run as `python student.py <input> <output>`", 0.0)
-    r = run_script(ex.run_files(ex.reference), STUDENT_FILE, timeout_s)
+    r = run_script(ex.run_files(ex.reference), STUDENT_FILE, timeout_s, heavy=ex.heavy)
     if r.outcome is Outcome.PASSED:
         return RuleResult("main", "runs on its own", Status.OK,
                           "`python student.py` ran the example (reference)", r.duration_s)
@@ -228,16 +261,23 @@ def has_main_block(source: str) -> bool:
         return False
 
 
-def check_reference_passes(ex: ExerciseFiles, timeout_s: float) -> RuleResult:
-    r = _run(ex, ex.reference, timeout_s, DEFAULT_PARTITIONS)
+def check_reference_passes(ex: ExerciseFiles, timeout_s: float,
+                           candidate: Path | None = None,
+                           label: str = "reference") -> RuleResult:
+    """Rule 1: the reference (or `candidate`, named `label` in the detail) passes every
+    test at the default partition count, the one a student's own run uses."""
+    r = _run(ex, candidate or ex.reference, timeout_s, DEFAULT_PARTITIONS)
     if r.outcome is Outcome.PASSED:
         return RuleResult("1", "reference passes", Status.OK, _summary(r), r.duration_s)
-    detail = f"reference {r.outcome.value}: {_summary(r)}"
+    detail = f"{label} {r.outcome.value}: {_summary(r)}"
     return RuleResult("1", "reference passes", Status.FAIL, detail, r.duration_s,
                       failure_excerpt(r.output))
 
 
 def check_skeleton_fails(ex: ExerciseFiles, timeout_s: float) -> RuleResult:
+    """Rule 2: the skeleton fails the tests, so they check what the student must write.
+    It must fail by assertion, not crash on import: a crash would also hide a broken test
+    file."""
     r = _run(ex, ex.skeleton, timeout_s, DEFAULT_PARTITIONS)
     if r.outcome is Outcome.FAILED:
         return RuleResult("2", "skeleton fails", Status.OK, _summary(r), r.duration_s)
@@ -252,33 +292,21 @@ def check_skeleton_fails(ex: ExerciseFiles, timeout_s: float) -> RuleResult:
 
 
 def check_mutants_killed(ex: ExerciseFiles, timeout_s: float) -> RuleResult:
-    """A mutant is killed if it fails at any of the exercise's "mutant_partitions"
-    (default [2]; a few exercises ask for [2, 4] to catch bugs that only show at 4)."""
+    """Rule 3: every planted bug is caught. A mutant is killed if it fails at any of the
+    exercise's "mutant_partitions" (default [2]; a few exercises ask for [2, 4] to catch
+    bugs that only show at 4)."""
     if not ex.mutants:
         return RuleResult(
             "3", "mutants killed", Status.FAIL,
             "no mutants: nothing shows the tests can catch a bug", 0.0,
         )
     counts = ex.metadata.get("mutant_partitions", [DEFAULT_PARTITIONS])
-    survived: list[str] = []
-    broken: list[str] = []
-    duration = 0.0
-    for mutant in ex.mutants:
-        verdict = "survived"
-        for partitions in counts:
-            r = _run(ex, mutant, timeout_s, partitions)
-            duration += r.duration_s
-            # TIMEOUT counts as killed: a mutant that hangs is caught by the time limit.
-            if r.outcome in (Outcome.FAILED, Outcome.TIMEOUT):
-                verdict = "killed"
-                break
-            if r.outcome is Outcome.ERROR:
-                verdict = "broken"
-                break
-        if verdict == "survived":
-            survived.append(mutant.stem)
-        elif verdict == "broken":
-            broken.append(mutant.stem)
+
+    # Mutants are independent of each other, so they run at once.
+    verdicts = in_parallel([lambda m=m: mutant_verdict(ex, m, timeout_s) for m in ex.mutants])
+    survived = [m.stem for m, (v, _) in zip(ex.mutants, verdicts, strict=True) if v == "survived"]
+    broken = [m.stem for m, (v, _) in zip(ex.mutants, verdicts, strict=True) if v == "broken"]
+    duration = sum(spent for _, spent in verdicts)
 
     killed = len(ex.mutants) - len(survived) - len(broken)
     parts = [f"{killed}/{len(ex.mutants)} killed"]
@@ -292,20 +320,43 @@ def check_mutants_killed(ex: ExerciseFiles, timeout_s: float) -> RuleResult:
     return RuleResult("3", "mutants killed", status, "; ".join(parts), duration)
 
 
-def check_matches_oracle(ex: ExerciseFiles, timeout_s: float) -> RuleResult:
-    """Rule 1 only tries the inputs written in the tests; random inputs find the cases the
+def mutant_verdict(ex: ExerciseFiles, wrong: Path, timeout_s: float) -> tuple[str, float]:
+    """Rule 3's verdict on one wrong solution (a mutant, or for the held-out check one of
+    the owner's mistakes), and the seconds its runs took:
+    - "killed": some run failed or timed out, so the tests catch it;
+    - "survived": it passed at every partition count tried, so the tests miss it;
+    - "broken": it errors before any test runs (import, syntax), so it shows nothing.
+    The exercise's partition counts run in turn; the first that catches it ends the runs."""
+    spent = 0.0
+    for partitions in ex.metadata.get("mutant_partitions", [DEFAULT_PARTITIONS]):
+        r = _run(ex, wrong, timeout_s, partitions)
+        spent += r.duration_s
+        # TIMEOUT counts as killed: a mutant that hangs is caught by the time limit.
+        if r.outcome in (Outcome.FAILED, Outcome.TIMEOUT):
+            return "killed", spent
+        if r.outcome is Outcome.ERROR:
+            return "broken", spent
+    return "survived", spent
+
+
+def check_matches_oracle(ex: ExerciseFiles, timeout_s: float,
+                         candidate: Path | None = None,
+                         label: str = "reference") -> RuleResult:
+    """Rule 4: the reference (or `candidate`) agrees with oracle.py on random inputs.
+    Rule 1 only tries the inputs written in the tests; random inputs find the cases the
     test author did not think of. The differential test picks partition counts itself."""
     if ex.oracle is None or ex.oracle_test is None:
         return RuleResult(
             "4", "matches oracle", Status.FAIL,
-            "no oracle.py / test_oracle.py: nothing compares the reference with an "
+            f"no oracle.py / test_oracle.py: nothing compares the {label} with an "
             "independent specification", 0.0,
         )
-    r = run_pytest(ex.differential_files(), timeout_s)
+    r = run_pytest(ex.differential_files(candidate), timeout_s, heavy=ex.heavy)
     if r.outcome is Outcome.PASSED:
         return RuleResult("4", "matches oracle", Status.OK, _summary(r), r.duration_s)
+    # FAILED: hypothesis found an input where the two disagree; it reports the smallest.
     if r.outcome is Outcome.FAILED:
-        detail = f"reference disagrees with the oracle; {_falsifying_example(r)}"
+        detail = f"{label} disagrees with the oracle; {_falsifying_example(r)}"
     elif r.outcome is Outcome.ERROR:
         detail = f"differential test cannot run: {_summary(r)}"
     else:
@@ -314,16 +365,22 @@ def check_matches_oracle(ex: ExerciseFiles, timeout_s: float) -> RuleResult:
                       failure_excerpt(r.output))
 
 
-def check_distribution(ex: ExerciseFiles, timeout_s: float) -> RuleResult:
-    """The result must not depend on how the work is distributed. Two checks, each switched
-    on in metadata:
-    - partition_check: the reference passes at every partition count (rule 1 already ran
-      the default, so only the others run here);
-    - combiner_check (MRJob, inline runner): it passes with the combiner removed, since
-      Hadoop may run a combiner zero, one or many times."""
+def check_distribution(ex: ExerciseFiles, timeout_s: float,
+                       candidate: Path | None = None,
+                       label: str = "reference") -> RuleResult:
+    """Rule 5, on the reference (or `candidate`, named `label` in the detail).
+    The result must not depend on how the work is distributed. Three checks:
+    - partition_check (metadata): the reference passes at every partition count (rule 1
+      already ran the default, so only the others run here);
+    - combiner_check (metadata; MRJob, inline runner): it passes with the combiner removed,
+      since Hadoop may run a combiner zero, one or many times;
+    - every MRJob exercise on the inline runner: it passes with each key's values in
+      reverse order, since Hadoop gives a reducer its values in no promised order."""
     partition_check = ex.metadata.get("partition_check", False)
     combiner_check = ex.metadata.get("combiner_check", False)
-    if not (partition_check or combiner_check):
+    value_order = (ex.metadata.get("framework") == "mrjob"
+                   and ex.metadata.get("runner") != "hadoop")
+    if not (partition_check or combiner_check or value_order):
         return RuleResult("5", "distribution", Status.NOT_APPLICABLE,
                           "no partition_check or combiner_check in metadata", 0.0)
     runs = []  # (description, partitions, extra env)
@@ -332,24 +389,35 @@ def check_distribution(ex: ExerciseFiles, timeout_s: float) -> RuleResult:
                  if n != DEFAULT_PARTITIONS]
     if combiner_check:
         runs.append(("with the combiner off", DEFAULT_PARTITIONS, {COMBINER_ENV: "off"}))
-    duration = 0.0
-    for description, partitions, env in runs:
-        r = _run(ex, ex.reference, timeout_s, partitions, env)
-        duration += r.duration_s
+    if value_order:
+        runs.append(("with each key's values in reverse order", DEFAULT_PARTITIONS,
+                     {VALUE_ORDER_ENV: "reversed"}))
+    # The runs are independent, so they go at once; the first failure in this order is
+    # reported, as when they ran one after another.
+    code = candidate or ex.reference
+    results = in_parallel([lambda n=partitions, e=env: _run(ex, code, timeout_s, n, e)
+                           for _, partitions, env in runs])
+    duration = sum(r.duration_s for r in results)
+    for (description, _, _), r in zip(runs, results, strict=True):
         if r.outcome is not Outcome.PASSED:
-            detail = f"reference {r.outcome.value} {description}: {_summary(r)}"
+            detail = f"{label} {r.outcome.value} {description}: {_summary(r)}"
             return RuleResult("5", "distribution", Status.FAIL, detail, duration,
                               failure_excerpt(r.output))
+    # Every run passed: name what was tried, e.g. "1, 2, 4 partitions and the combiner off".
     passed = []
     if partition_check:
         passed.append(f"{', '.join(map(str, PARTITION_COUNTS))} partitions")
     if combiner_check:
         passed.append("the combiner off")
-    detail = f"reference passes with {' and with '.join(passed)}"
+    if value_order:
+        passed.append("each key's values reversed")
+    detail = f"{label} passes with {' and with '.join(passed)}"
     return RuleResult("5", "distribution", Status.OK, detail, duration)
 
 
 def check_api_constraints(ex: ExerciseFiles) -> RuleResult:
+    """Rule api: the reference keeps the exercise's own constraints (forbidden calls or
+    imports, required definitions; api.py), so the task is solvable within them."""
     constraints = ex.metadata.get("constraints", {})
     if not constraints:
         return RuleResult("api", "api constraints", Status.NOT_APPLICABLE,
@@ -374,8 +442,11 @@ def _run(
     ex: ExerciseFiles, candidate: Path, timeout_s: float, partitions: int,
     extra_env: dict[str, str] | None = None,
 ) -> RunResult:
+    """One pytest run of the exercise's tests with `candidate` as student.py, at a
+    partition count (the tests read it from PARTITIONS_ENV) and any extra switches
+    (combiner off, values reversed)."""
     env = {PARTITIONS_ENV: str(partitions), **(extra_env or {})}
-    return run_pytest(ex.run_files(candidate), timeout_s, env)
+    return run_pytest(ex.run_files(candidate), timeout_s, env, heavy=ex.heavy)
 
 
 def _summary(r: RunResult) -> str:
@@ -384,8 +455,12 @@ def _summary(r: RunResult) -> str:
     return lines[-1] if lines else "(no output)"
 
 
+# Patterns over `pytest -q` output, used by failure_blocks:
+# a failing test's header, "____ test_name ____", which starts that test's block;
 _SECTION = re.compile(r"^_{3,} (.+?) _{3,}$")
+# the line in the test file where it failed, "test_student.py:42: AssertionError";
 _TEST_LOCATION = re.compile(r"^test_\w+\.py:\d+")
+# an absolute path such as /Users/<name>/.../student.py; group 1 keeps the file name.
 _ABSOLUTE_PATH = re.compile(r"(?:/[^\s/'\"]+)+/([^\s/'\"]+)")
 
 
@@ -395,7 +470,7 @@ def failure_blocks(output: str, per_test: int = 12) -> list[tuple[str, list[str]
     through testkit or Spark and their warnings. Absolute paths are cut to the file name:
     they name the machine's user, and the text may go to a model."""
     blocks: list[tuple[str, list[str]]] = []
-    current: list[str] | None = None
+    current: list[str] | None = None  # the lines of the test being read, None between tests
     for line in output.splitlines():
         if line.startswith("="):  # "short test summary info", warnings, the last line
             current = None
@@ -425,6 +500,8 @@ def _falsifying_example(r: RunResult, limit: int = 300) -> str:
     lines = [line.lstrip("E").strip() for line in r.output.splitlines()]
     for i, line in enumerate(lines):
         if line.startswith(("Failing test case", "Falsifying example")):
+            # The example may span lines ("test(\n  a=1,\n)"): read to its closing
+            # bracket or the first blank line.
             block = []
             for follow in lines[i:]:
                 if not follow:

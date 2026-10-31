@@ -66,7 +66,7 @@ PROVIDERS = {
 # stream_options (documented); others stream without the option, which may be refused.
 STREAM_USAGE = {"openai", "deepseek"}
 PROFILE_FIELDS = {"provider", "model", "base_url", "api_key_env", "reasoning_effort",
-                  "timeout_s"}
+                  "reasoning_effort_on", "timeout_s"}
 KEY_LIKE = re.compile(r"^(sk-[\w-]{16,}|[0-9a-f]{32}\.\w{8,})$")
 
 
@@ -84,6 +84,9 @@ class LLMConfig:
     api_key: str | None = field(default=None, repr=False)  # repr=False: never in a traceback
     timeout_s: float = 300.0
     thinking_off: tuple[dict, ...] = ()  # request fields to try, in order
+    # Request fields when thinking is on: a profile's `reasoning_effort_on`, e.g. DeepSeek's
+    # "low" (its default is "high"). Empty: the model's default depth.
+    thinking_on: dict = field(default_factory=dict)
     queue: Path | None = None  # an assistant profile's request folder (provider "assistant")
 
 
@@ -161,8 +164,10 @@ def _from_profile(name: str, data: dict, env: Mapping[str, str],
             raise LLMError(f"{where} needs {data['api_key_env']} set in .env")
     if "reasoning_effort" in data:
         thinking_off = ({"reasoning_effort": data["reasoning_effort"]},)
+    thinking_on = ({"reasoning_effort": data["reasoning_effort_on"]}
+                   if "reasoning_effort_on" in data else {})
     return LLMConfig(name, provider, base_url.rstrip("/"), data["model"], api_key,
-                     float(data.get("timeout_s", 300)), thinking_off)
+                     float(data.get("timeout_s", 300)), thinking_off, thinking_on=thinking_on)
 
 
 def _from_env(env: Mapping[str, str]) -> LLMConfig:
@@ -176,7 +181,8 @@ def _from_env(env: Mapping[str, str]) -> LLMConfig:
                        "(see docs/setup) or set LLM_MODEL in .env")
     config = _from_profile("env", data, env)
     return LLMConfig(config.name, config.provider, config.base_url, config.model,
-                     env.get("LLM_API_KEY") or None, config.timeout_s, config.thinking_off)
+                     env.get("LLM_API_KEY") or None, config.timeout_s, config.thinking_off,
+                     thinking_on=config.thinking_on)
 
 
 def image_message(prompt: str, png: bytes) -> dict:
@@ -236,7 +242,10 @@ def chat(config: LLMConfig, messages: list[dict], *, purpose: str,
         body["stream"] = True
         if config.provider in STREAM_USAGE:
             body["stream_options"] = {"include_usage": True}
-    variants = [{}] if thinking or not config.thinking_off else list(config.thinking_off)
+    if thinking:
+        variants = [config.thinking_on]
+    else:
+        variants = list(config.thinking_off) or [{}]
     for number, extra in enumerate(variants, 1):
         try:
             return _post(config, {**body, **extra}, purpose, log_path, on_progress)

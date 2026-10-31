@@ -349,7 +349,14 @@ safe. Every `.py` file that validation runs passes the static safety check (see 
    `testkit.run_mrjob` runs a subclass whose `MRStep`s have no combiner functions (explicit
    `steps()` included). Not on `hadoop`: the task processes run the student's own script, so a
    combiner removed in the test process would still run there; reducer counts cover those
-   exercises. Tests may also call `run_mrjob(..., combiner=False)` themselves, so a student's
+   exercises. Since 2026-10-30 (backlog C1) every MRJob exercise on the inline runner, with
+   no metadata flag, also reruns with `TUTOR_VALUE_ORDER=reversed`: reducers and combiners
+   get each key's values in reverse order. Hadoop promises no value order; the inline
+   runner keeps the input files' order (not sorted, as the backlog entry had guessed:
+   values 5, 25 from one file and 30, 10, 200 from another arrived as 5, 25, 30, 10, 200),
+   so a reducer taking its first value as the earliest passed every inline run. Reversed,
+   not shuffled, so any two values change order and a failure repeats. All 14 week 1-3
+   exercises stayed VALID; the one `hadoop` exercise is skipped, as for the combiner. Tests may also call `run_mrjob(..., combiner=False)` themselves, so a student's
    reducer that relies on the combiner (the classic broken mean) fails their own tests, not
    only the reference check. Neither flag: "n/a".
    - Plain Python: not applicable.
@@ -625,7 +632,12 @@ the reducer, several reducers). So the two are judged separately:
 Validity vs teaching quality (decided 2026-10-26, Codex review 4). VALID says the tests,
 reference and mutants agree; it does not say the exercise is good to learn from. Teaching
 quality is a separate score that never replaces or overrides validity, on four points:
-- clear: one reading of the question, inputs and outputs fully specified;
+- clear: someone who has never met the content can learn it from the question, with the
+  "Useful functions" part of `hints.md` where the API syntax is taught: after reading
+  them they understand it and have at least an idea how to start (owner, 2026-10-31; it
+  read "one reading of the question, inputs and outputs fully specified" until the judge,
+  held to that, missed all five of the owner's n: the owner had meant understandable, not
+  specified);
 - fits the material: matches how the lectures and labs present the idea (the stripes
   case below is a failure of this);
 - within what has been taught: no API or idea from later weeks; partly checkable
@@ -686,6 +698,95 @@ or knowledge point, a held-out set that generation and repair never see:
   sees the reference, so rule 4 compares two independent readings.
 The first batch seeds the set: the owner's solutions and mistakes, no extra work beyond
 solving.
+
+How it is built (3b design, owner 2026-10-31): the held-out check adds no new kind of
+check. It runs the validator's own rules with another candidate in place of the reference
+or a mutant (`validation/heldout.py`; rules 1, 4 and 5 take an optional candidate, rule
+3's per-file verdict is `mutant_verdict`):
+
+| Candidate | Must | Rules reused | A failure means |
+|---|---|---|---|
+| a correct solution (the owner's passing `student.py`) | pass at the default partitions, then at every rule 5 condition (1/2/4 partitions, combiner off, values reversed) | 1, 5 | the tests reject a correct answer, or the owner's code has a distribution bug their own run (2 partitions) could not show |
+| the same | agree with the oracle on random inputs | 4 | the tests let a wrong solution through, or the oracle is wrong |
+| a wrong solution (a `student.py` the attempts plugin kept from a `failed` run) | still be caught | 3 | the tests became weaker since |
+
+- Report only: a finding is for the owner to look at. It never changes VALID or
+  `validation.json`, and never reaches repair, or the set would stop being held out. It
+  measures how often a VALID exercise is still wrong (phase 5).
+- Candidates come from `attempts.jsonl`: the current `student.py` if a run of it ever
+  passed (the log keeps no copy of passing code; a file changed since shows up as failing
+  its tests, worded "changed since, or the tests did"), and each distinct copy kept from a
+  `failed` run. `error` runs are left out: the tests never ran.
+- The exercise's files pass rule 0 and the safety check first, as for validation; the
+  owner's code skips the safety check, as in their own runs.
+- `python -m tutor.validation.heldout <batch_dir> [<id> ...]` prints one line per check
+  and writes `solutions/<id>/heldout.json`.
+- First run, 2026-10-31: weeks 1-2, 5 and 7, 17 correct solutions and 2 mistakes, nothing
+  flagged, about 2 minutes (the Spark week 100 s). Expected limit: the owner's solution
+  follows the question, so a question that misreads the slides is not caught this way
+  (a week 7 question counts a bucket in full where the slides halve it). Step 2 below
+  targets that.
+
+Step 2 (built 2026-10-31): another model writes candidates from the question alone.
+`tutor/heldout_writer.py` (outside `validation/`, which stays free of LLMs) asks it, per
+exercise, for `correct.py` (the question as written), `slides.py` (the task the way the
+slides do it, with one sentence on where the question departs from them) and up to three
+`wrong_NN.py` (a typical student mistake each, with what it gets wrong). It sees the
+question, the original skeleton (never the owner's `student.py`), the sample data and the
+lectures the exercise names (whole when they fit in 120k characters, the exercise's own
+pages marked); never the reference, tests, mutants, oracle or hints. The files and a
+`meta.json` (model, notes, inputs hash) go to `solutions/<id>/heldout/model/`; an
+exercise is written again only when its inputs or the model change, or with `--force`.
+- One call per file. Asked for all five in one reply, GLM-5.3 returned placeholders
+  without thinking and spent its whole output on reasoning with it. A `plan` field comes
+  before `code` (without it GLM wrote its reasoning into `code`, as repairs without
+  `diagnosis` did). The task comes last in the prompt, so an exercise's calls share one
+  prefix (DeepSeek served 79% of the input from its cache; OpenAI reported none).
+- A reply is sent back (two retries, then the file is dropped) when the code does not
+  parse, lacks an entry point, has an entry point that does nothing (`...`, `pass`, a
+  bare name: GLM once lost every newline, so a function parsed as `def f(): n` with the
+  rest a comment), fails the static safety check, or repeats a mistake already written
+  (DeepSeek-V4-Pro did that even when told the earlier ones).
+- The model must be another family than the batch's generator (owner, 2026-10-31): the
+  `heldout` role is deepseek-pro, for the Claude-made phase 2 batches; DeepSeek-made
+  batches run with `--profile gpt-terra`. To save the OpenAI credit, only week 7 did
+  (11 exercises, about $1.7); weeks 4 and 5 used deepseek-pro, the generator's family.
+  glm-full was tried first and could not do it.
+
+`validation/heldout.py` runs them after the static safety check. A model's file may
+itself be wrong, so where it and the tests disagree, the oracle (an independent reading
+of the question) decides:
+
+| Model's file | Outcome | Reported |
+|---|---|---|
+| correct | fails the tests, agrees with the oracle | FAIL: the tests may reject a correct answer |
+| correct | fails the tests, disagrees with the oracle | n/a: the model's own mistake |
+| correct | passes the tests | as the owner's: rules 5 and 4 next |
+| slides | fails the tests | FAIL, with the model's note on where the question departs |
+| wrong | caught | ok |
+| wrong | passes the tests, disagrees with the oracle | FAIL: the tests miss this mistake |
+| wrong | passes the tests, agrees with the oracle | n/a: not a mistake after all |
+
+The oracle does not judge `slides.py`: it was written from the question, so it shares any
+departure from the slides. A slides flag is right when the question states the
+departure as an assumption; the owner checks.
+
+First run with model files, 2026-10-31 (all five batches, 38 exercises, about 8 minutes):
+11 flags. Week 7 (gpt-terra): the tests miss three mistakes (`counting-bloom-filter`:
+repeated hash positions counted once; `lossy-counting`: two), and two questions depart
+from the slides without saying so (`dgim-query-estimate`, the oldest bucket; and
+`dgim-bucket-update`, whose window boundary is one position off the slides' wording);
+`fixed-proportion-sampling`'s departure is stated. Week 3: four slides
+flags, all stated (letter names, a tie-break, top-k, pairs without a common friend). Week
+5: one slides flag with no difference named, likely the model's own mistake. Weeks 1-2
+and 4: none. The oracle mattered: 15 of DeepSeek-V4-Pro's 57 "mistakes" (12 in weeks
+4-5) were correct solutions, which would have been false "tests miss a bug" flags;
+gpt-terra wrote one such in 33.
+Fixed the same day (owner), by the rule that an exercise teaching something wrong is
+fixed: `lossy-counting` got two tests and `counting-bloom-filter` one (neither solved
+yet), after which the held-out check flags nothing there; the two DGIM questions
+(solved, so tests unchanged) got an assumption naming the departure from the slides.
+Their slides flags remain, as they should: the departure is now stated.
 
 ## Generation pipeline (LangGraph)
 
@@ -809,10 +910,38 @@ Design approved 2026-10-28 (owner):
   - Decided (owner, 2026-10-30): arm E's shape, Flash with thinking, Pro only when Flash's
     repair fails, so the time stays bounded; GLM-5.3 as the oracle after 2026-11-04. The
     oracle's thinking became its own setting, `oracle_thinking`, off by default: it
-    followed `thinking`, so turning generation thinking on would have made GLM think. Not
-    yet measured, for the next run: more items in parallel for plain-Python batches
-    (default 3 on 12 cores), a lower thinking effort if DeepSeek offers one, and running
-    mutants in parallel during validation for Spark weeks.
+    followed `thinking`, so turning generation thinking on would have made GLM think.
+  - Speed, measured 2026-10-30 on the same 11 items (owner asked for tests, not guesses):
+
+    | Setup | Wall time | First-round VALID | Flash draft | Output tokens | Layout |
+    |---|---|---|---|---|---|
+    | E, one at a time (high effort) | 1983 s | 7/11 | 129 s | - | 10/11 |
+    | high effort, 8 in parallel | 441 s | 8/11 | 119 s | 369k | 10/11 |
+    | low effort, 8 in parallel | 211 s | 7/11 | 90 s | 261k | 11/11 |
+
+    Eight requests at once did not slow DeepSeek (about 215 tokens/s each), so a batch
+    takes about as long as its slowest item. DeepSeek's `reasoning_effort` has three
+    levels, low / high / max, default high (medium counts as high); a profile's new
+    `reasoning_effort_on` sets the level used when thinking is on. Low drafted 24% faster,
+    repaired in 31 s instead of 104, with 29% fewer output tokens and the same first-round
+    rate on this sample (one run each; part of the 211 against 441 s is that no low item
+    needed a third round). Question quality per setup goes to the owner's blind comparison.
+    The examples' rewrite showed too: 10 and 11 of 11 questions in the layout, against 5
+    of 11 for arm A.
+  - Validation runs its independent checks at once (after the reference passes: skeleton,
+    each mutant, oracle, the partition runs, main), under process-wide caps on child runs:
+    heavy runs, which start a JVM (Spark, the Hadoop runner, any framework not yet
+    classified), default a third of the cores (`TUTOR_MAX_HEAVY_RUNS`); light runs (plain
+    Python, MRJob inline) half the cores (`TUTOR_MAX_RUNS`). Heavy or light is derived from
+    metadata `framework` and `runner`, never declared by an exercise (a model could get
+    it wrong); a test fails when the format allows a framework the table does not list. A Spark exercise took 47 s
+    instead of 96, a file-level one 27 instead of 65. The cap matters: with 8 or 12 runs
+    at once the exercise's hypothesis run passed its 30 s timeout and the exercise came
+    out INVALID; 4 and 6 took the same time, 4 with 10 s to spare. Checked: all 70 week 7
+    exercises (plain Python, every arm) still VALID; `pytest -m spark` passes in 217 s
+    instead of 462; the Hadoop exercise of week 3 took 94 s instead of 211; and 2 Hadoop
+    and 13 Spark exercises validated at once in one process, as a batch does, came out
+    VALID twice (about 400 s, against over 20 minutes one after another).
 - What repair is told (2026-10-29). A week 4 item came back word for word through all
   three repairs: rule 1 said only pytest's last line ("2 failed, 3 passed"), so the model
   could not see what to fix, and at temperature 0 an unchanged prompt returned the same
@@ -1109,6 +1238,22 @@ deterministic judge, hybrid RAG with recall@k, the phase 5 metrics, the hint lea
   2026-10-28: static check first, container later (see "Code execution safety").
 - [3c] Calibrated LLM judge for hint quality only (leaks the answer? right direction?),
   checked against owner-labelled hints before its scores are trusted. Never for validity.
+  Built 2026-10-31 (`tutor/judge/hints.py`), on simulated students since the owner had
+  asked `tutor.hint` for nothing yet: `simulate` makes two mutants per exercise of a batch
+  play students (their docstring, which names the bug, removed), runs their tests and
+  asks the hint model for the level-1 layer 3 hint; `calibrate` has the judge answer
+  "leaks?" and "right direction?" (evidence first; it sees the real bug and the
+  reference) and scores it against the owner's labels as the teaching judge is scored.
+  - Week 7, 22 hints by deepseek-flash: the owner found all 22 fine for learn mode, even
+    those naming the change in words, so the leak rule is mode-aware: in learn mode only
+    corrected code (or a whole corrected statement) leaks; in review mode naming the
+    place or the change does. gpt-terra agreed on all 22.
+  - With no bad label, nothing showed it could catch one, so 16 bad hints were planted
+    by construction (a hint paired with another exercise's bug; hints naming the change
+    judged as review hints; a corrected line pasted in): it found 10/10 leaks and 6/6
+    wrong directions, with no false flag on the 38. Trusted on this data; planted bad
+    hints are easier than real ones, so real requests (and review-mode batches) should
+    be labelled when they come.
 - [4] Reranker after hybrid retrieval, as one more arm of the recall@k comparison.
 - [5] Personal workflow cost (Codex review 4): steps and minutes from adding lecture files
   to the first exercise, owner minutes spent fixing each exercise, validation wait, and
@@ -1348,19 +1493,96 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
     sees each existing exercise's title and topic, not only its id, and repeats a solved
     task with another API only when the new API is the whole point (W5 had planned a fourth
     word count and a Spark SQL exercise that redid cleaning and per-key averages).
-  - The question (both modes, decided 2026-10-29: the owner rated three week 5 questions
-    unclear, "explanations too long", and found a docstring hard to read) is a title and
-    fixed sections, each label alone on a line: `Concept:` (learn only, at most 3 lines;
-    more goes in hints.md), `Symptom:` (debugging), `Task:`, `Input:`, `Output:`,
-    `Example:`, `Constraints:`, `Slides:`, `Run:`. `question.md` next to student.py is the
-    same text as Markdown, made by code from the docstring (no model, so they never
-    disagree), labels as headings and indented data as code blocks; existing batches get
-    it with `python -m tutor.question BATCH_DIR`. Not hints.md's top, which the owner
-    first suggested: hints.md is opened only when stuck. No validation check of the
-    layout yet: older exercises do not follow it and are not reworked. The four
-    `examples/` questions were rewritten in the layout (2026-10-30), since the prompt's
-    example outweighed its rules: on week 7, DeepSeek Flash without thinking followed the
-    layout in 5 of 11 questions and copied the example's "Run the example:" lines.
+  - The question (both modes, decided 2026-10-29) is a title and fixed sections: Concept
+    (learn only), Symptom (debugging), Task, Input, Output, Example, Constraints, Slides,
+    Run. Explanation goes in Concept, never into Task, which stays one or two sentences.
+    Until 2026-10-31 each was a label alone on a line (`Task:`, the plain layout); since
+    then generated questions are Markdown headings (see "question.md format" below).
+  - Concept (owner, 2026-10-30) is the knowledge point's condensed lecture, so the student
+    need not go back and forth between slides and question: at most `concept_lines`
+    lines (a generation setting, default 50), opening with an introduction of at most 3
+    lines (what the technique does and why it is needed), then how it works in the
+    slides' words, naming the slides each part comes from; a slide's own example may be
+    shown on other data than the exercise's. Never solution code or how to write this
+    exercise: that is the hints' job, in levels. Pseudocode may appear (owner, 2026-10-30):
+    the algorithm's steps as the slides give them, language-neutral, in a fenced `text`
+    block (`for i = 1..d: increment CMS[i][h_i(x)]`); not runnable Python, and not the
+    exercise's function names, signature or edge cases. Decided after week 7 was written,
+    which was left as it is. It was at most 3 lines from 2026-10-29,
+    after three week 5 questions were rated unclear, "explanations too long"; the owner
+    later explained the trouble was reading a docstring without layout, with the concept
+    mixed into the task, not the length: week 1-2 questions were longer (314 words on
+    average against 275) and all rated clear. Those three ratings carry a note saying so,
+    so the teaching-quality judge (3b) is not calibrated against them as unclear content.
+    The examples' Concepts show the shape (general knowledge in place of slides).
+  - `question.md` next to student.py is the same text as Markdown, made by code from the
+    docstring (no model, so they never disagree), labels as headings (the plain layout the
+    pipeline still writes; the format below replaces it for hand-made questions); existing batches
+    get it with `python -m tutor.question BATCH_DIR`. Code blocks only in Example and Run,
+    where there is something to copy; elsewhere indented text becomes plain lines (owner,
+    2026-10-30: a page of grey boxes is harder to read). It ends with "How to run"
+    (owner, 2026-10-30): `cd` into the exercise's folder, `pytest test_student.py`,
+    `python student.py`, `hints.md` and the hint command, with the real folder: absolute
+    for a workspace exercise (private; it pastes anywhere), from the repository's folder
+    for an example (public files hold no absolute path). The hints line is written by
+    code because a model may forget it (week 7 blind comparison). A draft has no such
+    block, since its folder is temporary; `save` writes it as it moves the exercise into
+    the batch. Not hints.md's top, which the owner first suggested: hints.md is opened only
+    when stuck. No validation check of the layout yet: older exercises do not follow it
+    and are not reworked. The four `examples/` questions were rewritten in the layout
+    (2026-10-30), since the prompt's example outweighed its rules: on week 7, DeepSeek
+    Flash without thinking followed the layout in 5 of 11 questions and copied the
+    example's "Run the example:" lines.
+  - `question.md` format (owner, 2026-10-30, on the week 7 questions): use what Markdown
+    offers, with a visible hierarchy, since the student reads question.md, not the
+    docstring. Top to bottom:
+    1. `# title`; a quote line with lecture, slides, mode, type and difficulty; a contents
+       line linking the sections; a rule (`---`).
+    2. `## Concept` in `###` parts: "Why it is needed" (the introduction, at most 3 lines),
+       then one part per idea, its slides in the heading. Steps as numbered lists (nested
+       for sub-steps) or pseudocode in a `text` block (see Concept above), properties as
+       bullets, comparisons and traces as tables, the key
+       claim in a quote. Proofs, analyses, failed attempts and optional extensions folded
+       in `<details>` with a `<summary>`, so the main line stays short.
+    3. A rule; `## Task` (one or two sentences, names as inline code); `## Input` as a
+       parameter table; `## Output`; `## Example`, a code block with the input and output,
+       plus a step-by-step table when the example is a trace; `## Constraints` as a
+       numbered list with the key words bold; `## Slides` with the assumptions in a quote.
+    4. A rule; `## How to run`: one bash block (`cd`, `pytest test_student.py`,
+       `python student.py`) and a "Stuck?" quote with the hint command in a bash block. The
+       separate `Run` section is folded in: the two repeated each other.
+    Math is LaTeX: `$...$` inline, `$$...$$` on its own lines for a display formula (not
+    inside a list item, where renderers differ), variables included ($n$, $k$). `\lbrace`
+    and `\rbrace`, not `\{ \}` (a Markdown escape on some renderers). Python expressions
+    that say what the code computes (`len(stream) / k`) stay inline code. Paragraphs are
+    plain Markdown paragraphs, without the hard line breaks of the plain layout. Checked
+    with KaTeX, which VS Code's preview uses: week 7's 358 formulas, no failure. Not used:
+    GitHub alerts (`> [!NOTE]`) and footnotes, which VS Code's preview may not render.
+    Status: week 7 (`2026-10-30_p3-w7-low`) was written by hand in this format, its
+    Concepts from the slides; `python -m tutor.question` would overwrite it, so it is
+    never re-rendered.
+    How the pipeline produces it (owner, 2026-10-31): student.py's docstring is itself the
+    Markdown question, so question.md is still made by code from the one source and the
+    two never disagree (a model writing question.md separately was the other option,
+    against that rule). The model writes the `# title` and the `## ` sections; code adds
+    the line under the title (from metadata.json and the batch mode), the contents line,
+    the rules and "How to run", into which a `## Run` section's commands and notes are
+    folded (`tutor/question.py`; a docstring not starting with `# ` is the plain layout,
+    rendered as before). The docstring is a raw string so LaTeX keeps its backslashes: in
+    a plain one Python reads `\frac` as a form feed and `\neq` as a line break, without
+    an error, so a draft whose docstring holds a backslash and is not raw is a format
+    failure sent to repair. The four examples were rewritten in the layout, since a model
+    follows the example more than the rules, and a test keeps their question.md equal to
+    what student.py renders. The prompt also carries the 3b findings: an algorithm's
+    starting state as the slides give it, no claim stronger than the slides, every
+    departure from the slides as an assumption in Slides, and the Example's output
+    exactly what the reference gives and the tests expect.
+    Trial, 2026-10-31 (one week 7 item, the false positive rate of a Bloom filter,
+    DeepSeek Flash with thinking): VALID in round 0, a raw docstring, every section in
+    place, Concept in slide-headed parts with a pseudocode block and a table, four
+    assumptions stated in Slides, 60 formulas rendering. One flaw: `$m = |S|$` in a table
+    row, where every `|` ends a cell; the renderer now writes `\vert` there. Kept in the
+    private workspace's experiments, not among the batches.
   - `review`: one or several weeks mixed, fuller tasks leaning file-level (closer to labs and
     projects), a bare skeleton. The tutor helps only when asked, first naming just the kind of
     error, and leaves the fix to the owner. Exercises may combine knowledge points, as a
@@ -1415,7 +1637,7 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
    check; `attempts.jsonl`. **Done 2026-10-25.**
 2. Golden exercises, solved by the owner. Run the whole loop by hand before automating it.
    **Done 2026-10-28** (the first batch's five must exercises solved and rated); the
-   `v0.1.0` release below is still open.
+   `v0.1.0` release below waits for the GUI or the whole backend (owner, 2026-10-31).
    - Batches from materials the owner picks (see "Material selection"), drafted by Claude Code and
      checked by the validator; the owner solves them in the batch's mode.
    - First batch (approved 2026-10-25): `2026-10-25_p2-w1w2-mapreduce`, mode `learn`, sources
@@ -1481,7 +1703,9 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
      all 21 VALID again); rule 0 in `validate()`, the examples' metadata in the one
      spelling, tests for a missing, mistyped and unknown field; the workspace `AGENTS.md`
      "Authoring exercises" section. **Done 2026-10-28.**
-   - Then release `v0.1.0` (decided 2026-10-26, from a Codex review before going public):
+   - Then release `v0.1.0` (decided 2026-10-26, from a Codex review before going public;
+     moved by the owner on 2026-10-31: not at the end of phase 2 or 3, but once the GUI or
+     the whole backend is done, with the same contents):
      a `constraints.txt` with the dependency versions CI passed on, a short CHANGELOG, and
      a git tag. Not earlier: before phase 2 is solved, the whole loop has not run once.
      README for the release: one positioning line (private lectures -> runnable exercises
@@ -1535,6 +1759,84 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
    the held-out set of "Independent checks" (the owner's passing solutions must pass, their
    mistakes must fail), and an LLM judge of teaching quality checked against the owner's
    ratings before it is trusted (never for validity).
+   Design approved 2026-10-31 (owner), in order, each its own step:
+   1. **Done 2026-10-31.** Held-out check with the owner's code, no LLM (see "Independent
+      checks").
+   2. **Done 2026-10-31.** Model-written held-out candidates, the oracle deciding
+      disagreements ("Independent checks", step 2).
+   3. **Built 2026-10-31** (as-built below the plan). Teaching-quality judge, in `tutor/judge/`, outside `validation/` so that package
+      stays free of LLMs. Input: `question.md` (what the owner reads), skeleton and
+      reference (needed for "targets the concept": does the solution need the knowledge
+      point?), the item's slides (as generation's `retrieve_context`) and the lectures
+      taught so far. Output: y/n per point with one sentence quoting the question, in
+      `solutions/<id>/quality.json`; never touches validity. Its model is from another
+      family than the generator's (self-preference bias). `--calibrate` compares it with
+      `ratings.jsonl` and the blind ratings point by point; a point is trusted when the
+      judge finds at least 80% of the owner's n labels and marks at most 20% of y labels
+      n, else it is shown as uncalibrated. Items where judge and owner disagree are listed
+      for the owner, whose label can be wrong too. The three week 5 ratings noted as format
+      problems are left out of "clear".
+      As built (2026-10-31): `python -m tutor.judge <batch>` writes `quality.json`;
+      `--calibrate [--blind DIR]` judges the 29 rated items (a blind item with the text
+      the owner rated, the arm's batch for skeleton and reference via `arms.json`), and a
+      rating line's `skip_points` keeps a point out (the three week 5 "clear"). One call per
+      exercise; each point's `evidence` comes before its y/n. The lecture context is shared
+      with the held-out writer (`materials/slides.py`).
+      - glm-full said yyyy to all 29, both before and after "clear" was redefined (see
+        "Validity vs teaching quality"): it found none of the owner's five n. gpt-terra
+        found 2 of 5 and marked 10 of 21 owner y as n: not trusted by the agreement bar.
+      - But most of those "false n" were real defects the owner's y had missed:
+        count-min-sketch claimed a never-added item gives 0 (collisions make it
+        positive), and boyer-moore-majority left out the slides' starting state (first
+        element, count 1), which is what led to the owner's own bug; both fixed. So the judge is a
+        reminder of what to look at, not a rating, and is measured a second way: the
+        owner reviews each flag (judge n where the owner said y or did not rate),
+        answers in `flag-reviews.jsonl`, and the report counts the right ones. First
+        review: 15 of 19 right (clear 10/13, fits 4/5, targets 1/1); the wrong ones a
+        debugging task's intended gap, a layout problem question.md had already solved,
+        and two pedantic points.
+      - The `judge` role is gpt-terra (calibration $0.86; all 38 exercises $1.07). On the
+        five batches it put an n on 34 of 38, 29 flags: some real (counting-bloom-filter's
+        constraints 1 and 2 contradict each other once a never-inserted item collides;
+        lossy-counting keeps the eps*n bound though floor(1/eps) breaks it; dgim-query-
+        estimate's bucket span implies every position is a 1), some wrong (a Boyer-Moore
+        counterexample without a majority), some pedantic. Too many to read each time.
+      - Two changes after it (2026-10-31). A flag is now serious or minor and the batch
+        report shows the serious ones (`--all` for every one); it did not filter much:
+        rerun on all 38, 23 of 25 flags came back serious. The judge also sees the
+        "Useful functions" part of `hints.md` (never the hint levels): about ten flags had
+        been "the question does not teach the API syntax", which this design puts in the
+        hints on purpose; on those seven exercises the rerun gave yyyy. The owner counts
+        that part as read with the question (see "clear" above).
+      - Fixed from the reruns (question.md only, noted in each manifest):
+        counting-bloom-filter's constraint 1 now holds while deletes match inserts;
+        lossy-counting's eps*n bound needs a whole 1/eps; dgim-query-estimate calls its
+        bucket span a simplification; df-wordcount-explode-split's example said bye,1
+        where Bye occurs twice (the tests say bye,2); reverse-graph-secondary-sort's
+        example lost its tabs; misra-gries says "more than n/k".
+      - Cost: the dollar figures above use the notes' prices ($2 in, $12 out per million
+        tokens); the OpenAI balance fell by about half of the estimate, so gpt-terra
+        costs roughly half that.
+   4. **Done 2026-10-31.** Synthetic defects for calibration: on 2026-10-31 the 29 labels held n only for
+      "clear" (5 usable), never for fits, taught or targets, so those three cannot be
+      calibrated from real data yet. A few yyyy questions get variants with one defect
+      each (an unstated output order; a convention other than the slides'; an API from a
+      later week; a task solvable without the knowledge point), labelled by construction
+      and spot-checked by the owner; reported apart from real labels, since planted
+      defects are easier to spot. Kept in the private workspace (`experiments/`).
+      As built: 18 variants of five yyyy questions (two week 2 MRJob, one week 5 Spark
+      SQL, two week 7), one defect each, written by hand; a "targets" variant brings a
+      reference that takes the workaround. No "taught" variant for week 7, the last
+      lecture. `--defects DIR` adds them; only the planted point is labelled, and the
+      report scores them apart. gpt-terra found 14 of 18: clear 3/5, fits 4/5, taught
+      2/3, targets 5/5. Of the misses, two were weak plants (a worked example still showed
+      the removed rule; the example output showed the letters a vague "characters" left
+      open) and two were real misses (a lab definition credited to the lecture; a window
+      function from a later lecture not seen as untaught). On the real ratings, with the
+      hints' Useful functions shown, it found 1 of the owner's 5 "clear" n. So the judge
+      is a usable reminder for fits, taught and targets, where real n labels are still
+      missing; for "clear" the owner's own rating stays the measure. The owner
+      spot-checks the variants (README.md in the folder).
 3c. **Done 2026-10-29.**
    Hint command, `python -m tutor.hint <exercise>` (decided 2026-10-24, after 3a since it
    needs the LLM client, and after 3b since its rules come from the owner's real mistakes;
@@ -1605,13 +1907,16 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
 
 ## Backlog (decided, not scheduled)
 
+Order agreed 2026-10-30, around 3b: C1 first (small, and before the owner solves the
+week 3 MapReduce batch, so an exercise relying on value order is fixed before it is
+solved), then 3b, then the hint-quality judge of [3c] (it reuses 3b's judge and needs
+real hint requests from solving week 7), then 2b together with C2 (both ask how good a
+design is, and share the Hadoop counters).
+
 - Batch API for whole-batch generation, once a cloud provider is used (see the [3] review in
   "LLM engineering candidates").
 
-- C1 value-order check: rule 5 also reruns with each key's values shuffled (a runtime
-  subclass, like the combiner switch), catching reducers that rely on value order, the
-  reason secondary sort exists. First verify that mrjob's inline runner delivers values
-  sorted (it sorts whole map-output lines), which would hide such bugs today.
+- C1 value-order check: done 2026-10-30, see rule 5 in "Exercise validation".
 - C2 algorithm-quality warnings (see "Correctness vs algorithm quality"), later Hadoop
   counters (map output records, combine input / output) to report how much a combiner cut.
 - C3 tokenizer: the course's labs hand out a fixed tokenizing line (a `re.split` over
@@ -1687,27 +1992,53 @@ gaps. Each was decided by the owner; change one only with the owner.
   more. The rule is in the generation prompt instead, and the teaching-quality judge (3b)
   can rate it.
 
+- No exam mode (owner, 2026-10-30; it was "reconsider later" since 2026-10-24). Review
+  mode already gives exam-style practice: fuller tasks, knowledge points combined, help
+  only when asked. A real exam mode would need a locked-down exam platform with a built-in
+  code editor, a different product from a tutor that leaves solving to the IDE. Practice
+  batches stay free of exam pressure (a write-everything-before-the-first-test-run rule
+  was turned down, 2026-10-24).
+
 ## Deferred
 
 SQLite, CLI, Docker (beyond the planned isolation container, see "Code execution safety"), error taxonomy (derive categories from real attempt data later).
-Adaptive learning and exam mode are listed under the later phases below.
+Adaptive learning is listed under the later phases below; exam mode is not done.
 
-Later phases, after phase 5. Order decided 2026-10-26: second course, then adaptive review
-(just before the GUI or built together with it), then the local GUI, then packaging and
-release; exam mode stays open.
+Translated `question.md` (candidate, owner 2026-10-30; not built). Why not now: an
+assistant in the IDE already explains or translates a question on request, so nothing
+needs building yet. Revisit together with how the pipeline produces the `question.md`
+format (see "Learning rules").
+- Shape: `question.<lang>.md` next to `question.md`. The English file stays the only
+  source. A translation call runs after validation; the tests never read the question
+  text, so a translation cannot change whether an exercise is valid. Languages are listed
+  in `workspace.toml`, English only by default; the repository's examples stay English.
+- Deterministic check: inline code, LaTeX, code blocks, commands, slide numbers and links
+  must be identical in both files, which catches a changed expression or a dropped rule.
+- Points to settle: translated headings change the contents links' anchors (use fixed
+  `<a id>` anchors or keep headings in English); technical terms keep the English word on
+  first use (exams use it); whether to translate only Concept and keep Task, Input,
+  Output, Example and Constraints in English (the rules read as an exam states them, with
+  no mistranslated rule); whether `hints.md` and `tutor.hint` follow.
+
+Later phases, after phase 5 (order decided 2026-10-26, numbered 2026-10-30): phase 6 the
+second course, phase 7 the local GUI, then packaging and release. Adaptive review is a
+maybe, not a phase (owner, 2026-10-30: batches are started by hand for now); exam mode
+is not done (see "Decisions not to do").
 - Second course: use the tool for another course (other language or framework) to prove
   workspace, testkit and setup recipes are not shaped around one course. A long-term goal.
   Brings isolation layer B, the module risk tiers and other languages (see "Code execution
-  safety").
-- Adaptive review: use `attempts.jsonl` (failures, run counts, hints used) and `coverage.md`
+  safety"). A new framework's weight for the executor's caps (heavy: a JVM or similar per
+  run) moves from the code's table to the course's `workspace.toml`, decided when the
+  framework is set up, by measuring a smoke run (start-up time, peak memory, a `java` child,
+  cores used), and confirmed by the owner like a `[requires]` entry (owner, 2026-10-30). A
+  model may propose which frameworks the slides use, never how heavy they are; an
+  unmeasured framework counts as heavy.
+- Adaptive review (a maybe): use `attempts.jsonl` (failures, run counts, hints used) and `coverage.md`
   to find weak knowledge points and schedule `review`-mode batches with spaced repetition.
 - Packaging and release: `pipx install`, one command to start, CI on macOS and Windows
   (WSL) as well, versioned releases after `v0.1.0`.
-- Exam mode (timed, no hints): not excluded, reconsider later. Practice batches stay free
-  of exam pressure (a write-everything-before-the-first-test-run rule was turned down,
-  2026-10-24).
 
-Local GUI (after the second course and adaptive review, just before packaging and release;
+Local GUI (phase 7: after the second course, just before packaging and release;
 discussed 2026-10-26). It sits on top of the files and functions the earlier phases build,
 so it comes late; the adaptive review screens can be built with it.
 - Shape: a local web app (FastAPI backend reusing the CLI functions, which a later MCP server

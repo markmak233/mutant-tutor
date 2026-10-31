@@ -49,6 +49,14 @@
       "title": "Oracle Thinking",
       "type": "boolean"
     },
+    "concept_lines": {
+      "default": 50,
+      "description": "The most lines of a learn-mode question's Concept section.",
+      "maximum": 120,
+      "minimum": 3,
+      "title": "Concept Lines",
+      "type": "integer"
+    },
     "max_tokens": {
       "default": 32000,
       "description": "Output tokens per reply when the model thinks (its reasoning counts as output).",
