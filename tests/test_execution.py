@@ -3,7 +3,7 @@ import sys
 import time
 from pathlib import Path
 
-from tutor.execution import Outcome, run_pytest
+from tutor.execution import TIMEOUT_FACTOR_ENV, Outcome, run_pytest, timeout_factor
 
 
 def write(path: Path, text: str) -> Path:
@@ -82,9 +82,10 @@ def test_no_tests_collected_is_error(tmp_path):
 SLEEPER = "[sys.executable, '-c', 'import time; time.sleep(60)']"
 
 
-def test_timeout_kills_the_whole_process_group(tmp_path):
+def test_timeout_kills_the_whole_process_group(tmp_path, monkeypatch):
     """An endless test is stopped at the limit, and so is any process it started
     (the way PySpark starts a JVM): the child's pid must be gone afterwards."""
+    monkeypatch.setenv(TIMEOUT_FACTOR_ENV, "1")  # the 2 s limit as given, on every platform
     pid_file = tmp_path / "child.pid"
     test = write(
         tmp_path / "test_hang.py",
@@ -124,6 +125,36 @@ def test_a_process_left_behind_by_a_finished_run_is_killed(tmp_path):
 
     assert result.outcome is Outcome.PASSED
     assert not _alive(int(pid_file.read_text()))
+
+
+def test_the_time_limit_is_scaled_on_windows_only(monkeypatch):
+    """Spark starts a Python process per task on Windows, so limits are 4x there."""
+    monkeypatch.delenv(TIMEOUT_FACTOR_ENV, raising=False)
+    monkeypatch.setattr(sys, "platform", "win32")
+    assert timeout_factor() == 4.0
+    monkeypatch.setattr(sys, "platform", "darwin")
+    assert timeout_factor() == 1.0
+
+
+def test_the_time_limit_factor_can_be_overridden(monkeypatch):
+    """TUTOR_TIMEOUT_FACTOR wins; a value that is not a positive number is ignored."""
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setenv(TIMEOUT_FACTOR_ENV, "2.5")
+    assert timeout_factor() == 2.5
+    for bad in ("0", "-1", "fast"):
+        monkeypatch.setenv(TIMEOUT_FACTOR_ENV, bad)
+        assert timeout_factor() == 1.0
+
+
+def test_a_scaled_limit_lets_a_slow_run_finish(tmp_path, monkeypatch):
+    """The factor reaches the run itself: 2 s given, 4x applied, a 3 s test passes."""
+    monkeypatch.setenv(TIMEOUT_FACTOR_ENV, "4")
+    test = write(tmp_path / "test_slow.py",
+                 "import time\n\ndef test_slow():\n    time.sleep(3)\n")
+
+    result = run_pytest({"test_slow.py": test}, timeout_s=2)
+
+    assert result.outcome is Outcome.PASSED
 
 
 def test_temp_dir_is_removed_and_sources_untouched(tmp_path):

@@ -37,6 +37,23 @@ MAX_HEAVY_RUNS_ENV = "TUTOR_MAX_HEAVY_RUNS"
 MAX_RUNS_ENV = "TUTOR_MAX_RUNS"
 _slots: dict[bool, threading.BoundedSemaphore] = {}  # heavy? -> its cap
 _slots_lock = threading.Lock()
+# Every run's time limit is multiplied by this. Windows: 4, because Spark cannot fork a
+# Python worker daemon there and starts a new Python process for every task, one after
+# another, about 0.6 s each (measured 2026-10-31: a 4-task RDD job 2.4 s, a JVM-only job
+# 0.09 s); an example's 25-case hypothesis check took 101 s against the 30 s it needs on
+# macOS, and validated with 120 s. TUTOR_TIMEOUT_FACTOR overrides it (read at every run).
+TIMEOUT_FACTOR_ENV = "TUTOR_TIMEOUT_FACTOR"
+WINDOWS_TIMEOUT_FACTOR = 4.0
+
+
+def timeout_factor() -> float:
+    raw = os.environ.get(TIMEOUT_FACTOR_ENV, "")
+    try:
+        if float(raw) > 0:
+            return float(raw)
+    except ValueError:
+        pass  # unset or not a number: the platform default
+    return WINDOWS_TIMEOUT_FACTOR if sys.platform == "win32" else 1.0
 
 
 def max_runs(heavy: bool) -> int:
@@ -168,7 +185,10 @@ def links(files: Mapping[str, Path]) -> list[str]:
 
 def _run_in(workdir: Path, timeout_s: float, extra_env: Mapping[str, str],
             script: list[str] | None = None) -> RunResult:
-    """Run pytest in `workdir`, or the command `script` (a Python file run directly)."""
+    """Run pytest in `workdir`, or the command `script` (a Python file run directly).
+    `timeout_s` is scaled by timeout_factor() here, so every caller (validation, hints,
+    held-out checks) keeps stating the limit an exercise needs on macOS or Linux."""
+    timeout_s *= timeout_factor()
     # sys.executable: the project venv, so student code can import pyspark and mrjob.
     # no:cacheprovider: no .pytest_cache; the temp dir is discarded anyway.
     # --junitxml: the counts that tell "all passed" from "all skipped" (see _outcome).

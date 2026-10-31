@@ -1375,6 +1375,12 @@ itself crashes. Accepted gap: a process the child started before being assigned 
 outside, but assignment follows `Popen` at once, while the child still spends far longer
 starting Python and importing pytest. A test covers a process left behind by a run that
 passed; both process tests fail on Windows when the child is kept out of the job.
+Time limits are 4x on Windows (`execution.timeout_factor`, `TUTOR_TIMEOUT_FACTOR`
+overrides it; measured 2026-10-31): Spark cannot fork its Python worker daemon there, so it
+starts a new Python process for every task, one after another, about 0.6 s each (a 4-task
+RDD job 2.4 s, a JVM-only job 0.09 s). An example's 25-case hypothesis check took 101 s
+against a 30 s limit; with 120 s the example was VALID. The factor is applied inside the
+runner, so metadata `timeout_s` keeps stating what an exercise needs on macOS or Linux.
 
 Scope: the runner protects validation, which runs generated code. A learner running
 `pytest test_student.py` runs their own code in the terminal, in-process and without a
