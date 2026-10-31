@@ -12,6 +12,24 @@ never saw, judged by the exercise's own tests:
 - a wrong solution (a failing student.py the attempts plugin kept) must still be caught,
   as rule 3 catches a mutant. If it is not, the tests have become weaker since.
 
+A second source (step 2): files another model wrote from the question and the slides alone
+(tutor/heldout_writer.py, in solutions/<id>/heldout/model/). A model's solution may itself
+be wrong, so when it and the tests disagree, the oracle (an independent reading of the
+question) says which side to believe:
+
+| Model's file | Outcome | Reported |
+|---|---|---|
+| correct | fails the tests, agrees with the oracle | FAIL: the tests may reject a correct answer |
+| correct | fails the tests, disagrees with the oracle | n/a: the model's own mistake |
+| correct | passes the tests | as the owner's: rules 5 and 4 next |
+| slides (the slides' way) | fails the tests | FAIL, with the model's note on the departure |
+| wrong | caught | ok |
+| wrong | passes the tests, disagrees with the oracle | FAIL: the tests miss this mistake |
+| wrong | passes the tests, agrees with the oracle | n/a: not a mistake after all |
+
+The oracle does not judge the slides' way: it was written from the question too, so it
+shares any departure from the slides.
+
 So this module adds no new kind of check: it runs the validator's own rules with another
 candidate in place of the reference or a mutant. It only reports. VALID and
 validation.json never change, and nothing here feeds the generation pipeline's repair
@@ -19,7 +37,8 @@ round, or the set would stop being held out. Its findings measure how often a VA
 exercise is still wrong (phase 5).
 
 The owner's code is run like their own pytest runs (it is theirs, so it skips the static
-safety check); the exercise's files must pass that check, as for validation. Every run is
+safety check); a model's files and the exercise's files must pass that check first, as for
+validation. Every run is
 in a temp dir, so the attempts plugin does not log it.
 
     python -m tutor.validation.heldout <batch_dir> [<exercise_id> ...]
@@ -49,20 +68,28 @@ from tutor.validation.checks import (
     mutant_verdict,
 )
 from tutor.validation.exercise import STUDENT_FILE, ExerciseError, ExerciseFiles, load_exercise
+from tutor.validation.safety import allowed_imports, find_hazards, workspace_allow_imports
 
 REPORT_FILE = "heldout.json"
 CORRECT = "correct"  # must pass
 WRONG = "wrong"  # must be caught
+SLIDES = "slides"  # the slides' way: should pass, unless the question departs from them
+OWNER, MODEL = "owner", "model"  # who wrote a candidate
+# Where tutor/heldout_writer.py puts a model's files, inside solutions/<id>/, and its notes.
+MODEL_DIR = Path("heldout") / "model"
+MODEL_META = "meta.json"
 
 
 @dataclass(frozen=True)
 class Candidate:
     """One held-out solution."""
 
-    kind: str  # CORRECT or WRONG
+    kind: str  # CORRECT, WRONG or SLIDES
     label: str  # how the report names it: "student.py", "attempt 10-30 23:35:43"
     path: Path
     source: str  # where it came from, relative: exercises/<id>/student.py, attempts/code/...
+    author: str = OWNER
+    note: str = ""  # a model's: the mistake it made, or where the question leaves the slides
 
 
 @dataclass(frozen=True)
@@ -119,6 +146,29 @@ def _when(time: str) -> str:
     return time[5:].replace("T", " ") or "(no time)"
 
 
+def model_candidates(solution_dir: Path) -> list[Candidate]:
+    """The files another model wrote for this exercise (tutor/heldout_writer.py):
+    correct.py, slides.py and wrong_NN.py, each with its note from meta.json. None until
+    the writer has run."""
+    folder = solution_dir / MODEL_DIR
+    meta = folder / MODEL_META
+    if not meta.is_file():
+        return []
+    notes = json.loads(meta.read_text()).get("notes", {})
+    found = []
+    for path in sorted(folder.glob("*.py")):  # correct, slides, then wrong_01, wrong_02, ...
+        if path.stem in (CORRECT, SLIDES):
+            kind = path.stem
+        elif path.stem.startswith("wrong_"):
+            kind = WRONG
+        else:
+            continue  # not one of the writer's names
+        found.append(Candidate(kind, f"model {path.name}", path,
+                               f"solutions/{solution_dir.name}/{MODEL_DIR.as_posix()}/{path.name}",
+                               MODEL, notes.get(path.name, "")))
+    return found
+
+
 def check_heldout(ex: ExerciseFiles, candidates: list[Candidate],
                   timeout_s: float | None = None) -> list[HeldOutResult]:
     """Every check of every candidate, candidates in the given order."""
@@ -134,16 +184,30 @@ def check_heldout(ex: ExerciseFiles, candidates: list[Candidate],
     if gate.status is not Status.OK:
         reason = f"skipped: the exercise fails rule {gate.rule}: {gate.detail}"
         return [HeldOutResult(c, "all", Status.SKIPPED, reason, 0.0) for c in candidates]
+    # A model's file is code from outside, like a generated exercise: the same static check
+    # before anything runs it. The owner's own code is not checked, as in their own runs.
+    allowed = allowed_imports(ex.metadata["framework"], workspace_allow_imports(ex.exercise_dir))
+    hazards = {c.path: find_hazards(c.path.read_text(), allowed) if c.author == MODEL else []
+               for c in candidates}
     # Candidates are independent: check them at once (execution.py caps how many test runs
     # go at a time) and flatten the results back into the candidates' order.
-    per_candidate = in_parallel([lambda c=c: _check_one(ex, c, timeout_s) for c in candidates])
+    per_candidate = in_parallel([
+        lambda c=c: ([HeldOutResult(c, "safety", Status.SKIPPED, "never run: "
+                                    + "; ".join(hazards[c.path]), 0.0)]
+                     if hazards[c.path] else _check_one(ex, c, timeout_s))
+        for c in candidates])
     return [result for results in per_candidate for result in results]
 
 
 def _check_one(ex: ExerciseFiles, c: Candidate, timeout_s: float) -> list[HeldOutResult]:
+    if c.kind == SLIDES:
+        return [_slides(ex, c, timeout_s)]
     if c.kind == WRONG:
-        # Rule 3's verdict, as if the owner's mistake were a planted mutant.
+        # Rule 3's verdict, as if the mistake were a planted mutant.
         verdict, spent = mutant_verdict(ex, c.path, timeout_s)
+        if verdict == "survived" and c.author == MODEL:
+            # Is it really wrong? The model may have written a correct solution by mistake.
+            return [_survivor(ex, c, timeout_s, spent)]
         status, detail = {
             "killed": (Status.OK, "the tests still catch it"),
             "survived": (Status.FAIL, "passes the tests now: they no longer catch this mistake"),
@@ -154,8 +218,10 @@ def _check_one(ex: ExerciseFiles, c: Candidate, timeout_s: float) -> list[HeldOu
 
     # A correct one: rule 1 first, at the partition count of the owner's own runs.
     tests = check_reference_passes(ex, timeout_s, c.path, c.label)
+    if tests.status is not Status.OK and c.author == MODEL:
+        return [_rejected(ex, c, timeout_s, tests)]
     if tests.status is not Status.OK:
-        # It passed these tests once. Either the file changed since or the tests did; the
+        # The owner's passed these tests once. Either the file changed since or the tests did; the
         # check cannot tell which, so it says both. Rules 4 and 5 would prove nothing.
         detail = f"{tests.detail}; it passed before, so it changed since or the tests did"
         skipped = "skipped: it must pass the tests first"
@@ -169,6 +235,52 @@ def _check_one(ex: ExerciseFiles, c: Candidate, timeout_s: float) -> list[HeldOu
     ])
     return [_line(c, "tests", tests), _line(c, "distribution", distribution),
             _line(c, "oracle", oracle)]
+
+
+def _slides(ex: ExerciseFiles, c: Candidate, timeout_s: float) -> HeldOutResult:
+    """The slides' way passes, or the question departs from the slides: a stated
+    assumption is fine, a silent one is what this is for (week 7 dgim-query-estimate)."""
+    tests = check_reference_passes(ex, timeout_s, c.path, c.label)
+    if tests.status is Status.OK:
+        return HeldOutResult(c, "tests", Status.OK, f"the slides' way passes too: {tests.detail}",
+                             tests.duration_s)
+    where = c.note or "the model named no difference (its own mistake?)"
+    detail = (f"the slides' way fails the tests ({tests.detail}); the question departs from the "
+              f"slides, per the model: {where}. Check that the question states it")
+    return HeldOutResult(c, "tests", Status.FAIL, detail, tests.duration_s)
+
+
+def _rejected(ex: ExerciseFiles, c: Candidate, timeout_s: float,
+              tests: RuleResult) -> HeldOutResult:
+    """A model's correct solution failed the tests: the oracle says which side is wrong."""
+    oracle = _oracle(ex, timeout_s, c)
+    spent = tests.duration_s + oracle.duration_s
+    if oracle.status is Status.OK:
+        return HeldOutResult(c, "tests", Status.FAIL, f"fails the tests ({tests.detail}) but "
+                             "agrees with the oracle: the tests may reject a correct answer",
+                             spent)
+    if oracle.status is Status.FAIL:
+        return HeldOutResult(c, "tests", Status.NOT_APPLICABLE, "fails the tests and disagrees "
+                             "with the oracle: the model's own mistake", spent)
+    return HeldOutResult(c, "tests", Status.NOT_APPLICABLE,
+                         f"fails the tests ({tests.detail}); {oracle.detail}", spent)
+
+
+def _survivor(ex: ExerciseFiles, c: Candidate, timeout_s: float,
+              spent: float) -> HeldOutResult:
+    """A model's mistake passed the tests: the oracle says whether it is a mistake."""
+    oracle = _oracle(ex, timeout_s, c)
+    spent += oracle.duration_s
+    mistake = c.note or "(no description)"
+    if oracle.status is Status.FAIL:
+        return HeldOutResult(c, "caught", Status.FAIL, f"passes the tests but disagrees with "
+                             f"the oracle: the tests miss this mistake: {mistake}; "
+                             f"{oracle.detail}", spent)
+    if oracle.status is Status.OK:
+        return HeldOutResult(c, "caught", Status.NOT_APPLICABLE, "passes the tests and agrees "
+                             f"with the oracle: not a mistake after all ({mistake})", spent)
+    return HeldOutResult(c, "caught", Status.FAIL, "passes the tests; no oracle to tell "
+                         f"whether it is really wrong: {mistake}", spent)
 
 
 def _oracle(ex: ExerciseFiles, timeout_s: float, c: Candidate) -> RuleResult:
@@ -187,7 +299,8 @@ def _line(c: Candidate, check: str, r: RuleResult) -> HeldOutResult:
 def format_report(exercise_id: str, results: list[HeldOutResult]) -> str:
     lines = [exercise_id]
     if not results:
-        lines.append("  no held-out solutions yet: no passed or failed run in attempts.jsonl")
+        lines.append("  no held-out solutions yet: no passed or failed run in attempts.jsonl, "
+                     "no model's files")
     for r in results:
         lines.append(f"  {r.status.value:<5} {r.candidate.kind:<8} {r.candidate.label:<23}"
                      f" {r.check:<13} {r.detail}")
@@ -203,7 +316,9 @@ def report_to_dict(exercise_id: str, results: list[HeldOutResult], checked_at: s
         "results": [
             {
                 "kind": r.candidate.kind,
+                "author": r.candidate.author,
                 "candidate": r.candidate.label,
+                "note": r.candidate.note,
                 "source": r.candidate.source,
                 "check": r.check,
                 "status": r.status.value,
@@ -241,7 +356,9 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{exercise_id}: {e}", file=sys.stderr)
             broken += 1
             continue
-        results = check_heldout(ex, owner_candidates(batch, exercise_id, attempts_dir))
+        candidates = (owner_candidates(batch, exercise_id, attempts_dir)
+                      + model_candidates(solution))
+        results = check_heldout(ex, candidates)
         print(format_report(exercise_id, results), flush=True)
         if not results:
             without += 1

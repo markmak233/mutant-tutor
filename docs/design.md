@@ -722,14 +722,61 @@ or a mutant (`validation/heldout.py`; rules 1, 4 and 5 take an optional candidat
   (week 7 `dgim-query-estimate` counts the oldest overlapping bucket in full where slides
   6.54/6.57 halve it). Step 2 below targets that.
 
-Step 2 (approved 2026-10-31, not built): another model, given only the question, the
-skeleton and the slides, writes a correct solution (the lecture's own form where the
-slides give one) and a few typical wrong solutions. They run after the static safety
-check. Since a model-written candidate may itself be wrong, the oracle decides which side
-a disagreement is on: a "correct" one that fails the tests but agrees with the oracle
-flags tests that reject a correct answer; a "wrong" one that passes the tests and
-disagrees with the oracle flags tests that miss a bug; the other cases are the
-candidate's own error and are only counted. Flags only, as above.
+Step 2 (built 2026-10-31): another model writes candidates from the question alone.
+`tutor/heldout_writer.py` (outside `validation/`, which stays free of LLMs) asks it, per
+exercise, for `correct.py` (the question as written), `slides.py` (the task the way the
+slides do it, with one sentence on where the question departs from them) and up to three
+`wrong_NN.py` (a typical student mistake each, with what it gets wrong). It sees the
+question, the original skeleton (never the owner's `student.py`), the sample data and the
+lectures the exercise names (whole when they fit in 120k characters, the exercise's own
+pages marked); never the reference, tests, mutants, oracle or hints. The files and a
+`meta.json` (model, notes, inputs hash) go to `solutions/<id>/heldout/model/`; an
+exercise is written again only when its inputs or the model change, or with `--force`.
+- One call per file. Asked for all five in one reply, GLM-5.3 returned placeholders
+  without thinking and spent its whole output on reasoning with it. A `plan` field comes
+  before `code` (without it GLM wrote its reasoning into `code`, as repairs without
+  `diagnosis` did). The task comes last in the prompt, so an exercise's calls share one
+  prefix (DeepSeek served 79% of the input from its cache; OpenAI reported none).
+- A reply is sent back (two retries, then the file is dropped) when the code does not
+  parse, lacks an entry point, has an entry point that does nothing (`...`, `pass`, a
+  bare name: GLM once lost every newline, so a function parsed as `def f(): n` with the
+  rest a comment), fails the static safety check, or repeats a mistake already written
+  (DeepSeek-V4-Pro did that even when told the earlier ones).
+- The model must be another family than the batch's generator (owner, 2026-10-31): the
+  `heldout` role is deepseek-pro, for the Claude-made phase 2 batches; DeepSeek-made
+  batches run with `--profile gpt-terra`. To save the OpenAI credit, only week 7 did
+  (11 exercises, about $1.7); weeks 4 and 5 used deepseek-pro, the generator's family.
+  glm-full was tried first and could not do it.
+
+`validation/heldout.py` runs them after the static safety check. A model's file may
+itself be wrong, so where it and the tests disagree, the oracle (an independent reading
+of the question) decides:
+
+| Model's file | Outcome | Reported |
+|---|---|---|
+| correct | fails the tests, agrees with the oracle | FAIL: the tests may reject a correct answer |
+| correct | fails the tests, disagrees with the oracle | n/a: the model's own mistake |
+| correct | passes the tests | as the owner's: rules 5 and 4 next |
+| slides | fails the tests | FAIL, with the model's note on where the question departs |
+| wrong | caught | ok |
+| wrong | passes the tests, disagrees with the oracle | FAIL: the tests miss this mistake |
+| wrong | passes the tests, agrees with the oracle | n/a: not a mistake after all |
+
+The oracle does not judge `slides.py`: it was written from the question, so it shares any
+departure from the slides. A slides flag is right when the question states the
+departure as an assumption; the owner checks.
+
+First run with model files, 2026-10-31 (all five batches, 38 exercises, about 8 minutes):
+11 flags. Week 7 (gpt-terra): the tests miss three mistakes (`counting-bloom-filter`:
+repeated hash positions counted once; `lossy-counting`: two), and two questions depart
+from the slides without saying so (`dgim-query-estimate`, the oldest bucket; and
+`dgim-bucket-update`, which drops a bucket at age N where slide 6.50 says "prior to N time
+units before"); `fixed-proportion-sampling`'s departure is stated. Week 3: four slides
+flags, all stated (letter names, a tie-break, top-k, pairs without a common friend). Week
+5: one slides flag with no difference named, likely the model's own mistake. Weeks 1-2
+and 4: none. The oracle mattered: 15 of DeepSeek-V4-Pro's 57 "mistakes" (12 in weeks
+4-5) were correct solutions, which would have been false "tests miss a bug" flags;
+gpt-terra wrote one such in 33.
 
 ## Generation pipeline (LangGraph)
 
@@ -1665,8 +1712,8 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
    Design approved 2026-10-31 (owner), in order, each its own step:
    1. **Done 2026-10-31.** Held-out check with the owner's code, no LLM (see "Independent
       checks").
-   2. Model-written held-out candidates, the oracle deciding disagreements ("Independent
-      checks", step 2).
+   2. **Done 2026-10-31.** Model-written held-out candidates, the oracle deciding
+      disagreements ("Independent checks", step 2).
    3. Teaching-quality judge, in `tutor/judge/`, outside `validation/` so that package
       stays free of LLMs. Input: `question.md` (what the owner reads), skeleton and
       reference (needed for "targets the concept": does the solution need the knowledge

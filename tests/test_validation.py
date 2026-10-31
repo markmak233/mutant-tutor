@@ -17,7 +17,15 @@ from tutor.schema import Metadata, problems
 from tutor.validation import ExerciseError, Status, heldout, load_exercise, validate
 from tutor.validation.__main__ import format_report, main
 from tutor.validation.api import count_uses, find_violations
-from tutor.validation.heldout import CORRECT, WRONG, Candidate, check_heldout
+from tutor.validation.heldout import (
+    CORRECT,
+    MODEL,
+    SLIDES,
+    WRONG,
+    Candidate,
+    check_heldout,
+    model_candidates,
+)
 
 TESTS = (
     "from student import add\n\n"
@@ -972,3 +980,86 @@ def test_heldout_cli_reports_and_saves_only_exercises_with_candidates(tmp_path, 
         ("correct", "oracle", "ok")]
     assert not (batch / "solutions" / "other" / "heldout.json").exists()
     assert heldout.main([]) == 2
+
+
+# --- held-out step 2: files another model wrote (tutor/heldout_writer.py) ---------------
+# A model may be wrong itself, so where it and the tests disagree, the oracle decides.
+
+FLOAT_SUM = "def add(a, b):\n    return float(a + b)\n"  # right, but not the int the tests want
+INT_REPR_TESTS = "from student import add\n\ndef test_add():\n    assert repr(add(2, 3)) == '5'\n"
+
+
+def by_model(tmp_path, kind, code, note=""):
+    path = tmp_path / f"model-{kind}-{abs(hash(code))}.py"
+    path.write_text(code)
+    return Candidate(kind, f"model {kind}.py", path, path.name, MODEL, note)
+
+
+def test_a_models_files_are_read_with_their_notes(tmp_path):
+    solution = tmp_path / "solution"
+    assert model_candidates(solution) == []  # the writer has not run
+
+    folder = solution / "heldout" / "model"
+    folder.mkdir(parents=True)
+    for name in ("correct.py", "slides.py", "wrong_01.py", "wrong_02.py", "scratch.py"):
+        (folder / name).write_text(REFERENCE)
+    (folder / "meta.json").write_text(json.dumps(
+        {"notes": {"slides.py": "the slides round", "wrong_01.py": "subtracts"}}))
+
+    found = model_candidates(solution)
+    assert [(c.kind, c.label, c.note) for c in found] == [
+        (CORRECT, "model correct.py", ""), (SLIDES, "model slides.py", "the slides round"),
+        (WRONG, "model wrong_01.py", "subtracts"), (WRONG, "model wrong_02.py", "")]
+    assert {c.author for c in found} == {MODEL}
+    assert found[0].source == "solutions/solution/heldout/model/correct.py"
+
+
+def test_a_model_solution_the_tests_reject_but_the_oracle_accepts_is_flagged(tmp_path):
+    found = held_out(make_exercise(tmp_path / "ex", tests=INT_REPR_TESTS),
+                     by_model(tmp_path, CORRECT, FLOAT_SUM))
+
+    status, detail = found[(CORRECT, "tests")]
+    assert status is Status.FAIL
+    assert "agrees with the oracle: the tests may reject a correct answer" in detail
+
+
+def test_a_model_solution_that_the_oracle_rejects_too_is_its_own_mistake(tmp_path):
+    found = held_out(make_exercise(tmp_path / "ex"), by_model(tmp_path, CORRECT, MUTANT_SUB))
+
+    assert found == {(CORRECT, "tests"): (
+        Status.NOT_APPLICABLE, "fails the tests and disagrees with the oracle: the model's own "
+                               "mistake")}
+
+
+@pytest.mark.parametrize(("code", "status", "expected"), [
+    (MUTANT_SUB, Status.OK, "the tests still catch it"),
+    (SMALL_ONLY, Status.FAIL, "the tests miss this mistake: only small"),
+    (SWAPPED, Status.NOT_APPLICABLE, "not a mistake after all (only small)"),
+])
+def test_a_models_mistake_that_passes_counts_only_if_the_oracle_disagrees(tmp_path, code,
+                                                                          status, expected):
+    found = held_out(make_exercise(tmp_path / "ex"), by_model(tmp_path, WRONG, code, "only small"))
+
+    assert found[(WRONG, "caught")][0] is status
+    assert expected in found[(WRONG, "caught")][1]
+
+
+def test_the_slides_way_that_fails_is_flagged_with_the_models_note(tmp_path):
+    exercise = make_exercise(tmp_path / "ex")
+    failing = held_out(exercise, by_model(tmp_path, SLIDES, MUTANT_SUB, "the slides subtract"))
+    passing = held_out(exercise, by_model(tmp_path, SLIDES, SWAPPED))
+
+    status, detail = failing[(SLIDES, "tests")]
+    assert status is Status.FAIL
+    assert "per the model: the slides subtract. Check that the question states it" in detail
+    assert passing[(SLIDES, "tests")][0] is Status.OK
+
+
+def test_a_models_file_that_fails_the_safety_check_is_never_run(tmp_path):
+    unsafe = "import subprocess\n\n" + REFERENCE
+    results = check_heldout(load_exercise(*make_exercise(tmp_path / "ex")),
+                            [by_model(tmp_path, CORRECT, unsafe)])
+
+    assert [(r.check, r.status, r.duration_s) for r in results] == [
+        ("safety", Status.SKIPPED, 0.0)]
+    assert "never run: line 1: import of 'subprocess'" in results[0].detail
