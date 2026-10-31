@@ -694,6 +694,43 @@ or knowledge point, a held-out set that generation and repair never see:
 The first batch seeds the set: the owner's solutions and mistakes, no extra work beyond
 solving.
 
+How it is built (3b design, owner 2026-10-31): the held-out check adds no new kind of
+check. It runs the validator's own rules with another candidate in place of the reference
+or a mutant (`validation/heldout.py`; rules 1, 4 and 5 take an optional candidate, rule
+3's per-file verdict is `mutant_verdict`):
+
+| Candidate | Must | Rules reused | A failure means |
+|---|---|---|---|
+| a correct solution (the owner's passing `student.py`) | pass at the default partitions, then at every rule 5 condition (1/2/4 partitions, combiner off, values reversed) | 1, 5 | the tests reject a correct answer, or the owner's code has a distribution bug their own run (2 partitions) could not show |
+| the same | agree with the oracle on random inputs | 4 | the tests let a wrong solution through, or the oracle is wrong |
+| a wrong solution (a `student.py` the attempts plugin kept from a `failed` run) | still be caught | 3 | the tests became weaker since |
+
+- Report only: a finding is for the owner to look at. It never changes VALID or
+  `validation.json`, and never reaches repair, or the set would stop being held out. It
+  measures how often a VALID exercise is still wrong (phase 5).
+- Candidates come from `attempts.jsonl`: the current `student.py` if a run of it ever
+  passed (the log keeps no copy of passing code; a file changed since shows up as failing
+  its tests, worded "changed since, or the tests did"), and each distinct copy kept from a
+  `failed` run. `error` runs are left out: the tests never ran.
+- The exercise's files pass rule 0 and the safety check first, as for validation; the
+  owner's code skips the safety check, as in their own runs.
+- `python -m tutor.validation.heldout <batch_dir> [<id> ...]` prints one line per check
+  and writes `solutions/<id>/heldout.json`.
+- First run, 2026-10-31: weeks 1-2, 5 and 7, 17 correct solutions and 2 mistakes, nothing
+  flagged, about 2 minutes (the Spark week 100 s). Expected limit: the owner's solution
+  follows the question, so a question that misreads the slides is not caught this way
+  (week 7 `dgim-query-estimate` counts the oldest overlapping bucket in full where slides
+  6.54/6.57 halve it). Step 2 below targets that.
+
+Step 2 (approved 2026-10-31, not built): another model, given only the question, the
+skeleton and the slides, writes a correct solution (the lecture's own form where the
+slides give one) and a few typical wrong solutions. They run after the static safety
+check. Since a model-written candidate may itself be wrong, the oracle decides which side
+a disagreement is on: a "correct" one that fails the tests but agrees with the oracle
+flags tests that reject a correct answer; a "wrong" one that passes the tests and
+disagrees with the oracle flags tests that miss a bug; the other cases are the
+candidate's own error and are only counted. Flags only, as above.
+
 ## Generation pipeline (LangGraph)
 
 ```
@@ -1625,6 +1662,30 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
    the held-out set of "Independent checks" (the owner's passing solutions must pass, their
    mistakes must fail), and an LLM judge of teaching quality checked against the owner's
    ratings before it is trusted (never for validity).
+   Design approved 2026-10-31 (owner), in order, each its own step:
+   1. **Done 2026-10-31.** Held-out check with the owner's code, no LLM (see "Independent
+      checks").
+   2. Model-written held-out candidates, the oracle deciding disagreements ("Independent
+      checks", step 2).
+   3. Teaching-quality judge, in `tutor/judge/`, outside `validation/` so that package
+      stays free of LLMs. Input: `question.md` (what the owner reads), skeleton and
+      reference (needed for "targets the concept": does the solution need the knowledge
+      point?), the item's slides (as generation's `retrieve_context`) and the lectures
+      taught so far. Output: y/n per point with one sentence quoting the question, in
+      `solutions/<id>/quality.json`; never touches validity. Its model is from another
+      family than the generator's (self-preference bias). `--calibrate` compares it with
+      `ratings.jsonl` and the blind ratings point by point; a point is trusted when the
+      judge finds at least 80% of the owner's n labels and marks at most 20% of y labels
+      n, else it is shown as uncalibrated. Items where judge and owner disagree are listed
+      for the owner, whose label can be wrong too. The three week 5 ratings noted as format
+      problems are left out of "clear".
+   4. Synthetic defects for calibration: on 2026-10-31 the 29 labels held n only for
+      "clear" (5 usable), never for fits, taught or targets, so those three cannot be
+      calibrated from real data yet. A few yyyy questions get variants with one defect
+      each (an unstated output order; a convention other than the slides'; an API from a
+      later week; a task solvable without the knowledge point), labelled by construction
+      and spot-checked by the owner; reported apart from real labels, since planted
+      defects are easier to spot. Kept in the private workspace (`experiments/`).
 3c. **Done 2026-10-29.**
    Hint command, `python -m tutor.hint <exercise>` (decided 2026-10-24, after 3a since it
    needs the LLM client, and after 3b since its rules come from the owner's real mistakes;

@@ -14,9 +14,10 @@ import pytest
 from tutor.config import load_env
 from tutor.execution import DEFAULT_TIMEOUT_S
 from tutor.schema import Metadata, problems
-from tutor.validation import ExerciseError, Status, load_exercise, validate
+from tutor.validation import ExerciseError, Status, heldout, load_exercise, validate
 from tutor.validation.__main__ import format_report, main
 from tutor.validation.api import count_uses, find_violations
+from tutor.validation.heldout import CORRECT, WRONG, Candidate, check_heldout
 
 TESTS = (
     "from student import add\n\n"
@@ -809,3 +810,165 @@ def test_rule_5_reverses_value_order_for_an_inline_mrjob_exercise(tmp_path):
                               solution / "reference.py", (), {"framework": "mrjob",
                                                              "runner": "hadoop"})
     assert check_distribution(on_hadoop, timeout_s=60).status is Status.NOT_APPLICABLE
+
+
+# --- held-out check (roadmap 3b) --------------------------------------------------------
+# The owner's own code judged by an exercise's tests: a passing solution must pass every
+# condition the reference meets, a kept mistake must still be caught.
+
+SWAPPED = "def add(a, b):\n    return b + a\n"  # correct, written differently
+# Right on the tests' small numbers, wrong past 1000: tests pass it, the oracle does not.
+SMALL_ONLY = "def add(a, b):\n    return a + b if abs(a) < 1000 else 0\n"
+
+
+def candidate(tmp_path, kind, code, label=None):
+    path = tmp_path / f"{kind}-{abs(hash(code))}.py"
+    path.write_text(code)
+    return Candidate(kind, label or ("student.py" if kind == CORRECT else "attempt"), path,
+                     path.name)
+
+
+def held_out(exercise_paths, *candidates):
+    """{(kind, check): (status, detail)} for one candidate of each kind at most."""
+    results = check_heldout(load_exercise(*exercise_paths), list(candidates))
+    return {(r.candidate.kind, r.check): (r.status, r.detail) for r in results}
+
+
+def test_a_correct_solution_passes_and_a_mistake_is_caught(tmp_path):
+    found = held_out(make_exercise(tmp_path / "ex"), candidate(tmp_path, CORRECT, SWAPPED),
+                     candidate(tmp_path, WRONG, MUTANT_SUB))
+
+    assert {key: status for key, (status, _) in found.items()} == {
+        (CORRECT, "tests"): Status.OK,
+        (CORRECT, "distribution"): Status.NOT_APPLICABLE,  # no partition_check
+        (CORRECT, "oracle"): Status.OK,
+        (WRONG, "caught"): Status.OK,
+    }
+
+
+def test_a_solution_wrong_only_at_4_partitions_is_flagged_by_rule_5(tmp_path):
+    """The owner's run uses 2 partitions, so it passed; rule 5 tries 1 and 4 as well."""
+    found = held_out(make_partition_exercise(tmp_path / "ex"),
+                     candidate(tmp_path, CORRECT, FIRST_TWO))
+
+    assert found[(CORRECT, "tests")][0] is Status.OK
+    status, detail = found[(CORRECT, "distribution")]
+    assert status is Status.FAIL
+    assert detail.startswith("student.py failed with 4 partition")
+
+
+def test_a_solution_the_tests_pass_but_the_oracle_does_not_is_flagged(tmp_path):
+    """The tests let a wrong solution through: random inputs find what they miss."""
+    found = held_out(make_exercise(tmp_path / "ex"), candidate(tmp_path, CORRECT, SMALL_ONLY))
+
+    assert found[(CORRECT, "tests")][0] is Status.OK
+    status, detail = found[(CORRECT, "oracle")]
+    assert status is Status.FAIL
+    assert detail.startswith("student.py disagrees with the oracle")
+
+
+def test_a_mistake_the_tests_no_longer_catch_is_flagged(tmp_path):
+    found = held_out(make_exercise(tmp_path / "ex"), candidate(tmp_path, WRONG, REFERENCE))
+
+    assert found[(WRONG, "caught")] == (
+        Status.FAIL, "passes the tests now: they no longer catch this mistake")
+
+
+def test_a_passing_solution_that_fails_now_skips_rules_4_and_5(tmp_path):
+    found = held_out(make_exercise(tmp_path / "ex"), candidate(tmp_path, CORRECT, MUTANT_SUB))
+
+    status, detail = found[(CORRECT, "tests")]
+    assert status is Status.FAIL
+    assert "it passed before, so it changed since or the tests did" in detail
+    assert found[(CORRECT, "distribution")][0] is Status.SKIPPED
+    assert found[(CORRECT, "oracle")][0] is Status.SKIPPED
+
+
+def test_held_out_never_runs_an_exercise_that_fails_the_safety_check(tmp_path):
+    exercise = make_exercise(tmp_path / "ex", extra_files={"data/helper.py": "import subprocess\n"})
+    results = check_heldout(load_exercise(*exercise), [candidate(tmp_path, CORRECT, SWAPPED)])
+
+    assert [(r.check, r.status) for r in results] == [("all", Status.SKIPPED)]
+    assert "fails rule safe" in results[0].detail
+    assert results[0].duration_s == 0.0
+
+
+def write_attempts(attempts_dir, *runs):
+    attempts_dir.mkdir(parents=True, exist_ok=True)
+    lines = [run if isinstance(run, str) else json.dumps(run) for run in runs]
+    (attempts_dir / "attempts.jsonl").write_text("\n".join(lines) + "\n")
+
+
+def test_owner_candidates_come_from_the_attempts_log(tmp_path):
+    batch = tmp_path / "batches" / "b1"
+    (batch / "exercises" / "demo").mkdir(parents=True)
+    (batch / "exercises" / "demo" / "student.py").write_text(SWAPPED)
+    attempts = tmp_path / "attempts"
+    (attempts / "code" / "b1" / "demo").mkdir(parents=True)
+    for name in ("aaa", "bbb", "ccc"):
+        (attempts / "code" / "b1" / "demo" / f"{name}.py").write_text(MUTANT_SUB)
+
+    def run(result, time, code=None, batch="b1", exercise="demo"):
+        line = {"time": time, "batch": batch, "exercise": exercise, "result": result}
+        return {**line, "code": f"code/b1/demo/{code}.py"} if code else line
+
+    write_attempts(
+        attempts,
+        run("failed", "2026-10-30T23:35:43", "aaa"),
+        run("failed", "2026-10-30T23:35:50", "aaa"),  # unchanged code: the same copy
+        run("error", "2026-10-30T23:35:32", "bbb"),  # the tests never ran
+        "{\"time\": \"2026-10-30T23:36",  # a half-written line
+        run("failed", "2026-10-30T23:37:00", "ddd"),  # its copy was deleted
+        run("failed", "2026-10-30T23:38:00", "ccc", batch="b2"),  # another batch
+        run("passed", "2026-10-30T23:40:00"),
+    )
+    found = heldout.owner_candidates(batch, "demo", attempts)
+
+    assert [(c.kind, c.label, c.source) for c in found] == [
+        (CORRECT, "student.py", "exercises/demo/student.py"),
+        (WRONG, "attempt 10-30 23:35:43", "attempts/code/b1/demo/aaa.py"),
+    ]
+
+
+def test_without_a_passing_run_the_student_file_is_not_a_correct_solution(tmp_path):
+    batch = tmp_path / "b1"
+    (batch / "exercises" / "demo").mkdir(parents=True)
+    (batch / "exercises" / "demo" / "student.py").write_text(SKELETON)
+    write_attempts(tmp_path / "attempts",
+                   {"time": "2026-10-30T10:00:00", "batch": "b1", "exercise": "demo",
+                    "result": "incomplete"})
+
+    assert heldout.owner_candidates(batch, "demo", tmp_path / "attempts") == []
+    assert heldout.owner_candidates(batch, "demo", tmp_path / "no-attempts") == []
+
+
+def test_heldout_cli_reports_and_saves_only_exercises_with_candidates(tmp_path, monkeypatch,
+                                                                       capsys):
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    (workspace / "workspace.toml").write_text('course = "demo"\n')
+    monkeypatch.setenv("WORKSPACE_DIR", str(workspace))
+    batch = workspace / "batches" / "b1"
+    for exercise_id in ("demo", "other"):
+        exercise, solution = make_exercise(tmp_path / exercise_id,
+                                           metadata={"id": exercise_id})
+        (batch / "exercises").mkdir(parents=True, exist_ok=True)
+        (batch / "solutions").mkdir(exist_ok=True)
+        exercise.rename(batch / "exercises" / exercise_id)
+        solution.rename(batch / "solutions" / exercise_id)
+    (batch / "exercises" / "demo" / "student.py").write_text(SWAPPED)
+    write_attempts(workspace / "attempts",
+                   {"time": "2026-10-31T09:00:00", "batch": "b1", "exercise": "demo",
+                    "result": "passed"})
+
+    assert heldout.main([str(batch)]) == 0
+    out = capsys.readouterr().out
+    assert "other\n  no held-out solutions yet" in out
+    assert "held-out: 0 flagged; 1 exercise(s) without held-out solutions" in out
+    data = json.loads((batch / "solutions" / "demo" / "heldout.json").read_text())
+    assert data["flagged"] == 0
+    assert [(r["kind"], r["check"], r["status"]) for r in data["results"]] == [
+        ("correct", "tests", "ok"), ("correct", "distribution", "n/a"),
+        ("correct", "oracle", "ok")]
+    assert not (batch / "solutions" / "other" / "heldout.json").exists()
+    assert heldout.main([]) == 2
