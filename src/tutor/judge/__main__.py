@@ -28,7 +28,7 @@ from tutor.judge.calibrate import (
     report,
     results_to_dict,
 )
-from tutor.judge.teaching import POINTS, Judge, JudgeError, model_name, write
+from tutor.judge.teaching import Judge, JudgeError, model_name, write
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -44,6 +44,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--force", action="store_true", help="judge even if inputs are unchanged")
     parser.add_argument("--profile", help="a workspace.toml profile instead of the `judge` role")
     parser.add_argument("--parallel", type=int, default=4, help="calls at once")
+    parser.add_argument("--all", action="store_true",
+                        help="show minor flags too, not only the serious ones")
     args = parser.parse_args(argv)
     if args.calibrate == (args.batch_dir is not None):
         parser.print_usage()
@@ -88,9 +90,13 @@ def _batch(args, root: Path, model: Judge) -> int:
             print(f"{exercise_id}: failed: {e}", flush=True)
             return False
         lines = [f"{exercise_id}: {letters}"]
-        if verdict is not None:  # the evidence for each n, so a flag can be checked at once
-            lines += [f"    {p}: {getattr(verdict, p).evidence}" for p in POINTS
-                      if not getattr(verdict, p).ok]
+        if verdict is not None:  # the evidence for each flag, so it can be checked at once
+            shown = verdict.flags(serious_only=not args.all)
+            lines += [f"    {p}{'' if getattr(verdict, p).serious else ' (minor)'}: "
+                      f"{getattr(verdict, p).evidence}" for p in shown]
+            hidden = len(verdict.flags()) - len(shown)
+            if hidden:
+                lines.append(f"    (+{hidden} minor; --all shows them)")
         print("\n".join(lines), flush=True)
         return True
 

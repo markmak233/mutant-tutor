@@ -11,11 +11,15 @@ good to learn from. A model rates that on the owner's four points, y or n each:
 - taught: needs nothing from lectures not yet taught;
 - targets: solving it needs the knowledge point it is filed under, not a workaround.
 
-It reads what the student reads (question.md, the starting file), the reference (to see
-whether solving needs the knowledge point; the student never sees it), the exercise's
-lecture with its own pages marked, the lectures taught so far and the batch mode; never
-the tests, mutants or hints. Each point has `evidence` (a quote that decides it) before its
-y/n: written first, it is a scratchpad, as `plan` is for the held-out writer.
+It reads what the student reads (question.md, the starting file, and the "Useful
+functions" part of hints.md, where the API syntax is taught with small examples), the
+reference (to see whether solving needs the knowledge point; the student never sees it),
+the exercise's lecture with its own pages marked, the lectures taught so far and the batch
+mode; never the tests, mutants or the hint levels. Without the Useful functions part,
+about ten of 25 flags (2026-10-31) were "the question does not teach the API syntax", which
+design.md puts in hints.md on purpose. Each point has `evidence` (a quote that decides
+it) before its y/n: written first, it is a scratchpad, as `plan` is for the held-out
+writer.
 
 It never touches validity, and nothing in generation reads it. A point's verdicts are
 trusted only once calibrate.py shows they agree with the owner's ratings.
@@ -37,7 +41,7 @@ from tutor import llm
 from tutor.materials.slides import lecture_context, lectures_taught
 
 # Bump when the prompt changes: it is part of the inputs' hash, so every verdict is redone.
-PROMPT_VERSION = 2
+PROMPT_VERSION = 4
 MAX_TOKENS = 4_000  # four short points
 RETRIES = 2  # more replies after the first, each told what was wrong with the last
 REPORT_FILE = "quality.json"  # in solutions/<id>/, next to validation.json
@@ -58,6 +62,13 @@ class Point(_Strict):
         "First: one or two sentences quoting the question (or the slides) that decide this "
         "point, and the problem if there is one."))
     ok: bool = Field(description="true: no problem a student would hit; false: there is one.")
+    # 38 exercises got 29 flags on 2026-10-31, too many to read each time: a flag is
+    # serious or minor, and the batch report shows the serious ones unless asked.
+    serious: bool = Field(default=False, description=(
+        "Only when ok is false. true: a student who follows the question would be misled (a "
+        "wrong statement, a contradiction, a step they need left out) or could not start; "
+        "false: an imprecision a careful student gets past (an edge case the constraints "
+        "settle, a nitpick)."))
 
 
 class Verdict(_Strict):
@@ -67,8 +78,14 @@ class Verdict(_Strict):
     targets: Point
 
     def letters(self) -> str:
-        """The owner's notation: "yyny" in POINTS order."""
+        """The owner's notation: "yyny" in POINTS order; a minor flag is an n too, so the
+        letters compare with the owner's ratings as before."""
         return "".join("y" if getattr(self, p).ok else "n" for p in POINTS)
+
+    def flags(self, serious_only: bool = False) -> list[str]:
+        """The points rated n, in POINTS order; only the serious ones if asked."""
+        return [p for p in POINTS if not getattr(self, p).ok
+                and (getattr(self, p).serious or not serious_only)]
 
 
 @dataclass(frozen=True)
@@ -91,6 +108,7 @@ class Inputs:
     slides: str  # the exercise's lecture, its pages marked; "" if none found
     taught: list[str] = field(default_factory=list)  # lecture names up to this one
     mode: str = "learn"
+    useful: str = ""  # the "Useful functions" part of hints.md; "" if it has none
 
     def key(self) -> str:
         """A hash of the inputs and the prompt version: unchanged means no new call."""
@@ -114,10 +132,31 @@ def gather(batch_dir: Path, exercise_id: str, workspace: Path,
     manifest = batch_dir / "manifest.json"
     mode = json.loads(manifest.read_text()).get("mode", "learn") if manifest.is_file() else "learn"
     source = metadata.get("source")
+    hints = exercise / "hints.md"
     return Inputs(question=question, skeleton=skeleton,
                   reference=(solution / "reference.py").read_text(),
                   slides=lecture_context(workspace, source),
-                  taught=lectures_taught(workspace, source), mode=mode)
+                  taught=lectures_taught(workspace, source), mode=mode,
+                  useful=useful_functions(hints.read_text()) if hints.is_file() else "")
+
+
+def useful_functions(hints: str) -> str:
+    """The "## Useful functions" section of hints.md, up to the next "## " heading outside
+    a code block (its examples may hold "# ..." comment lines). The hint levels after it
+    are left out: they give away the solution's steps."""
+    lines = hints.splitlines()
+    start = next((i for i, line in enumerate(lines)
+                  if line.strip().lower() == "## useful functions"), None)
+    if start is None:
+        return ""
+    in_code, end = False, len(lines)
+    for i in range(start + 1, len(lines)):
+        if lines[i].lstrip().startswith("```"):
+            in_code = not in_code
+        elif not in_code and lines[i].startswith("## "):
+            end = i
+            break
+    return "\n".join(lines[start:end]).strip()
 
 
 # --- the prompt -------------------------------------------------------------------------
@@ -130,7 +169,9 @@ do that. Rate four points, each true (fine) or false (a problem a student would 
    after reading it once they understand the idea and the task, and have at least an idea
    of how to start. False when it assumes what it should teach, skips a step the student
    needs, buries the task in text, or leaves the student with no way in. Read it as that
-   student would, not as an expert who already knows the topic.
+   student would, not as an expert who already knows the topic. API syntax may be taught
+   in the hints file's "Useful functions" part (shown below), which the student reads
+   with the question: the question need not repeat it.
 2. fits: it matches how the lecture slides present the idea: the same definitions, rules,
    formulas and boundaries. A departure is fine only when the question states it (for
    example as an assumption).
@@ -145,7 +186,10 @@ The batch mode: "learn" (one knowledge point, the concept explained in the quest
 
 For each point write `evidence` first: one or two sentences quoting the question or the
 slides that decide it, and the problem if there is one; then `ok`. Be strict but fair:
-false only for a real problem, named in the evidence.
+false only for a real problem, named in the evidence. For a false point, set `serious`:
+true when a student following the question would be misled (a wrong statement, a
+contradiction, a step they need left out) or could not start; false for an imprecision a
+careful student gets past (an edge case the constraints settle, a nitpick).
 
 Return only the JSON object."""
 
@@ -157,6 +201,9 @@ def user_prompt(inputs: Inputs) -> str:
              "The question, as the student reads it:\n" + inputs.question,
              "The starting file the student gets (student.py):\n```python\n"
              + inputs.skeleton.rstrip() + "\n```",
+             ("The \"Useful functions\" part of hints.md, which the student reads with the "
+              "question:\n" + inputs.useful if inputs.useful
+              else "The hints file has no \"Useful functions\" part."),
              "The reference solution (never shown to the student):\n```python\n"
              + inputs.reference.rstrip() + "\n```",
              ("The lecture slides (the exercise's own pages are marked):\n" + inputs.slides
@@ -209,6 +256,7 @@ def write(batch_dir: Path, exercise_id: str, workspace: Path, model: Judge,
         "model": model_name(model),
         "inputs": inputs.key(),
         "letters": verdict.letters(),
+        "serious": verdict.flags(serious_only=True),
         "points": verdict.model_dump(),
         "tokens": tokens,
     }

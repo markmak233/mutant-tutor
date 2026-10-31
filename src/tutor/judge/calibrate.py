@@ -195,9 +195,11 @@ def report(results: list[tuple[Item, Verdict | None, str]],
     lines.append("")
     lines.append(f"judge flags (judge n, owner y or not rated), {len(flags)}; the owner's "
                  f"answers in {REVIEWS_FILE}:")
+    verdicts = {item.name: v for item, v, _ in results if v is not None}
     for number, (item, p, evidence) in enumerate(flags, start=1):
         answer = reviews.get((item.name, p), "to review")
-        lines.append(f"  {number:>2}. [{answer}] {item.name}: {p}: {evidence}")
+        weight = "serious" if getattr(verdicts[item.name], p).serious else "minor"
+        lines.append(f"  {number:>2}. [{answer}] [{weight}] {item.name}: {p}: {evidence}")
     reviewed = precision(results, reviews)
     if any(n for _, n in reviewed.values()):
         lines.append("")

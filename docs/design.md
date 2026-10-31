@@ -632,11 +632,12 @@ the reducer, several reducers). So the two are judged separately:
 Validity vs teaching quality (decided 2026-10-26, Codex review 4). VALID says the tests,
 reference and mutants agree; it does not say the exercise is good to learn from. Teaching
 quality is a separate score that never replaces or overrides validity, on four points:
-- clear: someone who has never met the content can learn it from the question: after
-  reading it they understand it and have at least an idea how to start (owner,
-  2026-10-31; it read "one reading of the question, inputs and outputs fully specified"
-  until the judge, held to that, missed all five of the owner's n: the owner had meant
-  understandable, not specified);
+- clear: someone who has never met the content can learn it from the question, with the
+  "Useful functions" part of `hints.md` where the API syntax is taught: after reading
+  them they understand it and have at least an idea how to start (owner, 2026-10-31; it
+  read "one reading of the question, inputs and outputs fully specified" until the judge,
+  held to that, missed all five of the owner's n: the owner had meant understandable, not
+  specified);
 - fits the material: matches how the lectures and labs present the idea (the stripes
   case below is a failure of this);
 - within what has been taught: no API or idea from later weeks; partly checkable
@@ -1760,6 +1761,22 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
         lossy-counting keeps the eps*n bound though floor(1/eps) breaks it; dgim-query-
         estimate's bucket span implies every position is a 1), some wrong (a Boyer-Moore
         counterexample without a majority), some pedantic. Too many to read each time.
+      - Two changes after it (2026-10-31). A flag is now serious or minor and the batch
+        report shows the serious ones (`--all` for every one); it did not filter much:
+        rerun on all 38, 23 of 25 flags came back serious. The judge also sees the
+        "Useful functions" part of `hints.md` (never the hint levels): about ten flags had
+        been "the question does not teach the API syntax", which this design puts in the
+        hints on purpose; on those seven exercises the rerun gave yyyy. The owner counts
+        that part as read with the question (see "clear" above).
+      - Fixed from the reruns (question.md only, noted in each manifest):
+        counting-bloom-filter's constraint 1 now holds while deletes match inserts;
+        lossy-counting's eps*n bound needs a whole 1/eps; dgim-query-estimate calls its
+        bucket span a simplification; df-wordcount-explode-split's example said bye,1
+        where Bye occurs twice (the tests say bye,2); reverse-graph-secondary-sort's
+        example lost its tabs; misra-gries says "more than n/k".
+      - Cost: the dollar figures above use the notes' prices ($2 in, $12 out per million
+        tokens); the OpenAI balance fell by about half of the estimate, so gpt-terra
+        costs roughly half that.
    4. Synthetic defects for calibration: on 2026-10-31 the 29 labels held n only for
       "clear" (5 usable), never for fits, taught or targets, so those three cannot be
       calibrated from real data yet. A few yyyy questions get variants with one defect

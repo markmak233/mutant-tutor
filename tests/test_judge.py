@@ -48,7 +48,9 @@ def make_workspace(tmp_path):
     (exercise / "question.md").write_text("# Add\n\nAdd `a` and `b`.\n")
     (exercise / "student.py").write_text("def add(a, b):\n    return a + b  # the owner's\n")
     (exercise / "test_student.py").write_text("def test_add():\n    assert True\n")
-    (exercise / "hints.md").write_text("# Hints\nthe hint text\n")
+    (exercise / "hints.md").write_text(
+        "# Hints\n\n## Useful functions\n\n```python\nsum([1, 2])\n## not a heading in code\n"
+        "```\n\n## Level 1\n\nthe hint text\n")
     (solution / "skeleton.py").write_text("def add(a, b):\n    raise NotImplementedError\n")
     (solution / "reference.py").write_text("def add(a, b):\n    return sum([a, b])\n")
     (solution / "metadata.json").write_text(json.dumps({
@@ -57,7 +59,9 @@ def make_workspace(tmp_path):
 
 
 def verdict_json(letters="yyyy"):
-    return json.dumps({p: {"evidence": f"{p} evidence", "ok": letter == "y"}
+    """"y" fine, "n" a serious flag, "m" a minor one."""
+    return json.dumps({p: {"evidence": f"{p} evidence", "ok": letter == "y",
+                           "serious": letter == "n"}
                        for p, letter in zip(POINTS, letters, strict=True)})
 
 
@@ -85,6 +89,7 @@ def test_the_judge_sees_what_the_student_reads_and_the_reference(tmp_path):
     assert "Batch mode: review" in prompt
     assert "taught so far, in order: Lecture_2.1-Intro, Lecture_2.2-Demo\n" in prompt
     assert "p.2 · slide 2.2.2 · this exercise's page" in prompt
+    assert "## Useful functions" in prompt and "## not a heading in code" in prompt
     for hidden in ("the owner's", "def test_add", "the hint text", "Lecture_3.1-Later page"):
         assert hidden not in prompt
 
@@ -114,7 +119,9 @@ def test_a_verdict_is_saved_and_kept_while_nothing_changes(tmp_path):
     assert letters == "nyyy" and verdict.clear.evidence == "clear evidence"
     data = json.loads((batch / "solutions/demo/quality.json").read_text())
     assert data["letters"] == "nyyy" and data["model"] == "fake: fake-1"
-    assert data["points"]["clear"] == {"evidence": "clear evidence", "ok": False}
+    assert data["points"]["clear"] == {"evidence": "clear evidence", "ok": False,
+                                       "serious": True}
+    assert data["serious"] == ["clear"]
     assert write(batch, "demo", workspace, judge_with(FakeModel())) == ("kept: nyyy", None)
     again = write(batch, "demo", workspace, judge_with(FakeModel(verdict_json())), force=True)
     assert again[0] == "yyyy"
@@ -208,7 +215,7 @@ def test_verdicts_are_reused_and_disagreements_listed(tmp_path):
     assert first[0][1].letters() == again[0][1].letters() == "ynyy"
     text = report(again)
     assert "missed (owner n, judge y):\n  b1/demo: clear: clear evidence" in text
-    assert "1. [to review] b1/demo: fits: fits evidence" in text
+    assert "1. [to review] [serious] b1/demo: fits: fits evidence" in text
     assert "2. [to review] b1/demo: taught: taught evidence" not in text  # judge said y
 
 
@@ -229,7 +236,8 @@ def test_the_owners_answers_on_flags_give_how_many_were_right(tmp_path):
     assert precision(results, reviews)["clear"] == (2, 2)
     assert precision(results, reviews)["fits"] == (0, 1)
     text = report(results, reviews)
-    assert "1. [right] b1/demo: clear" in text and "2. [wrong] b1/demo: fits" in text
+    assert "1. [right] [serious] b1/demo: clear" in text
+    assert "2. [wrong] [serious] b1/demo: fits" in text
     assert "flags the owner found right: clear 2/2, fits 0/1" in text
     assert read_reviews(tmp_path / "none") == {}
 
@@ -243,3 +251,19 @@ def test_an_item_without_a_verdict_is_reported_not_scored(tmp_path):
     assert results[0][1] is None
     assert "no verdict: b1/demo: the reply does not fit" in report(results)
     assert scores([])[0].n_labels == 0
+
+
+def test_a_minor_flag_is_an_n_but_not_serious():
+    rated = verdict("mnyy")  # clear minor, fits serious
+
+    assert rated.letters() == "nnyy"  # compares with the owner's ratings as before
+    assert rated.flags() == ["clear", "fits"]
+    assert rated.flags(serious_only=True) == ["fits"]
+
+
+def test_only_the_useful_functions_part_of_the_hints_is_shown():
+    from tutor.judge.teaching import useful_functions
+
+    assert useful_functions("# Hints\n\n## Level 1\nx\n") == ""
+    hints = "## Useful functions\n### `f`\n```\n## in code\n```\n## Level 1\nsecret\n"
+    assert useful_functions(hints) == "## Useful functions\n### `f`\n```\n## in code\n```"
