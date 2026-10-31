@@ -101,7 +101,8 @@ def run_program(program, input_dir: Path | str, output_dir: Path | str, *params)
     # nothing would pass a test that expects empty output.
     out = Path(output_dir)
     if not (out / "_SUCCESS").exists():
-        saved = sorted(f"{p.parent.relative_to(out)}/" for p in out.glob("*/**/_SUCCESS"))
+        saved = sorted(f"{p.parent.relative_to(out).as_posix()}/"
+                       for p in out.glob("*/**/_SUCCESS"))
         # A program that saved into folders of outputPath otherwise reads as one that
         # saved nothing (a generated exercise lost three repairs to that).
         raise AssertionError(

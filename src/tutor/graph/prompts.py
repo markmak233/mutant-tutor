@@ -189,7 +189,9 @@ def example(framework: str, interface: str) -> str:
                 or path.name in ("validation.json", "question.md")):  # question.md: a copy
             continue
         try:
-            parts.append(f"=== {rel} ===\n{path.read_text(encoding='utf-8')}")
+            # as_posix: the model sees exercise/student.py on Windows too, and writes paths
+            # the same way back
+            parts.append(f"=== {rel.as_posix()} ===\n{path.read_text(encoding='utf-8')}")
         except UnicodeDecodeError:
             continue
     return "\n\n".join(parts)

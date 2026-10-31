@@ -709,7 +709,9 @@ def reusing_reports(check: Callable[[Path, Path], ValidationReport],
         digest = hashlib.sha256()
         for root in (exercise, solution):
             for path in sorted(p for p in root.rglob("*") if p.is_file()):
-                digest.update(str(path.relative_to(root)).encode() + b"\0" + path.read_bytes())
+                # as_posix: the same files give the same key on every platform
+                digest.update(path.relative_to(root).as_posix().encode() + b"\0"
+                              + path.read_bytes())
         stored = folder / f"{digest.hexdigest()[:20]}.json"
         if stored.is_file():
             data = json.loads(stored.read_text(encoding="utf-8"))

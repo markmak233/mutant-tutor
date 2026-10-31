@@ -108,7 +108,7 @@ def simulate(batch_dir: Path, exercise_ids: list[str], per_exercise: int, model:
         line = {"id": f"{exercise_id}/{mutant.stem}@L{level}", "batch": batch_dir.name,
                 "exercise": exercise_id, "mutant": mutant.stem, "level": level,
                 "mode": mode, "bug": bug, "effect": effect,
-                "student": str(student.relative_to(out)),
+                "student": student.relative_to(out).as_posix(),
                 "first_error": first_error(result.output)}
         try:
             hint = model_hint(model, student=code, hints=hints,
