@@ -1,5 +1,9 @@
 """The nodes of the generation graph: plain functions, state in, partial state out.
 
+One item goes retrieve_context -> generate -> write_oracle -> validate_draft, then route
+sends it to save, repair (back to write_oracle) or discard; a batch is plan_batch, the
+owner's apply_decision, the items, then collect. notes/langgraph.md walks through it.
+
 Nothing here imports langgraph (build.py wires the nodes and owns the interrupt), so every
 node is tested and usable on its own. Only `plan_batch`, `generate` and `repair` call a
 model, and `write_oracle` calls a second one; `validate` is the existing validator,
@@ -44,12 +48,14 @@ from tutor.validation.checks import RuleResult, Status, ValidationReport, valida
 from tutor.validation.exercise import load_exercise
 from tutor.validation.safety import CORE_IMPORTS, find_hazards, workspace_allow_imports
 
+# The JSON Schemas sent as structured output, one per kind of reply; the replies are
+# parsed back into the same Pydantic models (state.py).
 DRAFT_SCHEMA = ExerciseDraft.model_json_schema()
 PLAN_SCHEMA = BatchPlan.model_json_schema()
 ORACLE_SCHEMA = OracleDraft.model_json_schema()
 # Files of the exercise folder that data_files must not replace.
 OWN_FILES = {"student.py", "test_student.py", "hints.md", "question.md"}
-REPO = Path(__file__).resolve().parents[3]
+REPO = Path(__file__).resolve().parents[3]  # for the manifest's git commit
 PLAN_RETRIES = 2  # extra plan calls when the plan breaks a rule checked here
 UNREAD = ("pending", "partial")  # cached pages whose transcription is missing or cut off
 _LOG_LOCK = threading.Lock()  # items run in parallel threads and share the batch log
@@ -136,6 +142,7 @@ def retrieve_context(state: ItemState, deps: Deps) -> ItemState:
     if not entries:
         raise FileNotFoundError(f"no cached pages for {item.lecture}: run python -m "
                                 f"tutor.materials --vision lectures")
+    # The item's own pages: those whose slide footer falls in its range ("4.15-4.24").
     low, high = _slide_range(item.slides)
     slides = [e for e in entries if e.label and low <= _slide(e.label) <= high]
     too_long = sum(len(e.body) for e in entries) > deps.context_chars
@@ -147,19 +154,25 @@ def retrieve_context(state: ItemState, deps: Deps) -> ItemState:
     if unread := [e.number for e in pages if e.read in UNREAD]:
         raise ValueError(f"{item.lecture} pages {unread} (slides {item.slides}) are not fully "
                          f"read: run python -m tutor.materials --vision lectures")
+    # Whole lecture when it fits (the model sees what comes before and after); else only
+    # the item's pages. Unread pages elsewhere are left out rather than sent half-read.
     chosen = pages if too_long else [e for e in entries if e.read not in UNREAD]
     return {"context": "\n\n".join(_section(e) for e in chosen)}
 
 
 def _section(e: cache.Entry) -> str:
+    """One page as the model sees it: "## p.12 · slide 2.10", then its text. The generate
+    prompt tells the model to cite the p.N and slide S it uses."""
     return f"## p.{e.number}" + (f" · slide {e.label}" if e.label else "") + f"\n{e.body}"
 
 
 def _slide(label: str) -> tuple[int, ...]:
+    """"4.15" -> (4, 15): compared as numbers, so 4.9 < 4.15, unlike the strings."""
     return tuple(int(part) for part in re.findall(r"\d+", label))
 
 
 def _slide_range(slides: str) -> tuple[tuple[int, ...], tuple[int, ...]]:
+    """"4.15-4.24" -> ((4, 15), (4, 24)); a single slide is a range of one."""
     low, _, high = slides.partition("-")
     return _slide(low), _slide(high or low)
 
@@ -167,12 +180,16 @@ def _slide_range(slides: str) -> tuple[tuple[int, ...], tuple[int, ...]]:
 # --- generate / repair ------------------------------------------------------------------
 
 def generate(state: ItemState, deps: Deps) -> ItemState:
+    """Round 0: the first draft of the item's exercise, from its plan line and the course
+    pages."""
     item = state["item"]
     user = prompts.item_prompt(item, state["context"], deps.mode)
     return _ask(state, deps, user, "generate", 0)
 
 
 def repair(state: ItemState, deps: Deps) -> ItemState:
+    """Rounds 1..max_rounds: the draft again, told what failed. From round
+    `stronger_repair_from` the `repair` role's (larger) model takes over, if one is set."""
     item = state["item"]
     if state.get("draft") is None:
         # Nothing usable came back (cut off while thinking, or not JSON): showing that
@@ -192,6 +209,8 @@ def repair(state: ItemState, deps: Deps) -> ItemState:
 
 def _ask(state: ItemState, deps: Deps, user: str, purpose: str, round_: int,
          config: llm.LLMConfig | None = None, thinking: bool | None = None) -> ItemState:
+    """One exercise call (generate or repair): the reply parsed into an ExerciseDraft, or
+    a format failure for repair when it does not fit the schema."""
     config = config or deps.config
     thinking = deps.thinking if thinking is None else thinking
     conventions = deps.workspace / "conventions.md"
@@ -202,6 +221,8 @@ def _ask(state: ItemState, deps: Deps, user: str, purpose: str, round_: int,
             concept_lines=deps.concept_lines)},
         {"role": "user", "content": user},
     ]
+    # A repair round asks a little warmer each time: at temperature 0 an unchanged prompt
+    # got the identical draft back (graph/settings.py).
     reply = deps.chat(config, messages, purpose=purpose, log_path=deps.llm_log,
                       max_tokens=deps.max_tokens if thinking else deps.max_tokens_no_thinking,
                       response_schema=DRAFT_SCHEMA,
@@ -224,6 +245,7 @@ def _ask(state: ItemState, deps: Deps, user: str, purpose: str, round_: int,
 
 
 def _streaming(state: ItemState, deps: Deps) -> dict:
+    """The chat arguments for a streamed reply, with progress reported per item."""
     item_id = state["item"].id
     progress = (lambda chars: deps.on_stream(item_id, chars)) if deps.on_stream else None
     return {"stream": deps.stream, "on_progress": progress}
@@ -240,6 +262,7 @@ def _spent(state: ItemState, reply: llm.Reply) -> ItemState:
 
 
 def _describe(err: dict) -> str:
+    """One Pydantic error as "field.path: message", for a failure text a model can act on."""
     where = ".".join(str(part) for part in err["loc"]) or "(top level)"
     return f"{where}: {err['msg']}"
 
@@ -324,6 +347,7 @@ def _oracle_failed(state: ItemState, failure: str) -> ItemState:
 
 
 def _docstring(code: str) -> str:
+    """The module docstring of `code` (student.py's holds the question); "" if none."""
     try:
         return ast.get_docstring(ast.parse(code)) or ""
     except SyntaxError:
@@ -331,10 +355,12 @@ def _docstring(code: str) -> str:
 
 
 def _functions(tree: ast.Module) -> dict[str, ast.FunctionDef]:
+    """The module's top-level functions by name."""
     return {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
 
 
 def _is_stub(func: ast.FunctionDef) -> bool:
+    """Only `raise NotImplementedError` after an optional docstring: an interface line."""
     body = func.body[1:] if ast.get_docstring(func) is not None else func.body
     return (len(body) == 1 and isinstance(body[0], ast.Raise)
             and "NotImplementedError" in ast.unparse(body[0]))
@@ -357,6 +383,7 @@ def _as_interface(code: str) -> str:
 
 
 def _interface_problems(code: str) -> list[str]:
+    """Why `code` is not an oracle interface (functions with docstrings and stub bodies)."""
     try:
         functions = _functions(ast.parse(code))
     except SyntaxError as e:
@@ -367,6 +394,8 @@ def _interface_problems(code: str) -> list[str]:
 
 
 def _filled_problems(interface: str, code: str) -> str:
+    """Why the oracle model's code does not fill `interface`: a function missing or still
+    a stub; "" when every function is written."""
     try:
         written = _functions(ast.parse(code))
     except SyntaxError as e:
@@ -398,10 +427,13 @@ def validate_draft(state: ItemState, deps: Deps) -> ItemState:
             round_dir = str(round_dir_path)
             report = deps.check(exercise, solution)
             (round_dir_path / "report.txt").write_text(_report_text(report))
+            # The failure text: each failing rule with pytest's excerpt, for repair.
             failure = None if report.valid else "\n".join(
                 f"rule {r.rule} ({r.name}) FAIL: {r.detail}"
                 + ("\n" + textwrap.indent(r.excerpt, "    ") if r.excerpt else "")
                 for r in report.results if r.status is Status.FAIL)
+            # Rule 4 as a tie-breaker: when it disagrees, repair sees the oracle's code;
+            # when rule 1 fails but rule 4 agrees, the tests are the likely culprit.
             status = {r.rule: r.status for r in report.results}
             disagrees = any(r.rule == "4" and r.detail.startswith("reference disagrees")
                             for r in report.results)  # not a test that cannot run
@@ -439,6 +471,7 @@ ORACLE_AGREES = (
 
 
 def _report_text(report: ValidationReport) -> str:
+    """The round's report.txt: one line per rule, then VALID or INVALID."""
     return "\n".join(f"{r.rule:>4} {r.status.value:<5} {r.name}: {r.detail}"
                      for r in report.results) + ("\nVALID\n" if report.valid else "\nINVALID\n")
 
@@ -498,6 +531,8 @@ def write_draft(draft: ExerciseDraft, exercise_id: str,
 
 
 def _data_path(name: str) -> PurePosixPath:
+    """A data file's path inside the exercise folder, or DraftError: no absolute path,
+    no "..", no hidden part, no Python file and none of the exercise's own files."""
     # Checked after PurePosixPath has normalised it: "./hints.md" is hints.md.
     path = PurePosixPath(name)
     if (path.is_absolute() or ".." in path.parts or not path.parts or name.startswith("~")
@@ -525,6 +560,7 @@ def _closest(code: str, old: str) -> str:
 def apply_mutant(reference: str, mutant: MutantDraft) -> str:
     """The reference with the mutant's replacements, and its docstring saying the bug."""
     code = reference
+    # Each replacement must hit exactly one place, so the mutant is the change it states.
     for r in mutant.replacements:
         count = code.count(r.old)
         if count != 1:
@@ -550,6 +586,8 @@ def apply_mutant(reference: str, mutant: MutantDraft) -> str:
 # --- routing, save, discard -------------------------------------------------------------
 
 def route(state: ItemState, deps: Deps) -> str:
+    """After validation: save a VALID draft; else repair while rounds and the item's token
+    budget last; else discard."""
     if state.get("failure") is None:
         return "save"
     if state.get("round", 0) < deps.max_rounds and state.get("tokens", 0) < deps.item_token_budget:
@@ -592,6 +630,7 @@ def save(state: ItemState, deps: Deps) -> ItemState:
 
 
 def _saved_before(deps: Deps, exercise_id: str) -> bool:
+    """The batch log records `exercise_id` as saved (by an earlier run of this batch)."""
     if not deps.generation_log.is_file():
         return False
     lines = (json.loads(line) for line in deps.generation_log.read_text().splitlines())
@@ -827,6 +866,7 @@ def page_titles(workspace: Path, lecture: str) -> str:
 
 
 def existing_ids(workspace: Path) -> list[str]:
+    """Every exercise id in the workspace's batches; a plan may not reuse one."""
     batches = workspace / "batches"
     return sorted({p.name for p in batches.glob("*/exercises/*")
                    if p.is_dir() and not p.name.startswith((".", "_"))})
@@ -849,6 +889,7 @@ def existing_exercises(workspace: Path) -> list[str]:
 
 
 def _git_commit() -> str:
+    """The repository's short commit, recorded in the manifest; "unknown" outside git."""
     try:
         return subprocess.run(["git", "-C", str(REPO), "rev-parse", "--short", "HEAD"],
                               capture_output=True, text=True, check=True).stdout.strip()
@@ -862,6 +903,8 @@ def log_error(state: ItemState, deps: Deps, error: str) -> None:
 
 
 def _log(state: ItemState, deps: Deps, outcome: str, error: str | None = None) -> None:
+    """One line per finished item in the batch's generation.jsonl: its outcome, every
+    round's failure, tokens and models, for the phase 5 metrics and model comparisons."""
     line = {
         "time": datetime.now().isoformat(timespec="seconds"),
         "exercise": state["item"].id,

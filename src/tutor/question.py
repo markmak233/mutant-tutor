@@ -109,6 +109,7 @@ def _command(text: str) -> str:
 
 
 def _fence(block: list[str]) -> list[str]:
+    """Lines as a plain-text code block."""
     return ["```text", *block, "```"]
 
 
@@ -149,6 +150,7 @@ def write_question(student_source: str, exercise_dir: Path,
 
 
 def main(argv: list[str]) -> int:
+    """python -m tutor.question BATCH_DIR: question.md for every exercise of the batch."""
     if len(argv) != 1:
         print(__doc__.split("\n\n")[-1])
         return 2

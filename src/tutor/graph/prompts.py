@@ -30,6 +30,9 @@ EXAMPLE_FOR = {
 }
 DEFAULT_EXAMPLE = "station-average-rdd"
 
+# The generate / repair system prompt: what the validator checks, then each file of the
+# reply (ExerciseDraft's fields) with its rules. {imports}, {oracle} and {concept_lines}
+# are filled in by system_prompt().
 SPEC = """You write programming exercises for a university course, one exercise at a time.
 Each exercise is checked by an automatic validator before anyone sees it; write it so that
 it passes:
@@ -187,6 +190,8 @@ def system_prompt(conventions: str, oracle_interface: bool = False,
     ])
 
 
+# The batch mode's line in the item prompt: how much the question explains (decided
+# 2026-10-24; docs/design.md, "Two modes").
 MODES = {
     "learn": "learn: the student is meeting the topic. The Concept section is the knowledge "
              "point's condensed lecture (see the rules); a debugging Symptom may name the "
@@ -199,6 +204,8 @@ MODES = {
 
 
 def item_prompt(item: PlanItem, context: str, mode: str = "learn") -> str:
+    """The generate prompt for one item, longest-shared part first (see the module
+    docstring): the course pages, the example exercise, then the item itself."""
     return (
         "The course pages (one section per PDF page, `## p.N · slide S`; image slides "
         "were transcribed, so code there is as on the slide):\n\n" + context
@@ -259,6 +266,8 @@ def retry_prompt(item: PlanItem, context: str, failure: str, mode: str = "learn"
     )
 
 
+# The oracle model's system prompt: it reads only the question, the interface and the
+# sample data, so its oracle.py is a reading of the question independent of the reference.
 ORACLE_SPEC = """You write the plain-Python specification (oracle) of a programming exercise:
 the obviously correct, slow-but-simple result that a Spark or MapReduce solution is
 compared against on random inputs. You get the exercise's question, the interface to
@@ -279,11 +288,13 @@ ORACLE_IMPORTS = sorted(m for m in CORE_IMPORTS if not m.startswith("_") and m n
 
 
 def oracle_spec() -> str:
+    """ORACLE_SPEC with the modules an oracle may import filled in."""
     return ORACLE_SPEC.replace("{imports}", ", ".join(ORACLE_IMPORTS))
 
 
 def oracle_prompt(question: str, interface: str, data_files: dict[str, str],
                   sample_chars: int = 2000) -> str:
+    """The oracle model's user message; each sample data file is cut to `sample_chars`."""
     samples = "\n\n".join(
         f"=== {name} ===\n{text[:sample_chars]}" + ("\n..." if len(text) > sample_chars else "")
         for name, text in sorted(data_files.items()))
@@ -294,6 +305,8 @@ def oracle_prompt(question: str, interface: str, data_files: dict[str, str],
     )
 
 
+# The plan model's system prompt: choose knowledge points from coverage.md's gaps, one
+# plan line each; plan_problems() then checks what code can check.
 PLAN_SPEC = """You plan a batch of programming exercises for a university course. Choose
 what to practise; another step writes each exercise.
 
