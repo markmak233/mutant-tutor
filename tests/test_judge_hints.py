@@ -57,12 +57,29 @@ def fake_tests(files, timeout, env, heavy=True):
 
 
 class FakeChat:
+    """Answers with the given replies in turn: only for calls made one after another."""
+
     def __init__(self, *replies):
         self.replies, self.calls = list(replies), []
 
     def __call__(self, config, messages, **kwargs):
         self.calls.append(messages)
         return llm.Reply(self.replies.pop(0), 100, 20, 0.1)
+
+
+class KeyedChat:
+    """Answers by what the request contains: simulate() and judged() call the model from
+    several threads, so the order of the calls is not fixed (CI got them the other way
+    round, 2026-10-31) and replies handed out in turn went to the wrong hint."""
+
+    def __init__(self, replies: dict[str, str]):
+        self.replies, self.calls = replies, []
+
+    def __call__(self, config, messages, **kwargs):
+        self.calls.append(messages)
+        sent = json.dumps(messages)
+        reply = next(text for key, text in self.replies.items() if key in sent)
+        return llm.Reply(reply, 100, 20, 0.1)
 
 
 def config(name="fake"):
@@ -80,7 +97,8 @@ def test_a_mutants_docstring_is_removed_and_nothing_else():
 
 def test_mutants_play_students_and_the_hint_model_never_reads_their_bug(tmp_path):
     workspace, batch = make_batch(tmp_path)
-    chat = FakeChat(hint_reply(), hint_reply("Compare the result with the largest input."))
+    chat = KeyedChat({"a - b": hint_reply(),
+                      "max(a, b)": hint_reply("Compare the result with the largest input.")})
     out = tmp_path / "out"
 
     found = simulate(batch, ["demo"], 3, HintModel(config(), chat=chat), out,
@@ -90,6 +108,7 @@ def test_mutants_play_students_and_the_hint_model_never_reads_their_bug(tmp_path
     assert found[0]["bug"] == "subtracts instead of adding"
     assert found[0]["effect"].startswith("2 + 3 gives -1")
     assert found[0]["hint"] == "Look at how add combines its two numbers."
+    assert found[1]["hint"] == "Compare the result with the largest input."
     assert "assert -1 == 5" in found[0]["first_error"]
     sent = json.dumps(chat.calls)
     assert "Mutant:" not in sent and "subtracts instead" not in sent
@@ -118,12 +137,13 @@ def verdict(leaks, direction):
 def test_the_judge_is_scored_against_the_owners_labels(tmp_path):
     workspace, batch = make_batch(tmp_path)
     out = tmp_path / "out"
-    simulate(batch, ["demo"], 3, HintModel(config(), chat=FakeChat(hint_reply(), hint_reply())),
+    simulate(batch, ["demo"], 3, HintModel(config(), chat=KeyedChat({"def add": hint_reply()})),
              out, run_tests=fake_tests)
     (out / LABELS_FILE).write_text(
         json.dumps({"id": "demo/m01_sub@L1", "leaks": False, "direction": True}) + "\n"
         + json.dumps({"id": "demo/m03_max@L1", "leaks": True, "direction": False}) + "\n")
-    chat = FakeChat(verdict(False, True), verdict(False, False))
+    chat = KeyedChat({"subtracts instead of adding": verdict(False, True),
+                      "returns the larger number": verdict(False, False)})
 
     results = judged(out, workspace, Judge(config("judge"), chat=chat))
 
