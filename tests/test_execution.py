@@ -1,4 +1,5 @@
 import os
+import sys
 import time
 from pathlib import Path
 
@@ -76,15 +77,20 @@ def test_no_tests_collected_is_error(tmp_path):
     assert result.returncode == 5
 
 
+# A process that sleeps for a minute, started from inside a test the way PySpark starts a
+# JVM. Python rather than `sleep`, which Windows does not have.
+SLEEPER = "[sys.executable, '-c', 'import time; time.sleep(60)']"
+
+
 def test_timeout_kills_the_whole_process_group(tmp_path):
     """An endless test is stopped at the limit, and so is any process it started
     (the way PySpark starts a JVM): the child's pid must be gone afterwards."""
     pid_file = tmp_path / "child.pid"
     test = write(
         tmp_path / "test_hang.py",
-        "import subprocess, time\n"
+        "import subprocess, sys, time\n"
         "def test_hang():\n"
-        "    child = subprocess.Popen(['sleep', '60'])\n"
+        f"    child = subprocess.Popen({SLEEPER})\n"
         f"    open({str(pid_file)!r}, 'w').write(str(child.pid))\n"
         "    time.sleep(60)\n",
     )
@@ -97,6 +103,27 @@ def test_timeout_kills_the_whole_process_group(tmp_path):
     child_pid = int(pid_file.read_text())
     time.sleep(0.2)
     assert not _alive(child_pid)
+
+
+def test_a_process_left_behind_by_a_finished_run_is_killed(tmp_path):
+    """A test that passes but leaves a process running (a JVM never stopped) gets it
+    killed after the run, although its parent, pytest, has already exited; the process
+    sat in the temp dir, so the run returning at all shows the dir could be deleted."""
+    pid_file = tmp_path / "child.pid"
+    test = write(
+        tmp_path / "test_leaves.py",
+        "import subprocess, sys\n"
+        "def test_leaves():\n"
+        # Not on pytest's output pipe, which the runner reads until it closes.
+        f"    child = subprocess.Popen({SLEEPER}, stdout=subprocess.DEVNULL,\n"
+        "                             stderr=subprocess.DEVNULL)\n"
+        f"    open({str(pid_file)!r}, 'w').write(str(child.pid))\n",
+    )
+
+    result = run_pytest({"test_leaves.py": test})
+
+    assert result.outcome is Outcome.PASSED
+    assert not _alive(int(pid_file.read_text()))
 
 
 def test_temp_dir_is_removed_and_sources_untouched(tmp_path):
@@ -120,6 +147,19 @@ def test_temp_dir_is_removed_and_sources_untouched(tmp_path):
 
 
 def _alive(pid: int) -> bool:
+    if sys.platform == "win32":
+        # os.kill(pid, 0) would terminate the process on Windows; ask for its exit code.
+        import ctypes
+
+        kernel32 = ctypes.WinDLL("kernel32")
+        kernel32.OpenProcess.restype = ctypes.c_void_p
+        handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            return False  # no such process any more
+        code = ctypes.c_ulong()
+        kernel32.GetExitCodeProcess(ctypes.c_void_p(handle), ctypes.byref(code))
+        kernel32.CloseHandle(ctypes.c_void_p(handle))
+        return code.value == 259  # STILL_ACTIVE
     try:
         os.kill(pid, 0)
     except ProcessLookupError:

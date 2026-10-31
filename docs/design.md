@@ -62,6 +62,15 @@ container for isolation is fine; deploying the tool as a service is not.
   its `yarn` binary clashes with the JavaScript `yarn`. Runs on Java 17, so one JDK serves
   both Spark and Hadoop. Hadoop launches task scripts with the `python3` on `PATH`, so jobs must
   pass `--python-bin` pointing at the project's Python 3.11.
+- Platforms (decided 2026-10-31, owner): macOS, Linux and native Windows from one code base;
+  only a few functions branch on the platform (process tree kill, see "Code execution
+  safety"). Exception: the Hadoop runner is POSIX only (macOS, Linux, WSL). Measured on
+  Windows 11 with Hadoop 3.3.6 + winutils: Hadoop itself runs, but mrjob's Hadoop runner
+  hits one Windows gap after another (a space in `JAVA_HOME` breaks `hadoop.cmd`, `bin/hadoop`
+  is a bash script, the streaming jar is not found, tasks start with `/bin/sh`), and the
+  last could not be worked around: `hadoop.cmd` splits the comma-separated `-files` argument
+  into several. mrjob is unmaintained, so on Windows the Hadoop tests and exercises are
+  skipped with a pointer to WSL; the inline runner and Spark work there.
 
 ## Public repo vs private data
 
@@ -1353,6 +1362,19 @@ its report, which counted as FAILED until an outside review, 2026-10-29) is ERRO
 whole process group is killed on timeout and after every run, because PySpark starts a JVM
 under pytest that would otherwise be orphaned (a test covers this, and fails if only the parent
 is killed). This is isolation, not a sandbox: the child can still touch other files and the network.
+
+On Windows (native support decided 2026-10-31, owner: one code base for macOS, Linux and
+Windows, platform branches kept to a few functions) there are no process groups, and
+walking the parent-pid tree (`taskkill /T`) misses a JVM whose parent pytest has already
+exited: measured, the leftover process kept the temp dir open and deleting it failed
+(`WinError 32`). So the child is put into a Job Object (`tutor/winjob.py`, ctypes, no new
+dependency) right after it starts; its descendants join automatically, `TerminateJobObject`
+ends them all, and the runner waits until the job is empty before deleting the temp dir,
+since termination is asynchronous. `KILL_ON_JOB_CLOSE` also ends the job if the validator
+itself crashes. Accepted gap: a process the child started before being assigned would stay
+outside, but assignment follows `Popen` at once, while the child still spends far longer
+starting Python and importing pytest. A test covers a process left behind by a run that
+passed; both process tests fail on Windows when the child is kept out of the job.
 
 Scope: the runner protects validation, which runs generated code. A learner running
 `pytest test_student.py` runs their own code in the terminal, in-process and without a

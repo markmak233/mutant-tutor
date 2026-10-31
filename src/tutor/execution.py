@@ -20,6 +20,9 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
+if sys.platform == "win32":  # Job Objects stand in for process groups there
+    from tutor import winjob
+
 DEFAULT_TIMEOUT_S = 30.0
 REPORT_FILE = "tutor-pytest-report.xml"  # pytest's JUnit XML, written inside the temp dir
 # How many child runs may be alive at once in this process. Validation runs its checks in
@@ -123,6 +126,7 @@ def run_script(
 
 
 def _copy_in(files: Mapping[str, Path], workdir: Path) -> Path:
+    """Copy each source to its name inside `workdir`; directories whole (links followed)."""
     for name, source in files.items():
         target = workdir / name
         if source.is_dir():
@@ -179,20 +183,16 @@ def _run_in(workdir: Path, timeout_s: float, extra_env: Mapping[str, str],
         **extra_env,
     }
     start = time.monotonic()
-    # New session = new process group, so a timeout can kill grandchildren too
-    # (PySpark starts a JVM under pytest; killing only pytest would orphan it).
-    proc = subprocess.Popen(
-        cmd, cwd=workdir, env=env, text=True,
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True,
-    )
-    try:
-        output, _ = proc.communicate(timeout=timeout_s)
-    except subprocess.TimeoutExpired:
-        _kill_group(proc.pid)
-        output, _ = proc.communicate()
-        return RunResult(Outcome.TIMEOUT, None, time.monotonic() - start, output)
-    duration = time.monotonic() - start
-    _kill_group(proc.pid)  # leftovers such as a JVM that was never stopped
+    with _ProcessTree(cmd, workdir, env) as tree:
+        proc = tree.proc
+        try:
+            output, _ = proc.communicate(timeout=timeout_s)
+        except subprocess.TimeoutExpired:
+            tree.kill()
+            output, _ = proc.communicate()  # what it printed before the kill
+            return RunResult(Outcome.TIMEOUT, None, time.monotonic() - start, output)
+        duration = time.monotonic() - start
+        tree.kill()  # leftovers such as a JVM that was never stopped
     if script:  # no test report: the exit code is the whole answer
         outcome = Outcome.PASSED if proc.returncode == 0 else Outcome.ERROR
         return RunResult(outcome, proc.returncode, duration, output)
@@ -201,11 +201,48 @@ def _run_in(workdir: Path, timeout_s: float, extra_env: Mapping[str, str],
                      counts)
 
 
-def _kill_group(pgid: int) -> None:
-    try:
-        os.killpg(pgid, signal.SIGKILL)
-    except ProcessLookupError:
-        pass  # the whole group has already exited
+class _ProcessTree:
+    """The child and every process it starts, killed as one. PySpark starts a JVM under
+    pytest, and killing only pytest would orphan it, still running in the temp dir.
+
+    POSIX: a new session is a new process group, which the child's descendants join, so
+    one killpg reaches them all, even after their parent has exited.
+    Windows has no process groups: a Job Object does the same (tutor/winjob.py). The child
+    is assigned to the job right after it starts; a process it started in that moment
+    would stay outside, but Python takes far longer to start up and import pytest than
+    that, and only then do tests start anything."""
+
+    def __init__(self, cmd: list[str], cwd: Path, env: Mapping[str, str]) -> None:
+        self._job = winjob.Job() if sys.platform == "win32" else None
+        self.proc = subprocess.Popen(
+            cmd, cwd=cwd, env=env, text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            start_new_session=self._job is None,  # POSIX only; the job replaces it
+        )
+        if self._job is not None:
+            try:
+                self._job.add(self.proc.pid)
+            except OSError:  # not contained, so do not let it run: end it and report
+                self.proc.kill()
+                self.proc.communicate()
+                self._job.close()
+                raise
+
+    def kill(self) -> None:
+        if self._job is not None:
+            self._job.kill()  # returns once every process in the job is gone
+            return
+        try:
+            os.killpg(self.proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass  # the whole group has already exited
+
+    def __enter__(self) -> _ProcessTree:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        if self._job is not None:
+            self._job.close()  # KILL_ON_JOB_CLOSE: also ends what an exception left running
 
 
 def _read_counts(report: Path) -> TestCounts | None:
