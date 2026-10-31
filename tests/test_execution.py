@@ -3,6 +3,8 @@ import sys
 import time
 from pathlib import Path
 
+import pytest
+
 from tutor.execution import TIMEOUT_FACTOR_ENV, Outcome, run_pytest, timeout_factor
 
 
@@ -275,6 +277,27 @@ def test_copied_files_follow_links_as_the_run_does(tmp_path, symlink):
     assert copied_files({"data": data}) == {"data/a.csv": data / "a.csv",
                                              "data/more/x.py": data / "more" / "x.py"}
     assert links({"data": data}) == ["data/more"]
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="junctions exist on Windows only")
+def test_a_windows_junction_counts_as_a_link(tmp_path):
+    """A junction needs no privilege and is_symlink() is False for it, yet the run copies
+    what it points to: it must be found like any link, once, without walking into it."""
+    from conftest import make_junction
+
+    from tutor.execution import links
+
+    outside = tmp_path / "outside"
+    (outside / "inner").mkdir(parents=True)
+    (outside / "secret.txt").write_text("x", encoding="utf-8")
+    data = tmp_path / "data"
+    data.mkdir()
+    make_junction(data / "more", outside)
+    make_junction(outside / "inner" / "loop", outside)  # reached only by walking into it
+
+    assert not (data / "more").is_symlink()
+    assert links({"data": data}) == ["data/more"]
+    assert links({"more": data / "more"}) == ["more"]
 
 
 def test_the_cap_on_runs_at_once_holds_across_threads(tmp_path, monkeypatch):

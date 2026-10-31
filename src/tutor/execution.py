@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -170,17 +171,38 @@ def copied_files(files: Mapping[str, Path]) -> dict[str, Path]:
 
 
 def links(files: Mapping[str, Path]) -> list[str]:
-    """The symbolic links among `files` and inside their directories, by path in the run
-    directory; run_pytest would copy what each one points to."""
+    """The links among `files` and inside their directories (symbolic links, and
+    directory junctions on Windows), by path in the run directory; run_pytest would copy
+    what each one points to."""
     found = []
     for name, source in files.items():
-        if source.is_symlink():
+        if _is_link(source):
             found.append(name)
         elif source.is_dir():
-            for root, dirs, names in os.walk(source):  # not into linked directories
+            for root, dirs, names in os.walk(source):
                 found += [f"{name}/{(Path(root) / n).relative_to(source).as_posix()}"
-                          for n in sorted(dirs + names) if (Path(root) / n).is_symlink()]
+                          for n in sorted(dirs + names) if _is_link(Path(root) / n)]
+                # Not into linked directories: os.walk skips symbolic links itself, but
+                # walks into a junction, which it does not count as a link.
+                dirs[:] = [d for d in dirs if not _is_link(Path(root) / d)]
     return found
+
+
+def _is_link(path: Path) -> bool:
+    """A symbolic link, or on Windows a directory junction. A junction needs no privilege
+    to create (a symbolic link needs Developer Mode), copytree follows it like a link, and
+    is_symlink() is False for it: measured 2026-10-31, a junction to a folder outside the
+    exercise passed the link check and its file was copied into the run. Only the junction
+    tag counts, not every reparse point: OneDrive's files-on-demand are reparse points too."""
+    if path.is_symlink():
+        return True
+    if sys.platform != "win32":
+        return False
+    try:
+        tag = path.lstat().st_reparse_tag  # 0 for an ordinary file or folder
+    except OSError:
+        return False
+    return tag == stat.IO_REPARSE_TAG_MOUNT_POINT
 
 
 def _run_in(workdir: Path, timeout_s: float, extra_env: Mapping[str, str],

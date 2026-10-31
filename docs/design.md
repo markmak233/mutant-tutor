@@ -1430,7 +1430,12 @@ themselves, so a cheap layer comes first and a stronger one later.
   runs on its own. Both checks cover every file a run copies in, subfolders included
   (pytest collects tests and conftest.py recursively; checked only at the top until
   2026-10-29, found in an outside review). A symbolic link anywhere in the exercise is
-  refused before that: the run copies what it points to, which may be outside the
+  refused before that, and so is a Windows directory junction (found 2026-10-31 when
+  porting to Windows: `is_symlink()` is False for a junction and any account may create
+  one, so a junction to a folder outside the exercise passed the check and its files were
+  copied into the run; `execution._is_link` checks the junction reparse tag, not every
+  reparse point, since OneDrive's files-on-demand are reparse points too): the run copies
+  what it points to, which may be outside the
   exercise (`execution.copied_files` lists a run's files the way copytree copies them, for
   this check and the hint cache). A failure makes the exercise INVALID and skips every rule that runs
   code. A file with a syntax error is not a finding: Python cannot run it either, and the
