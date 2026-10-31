@@ -228,7 +228,7 @@ Phase numbers match `docs/design.md`.
   DataFrame, combiner-off and reversed-value-order checks, attempt log, two more synthetic
   examples
 - **2** ✅ Golden exercises: a first batch of 10 course exercises, validated, its must
-  exercises solved by hand and rated to run the full loop (the `v0.1.0` release still open)
+  exercises solved by hand and rated to run the full loop
 - **2b** Code-tracing exercises ("what does this print and why")
 - **3a** ✅ LLM generation: static check on generated code, slide reading with a cached
   text layer and vision transcription, LangGraph plan → owner approval → generate → oracle
@@ -253,7 +253,8 @@ Decided, next to 3b:
   answer away, does it point the right way
 - Algorithm-quality warnings, with 2b's design exercises (e.g. how much a combiner cut),
   reported, never failing an exercise
-- `v0.1.0`: pinned dependency versions, a changelog and a tag, closing phase 2
+- `v0.1.0`: pinned dependency versions, a changelog and a tag, once the GUI or the whole
+  backend is done
 
 ## How it is built
 

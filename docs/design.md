@@ -1637,7 +1637,7 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
    check; `attempts.jsonl`. **Done 2026-10-25.**
 2. Golden exercises, solved by the owner. Run the whole loop by hand before automating it.
    **Done 2026-10-28** (the first batch's five must exercises solved and rated); the
-   `v0.1.0` release below is still open.
+   `v0.1.0` release below waits for the GUI or the whole backend (owner, 2026-10-31).
    - Batches from materials the owner picks (see "Material selection"), drafted by Claude Code and
      checked by the validator; the owner solves them in the batch's mode.
    - First batch (approved 2026-10-25): `2026-10-25_p2-w1w2-mapreduce`, mode `learn`, sources
@@ -1703,7 +1703,9 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
      all 21 VALID again); rule 0 in `validate()`, the examples' metadata in the one
      spelling, tests for a missing, mistyped and unknown field; the workspace `AGENTS.md`
      "Authoring exercises" section. **Done 2026-10-28.**
-   - Then release `v0.1.0` (decided 2026-10-26, from a Codex review before going public):
+   - Then release `v0.1.0` (decided 2026-10-26, from a Codex review before going public;
+     moved by the owner on 2026-10-31: not at the end of phase 2 or 3, but once the GUI or
+     the whole backend is done, with the same contents):
      a `constraints.txt` with the dependency versions CI passed on, a short CHANGELOG, and
      a git tag. Not earlier: before phase 2 is solved, the whole loop has not run once.
      README for the release: one positioning line (private lectures -> runnable exercises
