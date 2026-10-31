@@ -7,7 +7,7 @@ from tutor.execution import TIMEOUT_FACTOR_ENV, Outcome, run_pytest, timeout_fac
 
 
 def write(path: Path, text: str) -> Path:
-    path.write_text(text)
+    path.write_text(text, encoding="utf-8")
     return path
 
 
@@ -101,7 +101,7 @@ def test_timeout_kills_the_whole_process_group(tmp_path, monkeypatch):
     assert result.outcome is Outcome.TIMEOUT
     assert result.returncode is None
     assert result.duration_s < 10
-    child_pid = int(pid_file.read_text())
+    child_pid = int(pid_file.read_text(encoding="utf-8"))
     time.sleep(0.2)
     assert not _alive(child_pid)
 
@@ -124,7 +124,7 @@ def test_a_process_left_behind_by_a_finished_run_is_killed(tmp_path):
     result = run_pytest({"test_leaves.py": test})
 
     assert result.outcome is Outcome.PASSED
-    assert not _alive(int(pid_file.read_text()))
+    assert not _alive(int(pid_file.read_text(encoding="utf-8")))
 
 
 def test_the_time_limit_is_scaled_on_windows_only(monkeypatch):
@@ -267,10 +267,10 @@ def test_copied_files_follow_links_as_the_run_does(tmp_path):
 
     target = tmp_path / "target"
     target.mkdir()
-    (target / "x.py").write_text("")
+    (target / "x.py").write_text("", encoding="utf-8")
     data = tmp_path / "data"
     data.mkdir()
-    (data / "a.csv").write_text("1\n")
+    (data / "a.csv").write_text("1\n", encoding="utf-8")
     (data / "more").symlink_to(target, target_is_directory=True)
     assert copied_files({"data": data}) == {"data/a.csv": data / "a.csv",
                                              "data/more/x.py": data / "more" / "x.py"}

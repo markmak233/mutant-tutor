@@ -31,16 +31,17 @@ def batch(tmp_path, student, mode="learn", constraints=None):
     exercise, solution = root / "exercises" / "sum-list", root / "solutions" / "sum-list"
     (solution / "mutants").mkdir(parents=True)
     exercise.mkdir(parents=True)
-    (exercise / "test_student.py").write_text(TESTS)
-    (exercise / "student.py").write_text(student)
-    (exercise / "hints.md").write_text("## Hint 1\n")
-    (root / "manifest.json").write_text(json.dumps({"mode": mode}))
+    (exercise / "test_student.py").write_text(TESTS, encoding="utf-8")
+    (exercise / "student.py").write_text(student, encoding="utf-8")
+    (exercise / "hints.md").write_text("## Hint 1\n", encoding="utf-8")
+    (root / "manifest.json").write_text(json.dumps({"mode": mode}), encoding="utf-8")
     (solution / "metadata.json").write_text(json.dumps(
-        {"id": "sum-list", "constraints": constraints or {}}))
-    (solution / "reference.py").write_text("def total(xs):\n    return sum(xs)\n")
-    (solution / "skeleton.py").write_text("def total(xs):\n    raise NotImplementedError\n")
+        {"id": "sum-list", "constraints": constraints or {}}), encoding="utf-8")
+    (solution / "reference.py").write_text("def total(xs):\n    return sum(xs)\n", encoding="utf-8")
+    (solution / "skeleton.py").write_text("def total(xs):\n    raise NotImplementedError\n",
+                                          encoding="utf-8")
     for name, code in MUTANTS.items():
-        (solution / "mutants" / f"{name}.py").write_text(code)
+        (solution / "mutants" / f"{name}.py").write_text(code, encoding="utf-8")
     return exercise
 
 
@@ -69,25 +70,25 @@ def test_mutant_signatures_are_computed_once(tmp_path):
     assert hint_for(exercise, run_tests=runs, say=lambda _: None).key == "m01_skip_first"
     assert runs.calls == 1  # only the student's run; the mutants come from the cache
     (exercise.parent.parent / "solutions" / "sum-list" / "mutants" / "m02_plus_one.py"
-     ).write_text(MUTANTS["m02_plus_one"].replace("+ 1", "+ 2"))
+     ).write_text(MUTANTS["m02_plus_one"].replace("+ 1", "+ 2"), encoding="utf-8")
     runs = CountingRuns()
     hint_for(exercise, run_tests=runs, say=lambda _: None)
     assert runs.calls == 2  # the changed mutant runs again
     (exercise / "data").mkdir()
-    (exercise / "data" / "input.csv").write_text("1,2\n")
+    (exercise / "data" / "input.csv").write_text("1,2\n", encoding="utf-8")
     runs = CountingRuns()
     hint_for(exercise, run_tests=runs, say=lambda _: None)
     assert runs.calls == 3  # new test data: every mutant runs again
-    (exercise / "data" / "input.csv").write_text("1,2,3\n")
+    (exercise / "data" / "input.csv").write_text("1,2,3\n", encoding="utf-8")
     runs = CountingRuns()
     hint_for(exercise, run_tests=runs, say=lambda _: None)
     assert runs.calls == 3  # changed test data too
     linked = tmp_path / "shared"
     linked.mkdir()
-    (linked / "more.csv").write_text("4\n")
+    (linked / "more.csv").write_text("4\n", encoding="utf-8")
     (exercise / "data" / "shared").symlink_to(linked, target_is_directory=True)
     hint_for(exercise, say=lambda _: None)
-    (linked / "more.csv").write_text("5\n")
+    (linked / "more.csv").write_text("5\n", encoding="utf-8")
     runs = CountingRuns()
     hint_for(exercise, run_tests=runs, say=lambda _: None)
     assert runs.calls == 3  # data behind a link the run copies
@@ -160,11 +161,11 @@ def test_signatures_ignore_addresses_and_timings():
 
 
 def test_a_hint_in_a_workspace_batch_is_logged(tmp_path, monkeypatch):
-    (tmp_path / "workspace.toml").write_text('course = "demo"\n')
+    (tmp_path / "workspace.toml").write_text('course = "demo"\n', encoding="utf-8")
     monkeypatch.setenv("WORKSPACE_DIR", str(tmp_path))
     exercise = batch(tmp_path, SKIPS_FIRST)
     log_hint(exercise, hint_for(exercise, say=lambda _: None))
-    line = json.loads((tmp_path / "attempts" / "attempts.jsonl").read_text())
+    line = json.loads((tmp_path / "attempts" / "attempts.jsonl").read_text(encoding="utf-8"))
     assert (line["event"], line["layer"], line["key"], line["exercise"]) == (
         "hint", "mutant", "m01_skip_first", "sum-list")
 
@@ -173,7 +174,7 @@ def test_mistakes_the_tests_cannot_tell_apart_are_all_named(tmp_path):
     exercise = batch(tmp_path, SKIPS_FIRST)
     twin = exercise.parent.parent / "solutions" / "sum-list" / "mutants" / "m03_drop_head.py"
     twin.write_text('"""Mutant: drops the head of the list, so the first value is lost."""\n'
-                    "def total(xs):\n    return sum(xs[1:])\n")
+                    "def total(xs):\n    return sum(xs[1:])\n", encoding="utf-8")
     hint = hint_for(exercise, say=lambda _: None)
     assert hint.key == "m01_skip_first|m03_drop_head"
     assert "one of: starts at the second element; drops the head of the list" in hint.text
@@ -277,7 +278,7 @@ def test_java_stack_frames_are_left_out_of_the_error():
 
 def test_asking_again_with_the_same_code_raises_the_level(tmp_path, monkeypatch):
     from tutor.hint.__main__ import model_hints_given
-    (tmp_path / "workspace.toml").write_text('course = "demo"\n')
+    (tmp_path / "workspace.toml").write_text('course = "demo"\n', encoding="utf-8")
     monkeypatch.setenv("WORKSPACE_DIR", str(tmp_path))
     exercise = batch(tmp_path, UNKNOWN)
     systems = []
@@ -289,5 +290,5 @@ def test_asking_again_with_the_same_code_raises_the_level(tmp_path, monkeypatch)
         systems.append(chat.calls[0][0]["content"])
     assert "Level 1:" in systems[0] and "Level 2" in systems[1]
     assert model_hints_given(exercise) == 2
-    (exercise / "student.py").write_text(UNKNOWN + "# tried something\n")
+    (exercise / "student.py").write_text(UNKNOWN + "# tried something\n", encoding="utf-8")
     assert model_hints_given(exercise) == 0  # changed code starts again at level 1

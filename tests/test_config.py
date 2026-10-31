@@ -9,7 +9,7 @@ from tutor.config import WorkspaceError, load_env, load_workspace
 def make_workspace(path: Path, toml: str = 'course = "demo"\n') -> Path:
     """Create a minimal workspace: a directory holding the given workspace.toml."""
     path.mkdir(parents=True, exist_ok=True)
-    (path / "workspace.toml").write_text(toml)
+    (path / "workspace.toml").write_text(toml, encoding="utf-8")
     return path
 
 
@@ -100,7 +100,7 @@ def test_load_env_does_not_override_existing(tmp_path, monkeypatch):
     """.env fills in missing variables (comments skipped, quotes stripped) but never
     overrides a variable already exported in the shell."""
     env_file = tmp_path / ".env"
-    env_file.write_text('# comment\nTUTOR_A="from file"\nTUTOR_B=from file\n')
+    env_file.write_text('# comment\nTUTOR_A="from file"\nTUTOR_B=from file\n', encoding="utf-8")
     monkeypatch.delenv("TUTOR_A", raising=False)
     monkeypatch.setenv("TUTOR_B", "from shell")
 

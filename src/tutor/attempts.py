@@ -196,7 +196,7 @@ def _snapshot(student: Path, attempts_dir: Path, batch: str, exercise: str) -> s
 def _mode(batch_dir: Path) -> str | None:
     """`mode` from the batch's manifest.json ("learn" / "review"), None if not given."""
     try:
-        return json.loads((batch_dir / "manifest.json").read_text()).get("mode")
+        return json.loads((batch_dir / "manifest.json").read_text(encoding="utf-8")).get("mode")
     except (OSError, ValueError, AttributeError):
         return None
 

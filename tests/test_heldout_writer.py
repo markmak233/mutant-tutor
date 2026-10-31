@@ -38,19 +38,20 @@ def make_batch(tmp_path, pdf_pages="3-4"):
     (exercise / "sample_output").mkdir()
     solution.mkdir(parents=True)
     (exercise / "question.md").write_text("# Add\n\nAdd `a` and `b`.\n")
-    (exercise / "student.py").write_text(OWNER)
-    (exercise / "test_student.py").write_text(TESTS)
-    (exercise / "hints.md").write_text("# Hints\nthe generator's reading\n")
-    (exercise / "sample_input" / "numbers.txt").write_text("2 3\n")
-    (exercise / "sample_output" / "part-00000").write_text("5\n")
-    (solution / "skeleton.py").write_text(SKELETON)
+    (exercise / "student.py").write_text(OWNER, encoding="utf-8")
+    (exercise / "test_student.py").write_text(TESTS, encoding="utf-8")
+    (exercise / "hints.md").write_text("# Hints\nthe generator's reading\n", encoding="utf-8")
+    (exercise / "sample_input" / "numbers.txt").write_text("2 3\n", encoding="utf-8")
+    (exercise / "sample_output" / "part-00000").write_text("5\n", encoding="utf-8")
+    (solution / "skeleton.py").write_text(SKELETON, encoding="utf-8")
     (solution / "metadata.json").write_text(json.dumps({
         "id": "demo", "framework": "python", "entry_point": ["add"],
-        "source": {"lecture": "L2.2", "slides": "2.3-2.4", "pdf_pages": pdf_pages}}))
+        "source": {"lecture": "L2.2", "slides": "2.3-2.4", "pdf_pages": pdf_pages}}),
+        encoding="utf-8")
     entries = [cache.Entry(n, f"2.{n}", "text", "h", f"page {n} body") for n in range(1, 6)]
     path = workspace / "cache" / "lectures" / "Lecture_2.2-Demo.pdf.md"
     path.parent.mkdir(parents=True)
-    path.write_text(cache.render("Lecture_2.2-Demo.pdf", entries))
+    path.write_text(cache.render("Lecture_2.2-Demo.pdf", entries), encoding="utf-8")
     return workspace, batch
 
 
@@ -111,7 +112,7 @@ def test_a_lecture_number_matches_its_cache_file_exactly(tmp_path):
     lectures = tmp_path / "cache" / "lectures"
     lectures.mkdir(parents=True)
     for name in ("Lecture_5-Topic_C.pdf.md", "Lecture_5.2-Topic_D.pdf.md"):
-        (lectures / name).write_text("")
+        (lectures / name).write_text("", encoding="utf-8")
 
     assert lecture_file(tmp_path, "5").name == "Lecture_5-Topic_C.pdf.md"
     assert lecture_file(tmp_path, "5.2").name == "Lecture_5.2-Topic_D.pdf.md"
@@ -156,8 +157,8 @@ def test_one_call_per_file_and_each_saved_with_its_note(tmp_path):
     assert [kind for kind, _ in model.calls] == ["correct", "slides", "wrong", "wrong", "wrong"]
     assert sorted(p.name for p in out.glob("*.py")) == [
         "correct.py", "slides.py", "wrong_01.py", "wrong_02.py", "wrong_03.py"]
-    assert (out / "wrong_02.py").read_text() == WRONG[1]
-    meta = json.loads((out / "meta.json").read_text())
+    assert (out / "wrong_02.py").read_text(encoding="utf-8") == WRONG[1]
+    meta = json.loads((out / "meta.json").read_text(encoding="utf-8"))
     assert meta["notes"] == {"slides.py": "the slides round first", "wrong_01.py": MISTAKES[0],
                              "wrong_02.py": MISTAKES[1], "wrong_03.py": MISTAKES[2]}
     assert meta["model"] == "fake: fake-1" and meta["dropped"] == {}
@@ -195,10 +196,11 @@ def test_an_unsafe_file_is_sent_back_and_dropped_if_it_stays_unsafe(tmp_path):
     second = [messages for kind, messages in model.calls if kind == "wrong"][2]
     assert "That reply has problems: line 1: import of 'subprocess'" in second[-1]["content"]
     assert outcome == "written: correct, slides, 2 wrong; dropped wrong_02.py"
-    meta = json.loads((batch / "solutions/demo/heldout/model/meta.json").read_text())
+    model_dir = batch / "solutions/demo/heldout/model"
+    meta = json.loads((model_dir / "meta.json").read_text(encoding="utf-8"))
     assert "import of 'subprocess'" in meta["dropped"]["wrong_02.py"]
     # The next file is numbered by its place in the plan, and told only the kept mistakes.
-    assert (batch / "solutions/demo/heldout/model/wrong_03.py").read_text() == WRONG[2]
+    assert (model_dir / "wrong_03.py").read_text(encoding="utf-8") == WRONG[2]
 
 
 def test_a_fixed_reply_replaces_the_unsafe_one(tmp_path):

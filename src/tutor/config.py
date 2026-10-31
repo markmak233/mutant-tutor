@@ -54,7 +54,7 @@ def load_env(path: Path | None = None) -> None:
     path = Path(".env") if path is None else path
     if not path.is_file():
         return
-    for line in path.read_text().splitlines():
+    for line in path.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue

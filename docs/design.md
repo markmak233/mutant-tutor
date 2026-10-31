@@ -71,6 +71,16 @@ container for isolation is fine; deploying the tool as a service is not.
   last could not be worked around: `hadoop.cmd` splits the comma-separated `-files` argument
   into several. mrjob is unmaintained, so on Windows the Hadoop tests and exercises are
   skipped with a pointer to WSL; the inline runner and Spark work there.
+  Every text file is read and written as UTF-8 explicitly: Windows' default is the ANSI
+  code page, so a `·` or any Chinese character failed or was garbled (16 of 468 tests on
+  2026-10-31). ruff's `unspecified-encoding` rule found 10 of the 296 calls, since it can
+  only type a few receivers, so `tests/test_encoding.py` checks the source with `ast`, and
+  catches a missing encoding on Linux CI too. Test runs get `PYTHONIOENCODING=utf-8` for
+  their output pipe only; the code under test opens files with the platform default, as
+  in the learner's own runs.
+  Spark on Windows reads and writes files through Hadoop's native library, so it needs
+  `HADOOP_HOME` with `winutils.exe` and `hadoop.dll`, and that `bin` folder on `PATH`
+  (measured: without `PATH`, every file-level exercise failed with `UnsatisfiedLinkError`).
 
 ## Public repo vs private data
 

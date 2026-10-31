@@ -66,7 +66,8 @@ def write_inputs(
         chunk = list(lines[i * size:(i + 1) * size])
         if header is not None:
             chunk.insert(0, header)
-        (input_dir / f"input-{i}{suffix}").write_text("".join(f"{line}\n" for line in chunk))
+        (input_dir / f"input-{i}{suffix}").write_text("".join(f"{line}\n" for line in chunk),
+                                                      encoding="utf-8")
     return input_dir
 
 
@@ -83,7 +84,7 @@ def read_output(output_dir: Path | str) -> Output:
     """Every part-* file in name order (part-00000, part-00001, ...). _SUCCESS and the
     hidden .crc files are not data."""
     paths = sorted(Path(output_dir).glob("part-*"))
-    return Output({p.name: p.read_text().splitlines() for p in paths})
+    return Output({p.name: p.read_text(encoding="utf-8").splitlines() for p in paths})
 
 
 def run_program(program, input_dir: Path | str, output_dir: Path | str, *params) -> Output:
@@ -226,7 +227,7 @@ def _assert_entry_point(job_cls) -> None:
     the job silently writes nothing; inline would still work, which hides the mistake."""
     script = Path(job_cls.mr_job_script() or "")
     pattern = rf"__name__\s*==\s*['\"]__main__['\"]\s*:\s*\n\s*{job_cls.__name__}\.run\(\)"
-    if not script.is_file() or not re.search(pattern, script.read_text()):
+    if not script.is_file() or not re.search(pattern, script.read_text(encoding="utf-8")):
         raise AssertionError(
             f"{script.name or 'the job file'} needs an entry point at the end:\n"
             f'if __name__ == "__main__":\n    {job_cls.__name__}.run()'

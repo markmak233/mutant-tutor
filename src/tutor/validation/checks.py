@@ -208,7 +208,8 @@ def check_safety(ex: ExerciseFiles) -> RuleResult:
     found = [f"{name} is not allowed in an exercise (pytest runs it on its own)"
              for name in config_files(copied)]
     for name, path in files.items():
-        found += [f"{name} {hazard}" for hazard in find_hazards(path.read_text(), allowed)]
+        found += [f"{name} {hazard}"
+                  for hazard in find_hazards(path.read_text(encoding="utf-8"), allowed)]
     if found:
         return RuleResult("safe", "static safety", Status.FAIL, "; ".join(found), 0.0)
     return RuleResult("safe", "static safety", Status.OK, f"{len(files)} files checked", 0.0)
@@ -235,7 +236,7 @@ def check_main(ex: ExerciseFiles, timeout_s: float) -> RuleResult:
     # Both sides need the block: the skeleton is what the student starts from.
     missing = [name for name, path in (("student.py", ex.skeleton), ("reference.py",
                                                                      ex.reference))
-               if not has_main_block(path.read_text())]
+               if not has_main_block(path.read_text(encoding="utf-8"))]
     if missing:
         return RuleResult("main", "runs on its own", Status.FAIL,
                           f"{' and '.join(missing)} lack an `if __name__ == \"__main__\":` "
@@ -422,7 +423,7 @@ def check_api_constraints(ex: ExerciseFiles) -> RuleResult:
     if not constraints:
         return RuleResult("api", "api constraints", Status.NOT_APPLICABLE,
                           "no constraints in metadata", 0.0)
-    source = ex.reference.read_text()
+    source = ex.reference.read_text(encoding="utf-8")
     violations = find_violations(source, constraints)
     if violations:
         detail = "reference breaks its own constraints: " + "; ".join(violations)

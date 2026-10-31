@@ -41,7 +41,8 @@ def locate(exercise_dir: Path) -> tuple[Path, str]:
     if exercise_dir.parent.name == "exercises":
         batch = exercise_dir.parent.parent
         try:
-            mode = json.loads((batch / "manifest.json").read_text()).get("mode", "learn")
+            manifest = json.loads((batch / "manifest.json").read_text(encoding="utf-8"))
+            mode = manifest.get("mode", "learn")
         except (OSError, json.JSONDecodeError):
             mode = "learn"
         return batch / "solutions" / exercise_dir.name, mode
@@ -64,8 +65,8 @@ def hint_for(exercise_dir: Path, run_tests=run_pytest, say=print,
     result = run(student)
     if result.outcome is Outcome.PASSED:
         return None
-    rule = first_rule(student.read_text(), result.output, ex.metadata.get("constraints", {}),
-                      mode)
+    rule = first_rule(student.read_text(encoding="utf-8"), result.output,
+                      ex.metadata.get("constraints", {}), mode)
     if rule:
         return rule
     ran: list[str] = []
@@ -106,14 +107,16 @@ def hint_for(exercise_dir: Path, run_tests=run_pytest, say=print,
     key, note = "", ""
     if model:
         hints_file = exercise_dir / "hints.md"
-        hints = hints_file.read_text() if hints_file.is_file() else ""
+        hints = hints_file.read_text(encoding="utf-8") if hints_file.is_file() else ""
         # What the student already has: the hint may quote it freely.
-        visible = "\n".join([student.read_text(), (exercise_dir / TEST_FILE).read_text(),
-                             hints, ex.skeleton.read_text()])
+        visible = "\n".join([student.read_text(encoding="utf-8"),
+                             (exercise_dir / TEST_FILE).read_text(encoding="utf-8"),
+                             hints, ex.skeleton.read_text(encoding="utf-8")])
         try:
-            return model_hint(model, student=student.read_text(), hints=hints,
+            return model_hint(model, student=student.read_text(encoding="utf-8"), hints=hints,
                               constraints=ex.metadata.get("constraints", {}),
-                              output=result.output, reference=ex.reference.read_text(),
+                              output=result.output,
+                              reference=ex.reference.read_text(encoding="utf-8"),
                               visible=visible, mode=mode, level=level)
         except HintRefused as e:
             # Blocked twice by the leak guard, or the model failed: fall through to the
@@ -143,7 +146,8 @@ def model_hints_given(exercise_dir: Path) -> int:
     # Count this exercise's earlier model hints whose logged hash matches the code now;
     # hints for an older version of the code do not count, so a change starts at level 1.
     code = code_hash(exercise_dir)
-    lines = (json.loads(line) for line in path.read_text().splitlines() if line.strip())
+    lines = (json.loads(line)
+             for line in path.read_text(encoding="utf-8").splitlines() if line.strip())
     return sum(1 for line in lines if line.get("event") == "hint" and line.get("layer") == "llm"
                and (line.get("batch"), line.get("exercise")) == where
                and line.get("code") == code)

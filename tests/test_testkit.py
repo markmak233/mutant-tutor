@@ -38,15 +38,15 @@ def test_write_inputs_splits_lines_and_repeats_header(tmp_path, monkeypatch):
     d = write_inputs(tmp_path / "in", ["a", "b", "c", "d", "e"], header="h", suffix=".csv")
 
     assert [p.name for p in sorted(d.iterdir())] == ["input-0.csv", "input-1.csv"]
-    assert (d / "input-0.csv").read_text() == "h\na\nb\nc\n"
-    assert (d / "input-1.csv").read_text() == "h\nd\ne\n"
+    assert (d / "input-0.csv").read_text(encoding="utf-8") == "h\na\nb\nc\n"
+    assert (d / "input-1.csv").read_text(encoding="utf-8") == "h\nd\ne\n"
 
 
 def test_write_inputs_more_files_than_lines(tmp_path):
     """Extra files are written empty rather than skipped, so the file count is what was asked."""
     d = write_inputs(tmp_path / "in", ["only"], files=4)
 
-    assert sorted(p.read_text() for p in d.iterdir()) == ["", "", "", "only\n"]
+    assert sorted(p.read_text(encoding="utf-8") for p in d.iterdir()) == ["", "", "", "only\n"]
 
 
 # --- running a program -------------------------------------------------------------------
@@ -61,9 +61,9 @@ class FakeProgram:
         FakeProgram.calls.append((input_path, output_path, *params))
         out_dir = Path(output_path)
         out_dir.mkdir()
-        (out_dir / "part-00000").write_text("x\t1\n")
-        (out_dir / ".part-00000.crc").write_text("not data")
-        (out_dir / "_SUCCESS").write_text("")
+        (out_dir / "part-00000").write_text("x\t1\n", encoding="utf-8")
+        (out_dir / ".part-00000.crc").write_text("not data", encoding="utf-8")
+        (out_dir / "_SUCCESS").write_text("", encoding="utf-8")
 
 
 class SavesNothing:
@@ -318,7 +318,7 @@ def load_job(tmp_path: Path, source: str, name: str):
     """Write `source` to <tmp>/<module>.py and return its job class `name`."""
     module_name = f"job_{name.lower()}_{tmp_path.name}"
     path = tmp_path / f"{module_name}.py"
-    path.write_text(source)
+    path.write_text(source, encoding="utf-8")
     spec = importlib.util.spec_from_file_location(module_name, path)
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module  # mrjob finds the job's script file through it

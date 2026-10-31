@@ -15,7 +15,7 @@ SCHEMA = {"type": "object", "properties": {"hint": {"type": "string"}}, "require
 def workspace(tmp_path, monkeypatch):
     (tmp_path / "workspace.toml").write_text(
         'course = "demo"\n[llm.profiles.claude-code]\nprovider = "assistant"\n'
-        '[llm.roles]\nhint = "claude-code"\n')
+        '[llm.roles]\nhint = "claude-code"\n', encoding="utf-8")
     monkeypatch.setenv("WORKSPACE_DIR", str(tmp_path))
     return tmp_path
 
@@ -39,7 +39,7 @@ def test_a_call_writes_a_request_and_waits_then_returns_the_answer(workspace):
     with pytest.raises(AwaitingAnswer) as waiting:
         ask(workspace, messages)
     request = waiting.value.request
-    text = request.read_text()
+    text = request.read_text(encoding="utf-8")
     assert "## system\nBe brief." in text and "Why does my loop fail?" in text
     assert "JSON Schema of the reply" in text and '"hint"' in text
     with pytest.raises(AwaitingAnswer) as again:  # asked again: the same request
@@ -49,7 +49,7 @@ def test_a_call_writes_a_request_and_waits_then_returns_the_answer(workspace):
     store_answer(queue, request.stem, '```json\n{"hint": "Look at the loop bound."}\n```')
     reply = ask(workspace, messages)
     assert json.loads(reply.text) == {"hint": "Look at the loop bound."}
-    log = json.loads((workspace / "calls.jsonl").read_text())
+    log = json.loads((workspace / "calls.jsonl").read_text(encoding="utf-8"))
     assert (log["outcome"], log["profile"], log["input_tokens"]) == ("ok", "claude-code", None)
     assert queue.waiting() == []
 
@@ -58,7 +58,7 @@ def test_an_image_is_saved_beside_the_request_and_named_in_it(workspace):
     png = b"\x89PNG\r\n\x1a\nfake"
     with pytest.raises(AwaitingAnswer) as waiting:
         ask(workspace, [image_message("Copy this slide.", png)], schema=None)
-    text = waiting.value.request.read_text()
+    text = waiting.value.request.read_text(encoding="utf-8")
     image = waiting.value.request.with_name(f"{waiting.value.request_id}-1.png")
     assert f"[image: open {image}]" in text and image.read_bytes() == png
     assert "reply with: plain text" in text
@@ -92,7 +92,7 @@ def test_the_command_lists_shows_and_takes_answers(workspace, tmp_path, capsys):
     assert exchange.main(["show", rid]) == 0
     assert "hint please" in capsys.readouterr().out
     reply = tmp_path / "reply.json"
-    reply.write_text('{"hint": "Check the loop."}')
+    reply.write_text('{"hint": "Check the loop."}', encoding="utf-8")
     assert exchange.main(["answer", rid, str(reply)]) == 0
     assert exchange.main(["answer", "0000000000000000", str(reply)]) == 1
     assert json.loads(ask(workspace, [{"role": "user", "content": "hint please"}]).text) == {

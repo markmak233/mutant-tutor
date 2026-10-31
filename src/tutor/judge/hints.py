@@ -77,7 +77,8 @@ def simulate(batch_dir: Path, exercise_ids: list[str], per_exercise: int, model:
     """Level-`level` model hints for the first `per_exercise` mutants (by name) of each
     exercise; written to out/hints.jsonl and out/labels.md, and returned."""
     manifest = batch_dir / "manifest.json"
-    mode = json.loads(manifest.read_text()).get("mode", "learn") if manifest.is_file() else "learn"
+    mode = (json.loads(manifest.read_text(encoding="utf-8")).get("mode", "learn")
+            if manifest.is_file() else "learn")
     students = out / "students"
     students.mkdir(parents=True, exist_ok=True)
     jobs = []
@@ -91,18 +92,18 @@ def simulate(batch_dir: Path, exercise_ids: list[str], per_exercise: int, model:
         exercise_id, exercise_dir, ex, mutant = job
         # The student's file: the mutant without the docstring that names its bug, kept
         # in out/students/ so the owner can read what the hint was about.
-        code = without_docstring(mutant.read_text())
+        code = without_docstring(mutant.read_text(encoding="utf-8"))
         student = students / f"{exercise_id}__{mutant.stem}.py"
-        student.write_text(code)
+        student.write_text(code, encoding="utf-8")
         result = run_tests(ex.run_files(student), ex.timeout_s,
                            {PARTITIONS_ENV: str(DEFAULT_PARTITIONS)}, heavy=ex.heavy)
         if result.outcome is Outcome.PASSED:
             return None  # caught only at other partition counts: no failure to hint at
         hints_file = exercise_dir / "hints.md"
-        hints = hints_file.read_text() if hints_file.is_file() else ""
+        hints = hints_file.read_text(encoding="utf-8") if hints_file.is_file() else ""
         # What the student already has, as tutor.hint builds it: the hint may quote it.
-        visible = "\n".join([code, (exercise_dir / TEST_FILE).read_text(), hints,
-                             ex.skeleton.read_text()])
+        visible = "\n".join([code, (exercise_dir / TEST_FILE).read_text(encoding="utf-8"), hints,
+                             ex.skeleton.read_text(encoding="utf-8")])
         bug, effect = mutants.bug_of(mutant)
         line = {"id": f"{exercise_id}/{mutant.stem}@L{level}", "batch": batch_dir.name,
                 "exercise": exercise_id, "mutant": mutant.stem, "level": level,
@@ -112,7 +113,8 @@ def simulate(batch_dir: Path, exercise_ids: list[str], per_exercise: int, model:
         try:
             hint = model_hint(model, student=code, hints=hints,
                               constraints=ex.metadata.get("constraints", {}),
-                              output=result.output, reference=ex.reference.read_text(),
+                              output=result.output,
+                              reference=ex.reference.read_text(encoding="utf-8"),
                               visible=visible, mode=mode, level=level)
             line.update(hint=hint.text, refused="")
         except HintRefused as e:
@@ -123,8 +125,8 @@ def simulate(batch_dir: Path, exercise_ids: list[str], per_exercise: int, model:
     with ThreadPoolExecutor(max_workers=4) as pool:
         found = [line for line in pool.map(one, jobs) if line is not None]
     (out / HINTS_FILE).write_text("".join(json.dumps(line, ensure_ascii=False) + "\n"
-                                          for line in found))
-    (out / "labels.md").write_text(labels_sheet(found))
+                                          for line in found), encoding="utf-8")
+    (out / "labels.md").write_text(labels_sheet(found), encoding="utf-8")
     return found
 
 
@@ -211,7 +213,8 @@ def judge_hint(h: dict, reference: str, model: Judge) -> HintVerdict:
 
 
 def _rows(path: Path) -> list[dict]:
-    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    return [json.loads(line)
+            for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
 def judged(out: Path, workspace: Path, model: Judge) -> list[tuple[dict, dict, HintVerdict]]:
@@ -225,15 +228,16 @@ def judged(out: Path, workspace: Path, model: Judge) -> list[tuple[dict, dict, H
     def one(label: dict) -> tuple[dict, dict, HintVerdict]:
         h = hints[label["id"]]
         reference = (workspace / "batches" / h["batch"] / "solutions" / h["exercise"]
-                     / "reference.py").read_text()
+                     / "reference.py").read_text(encoding="utf-8")
         key = hashlib.sha256(json.dumps([PROMPT_VERSION, model_name(model), h, reference],
                                         sort_keys=True).encode()).hexdigest()
         path = store / (h["id"].replace("/", "__").replace("@", "_") + ".json")
-        if path.is_file() and json.loads(path.read_text()).get("key") == key:
-            return h, label, HintVerdict.model_validate(json.loads(path.read_text())["verdict"])
+        if path.is_file() and json.loads(path.read_text(encoding="utf-8")).get("key") == key:
+            saved = json.loads(path.read_text(encoding="utf-8"))
+            return h, label, HintVerdict.model_validate(saved["verdict"])
         verdict = judge_hint(h, reference, model)
         path.write_text(json.dumps({"key": key, "verdict": verdict.model_dump()}, indent=2,
-                                   ensure_ascii=False) + "\n")
+                                   ensure_ascii=False) + "\n", encoding="utf-8")
         return h, label, verdict
 
     with ThreadPoolExecutor(max_workers=4) as pool:

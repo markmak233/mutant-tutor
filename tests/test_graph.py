@@ -74,7 +74,7 @@ def workspace(tmp_path):
     entries = [cache.Entry(n, f"1.{n}", "text", f"h{n}", f"page {n} text") for n in range(1, 7)]
     path = cache.cache_path(tmp_path, tmp_path / "lectures" / "L1.pdf")
     cache.save(path, cache.render("L1.pdf", entries))
-    (tmp_path / "conventions.md").write_text("- Tokenizer: re.split on spaces.\n")
+    (tmp_path / "conventions.md").write_text("- Tokenizer: re.split on spaces.\n", encoding="utf-8")
     return tmp_path
 
 
@@ -109,12 +109,14 @@ def test_write_draft_lays_out_a_batch_and_derives_the_skeleton(tmp_path):
     d = ExerciseDraft.model_validate(draft(data_files={"sample_input/a.txt": "1\n2"}))
     exercise, solution, dropped = write_draft(d, "sum-list", tmp_path / "round-0")
     assert dropped == {}
-    assert (solution / "skeleton.py").read_text() == (exercise / "student.py").read_text()
-    assert (exercise / "sample_input" / "a.txt").read_text() == "1\n2\n"
+    assert ((solution / "skeleton.py").read_text(encoding="utf-8")
+            == (exercise / "student.py").read_text(encoding="utf-8"))
+    assert (exercise / "sample_input" / "a.txt").read_text(encoding="utf-8") == "1\n2\n"
     assert sorted(p.name for p in (solution / "mutants").iterdir()) == [
         "m01_wrong.py", "m02_wrong.py", "m03_wrong.py"]
-    assert json.loads((solution / "metadata.json").read_text())["id"] == "sum-list"
-    assert (exercise / "question.md").read_text() == "# Sum a list.\n"  # from the docstring
+    assert json.loads((solution / "metadata.json").read_text(encoding="utf-8"))["id"] == "sum-list"
+    # from the docstring
+    assert (exercise / "question.md").read_text(encoding="utf-8") == "# Sum a list.\n"
 
 
 def broken_mutant(name: str) -> dict:
@@ -142,12 +144,14 @@ def test_too_few_mutants_left_is_still_a_format_error(tmp_path):
 def test_a_generated_exercise_is_always_under_rule_main(tmp_path):
     exercise, solution, _ = write_draft(ExerciseDraft.model_validate(draft()), "sum-list",
                                         tmp_path / "r")
-    assert json.loads((solution / "metadata.json").read_text())["standalone"] is True
+    metadata = json.loads((solution / "metadata.json").read_text(encoding="utf-8"))
+    assert metadata["standalone"] is True
     framework_launched = draft()
     framework_launched["metadata"]["standalone"] = False  # the model's explicit choice
     _, solution, _ = write_draft(ExerciseDraft.model_validate(framework_launched), "sum-list",
                                  tmp_path / "r2")
-    assert json.loads((solution / "metadata.json").read_text())["standalone"] is False
+    metadata = json.loads((solution / "metadata.json").read_text(encoding="utf-8"))
+    assert metadata["standalone"] is False
     assert 'if __name__ == "__main__":' in prompts.SPEC
 
 
@@ -183,7 +187,8 @@ def test_the_plan_model_sees_what_each_existing_exercise_does(tmp_path):
         (batch / "exercises" / exercise_id).mkdir(parents=True)
     (batch / "solutions" / "word-count").mkdir(parents=True)
     (batch / "solutions" / "word-count" / "metadata.json").write_text(
-        json.dumps({"title": "Word count with MRJob", "topic": "mrjob/word-count"}))
+        json.dumps({"title": "Word count with MRJob", "topic": "mrjob/word-count"}),
+        encoding="utf-8")
     # an exercise without readable metadata still keeps its id from being reused
     assert nodes.existing_exercises(tmp_path) == [
         "bare", "word-count: Word count with MRJob [mrjob/word-count]"]
@@ -276,9 +281,10 @@ def test_the_graph_repairs_a_failing_draft_then_saves_it(workspace):
     assert "rule 3 (rule 3) FAIL: 3 of 3 mutants survived" in model.calls[1][1][1]["content"]
     assert (d.batch_dir / "exercises" / "sum-list" / "student.py").is_file()
     assert not (d.batch_dir / "manifest.json").exists()  # written once per batch
-    log = json.loads((d.batch_dir / "generation.jsonl").read_text())
+    log = json.loads((d.batch_dir / "generation.jsonl").read_text(encoding="utf-8"))
     assert (log["outcome"], log["rounds"], log["tokens"]) == ("saved", 1, 3000)
-    assert (d.drafts / "sum-list" / "round-0" / "report.txt").read_text().endswith("INVALID\n")
+    report_txt = d.drafts / "sum-list" / "round-0" / "report.txt"
+    assert report_txt.read_text(encoding="utf-8").endswith("INVALID\n")
 
 
 def test_the_graph_saves_a_valid_draft_without_its_broken_mutant(workspace):
@@ -298,7 +304,7 @@ def test_the_graph_saves_a_valid_draft_without_its_broken_mutant(workspace):
     assert [a["dropped"] for a in final["attempts"]] == [["m04_invented"], ["m04_invented"]]
     saved = d.batch_dir / "solutions" / "sum-list" / "mutants"
     assert sorted(p.stem for p in saved.iterdir()) == ["m01_wrong", "m02_wrong", "m03_wrong"]
-    log = json.loads((d.batch_dir / "generation.jsonl").read_text())
+    log = json.loads((d.batch_dir / "generation.jsonl").read_text(encoding="utf-8"))
     assert log["attempts"][-1]["dropped"] == ["m04_invented"]
 
 
@@ -404,11 +410,11 @@ def test_a_resume_keeps_the_owners_edits_to_the_plan_until_the_model_plans_again
     model_plan = json.loads(plan_json("a"))["items"]
     assert _owner_plan(tmp_path, model_plan) == (model_plan, False)  # first pause: written
     edited = [{**model_plan[0], "id": "a-better-name"}]
-    (tmp_path / "plan.json").write_text(json.dumps(edited))
+    (tmp_path / "plan.json").write_text(json.dumps(edited), encoding="utf-8")
     assert _owner_plan(tmp_path, model_plan) == (edited, True)  # resume: edits kept
     replanned = json.loads(plan_json("b"))["items"]  # after feedback
     assert _owner_plan(tmp_path, replanned) == (replanned, False)
-    assert json.loads((tmp_path / "plan.json").read_text()) == replanned
+    assert json.loads((tmp_path / "plan.json").read_text(encoding="utf-8")) == replanned
 
 
 def test_a_batch_paused_before_the_model_plan_was_kept_keeps_the_owners_plan(tmp_path):
@@ -416,7 +422,8 @@ def test_a_batch_paused_before_the_model_plan_was_kept_keeps_the_owners_plan(tmp
 
     model_plan = json.loads(plan_json("a"))["items"]
     edited = [{**model_plan[0], "id": "a-better-name"}]
-    (tmp_path / "plan.json").write_text(json.dumps(edited))  # no plan.model.json yet
+    (tmp_path / "plan.json").write_text(json.dumps(edited),
+                                        encoding="utf-8")  # no plan.model.json yet
     assert _owner_plan(tmp_path, model_plan) == (edited, True)
     assert _owner_plan(tmp_path, model_plan) == (edited, True)  # and on the next resume
 
@@ -451,9 +458,10 @@ def test_a_batch_is_planned_sent_back_approved_later_and_generated_in_parallel(w
 
     outcomes = {r["id"]: r["outcome"] for r in final["results"]}
     assert outcomes == {"sum-list": "saved", "sum-squares": "discarded"}
-    manifest = Manifest.model_validate_json((d.batch_dir / "manifest.json").read_text())
+    manifest = Manifest.model_validate_json(
+        (d.batch_dir / "manifest.json").read_text(encoding="utf-8"))
     assert manifest.exercises == ["sum-list"] and "more debugging" in manifest.notes
-    proposal = (d.batch_dir / "coverage-proposal.md").read_text()
+    proposal = (d.batch_dir / "coverage-proposal.md").read_text(encoding="utf-8")
     assert "gap-code -> ex:sum-list (p3-w1)" in proposal and "sum-squares" not in proposal
 
 
@@ -489,9 +497,9 @@ def test_an_item_saved_before_is_not_saved_again_nor_overwritten(tmp_path):
     state = {"item": ITEM, "round_dir": str(round_dir)}
     nodes.save(state, d)
     student = d.batch_dir / "exercises" / "sum-list" / "student.py"
-    student.write_text("# the owner's answer\n")
+    student.write_text("# the owner's answer\n", encoding="utf-8")
     assert nodes.save(state, d) == {"outcome": "saved"}
-    assert student.read_text() == "# the owner's answer\n"
+    assert student.read_text(encoding="utf-8") == "# the owner's answer\n"
     (d.batch_dir / "generation.jsonl").unlink()  # not saved by this pipeline: refuse
     with pytest.raises(FileExistsError, match="never overwrite"):
         nodes.save(state, d)
@@ -501,12 +509,13 @@ def test_listing_saved_items_again_leaves_the_manifest_unchanged(tmp_path):
     """collect may run twice when a batch resumes after writing the manifest."""
     d = deps(tmp_path, None)
     write_manifest(d, [ITEM])
-    first = (d.batch_dir / "manifest.json").read_text()
+    first = (d.batch_dir / "manifest.json").read_text(encoding="utf-8")
     write_manifest(d, [ITEM])
-    assert (d.batch_dir / "manifest.json").read_text() == first
+    assert (d.batch_dir / "manifest.json").read_text(encoding="utf-8") == first
     other = ITEM.model_copy(update={"id": "sum-squares"})
     write_manifest(d, [ITEM, other])
-    manifest = Manifest.model_validate_json((d.batch_dir / "manifest.json").read_text())
+    manifest = Manifest.model_validate_json(
+        (d.batch_dir / "manifest.json").read_text(encoding="utf-8"))
     assert manifest.exercises == ["sum-list", "sum-squares"]
     assert [p.name for p in d.batch_dir.iterdir()] == ["manifest.json"]  # no .partial left
 
@@ -579,7 +588,7 @@ def test_an_exception_in_one_item_is_reported_and_the_others_finish(workspace):
     outcomes = {r["id"]: r["outcome"] for r in final["results"]}
     assert outcomes == {"sum-list": "saved", "sum-squares": "error"}
     assert (d.batch_dir / "manifest.json").is_file()  # collect still ran
-    log = [json.loads(x) for x in d.generation_log.read_text().splitlines()]
+    log = [json.loads(x) for x in d.generation_log.read_text(encoding="utf-8").splitlines()]
     assert any(x["outcome"] == "error" and "UnicodeDecodeError" in x["error"] for x in log)
 
 
@@ -594,7 +603,7 @@ def test_a_mutant_that_misses_the_reference_is_shown_the_closest_line():
 def test_the_example_leaves_out_hidden_and_binary_files(tmp_path, monkeypatch):
     root = tmp_path / prompts.DEFAULT_EXAMPLE
     (root / "exercise").mkdir(parents=True)
-    (root / "exercise" / "student.py").write_text("def f(): ...\n")
+    (root / "exercise" / "student.py").write_text("def f(): ...\n", encoding="utf-8")
     (root / ".DS_Store").write_bytes(b"\x00\x00\x00\x01Bud1\x80")  # what macOS leaves
     (root / "exercise" / "data.bin").write_bytes(b"\x80\x81")
     monkeypatch.setattr(prompts, "EXAMPLES", tmp_path)
@@ -666,11 +675,11 @@ def test_the_oracle_model_sees_the_question_and_interface_never_the_reference(wo
     assert "Reference" not in asked and "sum(xs)" not in asked and "m01_wrong" not in asked
     assert "only the interface" in model.calls[0][1][0]["content"]  # the generating model
     saved = d.batch_dir / "solutions" / "sum-list" / "oracle.py"
-    assert saved.read_text() == FILLED
+    assert saved.read_text(encoding="utf-8") == FILLED
     # the saved question's "How to run" names the batch folder, not the draft's
-    question = (d.batch_dir / "exercises" / "sum-list" / "question.md").read_text()
+    question = (d.batch_dir / "exercises" / "sum-list" / "question.md").read_text(encoding="utf-8")
     assert f'cd "{(d.batch_dir / "exercises" / "sum-list").resolve()}"' in question
-    log = json.loads((d.batch_dir / "generation.jsonl").read_text())
+    log = json.loads((d.batch_dir / "generation.jsonl").read_text(encoding="utf-8"))
     assert log["oracle_model"] == "gpt-terra: gpt-6.1-terra"
 
 
@@ -755,7 +764,7 @@ def test_the_oracle_must_come_from_another_provider(workspace):
         'course = "demo"\n[llm.profiles.glm-flash]\nprovider = "glm"\nmodel = "glm-5.3-flash"\n'
         '[llm.profiles.glm-full]\nprovider = "glm"\nmodel = "glm-5.3"\n'
         '[llm.profiles.gpt]\nprovider = "openai"\nmodel = "gpt-6.1-terra"\n'
-        '[llm.roles]\ngenerate = "glm-flash"\noracle = "glm-full"\n')
+        '[llm.roles]\ngenerate = "glm-flash"\noracle = "glm-full"\n', encoding="utf-8")
     with pytest.raises(ValueError, match="come from one provider"):
         _deps(workspace, workspace / "batches" / "b", {})
     d = _deps(workspace, workspace / "batches" / "b", {"oracle_profile": "gpt"})
@@ -883,7 +892,7 @@ def test_the_repair_role_takes_over_from_the_second_repair(workspace):
     assert model.thinkings == [False, False, True, True]  # the repair model reasons
     assert model.max_tokens == [16_000, 16_000, 32_000, 32_000]  # room for its reasoning
     assert [a["model"] for a in final["attempts"]] == model.configs
-    log = json.loads((d.batch_dir / "generation.jsonl").read_text())
+    log = json.loads((d.batch_dir / "generation.jsonl").read_text(encoding="utf-8"))
     assert log["repair_model"] == "deepseek-pro: deepseek-v4-pro"
 
 
@@ -893,7 +902,7 @@ def test_the_oracle_must_differ_from_the_repair_model_too(workspace):
     (workspace / "workspace.toml").write_text(
         'course = "demo"\n[llm.profiles.ds]\nprovider = "deepseek"\nmodel = "f"\n'
         '[llm.profiles.gpt]\nprovider = "openai"\nmodel = "g"\n'
-        '[llm.roles]\ngenerate = "ds"\nrepair = "gpt"\noracle = "gpt"\n')
+        '[llm.roles]\ngenerate = "ds"\nrepair = "gpt"\noracle = "gpt"\n', encoding="utf-8")
     with pytest.raises(ValueError, match="the oracle \\(gpt\\) and gpt, which writes"):
         _deps(workspace, workspace / "batches" / "b", {})
 
@@ -911,7 +920,8 @@ def test_a_repair_writes_its_diagnosis_first_and_it_is_logged(workspace):
     assert "Start with `diagnosis`" in model.calls[1][1][1]["content"]
     assert [a["diagnosis"] for a in final["attempts"]] == ["", fixed["diagnosis"]]
     saved = d.batch_dir / "solutions" / "sum-list"
-    assert not any("by hand" in p.read_text() for p in saved.rglob("*") if p.is_file())
+    assert not any("by hand" in p.read_text(encoding="utf-8")
+                   for p in saved.rglob("*") if p.is_file())
 
 
 def test_the_oracle_model_fixes_its_own_unsafe_import(workspace):
@@ -951,7 +961,7 @@ def answer_waiting(queue, replies: dict) -> list[str]:
 
     answered = []
     for request in queue.waiting():
-        purpose = re.search(r"- for: (\w+)", request.read_text())[1]
+        purpose = re.search(r"- for: (\w+)", request.read_text(encoding="utf-8"))[1]
         store_answer(queue, request.stem, replies[purpose])
         answered.append(purpose)
     return answered
@@ -988,9 +998,11 @@ def test_an_assistant_batch_pauses_for_answers_and_replays_to_the_end(workspace)
     assert (d.batch_dir / "exercises" / "sum-list" / "student.py").is_file()
     assert len(checks) == 1
     # Who wrote it is on record: the manifest and the log name the assistant as such.
-    manifest = Manifest.model_validate_json((d.batch_dir / "manifest.json").read_text())
+    manifest = Manifest.model_validate_json(
+        (d.batch_dir / "manifest.json").read_text(encoding="utf-8"))
     assert manifest.model == "cc: cc (assistant)"
-    log = json.loads((d.batch_dir / "generation.jsonl").read_text().splitlines()[-1])
+    log_lines = (d.batch_dir / "generation.jsonl").read_text(encoding="utf-8").splitlines()
+    log = json.loads(log_lines[-1])
     assert log["model"] == "cc: cc (assistant)"
 
 
@@ -998,12 +1010,12 @@ def test_a_validation_report_is_reused_for_the_same_files(tmp_path):
     exercise, solution = tmp_path / "e", tmp_path / "s"
     for folder in (exercise, solution):
         folder.mkdir()
-        (folder / "a.py").write_text("x = 1\n")
+        (folder / "a.py").write_text("x = 1\n", encoding="utf-8")
     runs = []
     check = nodes.reusing_reports(lambda e, s: runs.append(1) or report("3"), tmp_path / "c")
     first, again = check(exercise, solution), check(exercise, solution)
     assert again == first and again.result("3").status is Status.FAIL and len(runs) == 1
-    (solution / "a.py").write_text("x = 2\n")
+    (solution / "a.py").write_text("x = 2\n", encoding="utf-8")
     check(exercise, solution)
     assert len(runs) == 2  # other files: validated again
 
@@ -1014,7 +1026,7 @@ def test_one_assistant_may_write_the_oracle_through_a_second_profile(workspace, 
     (workspace / "workspace.toml").write_text(
         'course = "demo"\n[llm.profiles.cc]\nprovider = "assistant"\n'
         '[llm.profiles.cc-oracle]\nprovider = "assistant"\nmodel = "cc"\n'
-        '[llm.roles]\ngenerate = "cc"\noracle = "cc-oracle"\n')
+        '[llm.roles]\ngenerate = "cc"\noracle = "cc-oracle"\n', encoding="utf-8")
     d = _deps(workspace, workspace / "batches" / "b", {})
     assert d.oracle_config.name == "cc-oracle"
     assert "fresh context" in capsys.readouterr().out  # allowed, with a reminder
@@ -1031,7 +1043,7 @@ def test_a_docstring_with_backslashes_must_be_raw(tmp_path):
                     tmp_path / "r")
     exercise, _, _ = write_draft(ExerciseDraft.model_validate(draft(student_py="r" + latex)),
                                  "sum-list", tmp_path / "r", mode="learn")
-    question = (exercise / "question.md").read_text()
+    question = (exercise / "question.md").read_text(encoding="utf-8")
     assert "$\\frac{a}{b}$" in question  # the Markdown layout, its LaTeX intact
     assert "> **L1** · slides 1.3-1.4 · learn mode · implementation · easy" in question
 

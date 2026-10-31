@@ -115,7 +115,7 @@ def owner_candidates(batch_dir: Path, exercise_id: str, attempts_dir: Path) -> l
     log = attempts_dir / ATTEMPTS_FILE
     runs = []
     if log.is_file():
-        for raw in log.read_text().splitlines():
+        for raw in log.read_text(encoding="utf-8").splitlines():
             try:
                 run = json.loads(raw)
             except json.JSONDecodeError:
@@ -154,7 +154,7 @@ def model_candidates(solution_dir: Path) -> list[Candidate]:
     meta = folder / MODEL_META
     if not meta.is_file():
         return []
-    notes = json.loads(meta.read_text()).get("notes", {})
+    notes = json.loads(meta.read_text(encoding="utf-8")).get("notes", {})
     found = []
     for path in sorted(folder.glob("*.py")):  # correct, slides, then wrong_01, wrong_02, ...
         if path.stem in (CORRECT, SLIDES):
@@ -187,7 +187,8 @@ def check_heldout(ex: ExerciseFiles, candidates: list[Candidate],
     # A model's file is code from outside, like a generated exercise: the same static check
     # before anything runs it. The owner's own code is not checked, as in their own runs.
     allowed = allowed_imports(ex.metadata["framework"], workspace_allow_imports(ex.exercise_dir))
-    hazards = {c.path: find_hazards(c.path.read_text(), allowed) if c.author == MODEL else []
+    hazards = {c.path: (find_hazards(c.path.read_text(encoding="utf-8"), allowed)
+                        if c.author == MODEL else [])
                for c in candidates}
     # Candidates are independent: check them at once (execution.py caps how many test runs
     # go at a time) and flatten the results back into the candidates' order.
@@ -364,7 +365,8 @@ def main(argv: list[str] | None = None) -> int:
             without += 1
             continue  # no file for an exercise nobody has run yet
         data = report_to_dict(exercise_id, results, datetime.now().isoformat(timespec="seconds"))
-        (solution / REPORT_FILE).write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+        (solution / REPORT_FILE).write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n",
+                                            encoding="utf-8")
         flagged += data["flagged"]
     print(f"held-out: {flagged} flagged; {without} exercise(s) without held-out solutions"
           + (f"; {broken} would not load" if broken else ""))

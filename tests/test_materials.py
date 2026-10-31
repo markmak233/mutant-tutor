@@ -195,7 +195,7 @@ def test_an_outside_lecture_folder_is_cached_like_the_default_one(tmp_path, monk
     workspace, elsewhere = tmp_path / "ws", tmp_path / "course-pdfs"
     workspace.mkdir()
     elsewhere.mkdir()
-    (workspace / "workspace.toml").write_text('course = "demo"\n')
+    (workspace / "workspace.toml").write_text('course = "demo"\n', encoding="utf-8")
     lecture(elsewhere / "L1.pdf")
     monkeypatch.setenv("WORKSPACE_DIR", str(workspace))
     monkeypatch.setenv("LECTURE_DIR", str(elsewhere))
@@ -207,7 +207,7 @@ def test_an_outside_lecture_folder_is_cached_like_the_default_one(tmp_path, monk
 
 
 def test_cli_writes_the_cache_and_skips_unchanged_pages(tmp_path, monkeypatch, capsys):
-    (tmp_path / "workspace.toml").write_text('course = "demo"\n')
+    (tmp_path / "workspace.toml").write_text('course = "demo"\n', encoding="utf-8")
     (tmp_path / "lectures").mkdir()
     lecture(tmp_path / "lectures" / "l.pdf")
     monkeypatch.setenv("WORKSPACE_DIR", str(tmp_path))
@@ -243,7 +243,7 @@ def test_a_wrapping_markdown_fence_is_removed():
 
 
 def test_cli_vision_needs_a_model_and_profile_needs_vision(tmp_path, monkeypatch, capsys):
-    (tmp_path / "workspace.toml").write_text('course = "demo"\n')
+    (tmp_path / "workspace.toml").write_text('course = "demo"\n', encoding="utf-8")
     monkeypatch.setenv("WORKSPACE_DIR", str(tmp_path))
     monkeypatch.delenv("LLM_MODEL", raising=False)
     monkeypatch.setattr("tutor.materials.__main__.load_env", lambda: None)
@@ -316,7 +316,7 @@ def test_an_assistant_is_asked_for_every_image_page_in_one_run(tmp_path, monkeyp
 
     (tmp_path / "workspace.toml").write_text(
         'course = "demo"\n[llm.profiles.claude-code]\nprovider = "assistant"\n'
-        '[llm.roles]\nvision = "claude-code"\n')
+        '[llm.roles]\nvision = "claude-code"\n', encoding="utf-8")
     (tmp_path / "lectures").mkdir()
     pdf = make_pdf(tmp_path / "lectures" / "l.pdf", [
         {"lines": [f"Figure {n}"], "images": [(name, 0, 20, 720, 380)]}

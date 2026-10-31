@@ -55,7 +55,7 @@ generate = "glm-flash"
 
 
 def workspace(tmp_path, llm=WORKSPACE_LLM):
-    (tmp_path / "workspace.toml").write_text('course = "demo"\n' + llm)
+    (tmp_path / "workspace.toml").write_text('course = "demo"\n' + llm, encoding="utf-8")
     return tmp_path
 
 
@@ -126,9 +126,9 @@ def test_chat_sends_an_openai_request_and_logs_without_the_key(sent, tmp_path):
     url = body["messages"][0]["content"][1]["image_url"]["url"]
     assert base64.b64decode(url.removeprefix("data:image/png;base64,")) == b"\x89PNG fake"
     assert (reply.text, reply.input_tokens, reply.output_tokens) == ("## Mean v1", 1200, 80)
-    line = json.loads(log.read_text())
+    line = json.loads(log.read_text(encoding="utf-8"))
     assert (line["purpose"], line["outcome"], line["output_tokens"]) == ("vision", "ok", 80)
-    assert SECRET not in log.read_text()
+    assert SECRET not in log.read_text(encoding="utf-8")
 
 
 def test_no_authorization_header_without_a_key(sent):
@@ -145,7 +145,7 @@ def test_an_unreachable_server_is_a_clear_error_and_is_logged(monkeypatch, tmp_p
     with pytest.raises(LLMError, match="is the server running"):
         chat(LLMConfig("p", "lmstudio", "http://localhost:1234/v1", "gemma"), [], purpose="vision",
              log_path=log)
-    assert json.loads(log.read_text())["outcome"] == "error"
+    assert json.loads(log.read_text(encoding="utf-8"))["outcome"] == "error"
 
 
 def test_cached_input_tokens_are_read_and_logged(monkeypatch, tmp_path):
@@ -161,7 +161,7 @@ def test_cached_input_tokens_are_read_and_logged(monkeypatch, tmp_path):
     reply = chat(LLMConfig("p", "openai", "https://api.openai.com/v1", "gpt-6.1-terra"), [],
                  purpose="repair", log_path=log)
     assert reply.cached_tokens == 5504
-    assert json.loads(log.read_text())["cached_tokens"] == 5504
+    assert json.loads(log.read_text(encoding="utf-8"))["cached_tokens"] == 5504
 
 
 def test_a_byte_that_is_not_utf8_does_not_crash_the_call(monkeypatch):
@@ -202,7 +202,7 @@ def test_an_error_that_echoes_the_key_is_logged_and_raised_without_it(monkeypatc
     with pytest.raises(LLMError) as raised:
         chat(config, [], purpose="vision", log_path=log)
     assert "HTTP 401" in str(raised.value) and "invalid key [key]" in str(raised.value)
-    assert SECRET not in str(raised.value) and SECRET not in log.read_text()
+    assert SECRET not in str(raised.value) and SECRET not in log.read_text(encoding="utf-8")
 
 
 def test_thinking_off_tries_each_switch_until_the_model_accepts_one(monkeypatch, tmp_path):
@@ -312,7 +312,7 @@ def test_a_stream_that_ends_without_finishing_is_an_error(monkeypatch, tmp_path)
     with pytest.raises(LLMError, match="ended after 7 characters without finishing"):
         chat(LLMConfig("p", "deepseek", "https://api.deepseek.com", "deepseek-v4-flash"),
              [], purpose="generate", stream=True, log_path=log)
-    assert json.loads(log.read_text())["outcome"] == "error"
+    assert json.loads(log.read_text(encoding="utf-8"))["outcome"] == "error"
 
 
 def test_only_providers_known_to_accept_it_are_asked_for_usage_in_a_stream(monkeypatch):
@@ -335,4 +335,4 @@ def test_an_error_inside_a_stream_is_an_llm_error(monkeypatch, tmp_path):
     with pytest.raises(LLMError, match="error in the stream.*overloaded"):
         chat(LLMConfig("p", "openai", "http://x/v1", "gpt"), [], purpose="generate",
              stream=True, log_path=tmp_path / "calls.jsonl")
-    assert json.loads((tmp_path / "calls.jsonl").read_text())["outcome"] == "error"
+    assert json.loads((tmp_path / "calls.jsonl").read_text(encoding="utf-8"))["outcome"] == "error"

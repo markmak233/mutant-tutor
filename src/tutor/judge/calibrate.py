@@ -65,7 +65,8 @@ def _labels(row: dict) -> dict[str, bool]:
 
 
 def _rows(path: Path) -> list[dict]:
-    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    return [json.loads(line)
+            for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
 def daily_items(workspace: Path) -> list[Item]:
@@ -80,11 +81,12 @@ def daily_items(workspace: Path) -> list[Item]:
 
 
 def blind_items(workspace: Path, blind_dir: Path) -> list[Item]:
-    arms = json.loads((blind_dir / "arms.json").read_text())  # arm -> batch, from workspace
+    # arm -> batch, from workspace
+    arms = json.loads((blind_dir / "arms.json").read_text(encoding="utf-8"))
     items = []
     for row in _rows(blind_dir / "ratings.jsonl"):
         exercise = row["folder"].split("-", 1)[1]  # "1-dgim-bucket-update" -> the id
-        question = (blind_dir / row["folder"] / f"{row['version']}.md").read_text()
+        question = (blind_dir / row["folder"] / f"{row['version']}.md").read_text(encoding="utf-8")
         items.append(Item(f"blind {row['folder']} {row['version']} ({row['arm']})",
                           workspace / arms[row["arm"]], exercise, _labels(row), question))
     return items
@@ -95,12 +97,13 @@ def defect_items(workspace: Path, folder: Path) -> list[Item]:
     reference.py (optional)}; defect.json gives "batch", "exercise" and "point"."""
     items = []
     for variant in sorted(p for p in folder.iterdir() if (p / "defect.json").is_file()):
-        defect = json.loads((variant / "defect.json").read_text())
+        defect = json.loads((variant / "defect.json").read_text(encoding="utf-8"))
         reference = variant / "reference.py"
         items.append(Item(f"planted {variant.name}", workspace / "batches" / defect["batch"],
                           defect["exercise"], {defect["point"]: False},
-                          (variant / "question.md").read_text(),
-                          reference.read_text() if reference.is_file() else None, True))
+                          (variant / "question.md").read_text(encoding="utf-8"),
+                          reference.read_text(encoding="utf-8") if reference.is_file() else None,
+                          True))
     return items
 
 
@@ -116,7 +119,7 @@ def judged(items: list[Item], workspace: Path, model: Judge, store: Path,
                         item.reference)
         path = store / (re.sub(r"[^\w.-]+", "_", item.name) + ".json")
         if path.is_file():
-            old = json.loads(path.read_text())
+            old = json.loads(path.read_text(encoding="utf-8"))
             if old["inputs"] == inputs.key() and old["model"] == model_name(model):
                 return item, Verdict.model_validate(old["verdict"]), ""
         try:
@@ -126,7 +129,7 @@ def judged(items: list[Item], workspace: Path, model: Judge, store: Path,
         path.write_text(json.dumps({"name": item.name, "inputs": inputs.key(),
                                     "model": model_name(model),
                                     "verdict": verdict.model_dump(), "tokens": tokens},
-                                   indent=2, ensure_ascii=False) + "\n")
+                                   indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
         return item, verdict, ""
 
     # The calls wait on the network, so a few go at once.

@@ -150,7 +150,7 @@ def parse(text: str) -> dict[int, Entry]:
 
 
 def load(path: Path) -> dict[int, Entry]:
-    return parse(path.read_text()) if path.is_file() else {}
+    return parse(path.read_text(encoding="utf-8")) if path.is_file() else {}
 
 
 def save(path: Path, text: str) -> None:
@@ -158,6 +158,6 @@ def save(path: Path, text: str) -> None:
     half-written cache."""
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
-    with os.fdopen(fd, "w") as f:
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
         f.write(text)
     os.replace(tmp, path)

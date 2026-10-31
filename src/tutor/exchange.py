@@ -87,13 +87,15 @@ def ask(config: LLMConfig, messages: list[dict], purpose: str,
     answer = queue.answer_file(rid)
     if answer.is_file():
         # Replayed or just answered: the reply as the assistant wrote it.
-        return Reply(answer.read_text(), None, None, 0.0, "stop")
+        return Reply(answer.read_text(encoding="utf-8"), None, None, 0.0, "stop")
     queue.requests.mkdir(parents=True, exist_ok=True)
     request = queue.requests / f"{rid}.md"
     if not request.exists():
-        request.write_text(_render(rid, config, messages, purpose, response_schema, queue))
+        request.write_text(_render(rid, config, messages, purpose, response_schema, queue),
+                           encoding="utf-8")
         if response_schema is not None:
-            queue.schema_file(rid).write_text(json.dumps(response_schema, indent=1))
+            queue.schema_file(rid).write_text(json.dumps(response_schema, indent=1),
+                                              encoding="utf-8")
     raise AwaitingAnswer(request)
 
 
@@ -139,14 +141,14 @@ def store_answer(queue: Queue, rid: str, text: str) -> None:
             data = json.loads(_unfenced(text))
         except json.JSONDecodeError as e:
             raise ValueError(f"the reply must be one JSON object: {e}") from None
-        schema = json.loads(schema_file.read_text())
+        schema = json.loads(schema_file.read_text(encoding="utf-8"))
         missing = [f for f in schema.get("required", []) if not isinstance(data, dict)
                    or f not in data]
         if missing:
             raise ValueError(f"the reply lacks required fields: {', '.join(missing)}")
         text = json.dumps(data, ensure_ascii=False)
     queue.answers.mkdir(parents=True, exist_ok=True)
-    queue.answer_file(rid).write_text(text)
+    queue.answer_file(rid).write_text(text, encoding="utf-8")
 
 
 def _unfenced(text: str) -> str:
@@ -185,10 +187,11 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{len(waiting)} requests waiting for an answer", file=sys.stderr)
             return 0
         if args[:1] == ["show"] and len(args) == 2:
-            print((find(workspace, args[1]).requests / f"{args[1]}.md").read_text())
+            print((find(workspace, args[1]).requests / f"{args[1]}.md").read_text(encoding="utf-8"))
             return 0
         if args[:1] == ["answer"] and len(args) == 3:
-            store_answer(find(workspace, args[1]), args[1], Path(args[2]).read_text())
+            store_answer(find(workspace, args[1]), args[1],
+                         Path(args[2]).read_text(encoding="utf-8"))
             print(f"stored the answer to {args[1]}")
             return 0
     except (WorkspaceError, ValueError, OSError) as e:

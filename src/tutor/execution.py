@@ -196,10 +196,15 @@ def _run_in(workdir: Path, timeout_s: float, extra_env: Mapping[str, str],
                      f"--junitxml={REPORT_FILE}"]
     # PYSPARK_PYTHON: Spark workers otherwise start the `python3` on PATH, which may be a
     # different minor version than the driver (PYTHON_VERSION_MISMATCH).
+    # PYTHONIOENCODING: the child's stdout is a pipe, and on Windows Python would write it
+    # in the ANSI code page (cp1252), failing on any non-Latin character in test output.
+    # Only stdio: what the code under test opens keeps the platform default, as in the
+    # learner's own runs.
     env = {
         **os.environ,
         "PYTHONDONTWRITEBYTECODE": "1",
         "PYSPARK_PYTHON": sys.executable,
+        "PYTHONIOENCODING": "utf-8",
         **extra_env,
     }
     start = time.monotonic()
@@ -235,7 +240,9 @@ class _ProcessTree:
     def __init__(self, cmd: list[str], cwd: Path, env: Mapping[str, str]) -> None:
         self._job = winjob.Job() if sys.platform == "win32" else None
         self.proc = subprocess.Popen(
-            cmd, cwd=cwd, env=env, text=True,
+            # The output is decoded as UTF-8 (what PYTHONIOENCODING makes the child write);
+            # bytes a program wrote some other way are replaced, not a crash.
+            cmd, cwd=cwd, env=env, encoding="utf-8", errors="replace",
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             start_new_session=self._job is None,  # POSIX only; the job replaces it
         )

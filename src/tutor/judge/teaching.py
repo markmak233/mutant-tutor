@@ -123,23 +123,25 @@ def gather(batch_dir: Path, exercise_id: str, workspace: Path,
     and a planted defect may come with its own reference)."""
     solution = batch_dir / "solutions" / exercise_id
     exercise = batch_dir / "exercises" / exercise_id
-    metadata = json.loads((solution / "metadata.json").read_text())
+    metadata = json.loads((solution / "metadata.json").read_text(encoding="utf-8"))
     # The original skeleton: exercises/<id>/student.py may hold the owner's answer.
-    skeleton = (solution / "skeleton.py").read_text()
+    skeleton = (solution / "skeleton.py").read_text(encoding="utf-8")
     if question is None:
         question_md = exercise / "question.md"
-        question = (question_md.read_text() if question_md.is_file()
+        question = (question_md.read_text(encoding="utf-8") if question_md.is_file()
                     else ast.get_docstring(ast.parse(skeleton)) or "")
     manifest = batch_dir / "manifest.json"
-    mode = json.loads(manifest.read_text()).get("mode", "learn") if manifest.is_file() else "learn"
+    mode = (json.loads(manifest.read_text(encoding="utf-8")).get("mode", "learn")
+            if manifest.is_file() else "learn")
     source = metadata.get("source")
     hints = exercise / "hints.md"
     return Inputs(question=question, skeleton=skeleton,
                   reference=(reference if reference is not None
-                             else (solution / "reference.py").read_text()),
+                             else (solution / "reference.py").read_text(encoding="utf-8")),
                   slides=lecture_context(workspace, source),
                   taught=lectures_taught(workspace, source), mode=mode,
-                  useful=useful_functions(hints.read_text()) if hints.is_file() else "")
+                  useful=(useful_functions(hints.read_text(encoding="utf-8"))
+                          if hints.is_file() else ""))
 
 
 def useful_functions(hints: str) -> str:
@@ -249,7 +251,7 @@ def write(batch_dir: Path, exercise_id: str, workspace: Path, model: Judge,
     inputs = gather(batch_dir, exercise_id, workspace)
     path = batch_dir / "solutions" / exercise_id / REPORT_FILE
     if not force and path.is_file():
-        old = json.loads(path.read_text())
+        old = json.loads(path.read_text(encoding="utf-8"))
         if old.get("inputs") == inputs.key() and old.get("model") == model_name(model):
             return f"kept: {old.get('letters', '?')}", None
     verdict, tokens = judge(inputs, model)
@@ -262,5 +264,5 @@ def write(batch_dir: Path, exercise_id: str, workspace: Path, model: Judge,
         "points": verdict.model_dump(),
         "tokens": tokens,
     }
-    path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+    path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     return verdict.letters(), verdict

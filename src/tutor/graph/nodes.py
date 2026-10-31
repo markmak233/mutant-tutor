@@ -218,7 +218,7 @@ def _ask(state: ItemState, deps: Deps, user: str, purpose: str, round_: int,
     conventions = deps.workspace / "conventions.md"
     messages = [
         {"role": "system", "content": prompts.system_prompt(
-            conventions.read_text() if conventions.is_file() else "",
+            conventions.read_text(encoding="utf-8") if conventions.is_file() else "",
             oracle_interface=deps.oracle_config is not None,
             concept_lines=deps.concept_lines)},
         {"role": "user", "content": user},
@@ -429,7 +429,7 @@ def validate_draft(state: ItemState, deps: Deps) -> ItemState:
         else:
             round_dir = str(round_dir_path)
             report = deps.check(exercise, solution)
-            (round_dir_path / "report.txt").write_text(_report_text(report))
+            (round_dir_path / "report.txt").write_text(_report_text(report), encoding="utf-8")
             # The failure text: each failing rule with pytest's excerpt, for repair.
             failure = None if report.valid else "\n".join(
                 f"rule {r.rule} ({r.name}) FAIL: {r.detail}"
@@ -534,7 +534,7 @@ def write_draft(draft: ExerciseDraft, exercise_id: str, root: Path,
         raise DraftError("\n".join(dropped.values()))
     for path, content in files.items():
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content if content.endswith("\n") else content + "\n")
+        path.write_text(content if content.endswith("\n") else content + "\n", encoding="utf-8")
     return exercise, solution, dropped
 
 
@@ -648,9 +648,10 @@ def save(state: ItemState, deps: Deps) -> ItemState:
         if source.parent.name == "exercises" and (staging / "student.py").is_file():
             # The question's "How to run" names the folder it will have from now on; the
             # line under its title comes from the exercise's metadata and the batch mode.
-            metadata = json.loads((src / "solutions" / item.id / "metadata.json").read_text())
-            write_question((staging / "student.py").read_text(), staging, location=target,
-                           metadata=metadata, mode=deps.mode)
+            metadata = json.loads(
+                (src / "solutions" / item.id / "metadata.json").read_text(encoding="utf-8"))
+            write_question((staging / "student.py").read_text(encoding="utf-8"), staging,
+                           location=target, metadata=metadata, mode=deps.mode)
         staged.append((staging, target))
     for staging, target in staged:
         staging.rename(target)
@@ -662,7 +663,8 @@ def _saved_before(deps: Deps, exercise_id: str) -> bool:
     """The batch log records `exercise_id` as saved (by an earlier run of this batch)."""
     if not deps.generation_log.is_file():
         return False
-    lines = (json.loads(line) for line in deps.generation_log.read_text().splitlines())
+    lines = (json.loads(line)
+             for line in deps.generation_log.read_text(encoding="utf-8").splitlines())
     return any(line["exercise"] == exercise_id and line["outcome"] == "saved"
                for line in lines)
 
@@ -710,13 +712,13 @@ def reusing_reports(check: Callable[[Path, Path], ValidationReport],
                 digest.update(str(path.relative_to(root)).encode() + b"\0" + path.read_bytes())
         stored = folder / f"{digest.hexdigest()[:20]}.json"
         if stored.is_file():
-            data = json.loads(stored.read_text())
+            data = json.loads(stored.read_text(encoding="utf-8"))
             return ValidationReport(data["exercise_id"], [
                 RuleResult(**{**r, "status": Status(r["status"])}) for r in data["results"]])
         report = check(exercise, solution)
         folder.mkdir(parents=True, exist_ok=True)
         stored.write_text(json.dumps({"exercise_id": report.exercise_id, "results": [
-            {**asdict(r), "status": r.status.value} for r in report.results]}))
+            {**asdict(r), "status": r.status.value} for r in report.results]}), encoding="utf-8")
         return report
     return cached
 
@@ -729,7 +731,8 @@ def write_manifest(deps: Deps, items: list[PlanItem], notes: str | None = None,
     one step, so a crash leaves the old manifest or the new one, never half of one."""
     model = model or _model_names(deps)
     path = deps.batch_dir / "manifest.json"
-    known = Manifest.model_validate_json(path.read_text()) if path.is_file() else None
+    known = (Manifest.model_validate_json(path.read_text(encoding="utf-8"))
+             if path.is_file() else None)
     if known:
         items = [i for i in items if i.id not in known.exercises]
     if not items:
@@ -755,7 +758,8 @@ def write_manifest(deps: Deps, items: list[PlanItem], notes: str | None = None,
             exercises=[i.id for i in items], notes=notes or None)
     Manifest.model_validate(manifest.model_dump())  # the cross-field rules
     partial = path.with_name(path.name + ".partial")
-    partial.write_text(manifest.model_dump_json(indent=2, exclude_none=True) + "\n")
+    partial.write_text(manifest.model_dump_json(indent=2, exclude_none=True) + "\n",
+                       encoding="utf-8")
     partial.replace(path)
 
 
@@ -768,7 +772,8 @@ def plan_batch(state: BatchState, deps: Deps) -> BatchState:
     max_count = state.get("max_count", 6)
     coverage = deps.workspace / "coverage.md"
     inputs = dict(
-        lectures=lectures, coverage=coverage.read_text() if coverage.is_file() else "(none)",
+        lectures=lectures,
+        coverage=coverage.read_text(encoding="utf-8") if coverage.is_file() else "(none)",
         pages="\n".join(page_titles(deps.workspace, lecture) for lecture in lectures),
         existing=existing_exercises(deps.workspace), preferences=state.get("preferences", ""),
         count=count, max_count=max_count, feedback=state.get("feedback", ""),
@@ -851,7 +856,8 @@ def collect(state: BatchState, deps: Deps) -> BatchState:
                  "owner has looked at them (not applied automatically).", ""]
         lines += [f"- {i.lecture}, slides {i.slides} ({i.knowledge_point}): gap-code -> "
                   f"ex:{i.id} ({label})" for i in saved]
-        (deps.batch_dir / "coverage-proposal.md").write_text("\n".join(lines) + "\n")
+        (deps.batch_dir / "coverage-proposal.md").write_text("\n".join(lines) + "\n",
+                                                             encoding="utf-8")
     return {}
 
 
@@ -860,7 +866,8 @@ def _models_of(deps: Deps, ids: set[str]) -> str | None:
     another --profile mixes models, and the manifest names them all."""
     if not deps.generation_log.is_file():
         return None
-    lines = [json.loads(line) for line in deps.generation_log.read_text().splitlines()]
+    lines = [json.loads(line)
+             for line in deps.generation_log.read_text(encoding="utf-8").splitlines()]
     saved = [x for x in lines if x["exercise"] in ids and x["outcome"] == "saved"]
     models = ([x["model"] for x in saved]
               + [f"repair {x['repair_model']}" for x in saved if x.get("repair_model")]
@@ -908,7 +915,7 @@ def existing_exercises(workspace: Path) -> list[str]:
     for exercise_id in existing_ids(workspace):
         meta = next((workspace / "batches").glob(f"*/solutions/{exercise_id}/metadata.json"), None)
         try:
-            data = json.loads(meta.read_text()) if meta else {}
+            data = json.loads(meta.read_text(encoding="utf-8")) if meta else {}
         except (OSError, ValueError):  # a hand-edited or half-written file: the id still counts
             data = {}
         title = f": {data['title']}" if data.get("title") else ""
@@ -956,5 +963,5 @@ def _log(state: ItemState, deps: Deps, outcome: str, error: str | None = None) -
         line["error"] = error
     with _LOG_LOCK:
         deps.generation_log.parent.mkdir(parents=True, exist_ok=True)
-        with deps.generation_log.open("a") as f:
+        with deps.generation_log.open("a", encoding="utf-8") as f:
             f.write(json.dumps(line, ensure_ascii=False) + "\n")

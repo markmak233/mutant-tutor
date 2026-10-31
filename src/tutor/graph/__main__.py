@@ -150,11 +150,11 @@ def _profiles(args) -> dict:
 def _write_run(path: Path, profiles: dict, settings: GenerationSettings) -> None:
     """run.json: what the batch was planned with, read again by every resume."""
     path.write_text(json.dumps({"profiles": profiles, "settings": settings.model_dump()},
-                               indent=1) + "\n")
+                               indent=1) + "\n", encoding="utf-8")
 
 
 def _read_run(path: Path) -> tuple[dict, GenerationSettings]:
-    data = json.loads(path.read_text())
+    data = json.loads(path.read_text(encoding="utf-8"))
     if "settings" in data:
         return data.get("profiles", {}), GenerationSettings.model_validate(data["settings"])
     # Written before the settings existed (until 2026-10-29): one flat dict of the flags,
@@ -219,7 +219,7 @@ def _optional_role(role: str, profile: str | None, workspace: Path):
 
 
 def _item(args, workspace: Path, build) -> int:
-    item = PlanItem.model_validate_json(args.item_file.read_text())
+    item = PlanItem.model_validate_json(args.item_file.read_text(encoding="utf-8"))
     existing = sorted((workspace / "batches").glob(f"*_p3-{args.batch}"))
     batch_dir = (existing[-1] if existing
                  else workspace / "batches" / f"{date.today()}_p3-{args.batch}")
@@ -338,7 +338,7 @@ def _batch(args, workspace: Path, build) -> int:
                       f"{args.batch} --approve   (or --feedback \"...\")")
                 return 0
             if answer.get("approve"):
-                plan = json.loads(plan_file.read_text())  # with the owner's edits
+                plan = json.loads(plan_file.read_text(encoding="utf-8"))  # with the owner's edits
                 items = BatchPlan.model_validate({"items": plan}).items
                 if found := blocking_problems(items, snapshot.values["lectures"],
                                               existing_ids(workspace)):
@@ -384,14 +384,14 @@ def _owner_plan(drafts: Path, model_plan: list[dict]) -> tuple[list[dict], bool]
     if plan_file.is_file() and not model_file.is_file():
         # Paused before plan.model.json existed: plan.json may hold the owner's edits (or
         # the plan before their feedback), so it is kept; the caller says it differs.
-        model_file.write_text(text)
-        plan = json.loads(plan_file.read_text())
+        model_file.write_text(text, encoding="utf-8")
+        plan = json.loads(plan_file.read_text(encoding="utf-8"))
         return plan, plan != model_plan
-    if not plan_file.is_file() or model_file.read_text() != text:
-        plan_file.write_text(text)
-        model_file.write_text(text)
+    if not plan_file.is_file() or model_file.read_text(encoding="utf-8") != text:
+        plan_file.write_text(text, encoding="utf-8")
+        model_file.write_text(text, encoding="utf-8")
         return model_plan, False
-    plan = json.loads(plan_file.read_text())
+    plan = json.loads(plan_file.read_text(encoding="utf-8"))
     return plan, plan != model_plan
 
 

@@ -40,22 +40,24 @@ def make_workspace(tmp_path):
     for name in ("Lecture_2.1-Intro", "Lecture_2.2-Demo", "Lecture_3.1-Later"):
         entries = [cache.Entry(n, f"{name[8:11]}.{n}", "text", "h", f"{name} page {n}")
                    for n in range(1, 4)]
-        (lectures / f"{name}.pdf.md").write_text(cache.render(f"{name}.pdf", entries))
+        (lectures / f"{name}.pdf.md").write_text(cache.render(f"{name}.pdf", entries),
+                                                 encoding="utf-8")
     batch = workspace / "batches" / "b1"
     exercise, solution = batch / "exercises" / "demo", batch / "solutions" / "demo"
     exercise.mkdir(parents=True)
     solution.mkdir(parents=True)
-    (batch / "manifest.json").write_text(json.dumps({"mode": "review"}))
+    (batch / "manifest.json").write_text(json.dumps({"mode": "review"}), encoding="utf-8")
     (exercise / "question.md").write_text("# Add\n\nAdd `a` and `b`.\n")
     (exercise / "student.py").write_text("def add(a, b):\n    return a + b  # the owner's\n")
-    (exercise / "test_student.py").write_text("def test_add():\n    assert True\n")
+    (exercise / "test_student.py").write_text("def test_add():\n    assert True\n",
+                                              encoding="utf-8")
     (exercise / "hints.md").write_text(
         "# Hints\n\n## Useful functions\n\n```python\nsum([1, 2])\n## not a heading in code\n"
-        "```\n\n## Level 1\n\nthe hint text\n")
+        "```\n\n## Level 1\n\nthe hint text\n", encoding="utf-8")
     (solution / "skeleton.py").write_text("def add(a, b):\n    raise NotImplementedError\n")
     (solution / "reference.py").write_text("def add(a, b):\n    return sum([a, b])\n")
     (solution / "metadata.json").write_text(json.dumps({
-        "id": "demo", "source": {"lecture": "L2.2", "pdf_pages": "2"}}))
+        "id": "demo", "source": {"lecture": "L2.2", "pdf_pages": "2"}}), encoding="utf-8")
     return workspace, batch
 
 
@@ -105,7 +107,7 @@ def test_lectures_taught_follow_the_course_order(tmp_path):
     lectures = tmp_path / "cache" / "lectures"
     lectures.mkdir(parents=True)
     for name in ("Lecture_10-X", "Lecture_5.2-B", "Lecture_5-A", "Lecture_9-C"):
-        (lectures / f"{name}.pdf.md").write_text("")
+        (lectures / f"{name}.pdf.md").write_text("", encoding="utf-8")
 
     assert lectures_taught(tmp_path, {"lecture": "L9"}) == [
         "Lecture_5-A", "Lecture_5.2-B", "Lecture_9-C"]  # 10 is later, though "10" < "9"
@@ -118,7 +120,7 @@ def test_a_verdict_is_saved_and_kept_while_nothing_changes(tmp_path):
     letters, verdict = write(batch, "demo", workspace, judge_with(FakeModel(verdict_json("nyyy"))))
 
     assert letters == "nyyy" and verdict.clear.evidence == "clear evidence"
-    data = json.loads((batch / "solutions/demo/quality.json").read_text())
+    data = json.loads((batch / "solutions/demo/quality.json").read_text(encoding="utf-8"))
     assert data["letters"] == "nyyy" and data["model"] == "fake: fake-1"
     assert data["points"]["clear"] == {"evidence": "clear evidence", "ok": False,
                                        "serious": True}
@@ -188,14 +190,14 @@ def test_the_labels_come_from_both_rating_files(tmp_path):
          "targets": True, "skip_points": ["clear"]},
         {"batch": "gone", "exercise": "demo", "clear": True, "fits": True, "taught": True,
          "targets": True},  # its batch was deleted: left out
-    ]) + "\n")
+    ]) + "\n", encoding="utf-8")
     blind = workspace / "experiments" / "blind"
     (blind / "1-demo").mkdir(parents=True)
-    (blind / "1-demo" / "X.md").write_text("the X version")
-    (blind / "arms.json").write_text(json.dumps({"low": "batches/b1"}))
+    (blind / "1-demo" / "X.md").write_text("the X version", encoding="utf-8")
+    (blind / "arms.json").write_text(json.dumps({"low": "batches/b1"}), encoding="utf-8")
     (blind / "ratings.jsonl").write_text(json.dumps(
         {"folder": "1-demo", "version": "X", "arm": "low", "clear": False, "fits": True,
-         "taught": True, "targets": True}) + "\n")
+         "taught": True, "targets": True}) + "\n", encoding="utf-8")
 
     daily = daily_items(workspace)
     assert [(i.name, owner_letters(i)) for i in daily] == [("b1/demo", "-yyy")]
@@ -229,7 +231,7 @@ def test_the_owners_answers_on_flags_give_how_many_were_right(tmp_path):
         {"name": "b1/demo", "point": "clear", "owner_says": "right"},
         {"name": "b1/demo", "point": "fits", "owner_says": "wrong"},
         {"name": "b1/other", "point": "clear", "owner_says": "right"},
-    ]) + "\n")
+    ]) + "\n", encoding="utf-8")
     reviews = read_reviews(tmp_path)
 
     assert [(i.name, p) for i, p, _ in judge_flags(results)] == [
@@ -274,11 +276,12 @@ def test_a_planted_defect_labels_only_its_point_and_is_scored_apart(tmp_path):
     workspace, batch = make_workspace(tmp_path)
     variant = tmp_path / "defects" / "demo-targets"
     variant.mkdir(parents=True)
-    (variant / "question.md").write_text("Add them; any way will do.")
+    (variant / "question.md").write_text("Add them; any way will do.", encoding="utf-8")
     (variant / "reference.py").write_text("def add(a, b):\n    return a.__add__(b)\n")
     (variant / "defect.json").write_text(json.dumps(
-        {"batch": "b1", "exercise": "demo", "point": "targets", "change": "allows any way"}))
-    (tmp_path / "defects" / "README.md").write_text("not a variant")
+        {"batch": "b1", "exercise": "demo", "point": "targets", "change": "allows any way"}),
+        encoding="utf-8")
+    (tmp_path / "defects" / "README.md").write_text("not a variant", encoding="utf-8")
 
     [planted] = defect_items(workspace, tmp_path / "defects")
     assert (planted.name, planted.labels, planted.planted) == (

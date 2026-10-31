@@ -189,7 +189,7 @@ def example(framework: str, interface: str) -> str:
                 or path.name in ("validation.json", "question.md")):  # question.md: a copy
             continue
         try:
-            parts.append(f"=== {rel} ===\n{path.read_text()}")
+            parts.append(f"=== {rel} ===\n{path.read_text(encoding='utf-8')}")
         except UnicodeDecodeError:
             continue
     return "\n\n".join(parts)

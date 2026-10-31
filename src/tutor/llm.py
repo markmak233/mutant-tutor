@@ -375,5 +375,5 @@ def _log(path: Path | None, purpose: str, config: LLMConfig, reply: Reply | None
         "error": error,
     }
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a") as f:
+    with path.open("a", encoding="utf-8") as f:
         f.write(json.dumps(line, ensure_ascii=False) + "\n")

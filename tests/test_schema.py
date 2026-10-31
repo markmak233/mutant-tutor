@@ -110,12 +110,14 @@ def make_batch(root, exercise_ids, metadata_ids=None):
     """A batch folder with a manifest listing `exercise_ids` and one exercise and
     solution folder per id in `metadata_ids` (default: the same ids)."""
     root.mkdir()
-    (root / "manifest.json").write_text(json.dumps(manifest(exercises=exercise_ids)))
+    (root / "manifest.json").write_text(json.dumps(manifest(exercises=exercise_ids)),
+                                        encoding="utf-8")
     for exercise_id in metadata_ids or exercise_ids:
         (root / "exercises" / exercise_id).mkdir(parents=True)
         solution = root / "solutions" / exercise_id
         solution.mkdir(parents=True)
-        (solution / "metadata.json").write_text(json.dumps(metadata(id=exercise_id)))
+        (solution / "metadata.json").write_text(json.dumps(metadata(id=exercise_id)),
+                                                encoding="utf-8")
     return root
 
 
@@ -131,7 +133,7 @@ def test_check_batch_reports_folders_the_manifest_does_not_list(tmp_path):
 def test_check_batch_reports_metadata_problems_with_their_path(tmp_path):
     batch = make_batch(tmp_path / "b", ["word-count"])
     path = batch / "solutions" / "word-count" / "metadata.json"
-    path.write_text(json.dumps(metadata(id="other-id", interface=None)))
+    path.write_text(json.dumps(metadata(id="other-id", interface=None)), encoding="utf-8")
     assert check_batch(batch) == [
         "solutions/word-count/metadata.json: interface: Field required",
         "solutions/word-count/metadata.json: id 'other-id' differs from its folder name",
@@ -141,7 +143,7 @@ def test_check_batch_reports_metadata_problems_with_their_path(tmp_path):
 def test_check_batch_reports_missing_and_broken_files(tmp_path):
     batch = make_batch(tmp_path / "b", ["word-count"])
     (batch / "manifest.json").unlink()
-    (batch / "solutions" / "word-count" / "metadata.json").write_text("{")
+    (batch / "solutions" / "word-count" / "metadata.json").write_text("{", encoding="utf-8")
     found = check_batch(batch)
     assert found[0] == "missing manifest.json"
     assert found[1].startswith("solutions/word-count/metadata.json: not valid JSON")
@@ -151,7 +153,7 @@ def test_exported_schema_files_match_the_models():
     """schemas/ is what assistants without Python read; regenerate it with
     `python -m tutor.schema --export` after changing a model."""
     for name, schema in json_schemas().items():
-        assert json.loads((SCHEMA_DIR / name).read_text()) == schema, name
+        assert json.loads((SCHEMA_DIR / name).read_text(encoding="utf-8")) == schema, name
 
 
 def test_main_exit_codes(tmp_path, capsys):
@@ -167,10 +169,11 @@ def test_main_exit_codes(tmp_path, capsys):
 
 def test_check_batch_reports_null_files_and_wrong_shapes_without_crashing(tmp_path):
     batch = make_batch(tmp_path / "b", ["word-count"])
-    (batch / "manifest.json").write_text("null")
-    (batch / "solutions" / "word-count" / "metadata.json").write_text("null")
+    (batch / "manifest.json").write_text("null", encoding="utf-8")
+    (batch / "solutions" / "word-count" / "metadata.json").write_text("null", encoding="utf-8")
     found = check_batch(batch)
     assert any(line.startswith("manifest.json: ") for line in found), found
     assert any(line.startswith("solutions/word-count/metadata.json: ") for line in found)
-    (batch / "manifest.json").write_text(json.dumps(manifest(exercises=[{"id": "x"}])))
+    (batch / "manifest.json").write_text(json.dumps(manifest(exercises=[{"id": "x"}])),
+                                         encoding="utf-8")
     assert any("exercises" in line for line in check_batch(batch))
