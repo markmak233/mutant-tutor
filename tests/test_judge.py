@@ -10,6 +10,7 @@ from tutor.judge.calibrate import (
     Item,
     blind_items,
     daily_items,
+    defect_items,
     judge_flags,
     judged,
     owner_letters,
@@ -267,3 +268,26 @@ def test_only_the_useful_functions_part_of_the_hints_is_shown():
     assert useful_functions("# Hints\n\n## Level 1\nx\n") == ""
     hints = "## Useful functions\n### `f`\n```\n## in code\n```\n## Level 1\nsecret\n"
     assert useful_functions(hints) == "## Useful functions\n### `f`\n```\n## in code\n```"
+
+
+def test_a_planted_defect_labels_only_its_point_and_is_scored_apart(tmp_path):
+    workspace, batch = make_workspace(tmp_path)
+    variant = tmp_path / "defects" / "demo-targets"
+    variant.mkdir(parents=True)
+    (variant / "question.md").write_text("Add them; any way will do.")
+    (variant / "reference.py").write_text("def add(a, b):\n    return a.__add__(b)\n")
+    (variant / "defect.json").write_text(json.dumps(
+        {"batch": "b1", "exercise": "demo", "point": "targets", "change": "allows any way"}))
+    (tmp_path / "defects" / "README.md").write_text("not a variant")
+
+    [planted] = defect_items(workspace, tmp_path / "defects")
+    assert (planted.name, planted.labels, planted.planted) == (
+        "planted demo-targets", {"targets": False}, True)
+    inputs = gather(batch, "demo", workspace, planted.question, planted.reference)
+    assert "a.__add__(b)" in user_prompt(inputs) and "any way will do" in user_prompt(inputs)
+
+    real = Item("b1/demo", batch, "demo", {"clear": False})
+    text = report([(real, verdict("nyyy"), ""), (planted, verdict("yyyn"), "")])
+    assert "real ratings:" in text and "planted defects (found / planted):\ntargets  1/1" in text
+    real_clear = text.split("planted defects")[0]
+    assert "targets        0" in real_clear  # the planted one is not in the real table

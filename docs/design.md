@@ -1777,13 +1777,26 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
       - Cost: the dollar figures above use the notes' prices ($2 in, $12 out per million
         tokens); the OpenAI balance fell by about half of the estimate, so gpt-terra
         costs roughly half that.
-   4. Synthetic defects for calibration: on 2026-10-31 the 29 labels held n only for
+   4. **Done 2026-10-31.** Synthetic defects for calibration: on 2026-10-31 the 29 labels held n only for
       "clear" (5 usable), never for fits, taught or targets, so those three cannot be
       calibrated from real data yet. A few yyyy questions get variants with one defect
       each (an unstated output order; a convention other than the slides'; an API from a
       later week; a task solvable without the knowledge point), labelled by construction
       and spot-checked by the owner; reported apart from real labels, since planted
       defects are easier to spot. Kept in the private workspace (`experiments/`).
+      As built: 18 variants of five yyyy questions (two week 2 MRJob, one week 5 Spark
+      SQL, two week 7), one defect each, written by hand; a "targets" variant brings a
+      reference that takes the workaround. No "taught" variant for week 7, the last
+      lecture. `--defects DIR` adds them; only the planted point is labelled, and the
+      report scores them apart. gpt-terra found 14 of 18: clear 3/5, fits 4/5, taught
+      2/3, targets 5/5. Of the misses, two were weak plants (a worked example still showed
+      the removed rule; the example output showed the letters a vague "characters" left
+      open) and two were real misses (a lab definition credited to the lecture; a window
+      function from lecture 5.2 not seen as untaught). On the real ratings, with the
+      hints' Useful functions shown, it found 1 of the owner's 5 "clear" n. So the judge
+      is a usable reminder for fits, taught and targets, where real n labels are still
+      missing; for "clear" the owner's own rating stays the measure. The owner
+      spot-checks the variants (README.md in the folder).
 3c. **Done 2026-10-29.**
    Hint command, `python -m tutor.hint <exercise>` (decided 2026-10-24, after 3a since it
    needs the LLM client, and after 3b since its rules come from the owner's real mistakes;

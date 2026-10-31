@@ -1,7 +1,7 @@
 """Judge a batch's teaching quality, or calibrate the judge against the owner's ratings.
 
     python -m tutor.judge <batch_dir> [<exercise_id> ...] [--force] [--profile NAME]
-    python -m tutor.judge --calibrate [--blind DIR] [--out DIR] [--profile NAME]
+    python -m tutor.judge --calibrate [--blind DIR] [--defects DIR] [--out DIR] [--profile NAME]
 
 The model is the workspace's `judge` role ([llm.roles] in workspace.toml) unless --profile
 names another. A batch's verdicts go to solutions/<id>/quality.json; a calibration's to
@@ -23,6 +23,7 @@ from tutor.config import WorkspaceError, load_env, load_workspace
 from tutor.judge.calibrate import (
     blind_items,
     daily_items,
+    defect_items,
     judged,
     read_reviews,
     report,
@@ -40,6 +41,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--calibrate", action="store_true",
                         help="compare with the owner's ratings instead of judging a batch")
     parser.add_argument("--blind", type=Path, help="a blind comparison's folder to add")
+    parser.add_argument("--defects", type=Path, help="a folder of planted defects to add")
     parser.add_argument("--out", type=Path, help="where a calibration's files go")
     parser.add_argument("--force", action="store_true", help="judge even if inputs are unchanged")
     parser.add_argument("--profile", help="a workspace.toml profile instead of the `judge` role")
@@ -64,7 +66,8 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _calibrate(args, root: Path, model: Judge) -> int:
-    items = daily_items(root) + (blind_items(root, args.blind) if args.blind else [])
+    items = (daily_items(root) + (blind_items(root, args.blind) if args.blind else [])
+             + (defect_items(root, args.defects) if args.defects else []))
     out = args.out or root / "experiments" / f"{date.today()}_judge"
     results = judged(items, root, model, out / "verdicts", args.parallel)
     reviews = read_reviews(out)  # the owner's answers on earlier flags, if any

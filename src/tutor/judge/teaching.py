@@ -117,9 +117,10 @@ class Inputs:
 
 
 def gather(batch_dir: Path, exercise_id: str, workspace: Path,
-           question: str | None = None) -> Inputs:
-    """What the judge sees for one exercise of a batch. `question`: a text to judge in
-    place of the exercise's question.md (calibration uses the version the owner rated)."""
+           question: str | None = None, reference: str | None = None) -> Inputs:
+    """What the judge sees for one exercise of a batch. `question` and `reference`: texts
+    to judge in place of the exercise's own (calibration uses the version the owner rated,
+    and a planted defect may come with its own reference)."""
     solution = batch_dir / "solutions" / exercise_id
     exercise = batch_dir / "exercises" / exercise_id
     metadata = json.loads((solution / "metadata.json").read_text())
@@ -134,7 +135,8 @@ def gather(batch_dir: Path, exercise_id: str, workspace: Path,
     source = metadata.get("source")
     hints = exercise / "hints.md"
     return Inputs(question=question, skeleton=skeleton,
-                  reference=(solution / "reference.py").read_text(),
+                  reference=(reference if reference is not None
+                             else (solution / "reference.py").read_text()),
                   slides=lecture_context(workspace, source),
                   taught=lectures_taught(workspace, source), mode=mode,
                   useful=useful_functions(hints.read_text()) if hints.is_file() else "")

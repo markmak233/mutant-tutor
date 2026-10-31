@@ -14,6 +14,12 @@ Per point: of the owner's n, how many the judge gives too (found); of the owner'
 many it marks n (false n). Trusted when found >= 80% and false n <= 20%. A point without
 any n label cannot be checked, so it is "uncalibrated" whatever the judge says.
 
+With --defects DIR, planted defects (experiments/<date>_defects/): each folder holds an
+owner-rated yyyy exercise's question.md with one defect planted, maybe its own reference,
+and defect.json naming the batch, the exercise and the point it breaks. Only that point is
+labelled (n, by construction); the report scores these apart from the real ratings, since
+a planted defect is easier to spot than a real one.
+
 Agreement is not the whole story: on 2026-10-31 most of gpt-terra's "false n" named real
 defects the owner's y had missed (a wrong claim about count-min, a missing start in
 Boyer-Moore that had caused the owner's own bug). So each judge flag (an n where the owner
@@ -49,6 +55,8 @@ class Item:
     exercise_id: str
     labels: dict[str, bool]  # point -> the owner's y (True) or n (False); skipped points left out
     question: str | None = None  # the text the owner rated, when not the current question.md
+    reference: str | None = None  # a planted defect's own reference, when it has one
+    planted: bool = False  # a synthetic defect, scored apart from the real ratings
 
 
 def _labels(row: dict) -> dict[str, bool]:
@@ -82,6 +90,20 @@ def blind_items(workspace: Path, blind_dir: Path) -> list[Item]:
     return items
 
 
+def defect_items(workspace: Path, folder: Path) -> list[Item]:
+    """One item per planted defect: <folder>/<variant>/{question.md, defect.json,
+    reference.py (optional)}; defect.json gives "batch", "exercise" and "point"."""
+    items = []
+    for variant in sorted(p for p in folder.iterdir() if (p / "defect.json").is_file()):
+        defect = json.loads((variant / "defect.json").read_text())
+        reference = variant / "reference.py"
+        items.append(Item(f"planted {variant.name}", workspace / "batches" / defect["batch"],
+                          defect["exercise"], {defect["point"]: False},
+                          (variant / "question.md").read_text(),
+                          reference.read_text() if reference.is_file() else None, True))
+    return items
+
+
 def judged(items: list[Item], workspace: Path, model: Judge, store: Path,
            parallel: int = 4) -> list[tuple[Item, Verdict | None, str]]:
     """Each item's verdict (None and why, if the model gave none). Verdicts are kept in
@@ -90,7 +112,8 @@ def judged(items: list[Item], workspace: Path, model: Judge, store: Path,
     store.mkdir(parents=True, exist_ok=True)
 
     def one(item: Item) -> tuple[Item, Verdict | None, str]:
-        inputs = gather(item.batch_dir, item.exercise_id, workspace, item.question)
+        inputs = gather(item.batch_dir, item.exercise_id, workspace, item.question,
+                        item.reference)
         path = store / (re.sub(r"[^\w.-]+", "_", item.name) + ".json")
         if path.is_file():
             old = json.loads(path.read_text())
@@ -181,10 +204,17 @@ def report(results: list[tuple[Item, Verdict | None, str]],
            reviews: dict[tuple[str, str], str] | None = None) -> str:
     reviews = reviews or {}
     pairs = [(item, v) for item, v, _ in results if v is not None]
-    lines = [f"{'point':<8} {'owner n':>7} {'found':>5} {'owner y':>7} {'false n':>7}  status"]
-    for s in scores(pairs):
+    real = [(item, v) for item, v in pairs if not item.planted]
+    planted = [(item, v) for item, v in pairs if item.planted]
+    lines = ["real ratings:",
+             f"{'point':<8} {'owner n':>7} {'found':>5} {'owner y':>7} {'false n':>7}  status"]
+    for s in scores(real):
         lines.append(f"{s.point:<8} {s.n_labels:>7} {s.found:>5} {s.y_labels:>7} "
                      f"{s.false_n:>7}  {s.status}")
+    if planted:
+        # Only the planted point is labelled, so there is no false n to count here.
+        lines += ["", "planted defects (found / planted):"]
+        lines += [f"{s.point:<8} {s.found}/{s.n_labels}" for s in scores(planted) if s.n_labels]
     lines.append("")
     lines.append("missed (owner n, judge y):")
     for item, v in pairs:
@@ -219,7 +249,9 @@ def results_to_dict(results: list[tuple[Item, Verdict | None, str]], model: str,
         "model": model,
         "scores": [{"point": s.point, "n_labels": s.n_labels, "found": s.found,
                     "y_labels": s.y_labels, "false_n": s.false_n, "status": s.status}
-                   for s in scores(pairs)],
+                   for s in scores([(i, v) for i, v in pairs if not i.planted])],
+        "planted": [{"point": s.point, "planted": s.n_labels, "found": s.found}
+                    for s in scores([(i, v) for i, v in pairs if i.planted]) if s.n_labels],
         "flags_right": {p: {"right": right, "reviewed": n}
                         for p, (right, n) in precision(results, reviews or {}).items()},
         "items": [{"name": item.name, "owner": owner_letters(item),
