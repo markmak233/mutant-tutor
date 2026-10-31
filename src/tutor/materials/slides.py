@@ -1,8 +1,8 @@
 """An exercise's lecture pages, from the lecture cache, for a model that reads them.
 
 Exercises name their lecture and pages in metadata `source`, in the forms the batches
-happen to use ("L2.2", "Lecture 5: Spark III", "Lecture_4.2-Spark_II"; pages "35-38, 43",
-"p.13-p.15", "L2.1 13-24; L2.2 13-18"). Only the lecture's number is reliable, so the cache
+happen to use ("L2.2", "Lecture 5: Topic C", "Lecture_4.2-Topic_B"; pages "12-15, 20",
+"p.8-p.10", "L1.1 3-8; L1.2 5-9"). Only the lecture's number is reliable, so the cache
 file is found by it (cache/lectures/Lecture_<number>-....pdf.md).
 
 Used by the held-out writer (tutor/heldout_writer.py) and the teaching-quality judge
@@ -22,9 +22,9 @@ from tutor.materials import cache
 CONTEXT_CHARS = 120_000
 # A lecture number as names write it: "2.2", "5", "7.1".
 _NUMBER = re.compile(r"\d+(?:\.\d+)?")
-# "L2.1 13-24, 41-42": a group of pages that names its lecture first.
+# "L1.1 3-8, 12": a group of pages that names its lecture first.
 _LABELLED = re.compile(r"^\s*L(\d+(?:\.\d+)?)\s+(.*)$")
-# A cache file's name: "Lecture_7.1-Mining_Data_Streams_I.pdf.md" -> "7.1".
+# A cache file's name: "Lecture_7.1-Some_Topic.pdf.md" -> "7.1".
 _CACHE_NAME = re.compile(r"^Lecture_(\d+(?:\.\d+)?)[-_]")
 
 
@@ -67,8 +67,8 @@ def lecture_context(workspace: Path, source, limit: int = CONTEXT_CHARS) -> str:
 
 
 def page_groups(pdf_pages: str, lectures: list[str]) -> list[tuple[str, set[int]]]:
-    """(lecture number, PDF pages) from the forms the batches use: "35-38, 43-45",
-    "p.13-p.15, p.19", "36–41" (an en dash), or per lecture "L2.1 13-24; L2.2 13-18".
+    """(lecture number, PDF pages) from the forms the batches use: "12-15, 20-22",
+    "p.8-p.10, p.14", "16–21" (an en dash), or per lecture "L1.1 3-8; L1.2 5-9".
     A group without a lecture label belongs to the exercise's only lecture; with several
     lectures and no label, which pages are whose is unknown, so the group is left out."""
     groups = []
@@ -101,7 +101,7 @@ def lecture_file(workspace: Path, number: str) -> Path | None:
 
 def lectures_taught(workspace: Path, source) -> list[str]:
     """The cached lectures up to and including the exercise's last one, in course order,
-    by name ("Lecture_5-Spark_III"): what a student has been taught when solving it.
+    by name ("Lecture_5-Topic_C"): what a student has been taught when solving it.
     [] when the source names no lecture."""
     numbers = lecture_numbers(source)
     if not numbers:

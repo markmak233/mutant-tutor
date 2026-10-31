@@ -724,8 +724,8 @@ or a mutant (`validation/heldout.py`; rules 1, 4 and 5 take an optional candidat
 - First run, 2026-10-31: weeks 1-2, 5 and 7, 17 correct solutions and 2 mistakes, nothing
   flagged, about 2 minutes (the Spark week 100 s). Expected limit: the owner's solution
   follows the question, so a question that misreads the slides is not caught this way
-  (week 7 `dgim-query-estimate` counts the oldest overlapping bucket in full where slides
-  6.54/6.57 halve it). Step 2 below targets that.
+  (a week 7 question counts a bucket in full where the slides halve it). Step 2 below
+  targets that.
 
 Step 2 (built 2026-10-31): another model writes candidates from the question alone.
 `tutor/heldout_writer.py` (outside `validation/`, which stays free of LLMs) asks it, per
@@ -775,8 +775,8 @@ First run with model files, 2026-10-31 (all five batches, 38 exercises, about 8 
 11 flags. Week 7 (gpt-terra): the tests miss three mistakes (`counting-bloom-filter`:
 repeated hash positions counted once; `lossy-counting`: two), and two questions depart
 from the slides without saying so (`dgim-query-estimate`, the oldest bucket; and
-`dgim-bucket-update`, which drops a bucket at age N where slide 6.50 says "prior to N time
-units before"); `fixed-proportion-sampling`'s departure is stated. Week 3: four slides
+`dgim-bucket-update`, whose window boundary is one position off the slides' wording);
+`fixed-proportion-sampling`'s departure is stated. Week 3: four slides
 flags, all stated (letter names, a tie-break, top-k, pairs without a common friend). Week
 5: one slides flag with no difference named, likely the model's own mistake. Weeks 1-2
 and 4: none. The oracle mattered: 15 of DeepSeek-V4-Pro's 57 "mistakes" (12 in weeks
@@ -1747,8 +1747,8 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
         found 2 of 5 and marked 10 of 21 owner y as n: not trusted by the agreement bar.
       - But most of those "false n" were real defects the owner's y had missed:
         count-min-sketch claimed a never-added item gives 0 (collisions make it
-        positive), and boyer-moore-majority left out slide 6.29's start (first element,
-        count 1), which is what led to the owner's own bug; both fixed. So the judge is a
+        positive), and boyer-moore-majority left out the slides' starting state (first
+        element, count 1), which is what led to the owner's own bug; both fixed. So the judge is a
         reminder of what to look at, not a rating, and is measured a second way: the
         owner reviews each flag (judge n where the owner said y or did not rate),
         answers in `flag-reviews.jsonl`, and the report counts the right ones. First
@@ -1792,7 +1792,7 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
       2/3, targets 5/5. Of the misses, two were weak plants (a worked example still showed
       the removed rule; the example output showed the letters a vague "characters" left
       open) and two were real misses (a lab definition credited to the lecture; a window
-      function from lecture 5.2 not seen as untaught). On the real ratings, with the
+      function from a later lecture not seen as untaught). On the real ratings, with the
       hints' Useful functions shown, it found 1 of the owner's 5 "clear" n. So the judge
       is a usable reminder for fits, taught and targets, where real n labels are still
       missing; for "clear" the owner's own rating stays the measure. The owner

@@ -97,9 +97,9 @@ def writer(model):
 
 
 @pytest.mark.parametrize(("pdf_pages", "lectures", "expected"), [
-    ("35-38, 43", ["2.2"], [("2.2", {35, 36, 37, 38, 43})]),
-    ("p.13-p.15, p.19", ["4.2"], [("4.2", {13, 14, 15, 19})]),
-    ("36–41", ["4.1"], [("4.1", set(range(36, 42)))]),  # an en dash
+    ("12-15, 20", ["2.2"], [("2.2", {12, 13, 14, 15, 20})]),
+    ("p.8-p.10, p.14", ["4.2"], [("4.2", {8, 9, 10, 14})]),
+    ("16–21", ["4.1"], [("4.1", set(range(16, 22)))]),  # an en dash
     ("L2.1 13-14; L2.2 18", ["2.1", "2.2"], [("2.1", {13, 14}), ("2.2", {18})]),
     ("13-14", ["2.1", "2.2"], []),  # two lectures, no label: whose pages is unknown
 ])
@@ -110,11 +110,11 @@ def test_page_groups_read_every_form_the_batches_use(pdf_pages, lectures, expect
 def test_a_lecture_number_matches_its_cache_file_exactly(tmp_path):
     lectures = tmp_path / "cache" / "lectures"
     lectures.mkdir(parents=True)
-    for name in ("Lecture_5-Spark_III.pdf.md", "Lecture_5.2-Spark_IV.pdf.md"):
+    for name in ("Lecture_5-Topic_C.pdf.md", "Lecture_5.2-Topic_D.pdf.md"):
         (lectures / name).write_text("")
 
-    assert lecture_file(tmp_path, "5").name == "Lecture_5-Spark_III.pdf.md"
-    assert lecture_file(tmp_path, "5.2").name == "Lecture_5.2-Spark_IV.pdf.md"
+    assert lecture_file(tmp_path, "5").name == "Lecture_5-Topic_C.pdf.md"
+    assert lecture_file(tmp_path, "5.2").name == "Lecture_5.2-Topic_D.pdf.md"
     assert lecture_file(tmp_path, "6") is None
 
 
