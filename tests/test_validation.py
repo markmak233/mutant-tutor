@@ -176,13 +176,13 @@ def test_unsafe_code_is_never_run(tmp_path, extra_files, expected):
     assert not report.valid
 
 
-def test_a_link_in_the_exercise_is_never_run(tmp_path):
+def test_a_link_in_the_exercise_is_never_run(tmp_path, symlink):
     """A run copies what a link points to, which may be outside the exercise."""
     outside = tmp_path / "outside"
     outside.mkdir()
     (outside / "conftest.py").write_text("import subprocess\n")
     exercise, solution = make_exercise(tmp_path, extra_files={"data/a.csv": "1\n"})
-    (exercise / "data" / "more").symlink_to(outside, target_is_directory=True)
+    symlink(exercise / "data" / "more", outside, target_is_directory=True)
     report = run((exercise, solution))
     assert report.result("safe").status is Status.FAIL
     assert "data/more is a link" in report.result("safe").detail

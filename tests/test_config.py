@@ -85,12 +85,12 @@ def test_refuses_default_lectures_that_are_a_nested_repo(tmp_path):
         load_workspace({"WORKSPACE_DIR": str(root)})
 
 
-def test_refuses_default_lectures_symlinked_into_a_repo(tmp_path):
+def test_refuses_default_lectures_symlinked_into_a_repo(tmp_path, symlink):
     root = make_workspace(tmp_path / "ws")
     repo = tmp_path / "repo"
     (repo / ".git").mkdir(parents=True)
     (repo / "slides").mkdir()
-    (root / "lectures").symlink_to(repo / "slides")
+    symlink(root / "lectures", repo / "slides", target_is_directory=True)
 
     with pytest.raises(WorkspaceError, match="inside the git repository"):
         load_workspace({"WORKSPACE_DIR": str(root)})

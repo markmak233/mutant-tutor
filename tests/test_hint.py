@@ -63,7 +63,7 @@ def test_a_student_who_makes_a_known_mistake_is_told_that_mistake(tmp_path):
     assert runs.calls == 3  # the student, then each mutant once
 
 
-def test_mutant_signatures_are_computed_once(tmp_path):
+def test_mutant_signatures_are_computed_once(tmp_path, symlink):
     exercise = batch(tmp_path, SKIPS_FIRST)
     hint_for(exercise, say=lambda _: None)
     runs = CountingRuns()
@@ -86,7 +86,7 @@ def test_mutant_signatures_are_computed_once(tmp_path):
     linked = tmp_path / "shared"
     linked.mkdir()
     (linked / "more.csv").write_text("4\n", encoding="utf-8")
-    (exercise / "data" / "shared").symlink_to(linked, target_is_directory=True)
+    symlink(exercise / "data" / "shared", linked, target_is_directory=True)
     hint_for(exercise, say=lambda _: None)
     (linked / "more.csv").write_text("5\n", encoding="utf-8")
     runs = CountingRuns()

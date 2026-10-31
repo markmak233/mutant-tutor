@@ -190,7 +190,8 @@ def test_cache_path_mirrors_the_workspace(tmp_path):
         cache.cache_path(tmp_path / "workspace", tmp_path / "other" / "l.pdf")
 
 
-def test_an_outside_lecture_folder_is_cached_like_the_default_one(tmp_path, monkeypatch, capsys):
+def test_an_outside_lecture_folder_is_cached_like_the_default_one(tmp_path, monkeypatch, capsys,
+                                                                   symlink):
     """LECTURE_DIR may be outside the workspace, or lectures/ a link to another folder."""
     workspace, elsewhere = tmp_path / "ws", tmp_path / "course-pdfs"
     workspace.mkdir()
@@ -201,7 +202,7 @@ def test_an_outside_lecture_folder_is_cached_like_the_default_one(tmp_path, monk
     monkeypatch.setenv("LECTURE_DIR", str(elsewhere))
     assert main([str(elsewhere)]) == 0
     assert cache.lecture_cache(workspace, "L1").is_file()
-    (workspace / "lectures").symlink_to(elsewhere, target_is_directory=True)
+    symlink(workspace / "lectures", elsewhere, target_is_directory=True)
     assert cache.cache_path(workspace, workspace / "lectures" / "L1.pdf") == (
         cache.lecture_cache(workspace, "L1"))
 
