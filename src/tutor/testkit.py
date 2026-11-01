@@ -30,6 +30,9 @@ COMBINER_ENV = "TUTOR_COMBINER"  # "off": run MRJob jobs without their combiner 
 # "reversed": each key's values reach reducers and combiners in reverse order (rule 5)
 VALUE_ORDER_ENV = "TUTOR_VALUE_ORDER"
 ORDERS = ("any", "per_file", "total")
+# mrjob's Hadoop runner does not work on native Windows (design.md, "Environment").
+HADOOP_UNSUPPORTED = ("the Hadoop runner needs macOS, Linux or WSL; "
+                      "on Windows run this exercise in WSL")
 
 os.environ.setdefault("PYSPARK_PYTHON", sys.executable)
 # mrjob 0.7.4 imports the stdlib `pipes` module; exercise tests import this module before
@@ -41,6 +44,11 @@ warnings.filterwarnings("ignore", message="'pipes' is deprecated", category=Depr
 _NUMBER = re.compile(r"[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?")
 _FIELD_SEPARATOR = re.compile(r"[\t,]")
 _SHOWN = 10  # lines listed per kind in a mismatch message
+
+
+def hadoop_runner_supported() -> bool:
+    """False on native Windows, where hadoop.cmd splits mrjob's `-files` argument."""
+    return sys.platform != "win32"
 
 
 def partitions() -> int:
@@ -127,7 +135,8 @@ def run_mrjob(
     runner="hadoop" uses the local standalone Hadoop (HADOOP_HOME): partitioner, comparator
     and reducer count are honoured there, unlike inline. It sets mapreduce.job.reduces to
     partitions(), so rule 5 checks 1, 2 and 4 reducers; a reducer count written in an
-    MRStep's own jobconf still wins for that step (verified 2026-10-25).
+    MRStep's own jobconf still wins for that step (verified 2026-10-25). On native Windows
+    it skips the calling test with HADOOP_UNSUPPORTED.
 
     combiner=False, or TUTOR_COMBINER=off (set by the validator), runs the job without its
     combiner: Hadoop may run a combiner zero, one or many times, so the result must not
@@ -155,6 +164,11 @@ def run_mrjob(
         _run_job(job_cls, _inline_args(input_dir, output_dir), conf)
         return read_output(output_dir)
 
+    if not hadoop_runner_supported():
+        # A skip, not an error: the code may be right, it just cannot be checked here.
+        import pytest  # only exercise tests call run_mrjob, and they run under pytest
+
+        pytest.skip(HADOOP_UNSUPPORTED)
     hadoop = _hadoop_bin()
     conf.setdefault("mapreduce.job.reduces", partitions())
     # Fail on the first error: by default every failed task is retried 4 times.

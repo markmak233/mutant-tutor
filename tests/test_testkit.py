@@ -5,10 +5,13 @@ from pathlib import Path
 
 import pytest
 
+from tutor import testkit
 from tutor.config import load_env
 from tutor.testkit import (
+    HADOOP_UNSUPPORTED,
     Output,
     assert_output,
+    hadoop_runner_supported,
     partitions,
     run_mrjob,
     run_program,
@@ -234,8 +237,10 @@ load_env()  # HADOOP_HOME / JAVA_HOME from the repo's .env, for the hadoop tests
 
 
 def needs_hadoop(test):
-    """Slow (each job starts Hadoop, about 7 s), so `spark`-marked; skipped without Hadoop."""
+    """Slow (each job starts Hadoop, about 7 s), so `spark`-marked; skipped without Hadoop
+    and on native Windows, where the runner does not work."""
     test = pytest.mark.skipif(not os.environ.get("HADOOP_HOME"), reason="no HADOOP_HOME")(test)
+    test = pytest.mark.skipif(not hadoop_runner_supported(), reason=HADOOP_UNSUPPORTED)(test)
     return pytest.mark.spark(test)
 
 WORD_COUNT = '''
@@ -446,6 +451,17 @@ def test_mrjob_reversed_values_are_inline_only(tmp_path, monkeypatch):
 def test_mrjob_unknown_runner_is_an_error(tmp_path):
     with pytest.raises(ValueError):
         run_mrjob(object, tmp_path, tmp_path / "out", runner="local")
+
+
+def test_hadoop_runner_skips_where_unsupported(tmp_path, monkeypatch):
+    """On native Windows a hadoop-runner test is skipped with a pointer to WSL, rather
+    than failing deep inside hadoop.cmd."""
+    monkeypatch.setattr(testkit, "hadoop_runner_supported", lambda: False)
+    job = load_job(tmp_path, WORD_COUNT, "WordCount")
+    inp = write_inputs(tmp_path / "in", TEXT)
+
+    with pytest.raises(pytest.skip.Exception, match="WSL"):
+        run_mrjob(job, inp, tmp_path / "out", runner="hadoop")
 
 
 @needs_hadoop

@@ -70,7 +70,14 @@ container for isolation is fine; deploying the tool as a service is not.
   is a bash script, the streaming jar is not found, tasks start with `/bin/sh`), and the
   last could not be worked around: `hadoop.cmd` splits the comma-separated `-files` argument
   into several. mrjob is unmaintained, so on Windows the Hadoop tests and exercises are
-  skipped with a pointer to WSL; the inline runner and Spark work there.
+  skipped with a pointer to WSL; the inline runner and Spark work there. Where (2026-11-01):
+  `run_mrjob(runner="hadoop")` skips the calling test (`testkit.HADOOP_UNSUPPORTED`), so a
+  learner sees one line instead of a `hadoop.cmd` error; the validator runs rules 0, safe
+  and api on such an exercise and reports every rule that runs tests as skipped with that
+  reason, so it is not VALID. Decided (owner): no separate "cannot check here" verdict for
+  now. Known cost: generating a `hadoop` exercise on Windows would send it to repair until
+  the rounds run out, so generate those in WSL. `tutor.envcheck` adds a `winutils` line on
+  Windows when the course requires `pyspark` or `hadoop` (both files, and the folder on `PATH`).
   Every text file is read and written as UTF-8 explicitly: Windows' default is the ANSI
   code page, so a `·` or any Chinese character failed or was garbled (16 of 468 tests on
   2026-10-31). ruff's `unspecified-encoding` rule found 10 of the 296 calls, since it can

@@ -34,7 +34,14 @@ from pathlib import Path
 
 from tutor.execution import Outcome, RunResult, copied_files, links, run_pytest, run_script
 from tutor.schema import Metadata, problems
-from tutor.testkit import COMBINER_ENV, DEFAULT_PARTITIONS, PARTITIONS_ENV, VALUE_ORDER_ENV
+from tutor.testkit import (
+    COMBINER_ENV,
+    DEFAULT_PARTITIONS,
+    HADOOP_UNSUPPORTED,
+    PARTITIONS_ENV,
+    VALUE_ORDER_ENV,
+    hadoop_runner_supported,
+)
 from tutor.validation.api import count_uses, find_violations, is_main_block
 from tutor.validation.exercise import STUDENT_FILE, ExerciseFiles
 from tutor.validation.safety import (
@@ -111,6 +118,18 @@ def validate(ex: ExerciseFiles, timeout_s: float | None = None,
         # Code that fails the safety check is never run, not even the reference.
         return ValidationReport(ex.exercise_id, [
             fmt, safe, *_skipped_after_safety("skipped: the code must pass the safety check"),
+        ])
+    if ex.metadata.get("runner") == "hadoop" and not hadoop_runner_supported():
+        # Every test run would skip, so no rule that runs tests can say anything; the
+        # static API check still runs. Skipped counts against validity (design.md).
+        reason = f"skipped: {HADOOP_UNSUPPORTED}"
+        return ValidationReport(ex.exercise_id, [
+            fmt,
+            safe,
+            RuleResult("1", "reference passes", Status.SKIPPED, reason, 0.0),
+            *_skipped_test_rules(reason),
+            check_api_constraints(ex),
+            RuleResult("main", "runs on its own", Status.SKIPPED, reason, 0.0),
         ])
     if timeout_s is None:
         timeout_s = ex.timeout_s

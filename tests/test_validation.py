@@ -14,7 +14,8 @@ import pytest
 from tutor.config import load_env
 from tutor.execution import DEFAULT_TIMEOUT_S
 from tutor.schema import Metadata, problems
-from tutor.validation import ExerciseError, Status, heldout, load_exercise, validate
+from tutor.testkit import HADOOP_UNSUPPORTED, hadoop_runner_supported
+from tutor.validation import ExerciseError, Status, checks, heldout, load_exercise, validate
 from tutor.validation.__main__ import format_report, main
 from tutor.validation.api import count_uses, find_violations
 from tutor.validation.heldout import (
@@ -645,6 +646,23 @@ def test_cli_saves_the_report_as_json(tmp_path):
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 
 
+def test_hadoop_exercise_is_skipped_where_unsupported(monkeypatch):
+    """On native Windows a hadoop-runner exercise runs no tests: the static rules still
+    run, every rule that runs tests is skipped with the reason, and it is not VALID."""
+    monkeypatch.setattr(checks, "hadoop_runner_supported", lambda: False)
+    root = EXAMPLES / "station-condition-share"
+    exercise = load_exercise(root / "exercise", root / "solution")
+
+    report = validate(exercise)
+
+    status = {r.rule: r.status for r in report.results}
+    assert status["0"] is status["safe"] is status["api"] is Status.OK
+    for rule in ("1", "2", "3", "4", "5", "main"):
+        assert status[rule] is Status.SKIPPED
+    assert all("WSL" in r.detail for r in report.results if r.status is Status.SKIPPED)
+    assert not report.valid
+
+
 @pytest.mark.spark
 @pytest.mark.parametrize(
     "name",
@@ -655,6 +673,8 @@ def test_examples_are_valid(name):
     load_env()
     if name == "station-condition-share" and not os.environ.get("HADOOP_HOME"):
         pytest.skip("needs HADOOP_HOME")
+    if name == "station-condition-share" and not hadoop_runner_supported():
+        pytest.skip(HADOOP_UNSUPPORTED)
     exercise = load_exercise(EXAMPLES / name / "exercise", EXAMPLES / name / "solution")
 
     report = validate(exercise)
