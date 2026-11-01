@@ -417,6 +417,21 @@ def test_a_resume_keeps_the_owners_edits_to_the_plan_until_the_model_plans_again
     assert json.loads((tmp_path / "plan.json").read_text(encoding="utf-8")) == replanned
 
 
+def test_the_approval_prompt_pauses_when_stdin_is_closed(monkeypatch):
+    """On Windows stdin from NUL passes isatty(), then input() meets end of file."""
+    from tutor.graph import __main__ as cli
+
+    monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: True, raising=False)
+
+    def closed(prompt):
+        raise EOFError
+
+    monkeypatch.setattr("builtins.input", closed)
+    assert cli._ask() is None  # None: pause, as Enter does
+    monkeypatch.setattr("builtins.input", lambda prompt: "y")
+    assert cli._ask() == {"approve": True}
+
+
 def test_a_batch_paused_before_the_model_plan_was_kept_keeps_the_owners_plan(tmp_path):
     from tutor.graph.__main__ import _owner_plan
 

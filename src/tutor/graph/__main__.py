@@ -368,7 +368,11 @@ def _report_waiting(requests: list[str], batch: str) -> int:
 def _ask() -> dict | None:
     if not sys.stdin.isatty():
         return None
-    answer = input("Approve? [y] / type feedback to send it back / Enter to pause: ").strip()
+    try:
+        answer = input("Approve? [y] / type feedback to send it back / Enter to pause: ").strip()
+    except EOFError:
+        # Windows counts NUL (stdin closed) as a terminal, so isatty() lets it through.
+        return None
     if not answer:
         return None
     return {"approve": True} if answer.lower() in ("y", "yes") else {"feedback": answer}
