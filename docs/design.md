@@ -857,7 +857,8 @@ Design approved 2026-10-28 (owner):
   below); `generate` = DeepSeek-V4-Flash since 2026-10-29 (the week 4 rerun below), with
   thinking on since 2026-10-30 (the week 7 comparison below); `repair` = V4-Pro from the
   second repair on; `oracle` = a different model family (GPT, decided 2026-10-28 in place
-  of local Gemma; GLM-5.3 once the OpenAI key expires, measured on week 7), since the same
+  of local Gemma; GLM-5.3-Flash at high effort once the OpenAI key expires, see the
+  week 4 cross experiment below), since the same
   model writing reference and oracle is not an independent check. The CLI refuses an oracle from the generating model's provider.
 - Experiment 2026-10-28, one item (a closure / accumulator debugging exercise from the
   week 4 slides), same validator:
@@ -934,7 +935,8 @@ Design approved 2026-10-28 (owner):
     model's own test_oracle.py.
   - Layout: counted before the examples were rewritten in it (see "Learning rules").
   - Decided (owner, 2026-10-30): arm E's shape, Flash with thinking, Pro only when Flash's
-    repair fails, so the time stays bounded; GLM-5.3 as the oracle after 2026-11-04. The
+    repair fails, so the time stays bounded; GLM-5.3 as the oracle after 2026-11-04
+    (replaced 2026-11-01 by GLM-5.3-Flash, see the week 4 cross experiment). The
     oracle's thinking became its own setting, `oracle_thinking`, off by default: it
     followed `thinking`, so turning generation thinking on would have made GLM think.
   - Speed, measured 2026-10-30 on the same 11 items (owner asked for tests, not guesses):
@@ -1039,6 +1041,23 @@ Design approved 2026-10-28 (owner):
   first week 5 batch (GLM plan, Flash writing, Pro repairing with thinking, GPT oracle)
   saved 6 of 6: two after a Flash repair, four rescued by one Pro repair each, about $0.39
   in all at peak prices.
+- Week 4 cross experiment (2026-11-01, native Windows; owner asked for it). One plan by
+  GPT, then the same 4 RDD items in two arms, 4 at once each. DeepSeek writing with a GLM-5.3
+  oracle saved 4 of 4, 2 at the first round; its 3 first-round failures were all timeouts
+  (Spark on Windows, 4 exercises validating at once), fixed by one repair each. GLM-5.3
+  writing with a DeepSeek oracle failed on content (a mutant patch whose `old` text did not
+  occur, a wrong expected value, a surviving mutant, an oracle interface without the
+  question) and stopped after 2 items when GLM-5.3's quota ran out. So the planned oracle
+  for after 2026-11-04 had no quota. GLM-5.3-Flash rewrote the 4 oracles from the same
+  question and interface: at `reasoning_effort` high it matched GLM-5.3 exactly (reference
+  agrees 4 of 4; 14 of 18 mutants disagree with it, the 4 others change no output and are
+  killed by the tests) in 3-6 s each; thinking at the model's default (no effort field,
+  the deepest) gave the same result in 6-50 s. Decided (owner): the oracle becomes
+  GLM-5.3-Flash at high effort when the OpenAI key expires, through its own profile
+  (`glm-flash-oracle`, `reasoning_effort_on = "high"`, `oracle_thinking` on), since the plan
+  role uses `glm-flash` with the model's default. A FAIL of rule 4 on a mutant is not
+  "caught" by itself: when the check was first run without `JAVA_HOME`, 13 of 18 "caught"
+  were Spark failing to start.
 - A diagnosis first, and the oracle's own mistakes (2026-10-29). The draft's first field
   is `diagnosis`, filled by repairs before any file: what failed, the right result worked
   out by hand, which file is wrong and why. A scratchpad that works without thinking, and
