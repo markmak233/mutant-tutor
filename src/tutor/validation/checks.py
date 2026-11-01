@@ -469,9 +469,18 @@ def _run(
     return run_pytest(ex.run_files(candidate), timeout_s, env, heavy=ex.heavy)
 
 
+# pytest's closing line ends with the run time, e.g. "in 8.70s" or "in 75.33s (0:01:15)".
+_PYTEST_SUMMARY = re.compile(r"\bin \d+(\.\d+)?s( \(\d+:\d\d:\d\d\))?$")
+
+
 def _summary(r: RunResult) -> str:
-    """pytest's last line, e.g. "4 passed in 8.7s"."""
+    """pytest's summary line, e.g. "4 passed in 8.7s". It is searched from the end, as
+    lines can follow it (on Windows PySpark's exit prints taskkill's "SUCCESS: The
+    process ... terminated."); without one (timeout, crash) the last line is used."""
     lines = [line.strip("= ") for line in r.output.splitlines() if line.strip()]
+    for line in reversed(lines):
+        if _PYTEST_SUMMARY.search(line):
+            return line
     return lines[-1] if lines else "(no output)"
 
 

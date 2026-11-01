@@ -727,6 +727,21 @@ def test_the_failure_excerpt_keeps_what_a_fix_needs_and_no_home_paths():
     assert len(failure_excerpt(PYTEST_OUTPUT, limit=40)) == 40 + len("\n...")
 
 
+def test_the_summary_is_pytest_s_line_even_when_lines_follow_it():
+    """On Windows PySpark's exit prints taskkill's line after pytest's summary."""
+    from tutor.execution import Outcome, RunResult
+
+    def summary(output):
+        return checks._summary(RunResult(Outcome.FAILED, 1, 1.0, output))
+
+    taskkill = "SUCCESS: The process with PID 4242 (child process of PID 4200) has been terminated."
+    assert summary(PYTEST_OUTPUT + taskkill + "\n") == "2 failed, 1 passed in 12.92s"
+    assert summary("== 3 passed in 75.33s (0:01:15) ==\n" + taskkill) == (
+        "3 passed in 75.33s (0:01:15)")
+    assert summary("Traceback ...\nKeyboardInterrupt\n") == "KeyboardInterrupt"
+    assert summary("") == "(no output)"
+
+
 def test_required_definitions_accepts_a_method_named_with_its_class():
     """The form metadata entry_point uses for file-level programs: Class.run."""
     source = "class AuctionStats:\n    def run(self, a, b):\n        pass\n"
