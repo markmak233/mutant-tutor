@@ -1,8 +1,8 @@
 # Setup: big data course (Spark, MRJob, Hadoop)
 
 Everything needed to run the tests, validate the examples and solve the big data course exercises on a
-fresh machine. Verified on macOS (Apple silicon, Homebrew). The Linux / WSL commands are
-the standard equivalents and have not been tested yet.
+fresh machine. Verified on macOS (Apple silicon, Homebrew) and on native Windows 11. The
+Linux / WSL commands are the standard equivalents and have not been tested yet.
 
 ## 1. What to install
 
@@ -10,7 +10,8 @@ the standard equivalents and have not been tested yet.
 |---|---|---|---|
 | Python | 3.11 (3.12: see below) | everything | yes. Not 3.13: mrjob imports the removed `pipes` module |
 | Java (JDK) | 17 | Spark, and Hadoop if installed; one JDK serves both | yes |
-| Hadoop | 3.3.x, standalone | MRJob exercises with a custom partitioner or sort order (e.g. `examples/station-condition-share`) | no. Without it those tests are skipped |
+| Hadoop | 3.3.x, standalone | MRJob exercises with a custom partitioner or sort order (e.g. `examples/station-condition-share`) | no. Without it those tests are skipped. On Windows they are always skipped (below) |
+| winutils | for Hadoop 3.3.x | Windows only: Spark reading and writing files | yes, on Windows |
 | gitleaks | any | the pre-commit secret scan | only if you commit to the repo |
 
 Spark itself needs no separate install: `pip install pyspark` ships it.
@@ -46,10 +47,50 @@ ls /usr/lib/jvm/                              # JAVA_HOME is e.g. /usr/lib/jvm/j
 
 Hadoop: the same tarball commands as macOS, with your `JAVA_HOME`.
 
-### Windows, untested
+### Windows (native)
 
-Use WSL2 with Ubuntu and follow the Linux steps inside it. Spark and Hadoop on native
-Windows need extra binaries (`winutils.exe`) and are not supported here.
+In PowerShell:
+
+```powershell
+winget install Python.Python.3.11
+winget install Microsoft.OpenJDK.17
+py -3.11 --version     # plain `python` may be the Microsoft Store 3.13, which mrjob cannot use
+```
+
+`JAVA_HOME` is the JDK folder, e.g. `C:\Program Files\Microsoft\jdk-17.0.x-hotspot`.
+
+Spark needs two Hadoop binaries on Windows to read and write files, even without Hadoop
+jobs: `winutils.exe` and `hadoop.dll`. Unpack the Hadoop tarball (the same file as macOS;
+`tar` ships with Windows) and put both binaries in its `bin`. They come from the
+`hadoop-3.3.x` folder of a winutils build such as
+[cdarlint/winutils](https://github.com/cdarlint/winutils).
+
+```powershell
+mkdir $HOME\opt; cd $HOME\opt
+curl.exe -LO https://archive.apache.org/dist/hadoop/common/hadoop-3.3.6/hadoop-3.3.6.tar.gz
+tar xzf hadoop-3.3.6.tar.gz
+# copy winutils.exe and hadoop.dll into $HOME\opt\hadoop-3.3.6\bin, then:
+[Environment]::SetEnvironmentVariable("HADOOP_HOME", "$HOME\opt\hadoop-3.3.6", "User")
+[Environment]::SetEnvironmentVariable("Path",
+  [Environment]::GetEnvironmentVariable("Path", "User") + ";$HOME\opt\hadoop-3.3.6\bin", "User")
+```
+
+Open a new shell (and restart VS Code) so the new `PATH` is seen. `HADOOP_HOME` in `.env`
+is not enough: Windows looks up `hadoop.dll` on `PATH`. `python -m tutor.envcheck` (step 5)
+checks both and prints a `winutils` line.
+
+What does not work natively:
+
+- **mrjob's Hadoop runner.** `hadoop.cmd` splits `-files` at commas, so the jobs cannot be
+  submitted. Tests that need it are skipped, and the validator reports an exercise with
+  `runner = "hadoop"` as SKIPPED, which counts as INVALID. Validate and solve those
+  exercises in WSL2 (Ubuntu, the Linux steps above). Spark and the other MRJob exercises
+  (inline and local runners) work natively.
+- **Speed.** Starting Spark is slower than on macOS, so every test and validator timeout is
+  multiplied by 4 on Windows. Set `TUTOR_TIMEOUT_FACTOR` (e.g. `6`) if runs still time out
+  on a busy machine.
+
+For the gitleaks pre-commit scan: `winget install Gitleaks.Gitleaks`, then open a new shell.
 
 ## 3. Python environment
 
@@ -59,6 +100,9 @@ python3.11 -m venv .venv && source .venv/bin/activate   # name the version: plai
 pip install -e ".[bigdata,dev]"
 cp .env.example .env
 ```
+
+On Windows (PowerShell): `py -3.11 -m venv .venv`, then `.venv\Scripts\Activate.ps1`
+(the other commands are the same; use `copy` for `cp`).
 
 Python 3.12 works too, with one extra step: run `pip install setuptools` in the venv.
 mrjob 0.7.4 imports `distutils`, which 3.12 removed, and 3.12 venvs no longer come with
@@ -74,6 +118,10 @@ tests and the validator set this themselves.
 export PYSPARK_PYTHON="$(which python)"   # after activating the venv; add it to your shell profile or venv activate script
 ```
 
+```powershell
+$env:PYSPARK_PYTHON = (Get-Command python).Source   # Windows PowerShell, after activating
+```
+
 Edit `.env`. Set only what you have, and **comment out the lines you do not use**: a variable
 left at its `/path/to/...` placeholder counts as set, so the checks that need it run and fail
 instead of being skipped.
@@ -84,7 +132,8 @@ instead of being skipped.
 | `HADOOP_HOME` | Hadoop is installed | e.g. `~/opt/hadoop-3.3.6`, written as a full path |
 | `WORKSPACE_DIR` | you have a course workspace (step 5) | the workspace folder |
 
-Optional, before your first commit: `pre-commit install` (needs gitleaks).
+Optional, before your first commit: `pre-commit install` (needs gitleaks). On Windows,
+GitHub Desktop finds gitleaks only after a restart that follows its install.
 
 ## 4. Check it works
 
@@ -94,6 +143,9 @@ ruff check .           # All checks passed!
 pytest -m spark        # validates every example end to end: about 8 min with Hadoop;
                        # without HADOOP_HOME about 3 min, and the 5 Hadoop tests show as skipped
 ```
+
+On Windows the fast tests take several minutes (each starts processes, which is slower
+there), and the Hadoop tests in `pytest -m spark` are always skipped.
 
 Validate one example and solve one yourself:
 
@@ -253,4 +305,7 @@ specific hint (three levels; a review batch never gets code). `--no-llm` skips t
 | `test_env` fails with `/path/to/...` | a placeholder left in `.env` | set the real path or comment the line out |
 | Hadoop tests fail although Hadoop is not installed | `HADOOP_HOME` placeholder left in `.env` | comment the line out |
 | `yarn` runs Hadoop instead of JavaScript yarn, or the reverse | `brew install hadoop` | uninstall it; use the tarball |
+| Windows: `HADOOP_HOME and hadoop.home.dir are unset`, or `UnsatisfiedLinkError ... NativeIO$Windows.access0` | Spark cannot find `winutils.exe` or `hadoop.dll` | put both in `%HADOOP_HOME%\bin`, add that folder to `PATH`, open a new shell; `python -m tutor.envcheck` says which is missing |
+| Windows: `No module named 'pipes'` although Python 3.11 is installed | the venv was made with the Store `python` (3.13) | recreate it with `py -3.11 -m venv .venv` |
+| Windows: Hadoop exercise reported SKIPPED / INVALID | mrjob's Hadoop runner does not work on native Windows | validate it in WSL2 |
 | An MRJob job on Hadoop writes no output | the job file lacks `if __name__ == "__main__": MyJob.run()` | add it (the test helpers report this) |
