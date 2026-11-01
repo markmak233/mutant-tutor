@@ -1,5 +1,7 @@
 import os
+import shutil
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -57,6 +59,60 @@ def test_extra_env_reaches_the_tests(tmp_path):
 
     assert result.outcome is Outcome.PASSED
     assert "TUTOR_PARTITIONS" not in os.environ
+
+
+def test_each_run_gets_its_own_temp_dir(tmp_path):
+    """Spark's Windows launcher names its temp file by a seed of the start second, so runs
+    sharing %TEMP% could hang; each run gets a temp dir of its own, deleted afterwards."""
+    # The run writes the temp dir it sees to the file named in SEEN, outside the run.
+    test = write(
+        tmp_path / "test_tmp.py",
+        "import os, tempfile\n\ndef test_tmp():\n"
+        "    assert os.environ['TEMP'] == os.environ['TMP'] == os.environ['TMPDIR']\n"
+        "    with open(os.environ['SEEN'], 'w', encoding='utf-8') as f:\n"
+        "        f.write(tempfile.gettempdir())\n",
+    )
+
+    seen = []
+    for i in range(2):
+        out = tmp_path / f"seen{i}.txt"
+        result = run_pytest({"test_tmp.py": test}, env={"SEEN": str(out)})
+        assert result.outcome is Outcome.PASSED, result.output
+        seen.append(Path(out.read_text(encoding="utf-8")))
+
+    assert seen[0] != seen[1]
+    for run_tmp in seen:
+        assert run_tmp.parent == Path(tempfile.gettempdir())  # not inside the run's workdir
+        assert not run_tmp.exists()
+
+
+def test_run_temp_dir_removal_retries_then_gives_up(tmp_path, monkeypatch):
+    """A file a virus scan still holds is retried for a moment; one that stays locked is
+    left behind instead of failing the run."""
+    from tutor import execution
+
+    real_rmtree = shutil.rmtree
+    calls = []
+
+    def locked_twice(path, ignore_errors=False):
+        calls.append(ignore_errors)
+        if len(calls) <= 2:
+            raise PermissionError("locked")
+        real_rmtree(path)
+
+    run_tmp = tmp_path / "run-tmp"
+    run_tmp.mkdir()
+    monkeypatch.setattr(execution.shutil, "rmtree", locked_twice)
+    execution._remove_run_tmp(run_tmp)
+    assert len(calls) == 3 and not run_tmp.exists()
+
+    def always_locked(path, ignore_errors=False):
+        if not ignore_errors:
+            raise PermissionError("locked")
+
+    run_tmp.mkdir()
+    monkeypatch.setattr(execution.shutil, "rmtree", always_locked)
+    execution._remove_run_tmp(run_tmp, wait_s=0.3)  # returns, does not raise
 
 
 def test_syntax_error_is_error_not_failed(tmp_path):

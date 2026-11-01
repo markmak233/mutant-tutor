@@ -1391,6 +1391,20 @@ starts a new Python process for every task, one after another, about 0.6 s each 
 RDD job 2.4 s, a JVM-only job 0.09 s). An example's 25-case hypothesis check took 101 s
 against a 30 s limit; with 120 s the example was VALID. The factor is applied inside the
 runner, so metadata `timeout_s` keeps stating what an exercise needs on macOS or Linux.
+Each run also gets a temp dir of its own (`TEMP`, `TMP`, `TMPDIR`, outside the run's
+working dir, deleted afterwards), on every platform. Found 2026-11-01: with several Spark
+runs at once, one now and then hung until the timeout, waiting in `launch_gateway` for
+`spark-submit.cmd`. That script writes its launch command to
+`%TEMP%\spark-class-launcher-output-%RANDOM%.txt`, and cmd seeds `%RANDOM%` from the second
+it starts, so runs started in the same second shared one file (Spark's own fix, SPARK-28302,
+only checks whether the file exists, which two runs can both pass). Measured, three
+reference runs at a time: 3 of 30 hung with the shared `%TEMP%`, 0 of 48 with one per run.
+Deleting that dir found a second Windows gap: the native library the JVM unpacks there
+(`liblz4-java-*.so`) could not be deleted (`WinError 5`) although the job was already
+empty, most likely a virus scan of the new file. Removal retries for up to 5 s (measured:
+at most 0.2 s over 30 runs) and then leaves what is still locked, as the shared `%TEMP%`
+did before (it held 90 such leftovers).
+Part of the time the 4x factor covers may have been these hangs; it is to be measured again.
 
 Scope: the runner protects validation, which runs generated code. A learner running
 `pytest test_student.py` runs their own code in the terminal, in-process and without a

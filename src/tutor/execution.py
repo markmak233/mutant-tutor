@@ -222,13 +222,50 @@ def _run_in(workdir: Path, timeout_s: float, extra_env: Mapping[str, str],
     # in the ANSI code page (cp1252), failing on any non-Latin character in test output.
     # Only stdio: what the code under test opens keeps the platform default, as in the
     # learner's own runs.
+    # TEMP / TMP / TMPDIR: a temp dir of its own per run, outside workdir so the tests see
+    # the same files as before. On Windows, spark-submit.cmd writes its launch command to
+    # %TEMP%\spark-class-launcher-output-%RANDOM%.txt, and cmd seeds %RANDOM% from the
+    # second it starts: Spark runs started in the same second (parallel validation) shared
+    # one file, and one of them hung until the timeout (3 of 30 runs; 0 of 48 with this).
+    run_tmp = tempfile.mkdtemp(prefix="tutor-tmp-")
     env = {
         **os.environ,
         "PYTHONDONTWRITEBYTECODE": "1",
         "PYSPARK_PYTHON": sys.executable,
         "PYTHONIOENCODING": "utf-8",
+        "TEMP": run_tmp,
+        "TMP": run_tmp,
+        "TMPDIR": run_tmp,
         **extra_env,
     }
+    try:
+        return _run_with_env(cmd, workdir, env, timeout_s, script)
+    finally:
+        _remove_run_tmp(Path(run_tmp))
+
+
+def _remove_run_tmp(path: Path, wait_s: float = 5.0) -> None:
+    """Delete a run's temp dir, retrying for a moment. On Windows the native library a JVM
+    unpacks there (liblz4-java-*.so) could not be deleted for a while after every process
+    of the run had exited (WinError 5; most likely a virus scan of the new file). What is
+    still locked after `wait_s` is left behind, as it was in the shared %TEMP% before."""
+    deadline = time.monotonic() + wait_s
+    while True:
+        try:
+            shutil.rmtree(path)
+            return
+        except FileNotFoundError:
+            return
+        except OSError:
+            if time.monotonic() >= deadline:
+                shutil.rmtree(path, ignore_errors=True)  # delete what it can
+                return
+            time.sleep(0.1)
+
+
+def _run_with_env(cmd: list[str], workdir: Path, env: Mapping[str, str], timeout_s: float,
+                  script: list[str] | None) -> RunResult:
+    """Run `cmd` in `workdir` with `env` and turn the result into a RunResult."""
     start = time.monotonic()
     with _ProcessTree(cmd, workdir, env) as tree:
         proc = tree.proc
