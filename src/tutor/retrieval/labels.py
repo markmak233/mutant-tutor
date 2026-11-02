@@ -23,9 +23,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from tutor.retrieval.corpus import Page, PageKey
+from tutor.retrieval.jsonl import JsonLines
 
 COVERAGE_FILE = "coverage.md"
 CROSS_LECTURE_FILE = "retrieval/cross-lecture.jsonl"
+FROZEN_FILE = "retrieval/frozen-queries.jsonl"
 # Statuses with no knowledge point to find: course admin, and points taken off the list.
 _NOT_A_QUERY = ("n/a", "dropped")
 # About one query in this many goes to the dev split, the rest to the test split.
@@ -131,6 +133,33 @@ def load_queries(workspace: Path, pages: list[Page]) -> tuple[list[Query], list[
     if not path.is_file():
         raise FileNotFoundError(f"{path} not found: the labels come from it")
     return queries_from(parse_coverage(path.read_text(encoding="utf-8")), pages)
+
+
+def freeze(workspace: Path, pages: list[Page]) -> list[Query]:
+    """Write every query and label to a snapshot, which measurements then read instead of
+    coverage.md. A split comes from a row's hash, so rewording a row would move it between dev
+    and test, and a corrected slide range would change a test label after the routes were
+    chosen. Refuses to overwrite: to freeze again, delete the file on purpose."""
+    path = workspace / FROZEN_FILE
+    if path.is_file():
+        raise ValueError(f"{path} already exists: the queries are frozen")
+    queries, problems = load_queries(workspace, pages)
+    cross, cross_problems = load_cross_lecture(workspace, pages)
+    if problems or cross_problems:
+        raise ValueError("fix these before freezing: " + "; ".join(problems + cross_problems))
+    JsonLines(path).append(
+        {"id": q.id, "text": q.text, "split": q.split, "relevant": sorted(q.relevant)}
+        for q in [*queries, *cross])
+    return [*queries, *cross]
+
+
+def load_frozen(workspace: Path) -> list[Query] | None:
+    """The snapshot's queries; None if nothing is frozen yet."""
+    path = workspace / FROZEN_FILE
+    if not path.is_file():
+        return None
+    return [Query(row["id"], row["text"], frozenset(tuple(key) for key in row["relevant"]),
+                  row["split"]) for row in JsonLines(path).read()]
 
 
 def load_cross_lecture(workspace: Path, pages: list[Page]) -> tuple[list[Query], list[str]]:

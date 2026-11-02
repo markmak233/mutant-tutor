@@ -13,6 +13,7 @@ lecture or a new prompt builds again, for that lecture only.
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Collection, Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,7 +21,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from tutor.materials import cache
-from tutor.retrieval.asker import Ask, digest
+from tutor.retrieval.asker import Ask, digest, usage_of
 from tutor.retrieval.corpus import Page, PageKey
 from tutor.retrieval.jsonl import JsonLines
 
@@ -152,7 +153,8 @@ class ConceptRetriever:
                 self._entries[lecture] = [_Entry(lecture, c) for c in concepts]
         self._all_lectures = list(by_lecture(pages))
         self._file = JsonLines(store.directory / "picks.jsonl")
-        self._picks = {row["key"]: row["ids"] for row in self._file.read()}
+        self._picks = {row["key"]: row for row in self._file.read()}
+        self.used: list[dict] = []  # this process's picks, stored or new, for the summary
 
     def search(self, query: str, lectures: Collection[str] | None = None) -> list[Page]:
         """Pages of the picked topics in the order picked, each page once."""
@@ -177,9 +179,16 @@ class ConceptRetriever:
         text = "\n".join(entry.line(entry_id) for entry_id, entry in listing.items())
         key = digest(PROMPT_VERSION, self._run, query, text)
         if key not in self._picks:
+            in_before, out_before = usage_of(self._ask)
+            start = time.monotonic()
             reply = self._ask("concept-pick", PICK_PROMPT, f"{text}\n\nRequest: {query}",
                               Picked.model_json_schema(), PICK_MAX_TOKENS)
-            ids = Picked.model_validate_json(reply).ids
-            self._file.append([{"key": key, "ids": ids}])
-            self._picks[key] = ids
-        return self._picks[key]
+            in_after, out_after = usage_of(self._ask)
+            row = {"key": key, "query": query, "run": self._run,
+                   "ids": Picked.model_validate_json(reply).ids,
+                   "tokens_in": in_after - in_before, "tokens_out": out_after - out_before,
+                   "seconds": round(time.monotonic() - start, 2)}
+            self._file.append([row])
+            self._picks[key] = row
+        self.used.append(self._picks[key])
+        return self._picks[key]["ids"]

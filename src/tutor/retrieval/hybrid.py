@@ -42,3 +42,27 @@ class HybridRetriever:
 
     def search(self, query: str, lectures: Collection[str] | None = None) -> list[Page]:
         return fuse([route.search(query, lectures) for route in self._routes])
+
+
+class NeighbourRetriever:
+    """Another route's ranking with each page followed by the pages either side of it.
+
+    A control, not a candidate of its own: it asks whether the agent's extra model calls beat
+    this cheap rule, as a topic on slides usually runs over consecutive pages. Read its scores
+    with care: labels are consecutive ranges too, so it may fit the labels rather than the need.
+    The pooled labels of the final comparison are what can tell those apart."""
+
+    def __init__(self, route, pages: Sequence[Page], name: str) -> None:
+        self.name = name
+        self._route = route
+        self._pages = {page.key: page for page in pages}
+
+    def search(self, query: str, lectures: Collection[str] | None = None) -> list[Page]:
+        found: dict[PageKey, Page] = {}
+        for page in self._route.search(query, lectures):
+            found.setdefault(page.key, page)
+            lecture, number = page.key
+            for near in ((lecture, number - 1), (lecture, number + 1)):
+                if near in self._pages:  # a neighbour is in the same lecture, so in scope
+                    found.setdefault(near, self._pages[near])
+        return list(found.values())

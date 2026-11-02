@@ -6,10 +6,17 @@ import json
 
 import pytest
 
-from tutor.llm import Reply
+from tutor.llm import LLMConfig, Reply
 from tutor.materials import cache
 from tutor.retrieval.__main__ import main
-from tutor.retrieval.agent import MAX_READ, MAX_STEPS, SEARCH_RESULTS, AgentRetriever
+from tutor.retrieval.agent import (
+    MAX_READ,
+    MAX_STEPS,
+    SEARCH_RESULTS,
+    AgentRetriever,
+    tool_settings,
+)
+from tutor.retrieval.asker import ModelAsker, first_run_cost, settings_folder
 from tutor.retrieval.bm25 import BM25Index, BM25Retriever, tokenize
 from tutor.retrieval.concepts import (
     Concept,
@@ -19,14 +26,23 @@ from tutor.retrieval.concepts import (
 )
 from tutor.retrieval.corpus import Page, load_pages, load_settings
 from tutor.retrieval.evaluate import (
+    ADOPT_MARGIN,
     baselines,
+    compare,
     evaluate,
     recall,
     reciprocal_rank,
     within_budget,
 )
-from tutor.retrieval.hybrid import HybridRetriever, fuse
-from tutor.retrieval.labels import Query, load_cross_lecture, parse_coverage, queries_from
+from tutor.retrieval.hybrid import HybridRetriever, NeighbourRetriever, fuse
+from tutor.retrieval.labels import (
+    Query,
+    freeze,
+    load_cross_lecture,
+    load_frozen,
+    parse_coverage,
+    queries_from,
+)
 from tutor.retrieval.vectors import (
     MAX_BATCH_TEXTS,
     MAX_BATCH_TOKENS,
@@ -387,7 +403,7 @@ AGENT_PAGES = [page("3", 1, "3.1", "3.1\nJoins on a key\nReduce side joins"),
 
 def fresh_state(query="q", scope=("3", "4")):
     return {"query": query, "scope": list(scope), "log": [], "steps": 0, "action": None,
-            "read": []}
+            "read": [], "seen": [], "trace": [], "failed": 0}
 
 
 def drive(route, state):
@@ -420,6 +436,15 @@ def test_a_search_is_limited_to_the_scope_and_to_its_lecture(tmp_path):
     assert "4:1" not in model.prompts[1]
     assert "you may only search 3" in model.prompts[2]
     assert "3:1" in model.prompts[3]
+
+
+def test_a_search_without_words_reaches_no_search_route(tmp_path):
+    other = FixedRoute([AGENT_PAGES[1]])
+    model = ActionQueue(search_for("  "), finish_with())
+    route = AgentRetriever(AGENT_PAGES, model, tmp_path / "agent", search_route=other)
+    state = drive(route, fresh_state())
+    assert other.scopes == [] and state["seen"] == []
+    assert "it needs `words`" in model.prompts[1]
 
 
 def test_a_search_says_when_nothing_matches(tmp_path):
@@ -799,7 +824,7 @@ def test_build_concepts_writes_each_lecture_once_and_says_what_it_used(
     out = capsys.readouterr().out
     assert "L3: 1 concepts, 2 of 3 pages covered" in out
     assert "model calls 1, tokens in 100, out 10" in out
-    assert (workspace / "cache" / "retrieval" / "concepts" / "org_small" / "L3.json").is_file()
+    assert list((workspace / "cache" / "retrieval" / "concepts").glob("org_small-*/L3.json"))
     assert main(["--build-concepts", "3"]) == 0
     assert "L3: already indexed" in capsys.readouterr().out
     assert with_concept == ["concept-index"]
@@ -853,11 +878,27 @@ def test_the_agent_route_runs_and_says_what_it_used(workspace, monkeypatch, caps
     out = capsys.readouterr().out
     assert "lecture  agent" in out and "course   agent" in out
     assert "agent model calls this run" in out and "steps each" in out
-    assert (workspace / "cache" / "retrieval" / "agent" / "org_small" / "runs.jsonl").is_file()
+    assert list((workspace / "cache" / "retrieval" / "agent").glob("org_small-*/runs.jsonl"))
+
+
+def without_unfindable_rows(workspace):
+    """Freezing refuses a row with no page, as the fixture's coverage.md has on purpose."""
+    path = workspace / "coverage.md"
+    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+    path.write_text("".join(line for line in lines if "Missing" not in line), encoding="utf-8")
+
+
+def test_the_final_splits_need_frozen_queries(workspace, capsys):
+    for split in ("test", "cross"):
+        assert main(["--split", split]) == 1
+        assert "--freeze-queries" in capsys.readouterr().err
 
 
 def test_cross_searches_the_whole_course_only(workspace, capsys):
+    without_unfindable_rows(workspace)
     write_cross_lecture(workspace, {"query": "joins and sorting", "slides": {"3": "3.1-3.2"}})
+    assert main(["--freeze-queries"]) == 0
+    capsys.readouterr()
     assert main(["--split", "cross"]) == 0
     out = capsys.readouterr().out
     table = out.split("tokens per query")[0]  # the sizes line below says "whole lecture"
@@ -865,5 +906,157 @@ def test_cross_searches_the_whole_course_only(workspace, capsys):
 
 
 def test_cross_without_its_file_says_so(workspace, capsys):
+    without_unfindable_rows(workspace)
+    assert main(["--freeze-queries"]) == 0
+    capsys.readouterr()
     assert main(["--split", "cross"]) == 1
     assert "no cross queries" in capsys.readouterr().err
+
+
+# --- what the Codex review of 2026-11-02 asked for ------------------------------------------
+
+def test_a_changed_setting_gets_its_own_folder_so_nothing_old_is_replayed(tmp_path, monkeypatch):
+    base = settings_folder(tmp_path, {"model": "org/m", **tool_settings("bm25")})
+    assert base.name.startswith("org_m-")
+    assert json.loads((base / "settings.json").read_text(encoding="utf-8"))["search"] == "bm25"
+    assert settings_folder(tmp_path, {"model": "org/m", **tool_settings("hybrid")}) != base
+    monkeypatch.setattr("tutor.retrieval.agent.MAX_READ", 1)
+    assert settings_folder(tmp_path, {"model": "org/m", **tool_settings("bm25")}) != base
+    monkeypatch.undo()
+    assert settings_folder(tmp_path, {"model": "org/m", **tool_settings("bm25")}) == base
+
+
+def test_the_askers_settings_say_how_hard_it_thinks():
+    config = LLMConfig("p", "glm", "http://x", "m", thinking_off=({"reasoning_effort": "low"},),
+                       thinking_on={"reasoning_effort": "high"})
+    off, on = ModelAsker(config).settings, ModelAsker(config, thinking=True).settings
+    assert off["thinking"] is False and off["request"] == [{"reasoning_effort": "low"}]
+    assert on["thinking"] is True and on["request"] == {"reasoning_effort": "high"}
+
+
+class CountingQueue(ActionQueue):
+    """A model that also counts tokens, as the real asker does."""
+
+    def __init__(self, *actions):
+        super().__init__(*actions)
+        self.input_tokens = self.output_tokens = 0
+
+    def __call__(self, *args):
+        self.input_tokens += 100
+        self.output_tokens += 10
+        return super().__call__(*args)
+
+
+def test_a_stored_run_keeps_its_trace_and_what_it_cost(tmp_path):
+    pytest.importorskip("langgraph")
+    model = CountingQueue(search_for("joins"), "not json", read_pages("3:1"), finish_with("3:1"))
+    route = AgentRetriever(AGENT_PAGES, model, tmp_path / "agent")
+    route.search("q", {"3"})
+    row = route.used[0]
+    assert row["seen"] == ["3:1"] and row["read"] == ["3:1"] and row["pages"] == ["3:1"]
+    assert [step["action"] for step in row["trace"]] == ["search", "read", "finish"]
+    assert (row["failed"], row["finished"], row["steps"]) == (1, True, 4)
+    assert (row["tokens_in"], row["tokens_out"]) == (400, 40)
+    stored = AgentRetriever(AGENT_PAGES, CountingQueue(), tmp_path / "agent")
+    stored.search("q", {"3"})
+    assert first_run_cost(stored.used).startswith("first run, per query: 400 tokens in, 40 out")
+
+
+def test_first_run_cost_says_when_it_was_not_recorded():
+    assert first_run_cost([{"ids": []}]) == "cost not recorded"
+
+
+def test_the_agent_searches_with_the_route_it_is_given(tmp_path):
+    other = FixedRoute([AGENT_PAGES[1]])
+    model = ActionQueue(search_for("joins"), finish_with())
+    route = AgentRetriever(AGENT_PAGES, model, tmp_path / "agent", search_route=other)
+    state = drive(route, fresh_state(scope=["3"]))
+    assert state["seen"] == ["3:2"] and other.scopes == [{"3"}]
+
+
+def test_neighbours_follow_each_page_within_its_lecture_and_each_page_once():
+    pages = [page("3", n) for n in (1, 2, 3, 4)] + [page("4", 1)]
+    route = NeighbourRetriever(FixedRoute([pages[1], pages[2], pages[4]]), pages, "near")
+    assert [p.key for p in route.search("q")] == [("3", 2), ("3", 1), ("3", 3), ("3", 4), ("4", 1)]
+    assert route.name == "near"
+
+
+def scored(**recalls):
+    return [{"id": i, "recall_within": {2000: value}} for i, value in recalls.items()]
+
+
+def test_compare_counts_query_by_query_and_applies_the_margin():
+    base = scored(a=0.5, b=0.5, c=0.5, d=0.5)
+    just_enough = compare(base, scored(a=0.6, b=0.6, c=0.6, d=0.5))
+    assert (just_enough["better"], just_enough["worse"], just_enough["same"]) == (3, 0, 1)
+    assert just_enough["adopt"] is (3 >= ADOPT_MARGIN)
+    assert just_enough["mean_change"] == pytest.approx(0.075)
+    one_big_swing = compare(base, scored(a=1.0, b=0.5, c=0.5, d=0.5))
+    assert one_big_swing["mean_change"] > 0 and one_big_swing["adopt"] is False
+
+
+def test_compare_reads_rows_that_went_through_json():
+    rows = json.loads(json.dumps(scored(a=0.5)))
+    assert compare(rows, rows)["same"] == 1
+
+
+def test_compare_refuses_runs_of_different_queries():
+    with pytest.raises(ValueError, match="same queries"):
+        compare(scored(a=0.5), scored(b=0.5))
+
+
+def test_evaluate_reports_what_each_query_actually_returned():
+    pages = [page(number=n, text="x" * 40) for n in (1, 2)]  # 10 tokens each
+    result = evaluate(FixedRoute(pages), [query([1])], "course")
+    assert (result.pages_returned, result.tokens_returned) == (2, 20)
+    assert result.per_query[0]["pages"] == [["3", 1], ["3", 2]]
+    assert result.per_query[0]["recall_within"][2000] == 1.0
+
+
+def test_freezing_snapshots_labels_that_rewording_cannot_move(tmp_path):
+    pages = [page("3", 1, "3.1"), page("3", 2, "3.2")]
+    (tmp_path / "coverage.md").write_text("### L3 T\n| 3.1 | Joins | gap-code |\n",
+                                          encoding="utf-8")
+    write_cross_lecture(tmp_path, {"query": "spans", "slides": {"3": "3.1-3.2"}})
+    frozen = freeze(tmp_path, pages)
+    (tmp_path / "coverage.md").write_text("### L3 T\n| 3.2 | Reworded | gap-code |\n",
+                                          encoding="utf-8")
+    assert load_frozen(tmp_path) == frozen
+    assert {q.text for q in frozen} == {"Joins", "spans"}
+
+
+def test_freezing_refuses_to_overwrite_or_to_keep_a_row_with_no_page(tmp_path):
+    pages = [page("3", 1, "3.1")]
+    assert load_frozen(tmp_path) is None
+    (tmp_path / "coverage.md").write_text("### L3 T\n| 3.9 | Lost | gap-code |\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="fix these"):
+        freeze(tmp_path, pages)
+    (tmp_path / "coverage.md").write_text("### L3 T\n| 3.1 | Fine | gap-code |\n", encoding="utf-8")
+    freeze(tmp_path, pages)
+    with pytest.raises(ValueError, match="already"):
+        freeze(tmp_path, pages)
+
+
+def test_a_new_run_number_measures_again_and_the_same_one_does_not(
+        workspace, with_concept, capsys):
+    assert main(["--build-concepts"]) == 0
+    with_concept.clear()
+    assert main(["--route", "concept"]) == 0
+    asked = with_concept.count("concept-pick")
+    assert asked > 0
+    assert main(["--route", "concept"]) == 0
+    assert with_concept.count("concept-pick") == asked
+    assert main(["--route", "concept", "--run", "1"]) == 0
+    assert with_concept.count("concept-pick") == 2 * asked
+    capsys.readouterr()
+
+
+def test_saved_runs_can_be_compared_from_the_command_line(workspace, capsys):
+    assert main(["--route", "bm25", "--save", "first"]) == 0
+    assert main(["--route", "bm25", "--save", "second"]) == 0
+    capsys.readouterr()
+    assert main(["--compare", "first/bm25", "second/bm25"]) == 0
+    out = capsys.readouterr().out
+    assert "0 better, 0 worse" in out and "keep the simpler setting" in out
+    assert main(["--compare", "first/vector", "second/bm25"]) == 1
+    assert main(["--compare", "nothing/bm25", "second/bm25"]) == 1

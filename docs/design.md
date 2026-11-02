@@ -1178,7 +1178,8 @@ Routes:
   it is also an automatic first draft of `coverage.md`.
 
 Baselines, already in the pipeline: the whole lecture, and the labelled page slice (perfect
-retrieval, the upper bound). GraphRAG (through LightRAG) stays out unless the hybrid and
+retrieval by the labels, which is a reference, not a proven upper bound on what generation can
+produce from it). GraphRAG (through LightRAG) stays out unless the hybrid and
 agentic routes clearly fail the cross-lecture queries below: its strength is reasoning across
 several places (Han et al. 2025, arXiv 2502.11371), while a generation query is mostly "which
 pages teach this point". Routes read the page cache only, never `coverage.md`, which holds
@@ -1190,19 +1191,39 @@ Measurement:
   uses) with relevant pages (its slides). 71 rows qualify, against the 20-30 first planned. The
   hash of each row alone splits them into dev (18, for tuning) and test (53, only for the final
   comparison), so adding rows or lectures later never moves a query from one to the other.
-  `source.pdf_pages` of exercises adds nothing: they come from the same rows.
+  Rewording a row would move it, so `--freeze-queries` snapshots every query and label in the
+  workspace, and the test and cross-lecture splits refuse to run without it. Only 1 of the 53
+  test queries shares a page with a dev query. `source.pdf_pages` of exercises adds nothing:
+  they come from the same rows.
 - Cross-lecture queries: 13 written by hand in the workspace's `retrieval/cross-lecture.jsonl`,
   labelled from `coverage.md`'s rows, frozen by the owner 2026-11-02 before any route ran on
   them, and run last, like the test split.
 - Scope: the batch's lecture first, as generation does, and also the whole course, which is
-  harder and is what cross-lecture queries and hints need.
+  harder and is what cross-lecture queries and hints need. The lecture scope comes from the
+  labels: fair for generation, where the batch names its lecture, but prior knowledge for a
+  question of unknown source. Test queries from lectures with no dev query are also reported
+  apart, as the nearest thing here to unseen material.
 - Scores: recall@k and MRR assume a ranked list. Agentic search and the concept index return
   a set of no fixed size, and returning more pages always raises recall, so every route is
-  also scored by recall within a token budget (500 to 4000), results taken in order.
-- Incomplete labels: a page nobody listed may still be relevant. Before the final table the
-  test split's returned pages are pooled, as IR evaluations do, and the unlabelled ones judged;
-  both the strict and the pooled recall are reported.
-- Stability: routes that call a model run 3 times on the test split, to show the spread.
+  also scored by recall within a token budget (500 to 4000), results taken in order. A route
+  may stop early, so what it actually returned is reported too.
+- Fixed before the test split: routes are chosen by recall within 2000 tokens searching the
+  lecture (about twice the labelled pages, under a third of a lecture); the rest is supporting
+  evidence. On dev, a change replaces a simpler setting only if at least 3 more queries improve
+  than worsen: one query moves a mean by up to 1/18, so means alone would chase noise.
+- Costs apart: tokens above measure pages delivered, by a rough estimate, not a run's cost. A
+  stored answer takes no time, so each keeps its first run's tokens and seconds, reported apart
+  from the cost of building an index and from generation. Each stored agent run also keeps its
+  trace, which tells a page never shown from one shown and not chosen.
+- Incomplete labels: a label is a slide range written for choosing batches, not a page-by-page
+  judgement, so it favours finding consecutive pages and may overlook a good page elsewhere.
+  Before the final table, pool for each query what every route and repeat returns within 2000
+  tokens, with the labelled pages. A judge of another model family, not told which route
+  returned a page, rules on all of them, existing labels included; the owner checks a sample.
+  Strict and pooled recall are reported side by side. Pooled recall is still no absolute truth.
+- Stability: routes that call a model run 3 times on the test split, each with its own `--run`
+  number (the same number reads the stored answers), and every run is reported.
+- Reach: these results hold for this course. They say nothing about another course.
 - Generation: the same plan of about 12 items with each context, counting first-pass VALID,
   VALID after repair and cost per item, plus the judge's `fits` and `taught`, since material
   likely affects those more than validity. 12 paired items show only large differences, so
@@ -1231,22 +1252,39 @@ Choices:
   found: the workspace's `[retrieval] exclude_lectures` leaves it out. It cannot be detected by
   exact comparison, as the footers make every page differ.
 
-Dev scores so far (2026-11-02). 18 queries, so one query moves a recall by about 0.06, and
-these only guide the next steps; the test split decides. The labelled pages average 994 tokens
-per query, the whole lecture 6783.
+Dev scores (2026-11-02). 18 queries, which only guide the next steps; the test split decides.
+The labelled pages average 994 tokens per query, the whole lecture 6783.
 
 | Searching | Route | MRR | Recall within 1000 tokens | 2000 | 4000 |
 |---|---|---|---|---|---|
 | the lecture | BM25 | 0.78 | 0.66 | 0.81 | 0.89 |
 | the lecture | vector | 0.89 | 0.70 | 0.87 | 0.97 |
 | the lecture | hybrid | 0.91 | 0.68 | 0.85 | 0.97 |
+| the lecture | hybrid + neighbours | 0.88 | 0.71 | 0.89 | 0.99 |
 | the lecture | concept | 0.92 | 0.79 | 0.89 | 0.90 |
-| the lecture | agent | 0.97 | 0.74 | 0.80 | 0.80 |
+| the lecture | agent | 0.97 | 0.77 | 0.87 | 0.87 |
+| the lecture | agent + thinking | 0.97 | 0.75 | 0.87 | 0.88 |
+| the lecture | agent + hybrid search | 0.97 | 0.78 | 0.89 | 0.89 |
 | the course | BM25 | 0.67 | 0.52 | 0.67 | 0.78 |
 | the course | vector | 0.79 | 0.62 | 0.74 | 0.86 |
 | the course | hybrid | 0.81 | 0.59 | 0.74 | 0.82 |
+| the course | hybrid + neighbours | 0.75 | 0.65 | 0.80 | 0.91 |
 | the course | concept | 0.82 | 0.71 | 0.82 | 0.82 |
-| the course | agent | 0.75 | 0.59 | 0.62 | 0.62 |
+| the course | agent | 0.74 | 0.53 | 0.57 | 0.57 |
+| the course | agent + thinking | 0.89 | 0.73 | 0.81 | 0.81 |
+| the course | agent + hybrid search | 0.89 | 0.63 | 0.69 | 0.69 |
+
+Query by query at 2000 tokens, against the adoption rule. Searching the lecture nothing clears
+it: thinking 6 better and 5 worse against the plain agent, hybrid search 6 and 4, hybrid against
+vector 3 and 5, concept against vector 6 and 4. So the agent keeps BM25 and no thinking there,
+and three model-driven routes tie a rule with no model at all: hybrid + neighbours took 8 better
+and 3 worse against hybrid, at no cost. Neighbours may only fit the labels, which are consecutive
+ranges, and the pooled labels will tell. Searching the course, thinking clears the rule by far
+(10 better, 2 worse, mean +0.24), at about 5.5k tokens in, 880 out and 25 s per query; hybrid
+search also clears it (9 and 4, +0.12). The trace says why: 63 of the 64 pages the plain agent
+missed across the course were never shown by a search, so it needs better searches, not better
+choices. The same plain agent run twice moved by 0.05 to 0.07 on these means, so differences of
+that size are noise.
 
 The concept route returns about 1100 tokens (7-8 pages) and stops there, so a larger budget
 adds nothing: so far it finds more than the others in little room, and less in a lot of room.
@@ -1256,11 +1294,12 @@ course-wide query sends, at 2-3 s per query against milliseconds for the others.
 points covering 496 of 571 pages; on the lecture checked, the rest were title, section and
 reference pages, and 3 of the 125 pages the dev queries label are in no point.
 
-The agent route ranks a relevant page first most often and finds the fewest pages: it returns a
-small set too, and took 4.8 steps and about 4.4k tokens per query with GLM-5.3-Flash, at 13 s.
-Its first prompt scored 0.69 and 0.53 at 4000 tokens: 46 of the 51 pages it missed within a
-lecture were within two pages of one it returned, so the prompt now asks for the pages around a
-good one. Tuning stopped there, as 18 queries are easy to fit.
+The agent route ranks a relevant page first most often: it returns a small set too, and took
+4.8 steps and about 4.6k tokens per query with GLM-5.3-Flash, at 14 s. Its first prompt scored
+0.69 and 0.53 at 4000 tokens: 46 of the 51 pages it then missed within a lecture were within two
+pages of one it returned, so the prompt now asks for the pages around a good one. Tuning stopped
+there, as 18 queries are easy to fit. On the same dev queries the plain agent does not beat
+ranking with hybrid directly: 5 better and 5 worse searching the lecture, 2 and 9 the course.
 
 BM25 is hand-written, as the formula is short. Splitting camelCase, stop words, plural stripping
 and other `k1` / `b` values each moved its scores by a query or two, which is noise, so the
@@ -2090,6 +2129,10 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
    3. **Done 2026-11-02.** Concept index (tried on one lecture first, as agreed).
    4. **Done 2026-11-02.** Agentic search. It uses the LangGraph library and leaves `graph/` as
       it is.
+      **Done 2026-11-02, after a Codex review:** a folder per complete configuration, so a changed
+      setting cannot replay old answers; `--run` for true repeats; traces and first-run costs;
+      query-by-query comparison; frozen queries; and on dev, thinking, hybrid search for the agent
+      and a neighbour-page control.
    5. Pool the test split's results, write the final retrieval table, decide on LightRAG.
    6. Generation with each context; a budget is approved before it runs.
    7. Wire in a winner, or keep the whole lecture; README results.

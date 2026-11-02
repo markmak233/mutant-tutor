@@ -10,22 +10,24 @@ says when it is done. It is a loop of two nodes, wired with LangGraph:
 
 The model chooses each action as a JSON object (`Action`) through the client's structured
 output, which every profile supports, so the client needs no tool-calling support. The tools
-themselves are plain code: searching is the BM25 route, and reading returns a page's text. The
-model never sees a page it did not ask for, and every id it names is checked.
+themselves are plain code: searching is another route (BM25 or hybrid), and reading returns a
+page's text. The model never sees a page it did not ask for, and every id it names is checked.
 
-A whole run is kept on disk per query, so asking again costs nothing. `run` separates repeated
-measurements, since a model's path may differ between runs, which is worth knowing.
+A whole run is kept on disk per query, so asking again costs nothing, with its trace: what the
+model saw, read and chose, which tells "never found" from "found but not chosen". `run` separates
+repeated measurements, since a model's path may differ between runs, which is worth knowing.
 """
 
 from __future__ import annotations
 
+import time
 from collections.abc import Collection
 from pathlib import Path
 from typing import Literal, TypedDict
 
 from pydantic import BaseModel
 
-from tutor.retrieval.asker import Ask, digest
+from tutor.retrieval.asker import Ask, digest, usage_of
 from tutor.retrieval.bm25 import BM25Retriever
 from tutor.retrieval.corpus import Page
 from tutor.retrieval.jsonl import JsonLines
@@ -37,7 +39,8 @@ PROMPT_VERSION = 2
 MAX_STEPS = 6  # the model's turns; bounds the cost and time of one query
 SEARCH_RESULTS = 10  # pages one search shows
 MAX_READ = 5  # pages one read returns, so one action cannot pull in a whole lecture
-STEP_MAX_TOKENS = 1_000  # an action is short; a reply cut off here counts as unreadable
+# A limit, not a target: an action is short, but a model's thinking may count towards this too.
+STEP_MAX_TOKENS = 4_000
 _TITLE_CHARS = 80
 
 SYSTEM_PROMPT = f"""\
@@ -71,6 +74,9 @@ class AgentState(TypedDict):
     steps: int  # the model's turns so far
     action: dict | None  # the action just chosen; None if the reply could not be read
     read: list[str]  # page ids read so far, in order
+    seen: list[str]  # page ids any search has shown, in order, each once
+    trace: list[dict]  # every action chosen, for finding out afterwards why a page was missed
+    failed: int  # turns lost to a reply that could not be read as an action
 
 
 def _page_id(page: Page) -> str:
@@ -86,13 +92,20 @@ def _title(page: Page) -> str:
     return ""
 
 
-class AgentRetriever:
-    name = "agent"
+def tool_settings(search_name: str) -> dict:
+    """What a stored run depends on besides the model; see asker.settings_folder."""
+    return {"route": "agent", "prompt_version": PROMPT_VERSION, "max_steps": MAX_STEPS,
+            "search_results": SEARCH_RESULTS, "max_read": MAX_READ,
+            "step_max_tokens": STEP_MAX_TOKENS, "search": search_name}
 
-    def __init__(self, pages: list[Page], ask: Ask, folder: Path, run: int = 0) -> None:
+
+class AgentRetriever:
+    def __init__(self, pages: list[Page], ask: Ask, folder: Path, run: int = 0,
+                 search_route=None, name: str = "agent") -> None:
+        self.name = name
         self._pages = {_page_id(page): page for page in pages}
         self._lectures = list(dict.fromkeys(page.lecture for page in pages))
-        self._bm25 = BM25Retriever(pages)
+        self._search_route = search_route or BM25Retriever(pages)
         self._ask = ask
         self._run = run
         self._corpus = digest([(page.key, page.text) for page in pages])  # for the stored runs
@@ -118,9 +131,9 @@ class AgentRetriever:
                               STEP_MAX_TOKENS)
             action = Action.model_validate_json(reply).model_dump()
         except ValueError:  # not an action, or cut off: costs the turn, not the whole query
-            return {"steps": step, "action": None,
+            return {"steps": step, "action": None, "failed": state["failed"] + 1,
                     "log": [*state["log"], "Your last reply could not be read as an action."]}
-        return {"steps": step, "action": action}
+        return {"steps": step, "action": action, "trace": [*state["trace"], action]}
 
     def act(self, state: AgentState) -> dict:
         """Carry out the action chosen. Plain code: no model is involved here."""
@@ -128,7 +141,7 @@ class AgentRetriever:
         if action is None or action["action"] == "finish":
             return {}
         if action["action"] == "search":
-            return {"log": [*state["log"], self._search(action, state["scope"])]}
+            return self._search(action, state)
         return self._read(action, state)
 
     def next_node(self, state: AgentState) -> str:
@@ -141,13 +154,21 @@ class AgentRetriever:
         action = state["action"]
         return state["steps"] >= MAX_STEPS or bool(action and action["action"] == "finish")
 
-    def _search(self, action: dict, scope: list[str]) -> str:
-        words, lecture = action["words"], action["lecture"]
+    def _search(self, action: dict, state: AgentState) -> dict:
+        words, lecture, scope = action["words"], action["lecture"], state["scope"]
+        # An embedding model refuses empty text, and it would rank nothing anyway. The model has
+        # sent this (2026-11-02): it costs that turn, not the whole query.
+        if not words.strip():
+            return {"log": [*state["log"], "search: it needs `words`; nothing was searched."]}
         if lecture is not None and lecture not in scope:
-            return f"search {words!r} in lecture {lecture}: you may only search {', '.join(scope)}."
-        found = self._bm25.search(words, {lecture} if lecture else set(scope))[:SEARCH_RESULTS]
+            text = f"search {words!r} in lecture {lecture}: you may only search {', '.join(scope)}."
+            return {"log": [*state["log"], text]}
+        wanted = {lecture} if lecture else set(scope)
+        found = self._search_route.search(words, wanted)[:SEARCH_RESULTS]
         lines = [f"{_page_id(p)} | {p.slide or '-'} | {_title(p)}" for p in found]
-        return f"search {words!r}:\n" + ("\n".join(lines) if lines else "(no page has these words)")
+        text = f"search {words!r}:\n" + ("\n".join(lines) if lines else "(no page has these words)")
+        seen = list(dict.fromkeys([*state["seen"], *map(_page_id, found)]))
+        return {"log": [*state["log"], text], "seen": seen}
 
     def _read(self, action: dict, state: AgentState) -> dict:
         wanted = action["pages"][:MAX_READ]
@@ -164,7 +185,8 @@ class AgentRetriever:
 
     def finish_pages(self, state: AgentState) -> tuple[list[str], bool]:
         """The page ids to return, and whether the model finished. If it ran out of turns, the
-        pages it read are the best evidence of what it found."""
+        pages it read are the best evidence of what it found, though it may have read some and
+        rejected them, so a run that did not finish is counted and reported as such."""
         action = state["action"]
         finished = bool(action and action["action"] == "finish")
         chosen = action["pages"] if finished else state["read"]
@@ -176,12 +198,20 @@ class AgentRetriever:
     def search(self, query: str, lectures: Collection[str] | None = None) -> list[Page]:
         scope = [lecture for lecture in self._lectures
                  if lectures is None or lecture in lectures]
-        key = digest(PROMPT_VERSION, MAX_STEPS, self._run, query, scope, self._corpus)
+        key = digest(self._run, query, scope, self._corpus)
         if key not in self._runs:
+            in_before, out_before = usage_of(self._ask)
+            start = time.monotonic()
             state = self._invoke({"query": query, "scope": scope, "log": [], "steps": 0,
-                                  "action": None, "read": []})
+                                  "action": None, "read": [], "seen": [], "trace": [],
+                                  "failed": 0})
+            in_after, out_after = usage_of(self._ask)
             pages, finished = self.finish_pages(state)
-            row = {"key": key, "pages": pages, "steps": state["steps"], "finished": finished}
+            row = {"key": key, "query": query, "scope": scope, "run": self._run, "pages": pages,
+                   "finished": finished, "steps": state["steps"], "failed": state["failed"],
+                   "seen": state["seen"], "read": state["read"], "trace": state["trace"],
+                   "tokens_in": in_after - in_before, "tokens_out": out_after - out_before,
+                   "seconds": round(time.monotonic() - start, 2)}
             self._file.append([row])
             self._runs[key] = row
         self.used.append(self._runs[key])
