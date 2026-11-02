@@ -6,7 +6,7 @@ import json
 
 import pytest
 
-from tutor.llm import LLMConfig, Reply
+from tutor.llm import LLMConfig, LLMError, Reply
 from tutor.materials import cache
 from tutor.retrieval.__main__ import main
 from tutor.retrieval.agent import (
@@ -350,6 +350,40 @@ def test_a_pick_is_paid_for_once_across_runs_of_the_program(tmp_path):
     again, later = concept_route(tmp_path, ["4/0"])
     assert again.search("q", {"3"}) == first  # the stored pick, not the new reply
     assert later.asked == []
+
+
+def test_a_reply_cut_off_finds_nothing_and_stays_stored_as_failed(tmp_path):
+    route, _ = concept_route(tmp_path, ["3/0"])
+
+    def cut_off(*_):
+        raise ValueError("the reply was cut off")
+
+    route._ask = cut_off
+    assert route.search("q", {"3"}) == []
+    assert route.used[-1]["failed"] is True
+    again, later = concept_route(tmp_path, ["3/0"])
+    assert again.search("q", {"3"}) == []  # not asked until one works
+    assert later.asked == []
+
+
+def test_a_reply_outside_the_schema_finds_nothing(tmp_path):
+    route, _ = concept_route(tmp_path, "not a list")
+    assert route.search("q", {"3"}) == []
+    assert route.used[-1]["failed"] is True
+
+
+def test_a_failed_request_is_an_error_and_not_stored_as_an_answer(tmp_path):
+    route, _ = concept_route(tmp_path, ["3/0"])
+
+    def unreachable(*_):
+        raise LLMError("cannot reach the provider")
+
+    route._ask = unreachable
+    with pytest.raises(LLMError):
+        route.search("q", {"3"})
+    again, later = concept_route(tmp_path, ["3/0"])
+    assert again.search("q", {"3"})
+    assert len(later.asked) == 1
 
 
 def test_a_repeated_measurement_asks_the_model_again(tmp_path):

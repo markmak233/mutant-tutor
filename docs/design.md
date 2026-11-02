@@ -1165,6 +1165,12 @@ generation already sends the whole lecture, so a route has to beat that to be us
 database. Code in `src/tutor/retrieval/`; every route is one `search(query, lectures)` that
 returns pages best first.
 
+Outcome (owner, 2026-11-02): generation keeps the whole lecture and no route is wired in. Perfect
+retrieval did not beat the whole lecture on generation ("Does retrieval help generation at all?"
+below), so the rest of the plan was cut down to one final retrieval table ("Final table" below).
+The code stays for what was not tested: hints, questions of unknown source, or a course with no
+`coverage.md`.
+
 Routes:
 - Hybrid RAG: BM25 + vectors, fused by reciprocal rank fusion. API names like
   `aggregateByKey` are exact-match problems that pure vector search handles poorly.
@@ -1185,7 +1191,8 @@ several places (Han et al. 2025, arXiv 2502.11371), while a generation query is 
 pages teach this point". Routes read the page cache only, never `coverage.md`, which holds
 the answers they are measured against.
 
-Measurement:
+Measurement, as planned. The outcome above dropped the pooling, the repeats and generating with
+each route:
 - Unit: the cache's page sections, the same unit phase 3's slices use, so there is no chunker.
 - Labels: each `coverage.md` row is a query (its knowledge point, in the words a batch plan
   uses) with relevant pages (its slides). 71 rows qualify, against the 20-30 first planned. The
@@ -1247,6 +1254,11 @@ Choices:
   nothing and new lectures, changed pages or new queries pay only for themselves. Each model
   has its own file, as vectors from two models cannot be compared; another model means
   embedding the course again, which costs next to nothing.
+  A local model, tried 2026-11-02 with LM Studio's bundled `nomic-embed-text` v1.5 (84 MB, 768
+  dimensions): 12 s for all 571 pages, 12 ms per query, and on dev 0.85 against OpenAI's 0.87
+  within 2000 tokens searching the lecture, 0.70 against 0.74 the course. Not wired in: it saves
+  next to nothing, its one use is not needing a key, and it would need its task prefixes and a
+  store name that does not claim 1024 dimensions.
 - Reranker: not in the first round (see the [4] candidate).
 - A lecture file repeating another's slides under other footers would count as wrong when
   found: the workspace's `[retrieval] exclude_lectures` leaves it out. It cannot be detected by
@@ -1286,6 +1298,80 @@ missed across the course were never shown by a search, so it needs better search
 choices. The same plain agent run twice moved by 0.05 to 0.07 on these means, so differences of
 that size are noise.
 
+Frozen 2026-11-02 (owner), no more tuning: the plain agent searching a lecture, the agent with
+thinking across the course and on the cross-lecture queries, both with BM25 search, 10 results
+and the second prompt. The corpus is frozen too: a lecture arriving later stays out of these
+measurements, as it would change every course-wide score. If measured at all, it is measured
+apart as unseen material, with labels written before any route runs on it. Once such a lecture
+is in the cache, repeating these numbers needs it in `exclude_lectures`.
+
+Does retrieval help generation at all? Tested first, as it decides whether the costly final
+retrieval run is worth doing (owner, 2026-11-02): the labelled slice is what a perfect route would
+return, so if it does not beat the whole lecture, no route can be expected to. Same 12 plan items,
+sampled by hash from three real batches, two arms, $0.81 in all:
+
+| | Whole lecture | Labelled slice |
+|---|---|---|
+| Saved after repair | 12 of 12 | 12 of 12 |
+| VALID at the first try | 8 | 7 |
+| Exercises the judge finds fully fine | 7 | 5 |
+| `clear` flagged | 4 | 6 |
+| `fits the material` flagged | 2 | 5 |
+| Serious flags | 5 | 10 |
+| Tokens, all rounds | 743k | 678k |
+
+The slice saves 9% of the tokens, about $0.02 on this run, and does no better on validity. The
+judge finds it worse on `fits`: 4 items better with the whole lecture, 1 with the slice. 12 items
+and an imperfect judge, which itself reads the whole lecture, show a direction and not a proof.
+Its flags were read only on the four slice items it rated below the whole lecture: three are real
+misstatements in the exercise's own explanation, the fourth was not checked, and the whole-lecture
+arm's flags were not read. A model that sees less around a page may overstate more easily, which
+is a reading and not a measurement. Most of the slice's first-try failures were replies cut off at
+the output limit (4 against 1), not wrong content (1 against 3).
+
+Final table (2026-11-03), the test split with the frozen settings: 53 queries, 1.45M GLM-5.3-Flash
+tokens. Simplified by the outcome above: every route ran once and the labels were not pooled, so
+these are strict scores against slide ranges, and a few hundredths may be noise. The labelled pages
+average 734 tokens per query, the whole lecture 6931. The CLI runs both scopes for every route, so a
+private script ran each agent setting on its own scope.
+
+| Searching | Route | MRR | Recall within 1000 tokens | 2000 | 4000 | Model tokens per query | Seconds |
+|---|---|---|---|---|---|---|---|
+| the lecture | BM25 | 0.89 | 0.75 | 0.88 | 0.94 | - | - |
+| the lecture | vector | 0.92 | 0.77 | 0.87 | 0.92 | - | - |
+| the lecture | hybrid | 0.94 | 0.77 | 0.89 | 0.94 | - | - |
+| the lecture | hybrid + neighbours | 0.94 | 0.81 | 0.93 | 0.98 | - | - |
+| the lecture | concept | 0.85 | 0.81 | 0.88 | 0.89 | 1.6k | 2.7 |
+| the lecture | agent | 0.94 | 0.82 | 0.87 | 0.87 | 3.9k | 13.7 |
+| the course | BM25 | 0.81 | 0.63 | 0.80 | 0.86 | - | - |
+| the course | vector | 0.88 | 0.72 | 0.81 | 0.89 | - | - |
+| the course | hybrid | 0.88 | 0.70 | 0.85 | 0.89 | - | - |
+| the course | hybrid + neighbours | 0.86 | 0.75 | 0.90 | 0.95 | - | - |
+| the course | concept | 0.85 | 0.80 | 0.89 | 0.89 | 15.2k | 5.1 |
+| the course | agent + thinking | 0.87 | 0.72 | 0.82 | 0.82 | 6.6k | 28.0 |
+
+Query by query at 2000 tokens. Searching the lecture, the score fixed in advance, no route with a
+model beats the best route without one: hybrid + neighbours took 11 better and 4 worse against
+hybrid, and concept against it took 7 and 11, the agent 1 and 18. Nor do they beat plain vector:
+concept 10 and 10, the agent 7 and 11. Vector's lead over BM25 on dev did not hold (9 and 8), while
+hybrid does beat vector (6 and 1, mean +0.017). Searching the course, concept ties hybrid +
+neighbours (8 and 9) and beats vector (16 and 7, +0.074); the thinking agent falls behind (7 and 16
+against hybrid + neighbours). The margin of 3 was set for 18 queries and is a low bar on 53: the
+thinking agent clears it against vector across the course with 13 and 10 and a mean of +0.005, which
+is nothing.
+
+So a later use should start from hybrid + neighbours, which needs no model, unless neighbours only
+fit the labels, which are consecutive ranges; that was for pooling to test, and it was dropped. The
+routes with a model still hold up in little room, returning 900-1200 tokens: within 1000 tokens,
+concept finds 0.80 across the course against 0.75, the agent 0.82 in the lecture against 0.81. On
+the 11 test queries from lectures with no dev query, the nearest thing here to unseen material,
+routes score 0.92 to 0.99 at 2000 tokens searching the lecture, the agent lowest.
+
+One of the 106 concept picks was cut off at its output limit. It counts as a miss and stays stored
+as one, as asking again until a reply works would flatter the route. Every agent run finished; two
+provider errors stopped the run, which resumed from the stored answers. The cross-lecture split has
+not been run, and LightRAG stays out, as nothing here would use it.
+
 The concept route returns about 1100 tokens (7-8 pages) and stops there, so a larger budget
 adds nothing: so far it finds more than the others in little room, and less in a lot of room.
 Its index cost GLM-5.3-Flash about 90k tokens in and 21k out for the course (`concept` role).
@@ -1310,7 +1396,7 @@ tokenizer stays plain lowercase words.
 - First-pass validity rate; validity after repair loop.
 - Mutant kill rate.
 - Tokens / cost per valid exercise.
-- With RAG vs without RAG; across models.
+- Across models. With vs without retrieval was settled in phase 4 (see "RAG").
 
 ## LLM engineering candidates (review at the start of each phase)
 
@@ -1446,7 +1532,8 @@ deterministic judge, hybrid RAG with recall@k, the phase 5 metrics, the hint lea
 - [5] Long-context baseline: "without RAG" means the whole week's material in the prompt
   (with caching), not no material, so the comparison shows whether retrieval earns its keep.
   A third arm (2026-10-28): the labelled page slice from `coverage.md`, i.e. perfect
-  retrieval, the upper bound that shows how far RAG falls short of it.
+  retrieval, the upper bound that shows how far RAG falls short of it. Done in phase 4 (see
+  "RAG"), where the slice proved a reference and not an upper bound on generation.
 - [after 3, optional] MCP server exposing `validate` (and later `hint`) so any coding agent
   can check the exercises it writes.
 - Not proposed: fine-tuning or RL (too little data; model + validator suffices), multi-agent
@@ -2133,9 +2220,11 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
       setting cannot replay old answers; `--run` for true repeats; traces and first-run costs;
       query-by-query comparison; frozen queries; and on dev, thinking, hybrid search for the agent
       and a neighbour-page control.
-   5. Pool the test split's results, write the final retrieval table, decide on LightRAG.
-   6. Generation with each context; a budget is approved before it runs.
-   7. Wire in a winner, or keep the whole lecture; README results.
+   5. **Done 2026-11-03, simplified (owner):** the final retrieval table from the test split, run
+      once and not pooled. The cross-lecture split is not run, and LightRAG stays out.
+   6. **Dropped 2026-11-02 (owner):** even the labelled slice did not beat the whole lecture on
+      12 items, so no route was generated with.
+   7. **Done 2026-11-03.** The whole lecture stays; README results.
 5. Evaluation script + README results. First review the [5] items of "LLM engineering
    candidates".
 
@@ -2202,8 +2291,8 @@ gaps. Each was decided by the owner; change one only with the owner.
   prompt + validator, then + repair, then + RAG, each with validity gain, manual edits
   saved and cost). Too much for one person who still has the first batch to solve. Phase
   5 keeps the arms already planned (first-pass validity, after repair, with / without RAG,
-  long-context baseline, models), which cover most of the ladder; no separate study of
-  manual edit time per arm. Instead, user effort shows up as preference / revision
+  settled in phase 4, long-context baseline, models), which cover most of the ladder; no
+  separate study of manual edit time per arm. Instead, user effort shows up as preference / revision
   requests in the generation chat (see the [3] preference-chat candidate), counted per
   batch.
 - No license change and no closed generator (decided 2026-10-26, misuse discussion). The

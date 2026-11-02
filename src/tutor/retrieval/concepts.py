@@ -181,11 +181,18 @@ class ConceptRetriever:
         if key not in self._picks:
             in_before, out_before = usage_of(self._ask)
             start = time.monotonic()
-            reply = self._ask("concept-pick", PICK_PROMPT, f"{text}\n\nRequest: {query}",
-                              Picked.model_json_schema(), PICK_MAX_TOKENS)
+            # A reply cut off or not in the schema finds nothing, and is stored like any other:
+            # asking again until one works would score the route better than it is. The model
+            # has done this (2026-11-02). A request that fails is another error and is not caught:
+            # it says nothing about the route, so it is not kept as an answer.
+            try:
+                reply = self._ask("concept-pick", PICK_PROMPT, f"{text}\n\nRequest: {query}",
+                                  Picked.model_json_schema(), PICK_MAX_TOKENS)
+                ids, failed = Picked.model_validate_json(reply).ids, False
+            except ValueError:
+                ids, failed = [], True
             in_after, out_after = usage_of(self._ask)
-            row = {"key": key, "query": query, "run": self._run,
-                   "ids": Picked.model_validate_json(reply).ids,
+            row = {"key": key, "query": query, "run": self._run, "ids": ids, "failed": failed,
                    "tokens_in": in_after - in_before, "tokens_out": out_after - out_before,
                    "seconds": round(time.monotonic() - start, 2)}
             self._file.append([row])

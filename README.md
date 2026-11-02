@@ -9,13 +9,12 @@ deterministic checks before anyone sees it**. No LLM judges whether an exercise 
 It started as revision for a big data management course, inspired by its course
 materials (none are included here), and is built as an AI engineering portfolio project:
 exercises are generated from the lecture slides by a LangGraph pipeline (plan → generate →
-validate → repair), and the current phase measures which way of finding course material
-serves them best: hybrid RAG, an agent searching with tools, or a compiled concept index,
-against simply sending the whole lecture.
+validate → repair). Hybrid RAG, an agent searching with tools and a compiled concept index were
+measured against simply sending the whole lecture, and [the whole lecture stayed](#does-it-need-rag).
 
 **Status:** the validation harness (phases 1, 2a), LLM generation (3a), the checks that need
-the learner's own work (3b) and the hint command (3c) are complete; three course weeks were
-generated, every saved exercise VALID. The retrieval comparison (4) is in progress.
+the learner's own work (3b), the hint command (3c) and the retrieval comparison (4) are complete;
+three course weeks were generated, every saved exercise VALID.
 
 ## Why validation comes first
 
@@ -118,6 +117,41 @@ size: most failed first drafts had expected test values traced wrongly by hand. 
 the oracle wrote 19 of 19 usable oracles in 9 s each. Samples are small; the full table is in
 [`docs/design.md`](docs/design.md) ("Week 7 with five arms").
 
+## Does it need RAG?
+
+Not for generating exercises from this course, so retrieval is not wired in. The course is small
+(571 pages, about 71k tokens; a lecture 4-11k), and a batch's plan already names each exercise's
+pages. The deciding test gave generation perfect retrieval: 12 real plan items, generated from the
+whole lecture and again from only the pages labelled for the item.
+
+| | Whole lecture | Labelled pages |
+|---|---|---|
+| Saved after repair | 12 of 12 | 12 of 12 |
+| VALID at the first try | 8 | 7 |
+| Judge finds fully fine | 7 | 5 |
+| Flagged as not fitting the material | 2 | 5 |
+| Tokens, all rounds | 743k | 678k |
+
+The pages save 9% of the tokens, about $0.02 here, and the judge prefers the whole lecture. 12 items
+and an imperfect judge, which itself reads the whole lecture, show a direction and not a proof.
+
+The routes themselves work. Recall within 2000 tokens, under a third of a lecture, on 53 test
+queries held back from tuning, each route run once:
+
+| Route | Searching the lecture | Searching the course | Model tokens per query |
+|---|---|---|---|
+| BM25 | 0.88 | 0.80 | none |
+| Vectors | 0.87 | 0.81 | none (embeddings: $0.002, once) |
+| Hybrid | 0.89 | 0.85 | none |
+| Hybrid + neighbouring pages | 0.93 | 0.90 | none |
+| Concept index | 0.88 | 0.89 | 1.6k / 15k |
+| Agent (with thinking across the course) | 0.87 | 0.82 | 3.9k / 6.6k |
+
+The routes with a model find no more than those without. The labels are consecutive page ranges,
+which may favour adding neighbours, and they were not judged again. These results hold for this
+course only. The code stays in `src/tutor/retrieval/` for what was not tested, such as hints or a
+course with no labels; details are in [`docs/design.md`](docs/design.md) ("RAG").
+
 ## Quick start
 
 > **Setting up from scratch?** Follow [`docs/setup/bigdata.md`](docs/setup/bigdata.md):
@@ -212,6 +246,8 @@ src/tutor/
   hint/            hints while solving: rules, then the exercise's known mistakes (its
                    mutants), then a model's hint checked for giving code away; never the
                    reference; `python -m tutor.hint`
+  retrieval/       the routes compared in phase 4 and their scores; generation does not use
+                   them; `python -m tutor.retrieval`
   schema.py        the batch format (metadata.json, manifest.json); `python -m tutor.schema`
   validation/      rule 0 (format), a static safety check, rules 1-5 and the api check;
                    `python -m tutor.validation`
@@ -239,11 +275,10 @@ Phase numbers match `docs/design.md`.
   judge of teaching quality calibrated against the learner's ratings
 - **3c** ✅ Hint command: rules, mutant matching and a model's hint behind a leak check; a
   judge of hint quality calibrated on simulated students
-- **4** Retrieval compared by measurement: hybrid RAG (BM25 + vectors), agentic search and a
-  concept index against the whole lecture, by recall within a token budget and by the
-  exercises each one yields
-- **5** Evaluation: validity rate, mutant kill rate, cost per valid exercise, with vs without
-  retrieval
+- **4** ✅ Retrieval compared by measurement: hybrid RAG (BM25 + vectors), agentic search and a
+  concept index against the whole lecture, by recall within a token budget; perfect retrieval
+  did not beat the whole lecture on generation, so [the whole lecture stayed](#does-it-need-rag)
+- **5** Evaluation: validity rate, mutant kill rate, cost per valid exercise, across models
 - **6** Second course: another language or framework, to prove nothing is shaped around one
   course; brings the container for running generated code
 - **7** Local GUI: a web app on the CLI's functions, localhost only; solving stays in the IDE.
