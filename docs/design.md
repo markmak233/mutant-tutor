@@ -1369,8 +1369,30 @@ routes score 0.92 to 0.99 at 2000 tokens searching the lecture, the agent lowest
 
 One of the 106 concept picks was cut off at its output limit. It counts as a miss and stays stored
 as one, as asking again until a reply works would flatter the route. Every agent run finished; two
-provider errors stopped the run, which resumed from the stored answers. The cross-lecture split has
-not been run, and LightRAG stays out, as nothing here would use it.
+provider errors stopped the run, which resumed from the stored answers.
+
+Cross-lecture queries (2026-11-03): the 13 frozen queries, searching the course, run once, 0.29M
+GLM-5.3-Flash tokens. Their labelled pages average 14.7 pages and 2059 tokens, which fills a
+2000-token budget, so 4000 is the fairer score. The lectures holding them average 15.8k tokens.
+
+| Route | MRR | Recall within 2000 tokens | 4000 |
+|---|---|---|---|
+| BM25 | 0.82 | 0.35 | 0.47 |
+| vector | 0.94 | 0.37 | 0.54 |
+| hybrid | 0.94 | 0.37 | 0.51 |
+| hybrid + neighbours | 0.93 | 0.46 | 0.64 |
+| concept | 0.84 | 0.46 | 0.55 |
+| agent + thinking | 0.83 | 0.33 | 0.34 |
+
+Routes start well: a relevant page comes near the top, and only the agent, on one query, found none
+within 2000 tokens. But at best they find about two thirds of what a query needs, and no route found
+all of it for more than one query. The agent stops early, at about 1100 tokens. Query by query at
+2000 tokens, against hybrid + neighbours: hybrid 2 better and 10 worse, concept 4 and 6, the agent 2
+and 8. 13 queries show a direction. One concept request had no reply in 900 s and ran again.
+
+Hybrid and the agent fall well short here, which is the condition set above for trying LightRAG. It
+is still not built: generation does not look across lectures, so nothing here would use it. It is
+worth trying if hints or revision come to need that lookup.
 
 The concept route returns about 1100 tokens (7-8 pages) and stops there, so a larger budget
 adds nothing: so far it finds more than the others in little room, and less in a lot of room.
@@ -2221,7 +2243,8 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
       query-by-query comparison; frozen queries; and on dev, thinking, hybrid search for the agent
       and a neighbour-page control.
    5. **Done 2026-11-03, simplified (owner):** the final retrieval table from the test split, run
-      once and not pooled. The cross-lecture split is not run, and LightRAG stays out.
+      once and not pooled, then the cross-lecture split. Hybrid and the agent fall well short on
+      it, the condition for trying LightRAG, which is still not built as nothing here needs it.
    6. **Dropped 2026-11-02 (owner):** even the labelled slice did not beat the whole lecture on
       12 items, so no route was generated with.
    7. **Done 2026-11-03.** The whole lecture stays; README results.

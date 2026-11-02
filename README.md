@@ -148,8 +148,9 @@ queries held back from tuning, each route run once:
 | Agent (with thinking across the course) | 0.87 | 0.82 | 3.9k / 6.6k |
 
 The routes with a model find no more than those without. The labels are consecutive page ranges,
-which may favour adding neighbours, and they were not judged again. These results hold for this
-course only. The code stays in `src/tutor/retrieval/` for what was not tested, such as hints or a
+which may favour adding neighbours, and they were not judged again. Questions spanning several
+lectures are harder: on 13 of them the best route, hybrid + neighbours, found 0.64 of the labelled
+pages within 4000 tokens. Generation never asks those. These results hold for this course only. The code stays in `src/tutor/retrieval/` for what was not tested, such as hints or a
 course with no labels; details are in [`docs/design.md`](docs/design.md) ("RAG").
 
 ## Quick start
