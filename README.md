@@ -9,11 +9,13 @@ deterministic checks before anyone sees it**. No LLM judges whether an exercise 
 It started as revision for a big data management course, inspired by its course
 materials (none are included here), and is built as an AI engineering portfolio project:
 exercises are generated from the lecture slides by a LangGraph pipeline (plan → generate →
-validate → repair), and the next phase grounds them in course material with hybrid RAG.
+validate → repair), and the current phase measures which way of finding course material
+serves them best: hybrid RAG, an agent searching with tools, or a compiled concept index,
+against simply sending the whole lecture.
 
-**Status:** the validation harness (phases 1, 2a) is complete, and LLM generation (phase
-3a) works end to end: two course weeks were generated with it, every saved exercise VALID.
-Checks that need the learner's own work (3b), a hint command (3c) and RAG (4) are next.
+**Status:** the validation harness (phases 1, 2a), LLM generation (3a), the checks that need
+the learner's own work (3b) and the hint command (3c) are complete; three course weeks were
+generated, every saved exercise VALID. The retrieval comparison (4) is in progress.
 
 ## Why validation comes first
 
@@ -229,17 +231,19 @@ Phase numbers match `docs/design.md`.
   examples
 - **2** ✅ Golden exercises: a first batch of 10 course exercises, validated, its must
   exercises solved by hand and rated to run the full loop
-- **2b** Code-tracing exercises ("what does this print and why")
 - **3a** ✅ LLM generation: static check on generated code, slide reading with a cached
   text layer and vision transcription, LangGraph plan → owner approval → generate → oracle
   by a second model → validate → repair, exercises in parallel, three course weeks generated
   (a container for running generated code is moved to a later phase)
-- **3b** Checks that need a learner's real work: held-out solutions and mistakes, an LLM
+- **3b** ✅ Checks that need a learner's real work: held-out solutions and mistakes, an LLM
   judge of teaching quality calibrated against the learner's ratings
-- **3c** ✅ Hint command: rules, mutant matching and a model's hint behind a leak check;
-  a calibrated judge of hint quality later
-- **4** Hybrid RAG over course material (BM25 + vectors), evaluated with recall@k
-- **5** Evaluation: validity rate, mutant kill rate, cost per valid exercise, with vs without RAG
+- **3c** ✅ Hint command: rules, mutant matching and a model's hint behind a leak check; a
+  judge of hint quality calibrated on simulated students
+- **4** Retrieval compared by measurement: hybrid RAG (BM25 + vectors), agentic search and a
+  concept index against the whole lecture, by recall within a token budget and by the
+  exercises each one yields
+- **5** Evaluation: validity rate, mutant kill rate, cost per valid exercise, with vs without
+  retrieval
 - **6** Second course: another language or framework, to prove nothing is shaped around one
   course; brings the container for running generated code
 - **7** Local GUI: a web app on the CLI's functions, localhost only; solving stays in the IDE.
@@ -248,9 +252,8 @@ Phase numbers match `docs/design.md`.
 Maybe: adaptive review, spaced `review` batches for the weak knowledge points in the
 attempt log (batches are started by hand for now).
 
-Decided, next to 3b:
-- A calibrated judge of hint quality, after 3b, whose judge it reuses: does a hint give the
-  answer away, does it point the right way
+Decided, to weigh again after phases 4 and 5:
+- **2b** Code-tracing exercises ("what does this print and why") and design exercises
 - Algorithm-quality warnings, with 2b's design exercises (e.g. how much a combiner cut),
   reported, never failing an exercise
 - `v0.1.0`: pinned dependency versions, a changelog and a tag, once the GUI or the whole

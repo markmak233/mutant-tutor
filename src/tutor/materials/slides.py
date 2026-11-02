@@ -107,12 +107,17 @@ def lectures_taught(workspace: Path, source) -> list[str]:
     if not numbers:
         return []
     last = max(_order(n) for n in numbers)
-    taught = []
+    return [path.name.removesuffix(".pdf.md") for number, path in cached_lectures(workspace)
+            if _order(number) <= last]
+
+
+def cached_lectures(workspace: Path) -> list[tuple[str, Path]]:
+    """(lecture number, cache file) of every cached lecture, in course order."""
+    found = []
     for path in (workspace / "cache" / "lectures").glob("*.pdf.md"):
-        named = _CACHE_NAME.match(path.name)
-        if named and _order(named.group(1)) <= last:
-            taught.append((_order(named.group(1)), path.name.removesuffix(".pdf.md")))
-    return [name for _, name in sorted(taught)]
+        if named := _CACHE_NAME.match(path.name):
+            found.append((named.group(1), path))
+    return sorted(found, key=lambda item: _order(item[0]))
 
 
 def _order(number: str) -> tuple[int, ...]:

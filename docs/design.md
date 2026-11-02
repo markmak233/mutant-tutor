@@ -142,7 +142,7 @@ smartCodingReview/                       # public repo (the `tutor/` above), cod
 │   ├── materials/                       # P3a course files -> per-file md cache (pypdfium2), vision pages
 │   ├── llm.py                           # P3a thin OpenAI-compatible client, standard library only, no LangChain
 │   ├── graph/                           # P3 langgraph dependency added here
-│   ├── rag/                             # P4
+│   ├── retrieval/                       # P4 the page corpus, labels, scores and each route
 │   └── eval/                            # P5
 ├── examples/                            # P1 synthetic only, same shape as a real exercise
 │   ├── station-average-rdd/             # function-level: per-key average in PySpark RDD
@@ -1143,7 +1143,7 @@ Design approved 2026-10-28 (owner):
   format failures are counted apart from validation failures.
 - `validate` is pure Python and acts as the judge; repair receives the failure report.
 - `retrieve_context` before RAG (phase 3, decided 2026-10-28): the cache of the batch's
-  `sources`, whole (a lecture is roughly 15-25k tokens). When that does not fit the model's
+  `sources`, whole (a lecture is 4-11k tokens at 4 characters per token). When that does not fit the model's
   context, a slice instead: the slides that `coverage.md` lists for the batch plan's
   knowledge points. A slice is chosen by label, not by a query, so it is deterministic and the owner
   sees exactly which pages went in. For a local model, raising the context length it is
@@ -1158,18 +1158,88 @@ Design approved 2026-10-28 (owner):
 
 ## RAG
 
-- Reads the per-file md cache (see "Reading files"), not the PDFs; chunking by section / code
-  block, keeping source file, page and slide.
-- Retrieval filters by the batch's `sources` first, so a week-2 batch only draws on week-2
-  material; searching the whole course is the fallback, not the default.
-- Hybrid retrieval (BM25 + vectors): API names like `aggregateByKey` are exact-match problems
-  that pure vector search handles poorly.
-- Evaluate with 20-30 hand-labelled queries: recall@k for vector-only vs BM25-only vs hybrid.
-  The labels already exist by then (2026-10-28): each knowledge point in `coverage.md` with
-  its slides, and each exercise's `source.pdf_pages`, is a query with its relevant pages.
-- Chunks are the cache's page sections, the same unit phase 3's slices use, so the
-  chunker is not new work.
-- Vector store and embedding model not yet decided (Chroma or FAISS candidates).
+Decided 2026-11-02 (owner): phase 4 is a measured comparison, not a commitment to RAG. A
+course is small (about 570 pages, 70k tokens at 4 characters per token; a lecture 4-11k), and
+generation already sends the whole lecture, so a route has to beat that to be used. Saying
+"I measured whether retrieval earns its keep" shows more judgment than having a vector
+database. Code in `src/tutor/retrieval/`; every route is one `search(query, lectures)` that
+returns pages best first.
+
+Routes:
+- Hybrid RAG: BM25 + vectors, fused by reciprocal rank fusion. API names like
+  `aggregateByKey` are exact-match problems that pure vector search handles poorly.
+- Agentic search: a LangGraph loop in which a model searches and reads pages through tools,
+  at most 6 steps. Evidence for it is from coding agents and chat memory, not course slides.
+- Concept index, a small form of the "LLM wiki" pattern: one model call per lecture compiles
+  knowledge points -> pages; at query time a model sees only that index. For a second course
+  it is also an automatic first draft of `coverage.md`.
+
+Baselines, already in the pipeline: the whole lecture, and the labelled page slice (perfect
+retrieval, the upper bound). GraphRAG (through LightRAG) stays out unless the hybrid and
+agentic routes clearly fail the cross-lecture queries below: its strength is reasoning across
+several places (Han et al. 2025, arXiv 2502.11371), while a generation query is mostly "which
+pages teach this point". Routes read the page cache only, never `coverage.md`, which holds
+the answers they are measured against.
+
+Measurement:
+- Unit: the cache's page sections, the same unit phase 3's slices use, so there is no chunker.
+- Labels: each `coverage.md` row is a query (its knowledge point, in the words a batch plan
+  uses) with relevant pages (its slides). 71 rows qualify, against the 20-30 first planned. The
+  hash of each row alone splits them into dev (18, for tuning) and test (53, only for the final
+  comparison), so adding rows or lectures later never moves a query from one to the other.
+  `source.pdf_pages` of exercises adds nothing: they come from the same rows.
+- Cross-lecture queries: 13 written by hand in the workspace's `retrieval/cross-lecture.jsonl`,
+  labelled from `coverage.md`'s rows, frozen by the owner 2026-11-02 before any route ran on
+  them, and run last, like the test split.
+- Scope: the batch's lecture first, as generation does, and also the whole course, which is
+  harder and is what cross-lecture queries and hints need.
+- Scores: recall@k and MRR assume a ranked list. Agentic search and the concept index return
+  a set of no fixed size, and returning more pages always raises recall, so every route is
+  also scored by recall within a token budget (500 to 4000), results taken in order.
+- Incomplete labels: a page nobody listed may still be relevant. Before the final table the
+  test split's returned pages are pooled, as IR evaluations do, and the unlabelled ones judged;
+  both the strict and the pooled recall are reported.
+- Stability: routes that call a model run 3 times on the test split, to show the spread.
+- Generation: the same plan of about 12 items with each context, counting first-pass VALID,
+  VALID after repair and cost per item, plus the judge's `fits` and `taught`, since material
+  likely affects those more than validity. 12 paired items show only large differences, so
+  counts are reported, not significance.
+- Decision rule, fixed before the numbers: a route that does not beat the whole lecture on
+  generation results or cost is not wired in. The result goes in the README either way.
+
+Choices:
+- Vector store: plain Python, a JSON-lines file of vectors, no Chroma, FAISS or numpy.
+  Measured 2026-11-02 on an M2 Pro, 1024 dimensions, ranking every page: 571 pages 8 ms per
+  query, 6000 pages 86 ms. numpy was approved first, and would be far faster at scale (60,000
+  pages 4.9 ms, 2 million 168 ms and 8.2 GB, the limit being memory), but a course does not
+  need it, and installing it where Spark runs changes PySpark: `StatCounter` then returns
+  numpy values, in the validator's environment and not in the learner's. numpy or FAISS can
+  replace the scoring inside `VectorRetriever` if a query ever passes about 100 ms.
+- Embeddings: a model reached through the `embedding` role, by any provider with an
+  OpenAI-compatible `/embeddings` endpoint. For now OpenAI's `text-embedding-3-small` at 1024
+  dimensions: 83k tokens for a course, $0.002 (2026-11-02). Zhipu's `embedding-3`, planned first
+  through the existing key, refused: it is outside the free quota and the account has no
+  balance. Each text is embedded once and kept in `cache/retrieval/`, so repeated runs cost
+  nothing and new lectures, changed pages or new queries pay only for themselves. Each model
+  has its own file, as vectors from two models cannot be compared; another model means
+  embedding the course again, which costs next to nothing.
+- Reranker: not in the first round (see the [4] candidate).
+- A lecture file repeating another's slides under other footers would count as wrong when
+  found: the workspace's `[retrieval] exclude_lectures` leaves it out. It cannot be detected by
+  exact comparison, as the footers make every page differ.
+
+Dev scores so far (2026-11-02). 18 queries, so one query moves a recall by about 0.06, and
+these only guide the next steps; the test split decides. The labelled pages average 994 tokens
+per query, the whole lecture 6783.
+
+| Searching | Route | MRR | Recall within 1000 tokens | 2000 | 4000 |
+|---|---|---|---|---|---|
+| the lecture | BM25 | 0.78 | 0.66 | 0.81 | 0.89 |
+| the course | BM25 | 0.67 | 0.52 | 0.67 | 0.78 |
+
+BM25 is hand-written, as the formula is short. Splitting camelCase, stop words, plural stripping
+and other `k1` / `b` values each moved its scores by a query or two, which is noise, so the
+tokenizer stays plain lowercase words.
 
 ## Evaluation metrics (README results table)
 
@@ -1299,7 +1369,8 @@ deterministic judge, hybrid RAG with recall@k, the phase 5 metrics, the hint lea
     wrong directions, with no false flag on the 38. Trusted on this data; planted bad
     hints are easier than real ones, so real requests (and review-mode batches) should
     be labelled when they come.
-- [4] Reranker after hybrid retrieval, as one more arm of the recall@k comparison.
+- [4] Reranker after hybrid retrieval, as one more arm of the recall@k comparison. Not in the
+  first round (2026-11-02): only if hybrid's misses are pages it found but ranked too low.
 - [5] Personal workflow cost (Codex review 4): steps and minutes from adding lecture files
   to the first exercise, owner minutes spent fixing each exercise, validation wait, and
   whether a failed run can resume. The first batch is the hand-made baseline, taken from
@@ -1315,7 +1386,8 @@ deterministic judge, hybrid RAG with recall@k, the phase 5 metrics, the hint lea
 - [after 3, optional] MCP server exposing `validate` (and later `hint`) so any coding agent
   can check the exercises it writes.
 - Not proposed: fine-tuning or RL (too little data; model + validator suffices), multi-agent
-  debate, GraphRAG, a hosted vector database (a few hundred pages fit local FAISS / Chroma),
+  debate, GraphRAG unless the cross-lecture queries call for it (see "RAG"), a hosted vector
+  database (a few hundred pages fit in memory),
   an LLM judging validity (already in "Decisions not to do").
 
 ## Assistant mode
@@ -1796,7 +1868,10 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
      semantics checks -> local practice feedback; AI exercises, IDE practice, autograding
      and no-answer hints alone all have precedents) and a built / planned table, so
      generation, RAG and hints are never read as existing features (Codex review 4).
-2b. Code tracing and design exercises (raised from "deferred" on 2026-10-24; scope revised
+2b. **Moved to the backlog 2026-11-02 (owner):** the primary goal is the portfolio, and
+   phases 4 and 5 are what it still lacks. Tracing and design practice happen in chat for now,
+   running every snippet to confirm the answer, which worked well on week 7.
+   Code tracing and design exercises (raised from "deferred" on 2026-10-24; scope revised
    2026-10-25). The course is examined in writing, so beyond runnable
    code two more types (concept questions are out of scope: the owner generates those in chat
    for exam revision):
@@ -1984,7 +2059,14 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
    (name every exact match, rank guesses by similarity): 30/32 named, the other 2 named
    among the indistinguishable pair, none wrong. Real students' code will differ more from
    a mutant than a mutant does from itself, so this is an upper bound for layer 2.
-4. Hybrid RAG. First review the [4] items of "LLM engineering candidates".
+4. Retrieval, compared by measurement (see "RAG"; plan approved 2026-11-02), one step each:
+   1. **Done 2026-11-02.** Page corpus, labels from `coverage.md`, scores and BM25, no LLM.
+   2. Vectors, and their fusion with BM25 into hybrid retrieval.
+   3. Concept index: try one lecture and report the cost first.
+   4. Agentic search: explain the design first, as it touches `graph/`.
+   5. Pool the test split's results, write the final retrieval table, decide on LightRAG.
+   6. Generation with each context; a budget is approved before it runs.
+   7. Wire in a winner, or keep the whole lecture; README results.
 5. Evaluation script + README results. First review the [5] items of "LLM engineering
    candidates".
 
@@ -1994,7 +2076,10 @@ Order agreed 2026-10-30, around 3b: C1 first (small, and before the owner solves
 week 3 MapReduce batch, so an exercise relying on value order is fixed before it is
 solved), then 3b, then the hint-quality judge of [3c] (it reuses 3b's judge and needs
 real hint requests from solving week 7), then 2b together with C2 (both ask how good a
-design is, and share the Hadoop counters).
+design is, and share the Hadoop counters). Since 2026-11-02 2b and C2 wait until after phases
+4 and 5, to be weighed again then: as designed, C2's warnings read the reference, not the
+learner's code, so reaching the learner would go through `tutor.hint`; and the Hadoop counters
+cannot run on native Windows.
 
 - Batch API for whole-batch generation, once a cloud provider is used (see the [3] review in
   "LLM engineering candidates").
