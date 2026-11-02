@@ -9,6 +9,7 @@ import pytest
 from tutor.llm import Reply
 from tutor.materials import cache
 from tutor.retrieval.__main__ import main
+from tutor.retrieval.agent import MAX_READ, MAX_STEPS, SEARCH_RESULTS, AgentRetriever
 from tutor.retrieval.bm25 import BM25Index, BM25Retriever, tokenize
 from tutor.retrieval.concepts import (
     Concept,
@@ -350,6 +351,169 @@ def test_searching_a_lecture_without_an_index_is_an_error_not_a_miss(tmp_path):
         route.search("q")
 
 
+# --- agentic search ------------------------------------------------------------------------
+
+class ActionQueue:
+    """A model that replies with the given actions in turn, and records what it was shown."""
+
+    def __init__(self, *actions):
+        self.actions = list(actions)
+        self.prompts = []
+
+    def __call__(self, purpose, system, user, schema, max_tokens):
+        self.prompts.append(user)
+        action = self.actions.pop(0)
+        if isinstance(action, Exception):
+            raise action
+        return action if isinstance(action, str) else json.dumps(action)
+
+
+def search_for(words, lecture=None):
+    return {"action": "search", "words": words, "lecture": lecture}
+
+
+def read_pages(*pages):
+    return {"action": "read", "pages": list(pages)}
+
+
+def finish_with(*pages):
+    return {"action": "finish", "pages": list(pages)}
+
+
+AGENT_PAGES = [page("3", 1, "3.1", "3.1\nJoins on a key\nReduce side joins"),
+               page("3", 2, "3.2", "Sorting values"),
+               page("4", 1, None, "# Joins in Spark\nbroadcast")]
+
+
+def fresh_state(query="q", scope=("3", "4")):
+    return {"query": query, "scope": list(scope), "log": [], "steps": 0, "action": None,
+            "read": []}
+
+
+def drive(route, state):
+    """The loop LangGraph runs, by hand, so these tests also run where it is not installed."""
+    while True:
+        state = {**state, **route.decide(state)}
+        if route.next_node(state) == "end":
+            return state
+        state = {**state, **route.act(state)}
+
+
+def agent(tmp_path, *actions, pages=AGENT_PAGES, run=0):
+    model = ActionQueue(*actions)
+    return AgentRetriever(pages, model, tmp_path / "agent", run=run), model
+
+
+def test_a_search_shows_id_slide_and_first_real_line_never_the_text(tmp_path):
+    route, model = agent(tmp_path, search_for("joins"), finish_with())
+    drive(route, fresh_state())
+    shown = model.prompts[1]
+    assert "3:1 | 3.1 | Joins on a key" in shown  # the footer line is skipped
+    assert "4:1 | - | Joins in Spark" in shown  # no footer, and the heading marks are gone
+    assert "Reduce side joins" not in shown
+
+
+def test_a_search_is_limited_to_the_scope_and_to_its_lecture(tmp_path):
+    route, model = agent(tmp_path, search_for("joins"), search_for("joins", "4"),
+                         search_for("joins", "3"), finish_with())
+    drive(route, fresh_state(scope=["3"]))
+    assert "4:1" not in model.prompts[1]
+    assert "you may only search 3" in model.prompts[2]
+    assert "3:1" in model.prompts[3]
+
+
+def test_a_search_says_when_nothing_matches(tmp_path):
+    route, model = agent(tmp_path, search_for("nothing here"), finish_with())
+    drive(route, fresh_state())
+    assert "no page has these words" in model.prompts[1]
+
+
+def test_a_search_shows_a_limited_number_of_pages(tmp_path):
+    pages = [page(number=n, text="same words") for n in range(1, SEARCH_RESULTS + 5)]
+    route, model = agent(tmp_path, search_for("same"), finish_with(), pages=pages)
+    drive(route, fresh_state(scope=["3"]))
+    assert model.prompts[1].count("| - |") == SEARCH_RESULTS
+
+
+def test_read_returns_the_text_of_known_pages_within_the_limit(tmp_path):
+    pages = [page(number=n, text=f"text of {n}") for n in range(1, MAX_READ + 3)]
+    ids = [f"3:{n}" for n in range(1, MAX_READ + 3)]
+    route, model = agent(tmp_path, read_pages(*ids), finish_with(), pages=pages)
+    state = drive(route, fresh_state(scope=["3"]))
+    assert f"text of {MAX_READ}" in model.prompts[1]
+    assert f"text of {MAX_READ + 1}" not in model.prompts[1]
+    assert state["read"] == ids[:MAX_READ]
+
+
+def test_read_refuses_a_made_up_or_out_of_scope_page_and_says_so(tmp_path):
+    route, model = agent(tmp_path, read_pages("3:2", "4:1", "9:9"), finish_with())
+    state = drive(route, fresh_state(scope=["3"]))
+    assert "Sorting values" in model.prompts[1] and "broadcast" not in model.prompts[1]
+    assert "No such pages here: 4:1, 9:9" in model.prompts[1]
+    assert state["read"] == ["3:2"]
+
+
+def test_finish_keeps_the_models_order_and_only_real_pages_each_once(tmp_path):
+    route, _ = agent(tmp_path, finish_with("3:2", "9:9", "3:1", "3:2", "4:1"))
+    state = drive(route, fresh_state(scope=["3"]))
+    assert route.finish_pages(state) == (["3:2", "3:1"], True)
+
+
+def test_out_of_turns_returns_the_pages_read_and_warns_on_the_last_turn(tmp_path):
+    actions = [read_pages("3:1")] + [search_for(f"try {n}") for n in range(MAX_STEPS)]
+    route, model = agent(tmp_path, *actions)
+    state = drive(route, fresh_state())
+    assert state["steps"] == MAX_STEPS
+    assert route.finish_pages(state) == (["3:1"], False)
+    assert len(model.prompts) == MAX_STEPS
+    assert "finish now" in model.prompts[-1] and "finish now" not in model.prompts[-2]
+
+
+def test_an_unreadable_reply_costs_the_turn_and_the_model_is_told(tmp_path):
+    route, model = agent(tmp_path, "not json", {"action": "dance"},
+                         ValueError("agent-step: the reply was cut off"), finish_with("3:1"))
+    state = drive(route, fresh_state())
+    assert state["steps"] == 4
+    assert model.prompts[3].count("could not be read as an action") == 3
+    assert route.finish_pages(state) == (["3:1"], True)
+
+
+def test_the_prompt_starts_the_same_each_turn_so_a_cache_can_reuse_it(tmp_path):
+    route, model = agent(tmp_path, search_for("joins"), finish_with())
+    drive(route, fresh_state())
+    first, second = model.prompts
+    assert second.startswith(first[:first.index("Action 1 of")].rstrip())
+
+
+def test_the_route_runs_the_loop_through_langgraph_and_returns_pages(tmp_path):
+    pytest.importorskip("langgraph")
+    route, model = agent(tmp_path, search_for("joins"), read_pages("3:1"),
+                         finish_with("3:1", "4:1"))
+    assert [p.key for p in route.search("q")] == [("3", 1), ("4", 1)]
+    assert route.used[0]["finished"] and route.used[0]["steps"] == 3
+    assert len(model.prompts) == 3
+
+
+def test_a_run_is_paid_for_once_across_runs_of_the_program(tmp_path):
+    pytest.importorskip("langgraph")
+    route, _ = agent(tmp_path, finish_with("3:1"))
+    first = route.search("q", {"3"})
+    assert route.search("q", {"3"}) == first  # the queue is empty: a call would fail
+    again, model = agent(tmp_path)
+    assert again.search("q", {"3"}) == first
+    assert model.prompts == []
+
+
+def test_another_scope_or_a_repeated_measurement_asks_again(tmp_path):
+    pytest.importorskip("langgraph")
+    route, _ = agent(tmp_path, finish_with("3:1"), finish_with("4:1"))
+    assert route.search("q", {"3"})[0].key == ("3", 1)
+    assert route.search("q")[0].key == ("4", 1)
+    repeat, model = agent(tmp_path, finish_with("3:2"), run=1)
+    assert repeat.search("q", {"3"})[0].key == ("3", 2)
+    assert len(model.prompts) == 1
+
+
 # --- labels --------------------------------------------------------------------------------
 
 def test_rows_come_only_from_lecture_headings():
@@ -625,7 +789,7 @@ def with_concept(workspace, monkeypatch):
                  else {"ids": ["3/0"]})
         return Reply(json.dumps(reply), 100, 10, 0.1)
 
-    monkeypatch.setattr("tutor.retrieval.concepts.llm.chat", chat)
+    monkeypatch.setattr("tutor.retrieval.asker.llm.chat", chat)
     return purposes
 
 
@@ -668,6 +832,28 @@ def test_lecture_limits_the_queries_and_the_scope(workspace, capsys):
     table = capsys.readouterr().out.split("tokens per query")[0]
     assert "lecture  bm25" in table and "course" not in table
     assert main(["--lecture", "9"]) == 1
+
+
+def test_asking_for_the_agent_route_without_its_role_is_an_error(workspace, capsys):
+    assert main(["--route", "agent"]) == 1
+    assert "agent" in capsys.readouterr().err
+
+
+def test_the_agent_route_runs_and_says_what_it_used(workspace, monkeypatch, capsys):
+    pytest.importorskip("langgraph")
+    with (workspace / "workspace.toml").open("a", encoding="utf-8") as f:
+        f.write('[llm.profiles.small]\nprovider = "custom"\nbase_url = "http://x"\n'
+                'model = "org/small"\n[llm.roles]\nagent = "small"\n')
+
+    def chat(config, messages, *, purpose, **kwargs):
+        return Reply(json.dumps(finish_with("3:1")), 100, 10, 0.1)
+
+    monkeypatch.setattr("tutor.retrieval.asker.llm.chat", chat)
+    assert main([]) == 0  # the role alone puts it among the default routes
+    out = capsys.readouterr().out
+    assert "lecture  agent" in out and "course   agent" in out
+    assert "agent model calls this run" in out and "steps each" in out
+    assert (workspace / "cache" / "retrieval" / "agent" / "org_small" / "runs.jsonl").is_file()
 
 
 def test_cross_searches_the_whole_course_only(workspace, capsys):

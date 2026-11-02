@@ -1168,8 +1168,11 @@ returns pages best first.
 Routes:
 - Hybrid RAG: BM25 + vectors, fused by reciprocal rank fusion. API names like
   `aggregateByKey` are exact-match problems that pure vector search handles poorly.
-- Agentic search: a LangGraph loop in which a model searches and reads pages through tools,
-  at most 6 steps. Evidence for it is from coding agents and chat memory, not course slides.
+- Agentic search: a LangGraph loop in which a model searches (BM25: id, footer, first line of
+  the top 10), reads up to 5 pages at a time and finishes with its pages, at most 6 steps. It
+  chooses each action as JSON through the client's structured output, which every profile
+  supports, not through native tool calling, which would extend the client and differs by
+  provider. Evidence for this route is from coding agents and chat memory, not course slides.
 - Concept index, a small form of the "LLM wiki" pattern: one model call per lecture compiles
   knowledge points -> pages; at query time a model sees only that index. For a second course
   it is also an automatic first draft of `coverage.md`.
@@ -1238,10 +1241,12 @@ per query, the whole lecture 6783.
 | the lecture | vector | 0.89 | 0.70 | 0.87 | 0.97 |
 | the lecture | hybrid | 0.91 | 0.68 | 0.85 | 0.97 |
 | the lecture | concept | 0.92 | 0.79 | 0.89 | 0.90 |
+| the lecture | agent | 0.97 | 0.74 | 0.80 | 0.80 |
 | the course | BM25 | 0.67 | 0.52 | 0.67 | 0.78 |
 | the course | vector | 0.79 | 0.62 | 0.74 | 0.86 |
 | the course | hybrid | 0.81 | 0.59 | 0.74 | 0.82 |
 | the course | concept | 0.82 | 0.71 | 0.82 | 0.82 |
+| the course | agent | 0.75 | 0.59 | 0.62 | 0.62 |
 
 The concept route returns about 1100 tokens (7-8 pages) and stops there, so a larger budget
 adds nothing: so far it finds more than the others in little room, and less in a lot of room.
@@ -1250,6 +1255,12 @@ A lecture's index is about a fifth of the lecture, the course's about 16k tokens
 course-wide query sends, at 2-3 s per query against milliseconds for the others. It holds 220
 points covering 496 of 571 pages; on the lecture checked, the rest were title, section and
 reference pages, and 3 of the 125 pages the dev queries label are in no point.
+
+The agent route ranks a relevant page first most often and finds the fewest pages: it returns a
+small set too, and took 4.8 steps and about 4.4k tokens per query with GLM-5.3-Flash, at 13 s.
+Its first prompt scored 0.69 and 0.53 at 4000 tokens: 46 of the 51 pages it missed within a
+lecture were within two pages of one it returned, so the prompt now asks for the pages around a
+good one. Tuning stopped there, as 18 queries are easy to fit.
 
 BM25 is hand-written, as the formula is short. Splitting camelCase, stop words, plural stripping
 and other `k1` / `b` values each moved its scores by a query or two, which is noise, so the
@@ -2077,7 +2088,8 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
    1. **Done 2026-11-02.** Page corpus, labels from `coverage.md`, scores and BM25, no LLM.
    2. **Done 2026-11-02.** Vectors, and their fusion with BM25 into hybrid retrieval.
    3. **Done 2026-11-02.** Concept index (tried on one lecture first, as agreed).
-   4. Agentic search: explain the design first, as it touches `graph/`.
+   4. **Done 2026-11-02.** Agentic search. It uses the LangGraph library and leaves `graph/` as
+      it is.
    5. Pool the test split's results, write the final retrieval table, decide on LightRAG.
    6. Generation with each context; a budget is approved before it runs.
    7. Wire in a winner, or keep the whole lecture; README results.

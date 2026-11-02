@@ -12,9 +12,9 @@ course only.
 BM25 costs nothing. The vector and hybrid routes need the workspace's `embedding` role
 ([llm.roles] in workspace.toml) and are left out without one. The concept route needs the
 `concept` role and an index of every lecture it searches: --build-concepts writes those, only
-for lectures new or changed since. By default it runs once every lecture has one. What models
-produce is kept in cache/retrieval/, so only what has not been asked yet costs anything; the
-run says how much that was.
+for lectures new or changed since. By default it runs once every lecture has one. The agent
+route needs the `agent` role and langgraph. What models produce is kept in cache/retrieval/, so
+only what has not been asked yet costs anything; the run says how much that was.
 """
 
 from __future__ import annotations
@@ -26,11 +26,12 @@ from pathlib import Path
 
 from tutor import llm
 from tutor.config import WorkspaceError, load_env, load_workspace
+from tutor.retrieval.agent import AgentRetriever
+from tutor.retrieval.asker import ModelAsker
 from tutor.retrieval.bm25 import BM25Retriever
 from tutor.retrieval.concepts import (
     ConceptRetriever,
     ConceptStore,
-    ModelAsker,
     build_lecture,
     by_lecture,
 )
@@ -40,7 +41,7 @@ from tutor.retrieval.hybrid import HybridRetriever
 from tutor.retrieval.labels import load_cross_lecture, load_queries
 from tutor.retrieval.vectors import DIMENSIONS, EmbeddingStore, VectorRetriever
 
-ROUTES = ("bm25", "vector", "hybrid", "concept")
+ROUTES = ("bm25", "vector", "hybrid", "concept", "agent")
 
 
 def format_table(results: list[Result]) -> str:
@@ -88,6 +89,13 @@ def _concept_tools(workspace: Path) -> tuple[ConceptStore, ModelAsker]:
     return ConceptStore(folder), ModelAsker(config, _log_path(workspace))
 
 
+def _agent_route(pages: list[Page], workspace: Path) -> tuple[AgentRetriever, ModelAsker]:
+    config = llm.config_for("agent", workspace=workspace)
+    asker = ModelAsker(config, _log_path(workspace))
+    folder = workspace / "cache" / "retrieval" / "agent" / _model_file(config.model)
+    return AgentRetriever(pages, asker, folder), asker
+
+
 @dataclass
 class Routes:
     """The routes of a run, and what can say what they spent."""
@@ -95,6 +103,8 @@ class Routes:
     built: dict[str, Retriever] = field(default_factory=dict)
     embeddings: EmbeddingStore | None = None
     asker: ModelAsker | None = None
+    agent: AgentRetriever | None = None
+    agent_asker: ModelAsker | None = None
 
     def spending(self) -> list[str]:
         lines = []
@@ -104,6 +114,13 @@ class Routes:
         if self.asker is not None:
             lines.append(f"concept model calls this run: {self.asker.calls}, tokens in "
                          f"{self.asker.input_tokens}, out {self.asker.output_tokens}")
+        if self.agent is not None and self.agent.used:
+            used = self.agent.used
+            done = sum(row["finished"] for row in used)
+            steps = sum(row["steps"] for row in used) / len(used)
+            lines.append(f"agent model calls this run: {self.agent_asker.calls}, tokens in "
+                         f"{self.agent_asker.input_tokens}, out {self.agent_asker.output_tokens}; "
+                         f"{done} of {len(used)} searches finished, {steps:.1f} steps each")
         return lines
 
 
@@ -118,10 +135,14 @@ def build_routes(pages: list[Page], workspace: Path, names: list[str] | None) ->
         if concept_tools and all(concept_tools[0].load(lecture_pages) is not None
                                  for lecture_pages in by_lecture(pages).values()):
             names.append("concept")
+        if "agent" in roles:
+            names.append("agent")
     if {"vector", "hybrid"} & set(names) and not has_embedding:
         raise ValueError("the vector and hybrid routes need an `embedding` role in [llm.roles]")
     if "concept" in names and not has_concept:
         raise ValueError("the concept route needs a `concept` role in [llm.roles]")
+    if "agent" in names and "agent" not in roles:
+        raise ValueError("the agent route needs an `agent` role in [llm.roles]")
     routes = Routes()
     bm25 = BM25Retriever(pages)
     built: dict[str, Retriever] = {"bm25": bm25}
@@ -133,6 +154,9 @@ def build_routes(pages: list[Page], workspace: Path, names: list[str] | None) ->
     if "concept" in names:
         store, routes.asker = concept_tools
         built["concept"] = ConceptRetriever(pages, store, routes.asker)
+    if "agent" in names:
+        routes.agent, routes.agent_asker = _agent_route(pages, workspace)
+        built["agent"] = routes.agent
     routes.built = {name: built[name] for name in names}
     return routes
 
