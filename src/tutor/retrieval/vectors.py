@@ -13,13 +13,13 @@ PySpark methods return, which the learner's environment would not show.
 from __future__ import annotations
 
 import hashlib
-import json
 import math
 import operator
 from collections.abc import Callable, Collection, Iterator
 from pathlib import Path
 
 from tutor.retrieval.corpus import CHARS_PER_TOKEN, Page
+from tutor.retrieval.jsonl import JsonLines
 
 DIMENSIONS = 1024  # asked of the model; enough for a course, and smaller than most defaults
 # A request's limits: the strictest documented so far (Zhipu's 64 texts, 3072 tokens), so any
@@ -56,22 +56,10 @@ class EmbeddingStore:
     one size, and the caller names it accordingly."""
 
     def __init__(self, path: Path, embed: Embed) -> None:
-        self._path = path
+        self._file = JsonLines(path)
         self._embed = embed
         self.embedded = 0  # texts sent to the model by this store, to report what was spent
-        self._vectors: dict[str, list[float]] = {}
-        # A run cut off mid-write leaves a broken last line: skip it, and start the next
-        # write on a new line so that it does not join the broken one and break as well.
-        self._starts_clean = True
-        if path.is_file():
-            text = path.read_text(encoding="utf-8")
-            self._starts_clean = not text or text.endswith("\n")
-            for line in text.splitlines():
-                try:
-                    row = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                self._vectors[row["hash"]] = row["vector"]
+        self._vectors = {row["hash"]: row["vector"] for row in self._file.read()}
 
     def __call__(self, texts: list[str]) -> list[list[float]]:
         """A vector per text, asking the model only for those not stored yet."""
@@ -79,19 +67,12 @@ class EmbeddingStore:
         missing = list({key: text for key, text in zip(keys, texts, strict=True)
                         if key not in self._vectors}.values())
         for batch in _batches(missing):
-            self._append(batch, self._embed(batch))
+            rows = [{"hash": _key(text), "vector": vector}
+                    for text, vector in zip(batch, self._embed(batch), strict=True)]
+            self._file.append(rows)
+            self._vectors.update((row["hash"], row["vector"]) for row in rows)
+            self.embedded += len(batch)
         return [self._vectors[key] for key in keys]
-
-    def _append(self, batch: list[str], vectors: list[list[float]]) -> None:
-        self._path.parent.mkdir(parents=True, exist_ok=True)
-        with self._path.open("a", encoding="utf-8") as f:
-            if not self._starts_clean:
-                f.write("\n")
-                self._starts_clean = True
-            for text, vector in zip(batch, vectors, strict=True):
-                f.write(json.dumps({"hash": _key(text), "vector": vector}) + "\n")
-                self._vectors[_key(text)] = vector
-        self.embedded += len(batch)
 
 
 def _key(text: str) -> str:

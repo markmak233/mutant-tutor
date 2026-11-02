@@ -6,9 +6,16 @@ import json
 
 import pytest
 
+from tutor.llm import Reply
 from tutor.materials import cache
 from tutor.retrieval.__main__ import main
 from tutor.retrieval.bm25 import BM25Index, BM25Retriever, tokenize
+from tutor.retrieval.concepts import (
+    Concept,
+    ConceptRetriever,
+    ConceptStore,
+    build_lecture,
+)
 from tutor.retrieval.corpus import Page, load_pages, load_settings
 from tutor.retrieval.evaluate import (
     baselines,
@@ -235,6 +242,112 @@ def test_hybrid_passes_the_scope_to_every_route():
     routes = [FixedRoute([page(number=1)]), FixedRoute([page(number=2)])]
     assert len(HybridRetriever(routes).search("q", {"3"})) == 2
     assert [route.scopes for route in routes] == [[{"3"}], [{"3"}]]
+
+
+# --- concept index -------------------------------------------------------------------------
+
+class ScriptedModel:
+    """Answers each purpose with a fixed reply, and records what it was asked."""
+
+    def __init__(self, **replies):
+        self.replies = replies
+        self.asked = []
+
+    def __call__(self, purpose, system, user, schema, max_tokens):
+        self.asked.append((purpose, user))
+        return json.dumps(self.replies[purpose.replace("-", "_")])
+
+
+def concept(name, pages, aliases=(), summary="what it teaches"):
+    return {"name": name, "aliases": list(aliases), "summary": summary, "pages": pages}
+
+
+def index_reply(*concepts):
+    return {"concept_index": {"concepts": list(concepts)}}
+
+
+def test_building_sends_every_page_and_keeps_what_the_model_wrote():
+    pages = [page(number=1, text="first"), page(number=2, text="second")]
+    model = ScriptedModel(**index_reply(concept("Joins", [2, 1, 2], ["join"])))
+    concepts, dropped = build_lecture(pages, model)
+    assert "## p.1\nfirst" in model.asked[0][1] and "## p.2\nsecond" in model.asked[0][1]
+    assert concepts == [Concept(name="Joins", aliases=["join"], summary="what it teaches",
+                                pages=[1, 2])]  # sorted, each page once
+    assert dropped == []
+
+
+def test_page_numbers_outside_the_lecture_are_dropped_and_said():
+    pages = [page(number=1)]
+    model = ScriptedModel(**index_reply(concept("Some", [1, 9]), concept("None", [8])))
+    concepts, dropped = build_lecture(pages, model)
+    assert [(c.name, c.pages) for c in concepts] == [("Some", [1])]
+    assert dropped == ["Some: no page [9]", "None: no page [8]", "None: left with no pages"]
+
+
+def test_a_stored_index_is_reused_until_the_lecture_changes(tmp_path):
+    store = ConceptStore(tmp_path / "concepts")
+    pages = [page(number=1, text="first")]
+    assert store.load(pages) is None
+    store.save(pages, [Concept(name="Joins", summary="s", pages=[1])])
+    assert [c.name for c in store.load(pages)] == ["Joins"]
+    assert store.load([page(number=1, text="changed")]) is None
+
+
+def concept_route(tmp_path, picks, pages=None, run=0, indexed=("3", "4")):
+    """A route over two lectures: L3 has pages 1-3 and L4 page 1."""
+    pages = pages or [page("3", 1), page("3", 2), page("3", 3), page("4", 1)]
+    store = ConceptStore(tmp_path / "concepts")
+    indexes = {"3": [Concept(name="Joins", aliases=["join"], summary="s", pages=[2, 3]),
+                     Concept(name="Sorting", summary="t", pages=[1, 2])],
+               "4": [Concept(name="Spark", summary="u", pages=[1])]}
+    for lecture in indexed:
+        store.save([p for p in pages if p.lecture == lecture], indexes[lecture])
+    model = ScriptedModel(concept_pick={"ids": picks})
+    return ConceptRetriever(pages, store, model, run=run), model
+
+
+def test_a_query_gets_the_pages_of_the_picked_topics_in_order_each_once(tmp_path):
+    route, model = concept_route(tmp_path, ["3/1", "3/0"])
+    assert [p.key for p in route.search("q", {"3"})] == [("3", 1), ("3", 2), ("3", 3)]
+    assert "Joins (join)" in model.asked[0][1] and "Request: q" in model.asked[0][1]
+
+
+def test_the_model_sees_the_index_of_the_scope_only(tmp_path):
+    route, model = concept_route(tmp_path, ["3/0"])
+    route.search("q", {"3"})
+    assert "Spark" not in model.asked[0][1]
+    route.search("q")
+    assert "Spark" in model.asked[1][1]
+
+
+def test_an_id_the_model_made_up_finds_nothing(tmp_path):
+    route, _ = concept_route(tmp_path, ["9/9"])
+    assert route.search("q") == []
+
+
+def test_a_pick_is_paid_for_once_across_runs_of_the_program(tmp_path):
+    route, model = concept_route(tmp_path, ["3/0"])
+    first = route.search("q", {"3"})
+    route.search("q", {"3"})
+    assert len(model.asked) == 1
+    again, later = concept_route(tmp_path, ["4/0"])
+    assert again.search("q", {"3"}) == first  # the stored pick, not the new reply
+    assert later.asked == []
+
+
+def test_a_repeated_measurement_asks_the_model_again(tmp_path):
+    route, _ = concept_route(tmp_path, ["3/0"])
+    route.search("q", {"3"})
+    repeat, model = concept_route(tmp_path, ["3/1"], run=1)
+    assert [p.number for p in repeat.search("q", {"3"})] == [1, 2]
+    assert len(model.asked) == 1
+
+
+def test_searching_a_lecture_without_an_index_is_an_error_not_a_miss(tmp_path):
+    route, _ = concept_route(tmp_path, ["3/0"], indexed=("3",))
+    assert route.search("q", {"3"})
+    with pytest.raises(ValueError, match=r"no concept index for lectures \['4'\]"):
+        route.search("q")
 
 
 # --- labels --------------------------------------------------------------------------------
@@ -496,6 +609,65 @@ def test_a_single_route_can_be_asked_for(workspace, with_embedding, capsys):
 def test_bm25_alone_spends_nothing_even_with_a_role(workspace, with_embedding, capsys):
     assert main(["--route", "bm25"]) == 0
     assert with_embedding == []
+
+
+@pytest.fixture
+def with_concept(workspace, monkeypatch):
+    """The workspace with a concept role, and a fake model behind the real chat call."""
+    with (workspace / "workspace.toml").open("a", encoding="utf-8") as f:
+        f.write('[llm.profiles.small]\nprovider = "custom"\nbase_url = "http://x"\n'
+                'model = "org/small"\n[llm.roles]\nconcept = "small"\n')
+    purposes = []
+
+    def chat(config, messages, *, purpose, **kwargs):
+        purposes.append(purpose)
+        reply = ({"concepts": [concept("Joins", [1, 2])]} if purpose == "concept-index"
+                 else {"ids": ["3/0"]})
+        return Reply(json.dumps(reply), 100, 10, 0.1)
+
+    monkeypatch.setattr("tutor.retrieval.concepts.llm.chat", chat)
+    return purposes
+
+
+def test_build_concepts_writes_each_lecture_once_and_says_what_it_used(
+        workspace, with_concept, capsys):
+    assert main(["--build-concepts"]) == 0
+    out = capsys.readouterr().out
+    assert "L3: 1 concepts, 2 of 3 pages covered" in out
+    assert "model calls 1, tokens in 100, out 10" in out
+    assert (workspace / "cache" / "retrieval" / "concepts" / "org_small" / "L3.json").is_file()
+    assert main(["--build-concepts", "3"]) == 0
+    assert "L3: already indexed" in capsys.readouterr().out
+    assert with_concept == ["concept-index"]
+
+
+def test_build_concepts_refuses_a_lecture_it_does_not_have(workspace, with_concept, capsys):
+    assert main(["--build-concepts", "9"]) == 1
+    assert "no such lectures" in capsys.readouterr().err
+    assert with_concept == []
+
+
+def test_the_concept_route_joins_the_default_once_every_lecture_is_indexed(
+        workspace, with_concept, capsys):
+    assert main([]) == 0
+    assert "concept" not in capsys.readouterr().out
+    assert main(["--build-concepts"]) == 0
+    capsys.readouterr()
+    assert main([]) == 0
+    out = capsys.readouterr().out
+    assert "lecture  concept" in out and "concept model calls this run" in out
+
+
+def test_asking_for_the_concept_route_without_its_role_is_an_error(workspace, capsys):
+    assert main(["--route", "concept"]) == 1
+    assert "concept" in capsys.readouterr().err
+
+
+def test_lecture_limits_the_queries_and_the_scope(workspace, capsys):
+    assert main(["--lecture", "3"]) == 0
+    table = capsys.readouterr().out.split("tokens per query")[0]
+    assert "lecture  bm25" in table and "course" not in table
+    assert main(["--lecture", "9"]) == 1
 
 
 def test_cross_searches_the_whole_course_only(workspace, capsys):

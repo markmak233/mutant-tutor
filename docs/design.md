@@ -1237,9 +1237,19 @@ per query, the whole lecture 6783.
 | the lecture | BM25 | 0.78 | 0.66 | 0.81 | 0.89 |
 | the lecture | vector | 0.89 | 0.70 | 0.87 | 0.97 |
 | the lecture | hybrid | 0.91 | 0.68 | 0.85 | 0.97 |
+| the lecture | concept | 0.92 | 0.79 | 0.89 | 0.90 |
 | the course | BM25 | 0.67 | 0.52 | 0.67 | 0.78 |
 | the course | vector | 0.79 | 0.62 | 0.74 | 0.86 |
 | the course | hybrid | 0.81 | 0.59 | 0.74 | 0.82 |
+| the course | concept | 0.82 | 0.71 | 0.82 | 0.82 |
+
+The concept route returns about 1100 tokens (7-8 pages) and stops there, so a larger budget
+adds nothing: so far it finds more than the others in little room, and less in a lot of room.
+Its index cost GLM-5.3-Flash about 90k tokens in and 21k out for the course (`concept` role).
+A lecture's index is about a fifth of the lecture, the course's about 16k tokens, which every
+course-wide query sends, at 2-3 s per query against milliseconds for the others. It holds 220
+points covering 496 of 571 pages; on the lecture checked, the rest were title, section and
+reference pages, and 3 of the 125 pages the dev queries label are in no point.
 
 BM25 is hand-written, as the formula is short. Splitting camelCase, stop words, plural stripping
 and other `k1` / `b` values each moved its scores by a query or two, which is noise, so the
@@ -2066,7 +2076,7 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
 4. Retrieval, compared by measurement (see "RAG"; plan approved 2026-11-02), one step each:
    1. **Done 2026-11-02.** Page corpus, labels from `coverage.md`, scores and BM25, no LLM.
    2. **Done 2026-11-02.** Vectors, and their fusion with BM25 into hybrid retrieval.
-   3. Concept index: try one lecture and report the cost first.
+   3. **Done 2026-11-02.** Concept index (tried on one lecture first, as agreed).
    4. Agentic search: explain the design first, as it touches `graph/`.
    5. Pool the test split's results, write the final retrieval table, decide on LightRAG.
    6. Generation with each context; a budget is approved before it runs.
