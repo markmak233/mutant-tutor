@@ -1235,7 +1235,11 @@ per query, the whole lecture 6783.
 | Searching | Route | MRR | Recall within 1000 tokens | 2000 | 4000 |
 |---|---|---|---|---|---|
 | the lecture | BM25 | 0.78 | 0.66 | 0.81 | 0.89 |
+| the lecture | vector | 0.89 | 0.70 | 0.87 | 0.97 |
+| the lecture | hybrid | 0.91 | 0.68 | 0.85 | 0.97 |
 | the course | BM25 | 0.67 | 0.52 | 0.67 | 0.78 |
+| the course | vector | 0.79 | 0.62 | 0.74 | 0.86 |
+| the course | hybrid | 0.81 | 0.59 | 0.74 | 0.82 |
 
 BM25 is hand-written, as the formula is short. Splitting camelCase, stop words, plural stripping
 and other `k1` / `b` values each moved its scores by a query or two, which is noise, so the
@@ -2061,7 +2065,7 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
    a mutant than a mutant does from itself, so this is an upper bound for layer 2.
 4. Retrieval, compared by measurement (see "RAG"; plan approved 2026-11-02), one step each:
    1. **Done 2026-11-02.** Page corpus, labels from `coverage.md`, scores and BM25, no LLM.
-   2. Vectors, and their fusion with BM25 into hybrid retrieval.
+   2. **Done 2026-11-02.** Vectors, and their fusion with BM25 into hybrid retrieval.
    3. Concept index: try one lecture and report the cost first.
    4. Agentic search: explain the design first, as it touches `graph/`.
    5. Pool the test split's results, write the final retrieval table, decide on LightRAG.

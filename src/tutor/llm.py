@@ -1,4 +1,5 @@
-"""A thin client for OpenAI-compatible chat APIs (docs/design.md, [3] model access).
+"""A thin client for OpenAI-compatible chat and embedding APIs (docs/design.md, [3] model
+access).
 
 Standard library only. Models are named profiles in the workspace's workspace.toml, and
 roles (vision, generate, ...) say which profile a task uses:
@@ -255,6 +256,46 @@ def chat(config: LLMConfig, messages: list[dict], *, purpose: str,
     raise AssertionError("unreachable")
 
 
+def embed(config: LLMConfig, texts: list[str], *, purpose: str, log_path: Path | None = None,
+          dimensions: int | None = None) -> list[list[float]]:
+    """One vector per text, in their order, from the provider's /embeddings endpoint.
+    `dimensions` asks for vectors of that size, for models that offer several. The caller
+    keeps a batch within the provider's limits. Logged like a chat call, with no output
+    tokens, so the call log still adds up to the whole cost."""
+    if config.provider == "assistant":
+        raise LLMError(f"profile {config.name!r} has no API to embed with: use a provider "
+                       f"with an /embeddings endpoint")
+    body: dict = {"model": config.model, "input": texts}
+    if dimensions is not None:
+        body["dimensions"] = dimensions
+    request = urllib.request.Request(f"{config.base_url}/embeddings",
+                                     data=json.dumps(body).encode(), headers=_headers(config))
+    start = time.monotonic()
+    error = None
+    try:
+        with urllib.request.urlopen(request, timeout=config.timeout_s) as response:
+            data = json.loads(response.read().decode("utf-8", errors="replace"))
+        # The reply says which input each vector belongs to, so sort by that, not by order.
+        vectors = [row["embedding"] for row in sorted(data["data"], key=lambda r: r["index"])]
+        if len(vectors) != len(texts):
+            error = f"{len(vectors)} vectors for {len(texts)} texts from {config.base_url}"
+    except urllib.error.HTTPError as e:
+        # Redacted before it is cut, so a key on the cut cannot be left half there.
+        reply_text = _redact(e.read()[:4000].decode(errors="replace"), config)
+        error = f"HTTP {e.code} from {config.base_url}: {reply_text[:300]}"
+    except (TimeoutError, urllib.error.URLError, OSError) as e:
+        error = _redact(f"cannot reach {config.base_url} ({e}); is the server running?", config)
+    except (KeyError, TypeError, json.JSONDecodeError) as e:
+        error = _redact(f"unexpected reply from {config.base_url}: {e!r}", config)
+    seconds = time.monotonic() - start
+    if error is not None:
+        _log(log_path, purpose, config, None, seconds, error)
+        raise LLMError(error)
+    tokens = (data.get("usage") or {}).get("prompt_tokens")
+    _log(log_path, purpose, config, Reply("", tokens, None, seconds), seconds, None)
+    return vectors
+
+
 class _StreamCut(Exception):
     """A stream ended with neither [DONE] nor a finish reason: the reply may be incomplete."""
 
@@ -263,13 +304,17 @@ class _Rejected(Exception):
     """HTTP 400: the request (often a thinking switch) was refused; another variant may work."""
 
 
-def _post(config: LLMConfig, body: dict, purpose: str, log_path: Path | None,
-          on_progress: Callable[[int], None] | None = None) -> Reply:
+def _headers(config: LLMConfig) -> dict[str, str]:
     headers = {"Content-Type": "application/json"}
     if config.api_key:
         headers["Authorization"] = f"Bearer {config.api_key}"
+    return headers
+
+
+def _post(config: LLMConfig, body: dict, purpose: str, log_path: Path | None,
+          on_progress: Callable[[int], None] | None = None) -> Reply:
     request = urllib.request.Request(f"{config.base_url}/chat/completions",
-                                     data=json.dumps(body).encode(), headers=headers)
+                                     data=json.dumps(body).encode(), headers=_headers(config))
     start = time.monotonic()
     try:
         with urllib.request.urlopen(request, timeout=config.timeout_s) as response:

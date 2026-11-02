@@ -1,5 +1,7 @@
-"""Phase 4's retrieval measurement, on a small made-up corpus: BM25, labels, scores, CLI."""
+"""Phase 4's retrieval measurement, on a small made-up corpus and with a fake embedding
+model: BM25, vectors, fusion, labels, scores, CLI."""
 
+import hashlib
 import json
 
 import pytest
@@ -15,7 +17,15 @@ from tutor.retrieval.evaluate import (
     reciprocal_rank,
     within_budget,
 )
+from tutor.retrieval.hybrid import HybridRetriever, fuse
 from tutor.retrieval.labels import Query, load_cross_lecture, parse_coverage, queries_from
+from tutor.retrieval.vectors import (
+    MAX_BATCH_TEXTS,
+    MAX_BATCH_TOKENS,
+    EmbeddingStore,
+    VectorRetriever,
+    _batches,
+)
 
 COVERAGE = """\
 # Coverage
@@ -106,6 +116,125 @@ def test_the_scope_filters_results_and_pages_sharing_no_term_are_left_out():
 def test_ties_keep_page_order_so_a_run_repeats():
     pages = [page(number=n, text="same words") for n in (1, 2, 3)]
     assert [p.number for p in BM25Retriever(pages).search("same")] == [1, 2, 3]
+
+
+# --- vectors and fusion --------------------------------------------------------------------
+
+def fake_embed(texts):
+    """A stand-in model: each word switches on one of 64 dimensions, so texts sharing words
+    point in similar directions, and the same text always gets the same vector."""
+    vectors = []
+    for text in texts:
+        vector = [0.0] * 64
+        for word in text.lower().split():
+            vector[int(hashlib.sha256(word.encode()).hexdigest(), 16) % 64] += 1.0
+        vectors.append(vector)
+    return vectors
+
+
+class CountingModel:
+    """Records every batch it is asked for."""
+
+    def __init__(self):
+        self.batches = []
+
+    def __call__(self, texts):
+        self.batches.append(list(texts))
+        return fake_embed(texts)
+
+
+def test_vector_search_ranks_by_direction_and_respects_the_scope():
+    pages = [page("1", 1, text="joins on keys"), page("2", 1, text="joins on keys and more"),
+             page("2", 2, text="sorting values")]
+    route = VectorRetriever(pages, fake_embed)
+    assert route.search("sorting values")[0].key == ("2", 2)
+    assert [p.lecture for p in route.search("joins", {"2"})] == ["2", "2"]
+    assert len(route.search("anything")) == 3  # unlike BM25, it ranks every page
+
+
+def test_vector_length_does_not_count_only_direction():
+    pages = [page(number=1, text="joins"), page(number=2, text="joins joins joins"),
+             page(number=3, text="other")]
+    first, second, _ = VectorRetriever(pages, fake_embed).search("joins")
+    assert (first.number, second.number) == (1, 2)  # equal cosine: the earlier page first
+
+
+def test_batches_keep_within_both_limits_and_lose_nothing():
+    many = [f"text {i}" for i in range(MAX_BATCH_TEXTS + 5)]
+    assert [len(b) for b in _batches(many)] == [MAX_BATCH_TEXTS, 5]
+    big = "x" * 4 * (MAX_BATCH_TOKENS - 10)
+    assert [len(b) for b in _batches([big, "y" * 80, "z"])] == [1, 2]
+
+
+def test_a_text_over_the_limit_still_goes_alone():
+    assert [len(b) for b in _batches(["x" * 4 * (MAX_BATCH_TOKENS + 1), "y"])] == [1, 1]
+
+
+def test_the_store_pays_for_a_text_only_once_across_runs(tmp_path):
+    path = tmp_path / "cache" / "vectors.jsonl"
+    model = CountingModel()
+    store = EmbeddingStore(path, model)
+    assert store(["a", "b", "a"]) == fake_embed(["a", "b", "a"])
+    assert store(["b"]) == fake_embed(["b"])
+    assert model.batches == [["a", "b"]]
+    assert store.embedded == 2
+    later = CountingModel()
+    assert EmbeddingStore(path, later)(["a", "c"]) == fake_embed(["a", "c"])
+    assert later.batches == [["c"]]
+
+
+def test_a_failed_batch_keeps_the_earlier_ones(tmp_path):
+    path = tmp_path / "vectors.jsonl"
+    calls = []
+
+    def fails_on_second(texts):
+        calls.append(texts)
+        if len(calls) == 2:
+            raise RuntimeError("lost the connection")
+        return fake_embed(texts)
+
+    texts = [f"text {i}" for i in range(MAX_BATCH_TEXTS + 1)]
+    with pytest.raises(RuntimeError):
+        EmbeddingStore(path, fails_on_second)(texts)
+    resumed = CountingModel()
+    EmbeddingStore(path, resumed)(texts)
+    assert resumed.batches == [[texts[-1]]]
+
+
+def test_a_line_cut_off_mid_write_costs_only_that_text(tmp_path):
+    path = tmp_path / "vectors.jsonl"
+    EmbeddingStore(path, fake_embed)(["kept"])
+    with path.open("a", encoding="utf-8") as f:
+        f.write('{"hash": "abc", "vect')  # no newline: the process died here
+    model = CountingModel()
+    store = EmbeddingStore(path, model)
+    assert store(["kept", "new"]) == fake_embed(["kept", "new"])
+    assert model.batches == [["new"]]
+    # The new line did not join the broken one, so it survives the next load too.
+    final = CountingModel()
+    EmbeddingStore(path, final)(["kept", "new"])
+    assert final.batches == []
+
+
+def test_fusion_prefers_a_page_high_in_both_rankings():
+    a, b, c = page(number=1), page(number=2), page(number=3)
+    assert fuse([[a, b, c], [b, c, a]])[0] == b  # second and first beats first and third
+
+
+def test_fusion_keeps_pages_only_one_route_found_and_each_page_once():
+    a, b, c = page(number=1), page(number=2), page(number=3)
+    assert fuse([[a, b], [c, a]]) == [a, c, b]
+
+
+def test_fusion_ties_keep_the_order_pages_were_first_seen():
+    a, b = page(number=1), page(number=2)
+    assert fuse([[a], [b]]) == [a, b]
+
+
+def test_hybrid_passes_the_scope_to_every_route():
+    routes = [FixedRoute([page(number=1)]), FixedRoute([page(number=2)])]
+    assert len(HybridRetriever(routes).search("q", {"3"})) == 2
+    assert [route.scopes for route in routes] == [[{"3"}], [{"3"}]]
 
 
 # --- labels --------------------------------------------------------------------------------
@@ -315,6 +444,58 @@ def test_the_command_reports_a_missing_coverage_file(workspace, capsys):
     (workspace / "coverage.md").unlink()
     assert main([]) == 1
     assert "coverage.md" in capsys.readouterr().err
+
+
+def test_without_an_embedding_role_only_bm25_runs(workspace, capsys):
+    assert main([]) == 0
+    out = capsys.readouterr().out
+    assert "vector" not in out and "hybrid" not in out and "embedding model" not in out
+
+
+def test_asking_for_a_route_that_cannot_run_is_an_error(workspace, capsys):
+    assert main(["--route", "hybrid"]) == 1
+    assert "embedding" in capsys.readouterr().err
+
+
+@pytest.fixture
+def with_embedding(workspace, monkeypatch):
+    """The workspace with an embedding role, and a fake model behind the real client call."""
+    with (workspace / "workspace.toml").open("a", encoding="utf-8") as f:
+        f.write('[llm.profiles.embed]\nprovider = "custom"\nbase_url = "http://x"\n'
+                'model = "org/model"\n[llm.roles]\nembedding = "embed"\n')
+    calls = []
+
+    def embed(config, texts, *, purpose, log_path=None, dimensions=None):
+        calls.append((purpose, dimensions, len(texts)))
+        return fake_embed(texts)
+
+    monkeypatch.setattr("tutor.retrieval.__main__.llm.embed", embed)
+    return calls
+
+
+def test_the_command_runs_every_route_and_pays_only_once(workspace, with_embedding, capsys):
+    assert main([]) == 0
+    out = capsys.readouterr().out
+    for route in ("bm25", "vector", "hybrid"):
+        assert f"lecture  {route}" in out and f"course   {route}" in out
+    assert "embedding model this run: 0" not in out
+    assert all(purpose == "embedding" and size == 1024 for purpose, size, _ in with_embedding)
+    assert (workspace / "cache" / "retrieval" / "org_model-1024.jsonl").is_file()
+    with_embedding.clear()
+    assert main([]) == 0
+    assert "embedding model this run: 0" in capsys.readouterr().out
+    assert with_embedding == []
+
+
+def test_a_single_route_can_be_asked_for(workspace, with_embedding, capsys):
+    assert main(["--route", "vector"]) == 0
+    out = capsys.readouterr().out
+    assert "course   vector" in out and "bm25" not in out
+
+
+def test_bm25_alone_spends_nothing_even_with_a_role(workspace, with_embedding, capsys):
+    assert main(["--route", "bm25"]) == 0
+    assert with_embedding == []
 
 
 def test_cross_searches_the_whole_course_only(workspace, capsys):
