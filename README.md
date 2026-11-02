@@ -121,22 +121,26 @@ the oracle wrote 19 of 19 usable oracles in 9 s each. Samples are small; the ful
 
 Not for generating exercises from this course, so retrieval is not wired in. The course is small
 (571 pages, about 71k tokens; a lecture 4-11k), and a batch's plan already names each exercise's
-pages. The deciding test gave generation perfect retrieval: 12 real plan items, generated from the
-whole lecture and again from only the pages labelled for the item.
+pages. The deciding test generated 12 real plan items from each context: the whole lecture, only
+the pages labelled for the item (perfect retrieval), and what each of three routes found within
+2000 tokens.
 
-| | Whole lecture | Labelled pages |
-|---|---|---|
-| Saved after repair | 12 of 12 | 12 of 12 |
-| VALID at the first try | 8 | 7 |
-| Judge finds fully fine | 7 | 5 |
-| Flagged as not fitting the material | 2 | 5 |
-| Tokens, all rounds | 743k | 678k |
+| | Whole lecture | Labelled pages | Hybrid + neighbours | Concept index | Agent |
+|---|---|---|---|---|---|
+| Saved after repair | 12 | 12 | 12 | 12 | 12 |
+| VALID at the first try | 8 | 7 | 4 | 8 | 4 |
+| Judge finds fully fine | 7 | 5 | 3 | 3 | 5 |
+| Serious flags | 5 | 10 | 12 | 10 | 11 |
+| Tokens, % of the whole lecture | 100 | 92 | 124 | 86 | 111 |
 
-The pages save 9% of the tokens, about $0.02 here, and the judge prefers the whole lecture. 12 items
-and an imperfect judge, which itself reads the whole lecture, show a direction and not a proof.
+No route met the rule fixed before the run, and no exercise was fully fine from a route and not
+from the whole lecture. Less context did not reliably save money either: more first drafts were cut
+off, and repairs cost more than the smaller prompts saved. 15 of the judge's flags, checked by hand
+with the arms hidden, were all real. 12 items, each run once, and a judge that reads the whole
+lecture in every arm show a direction and not a proof.
 
-The routes themselves work. Recall within 2000 tokens, under a third of a lecture, on 53 test
-queries held back from tuning, each route run once:
+The routes themselves find the right pages. Recall within 2000 tokens, under a third of a lecture,
+on 53 test queries held back from tuning, each route run once:
 
 | Route | Searching the lecture | Searching the course | Model tokens per query |
 |---|---|---|---|
@@ -277,8 +281,8 @@ Phase numbers match `docs/design.md`.
 - **3c** ✅ Hint command: rules, mutant matching and a model's hint behind a leak check; a
   judge of hint quality calibrated on simulated students
 - **4** ✅ Retrieval compared by measurement: hybrid RAG (BM25 + vectors), agentic search and a
-  concept index against the whole lecture, by recall within a token budget; perfect retrieval
-  did not beat the whole lecture on generation, so [the whole lecture stayed](#does-it-need-rag)
+  concept index against the whole lecture, by recall within a token budget and by the exercises
+  each one yields; none beat it, so [the whole lecture stayed](#does-it-need-rag)
 - **5** Evaluation: validity rate, mutant kill rate, cost per valid exercise, across models
 - **6** Second course: another language or framework, to prove nothing is shaped around one
   course; brings the container for running generated code

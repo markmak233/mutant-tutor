@@ -1167,9 +1167,9 @@ returns pages best first.
 
 Outcome (owner, 2026-11-02): generation keeps the whole lecture and no route is wired in. Perfect
 retrieval did not beat the whole lecture on generation ("Does retrieval help generation at all?"
-below), so the rest of the plan was cut down to one final retrieval table ("Final table" below).
-The code stays for what was not tested: hints, questions of unknown source, or a course with no
-`coverage.md`.
+below), so the rest of the plan was cut down to one final retrieval table ("Final table" below). A
+smaller test with the three real routes (owner, 2026-11-03) agrees: none beats it. The code stays
+for what was not tested: hints, questions of unknown source, or a course with no `coverage.md`.
 
 Routes:
 - Hybrid RAG: BM25 + vectors, fused by reciprocal rank fusion. API names like
@@ -1191,8 +1191,7 @@ several places (Han et al. 2025, arXiv 2502.11371), while a generation query is 
 pages teach this point". Routes read the page cache only, never `coverage.md`, which holds
 the answers they are measured against.
 
-Measurement, as planned. The outcome above dropped the pooling, the repeats and generating with
-each route:
+Measurement, as planned. The outcome above dropped the pooling and the repeats:
 - Unit: the cache's page sections, the same unit phase 3's slices use, so there is no chunker.
 - Labels: each `coverage.md` row is a query (its knowledge point, in the words a batch plan
   uses) with relevant pages (its slides). 71 rows qualify, against the 20-30 first planned. The
@@ -1318,9 +1317,9 @@ sampled by hash from three real batches, two arms, $0.81 in all:
 | `clear` flagged | 4 | 6 |
 | `fits the material` flagged | 2 | 5 |
 | Serious flags | 5 | 10 |
-| Tokens, all rounds | 743k | 678k |
+| Tokens, all rounds | 764k | 703k |
 
-The slice saves 9% of the tokens, about $0.02 on this run, and does no better on validity. The
+The slice saves 8% of the tokens, about $0.02 on this run, and does no better on validity. The
 judge finds it worse on `fits`: 4 items better with the whole lecture, 1 with the slice. 12 items
 and an imperfect judge, which itself reads the whole lecture, show a direction and not a proof.
 Its flags were read only on the four slice items it rated below the whole lecture: three are real
@@ -1328,6 +1327,66 @@ misstatements in the exercise's own explanation, the fourth was not checked, and
 arm's flags were not read. A model that sees less around a page may overstate more easily, which
 is a reading and not a measurement. Most of the slice's first-try failures were replies cut off at
 the output limit (4 against 1), not wrong content (1 against 3).
+
+Then with the real routes (owner, 2026-11-03, about $1.72 before any cache discount): the same 12
+items and pipeline, the context being what a route returns within 2000 tokens for the item's
+knowledge point, searching its lecture, in page order. The plan line, its slide range included, is
+the same in every arm. A private script replaced the context step, so `graph/` did not change. The
+rule was written down first: a route wins only if it is VALID at the first try on at least as many
+items, and the judge finds at least 3 more items fully fine, or at most 1 fewer with at most 70% of
+the tokens, the route's own model tokens included.
+
+Why these arms. The whole lecture is what generation sends today, so it is what a route must beat.
+The labelled slice is what a perfect route would return. Hybrid + neighbours is the best route of
+the final table below and needs no model. Concept and the agent are the two other kinds of route
+this phase set out to compare, at their frozen settings. 2000 tokens is the budget the routes were
+to be chosen by. 12 items and not all 23 of the three batches: the owner chose the smaller run on
+cost, which also reuses the first two arms. Pooling and repeats stayed out, as seeing what a route's
+pages generate answers the question more directly than judging those pages again.
+
+| | Whole lecture | Labelled slice | Hybrid + neighbours | Concept | Agent |
+|---|---|---|---|---|---|
+| Context tokens per item, mean | 8183 | 772 | 1926 | 1142 | 815 |
+| Labelled pages covered | all | all | 0.94 | 0.89 | 0.81 |
+| Saved after repair | 12 | 12 | 12 | 12 | 12 |
+| VALID at the first try | 8 | 7 | 4 | 8 | 4 |
+| First try cut off / wrong | 1 / 3 | 4 / 1 | 5 / 3 | 0 / 4 | 5 / 3 |
+| Items repaired / repair rounds | 4 / 4 | 5 / 5 | 8 / 11 | 4 / 5 | 8 / 9 |
+| Exercises the judge finds fully fine | 7 | 5 | 3 | 3 | 5 |
+| `clear` flagged | 4 | 6 | 7 | 7 | 7 |
+| `fits the material` flagged | 2 | 5 | 5 | 3 | 4 |
+| `taught` flagged | 0 | 0 | 0 | 0 | 0 |
+| `targets` flagged | 1 | 0 | 1 | 1 | 1 |
+| Serious flags | 5 | 10 | 12 | 10 | 11 |
+| Tokens, all rounds | 764k | 703k | 946k | 637k | 808k |
+| The route's own model tokens | - | - | - | 22k | 43k |
+| Tokens, % of the whole lecture | 100 | 92 | 124 | 86 | 111 |
+
+Tokens count generation, repair and the oracle. Costs at list prices before any cache discount
+(DeepSeek-V4-Flash $0.14 in, $0.28 out; V4-Pro $1.74, $3.48; GPT-6.1-Terra $1, $5; from third-party
+price pages): the first two arms $0.81 (generate 0.24, repair 0.07, oracle 0.09, judge 0.41), the
+three routes $1.72 (generate 0.34, repair 0.60, of which 0.47 on V4-Pro, oracle 0.16, judge 0.62).
+The exercises, verdicts, a per-item table and each query's retrieval results stay in the private
+workspace's `experiments/`, as they are course content.
+
+Why retrieval has little to save here. An exercise takes about 64k tokens with the whole lecture,
+and the lecture is about 8k of them; over half of the generation tokens are the model's output, the
+dearer side. Even a perfect route can save about 7k tokens per exercise, about $0.001, and one extra
+repair costs more than that.
+
+No route wins. No exercise was fully fine from a route and not from the whole lecture, while the
+reverse held for 4 items with hybrid + neighbours, 4 with concept and 2 with the agent. Two routes
+cost more than the whole lecture: more first drafts were cut off at the output limit (5 each against
+1), and the repairs, five of them on the stronger model, cost more than the smaller context saves.
+Concept comes nearest on cost, with as many VALID at the first try and 14% fewer tokens, but 4 fewer
+fully fine. Why less material leads to worse explanations or more cut-offs was not measured.
+
+Flags were checked with the arms hidden: 3 from each arm, 15 in shuffled order, each against the
+exercise and the course, verdicts stored before the arms were revealed. All 15 are real defects, 2
+of them overrated as serious (one from the whole lecture, one from hybrid + neighbours). That tests
+what the judge says, not what it misses. 12 items show a direction only. 4 were fully fine in no
+arm and 2 in every arm, so for those the item decides rather than the context. Each arm ran once,
+and the judge reads the whole lecture in every arm.
 
 Final table (2026-11-03), the test split with the frozen settings: 53 queries, 1.45M GLM-5.3-Flash
 tokens. Simplified by the outcome above: every route ran once and the labels were not pooled, so
@@ -1412,6 +1471,27 @@ ranking with hybrid directly: 5 better and 5 worse searching the lecture, 2 and 
 BM25 is hand-written, as the formula is short. Splitting camelCase, stop words, plural stripping
 and other `k1` / `b` values each moved its scores by a query or two, which is noise, so the
 tokenizer stays plain lowercase words.
+
+Where retrieval could still earn its place (owner, 2026-11-03; not scheduled). Generation is the
+easy case for doing without it: the plan names the pages and a lecture fits. These lack one or both:
+- A chat or question window, the clearest case: a question may come from any lecture, the context
+  goes again every turn, and an answer can cite its pages. Not on the roadmap, and phase 7's GUI
+  only wraps the existing functions, so it would be added on its own.
+- Material too large for a prompt: a textbook, several courses, or the public Spark documentation
+  corpus planned for a demo.
+- A local model with a small context: Gemma was loaded with 8192 tokens, which a course overflows.
+- A new course with no `coverage.md`: the plan cannot name pages until something finds them, and
+  the concept index is also a first draft of that file.
+- Revision across lectures, which is the routes' weak spot (0.64 at best above) and the case for
+  trying LightRAG.
+
+A chat window should be measured first too, not assumed. This course is about 71k tokens, so
+sending all of it costs about $0.01 of input per turn on DeepSeek-V4-Flash before any cache
+discount, against $0.0003 for 2000 tokens: about 35 times more, but little money for light use.
+Compare the whole course with caching against hybrid + neighbours on about 20 questions, by whether
+answers are right and cite the right pages. Start from hybrid + neighbours, which needs no model and
+found 0.90 across the course. The generation test's warning may carry over, as less context brought
+more misstatements; that is untested for answers.
 
 ## Evaluation metrics (README results table)
 
@@ -2245,8 +2325,8 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
    5. **Done 2026-11-03, simplified (owner):** the final retrieval table from the test split, run
       once and not pooled, then the cross-lecture split. Hybrid and the agent fall well short on
       it, the condition for trying LightRAG, which is still not built as nothing here needs it.
-   6. **Dropped 2026-11-02 (owner):** even the labelled slice did not beat the whole lecture on
-      12 items, so no route was generated with.
+   6. **Done 2026-11-03, smaller (owner):** the whole lecture, the labelled slice and the three
+      real routes on the same 12 items. None beats the whole lecture.
    7. **Done 2026-11-03.** The whole lecture stays; README results.
 5. Evaluation script + README results. First review the [5] items of "LLM engineering
    candidates".
@@ -2347,6 +2427,15 @@ gaps. Each was decided by the owner; change one only with the owner.
   code editor, a different product from a tutor that leaves solving to the IDE. Practice
   batches stay free of exam pressure (a write-everything-before-the-first-test-run rule
   was turned down, 2026-10-24).
+- No RAG in exercise generation (owner, 2026-11-03): generation sends the whole lecture. Same 12
+  items, a rule fixed first: the whole lecture had 8 VALID at the first try, 7 exercises the judge
+  finds fully fine and 5 serious flags; perfect retrieval 7, 5 and 10; hybrid + neighbours 4, 3 and
+  12; concept 8, 3 and 10; the agent 4, 5 and 11. Tokens were 86% to 124% of the whole lecture's: a
+  lecture is about 8k of an exercise's 64k, so there is little to save, and one extra repair costs
+  more than it does. A plan already names each exercise's pages, so there is little to find too.
+  This holds for this course and its size, on a small sample; a lecture too large for the prompt or
+  a course with no `coverage.md` reopens it. All the numbers and reasons, and where retrieval could
+  still earn its place, are in "RAG".
 
 ## Deferred
 
