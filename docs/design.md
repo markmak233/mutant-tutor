@@ -1511,9 +1511,18 @@ the call log shows the result. Meaning comes first: a short prompt gains nothing
 contorted, and reordering a calibrated prompt means calibrating it again.
 
 Measured so far: DeepSeek hits 53-75% on generate and repair. `gpt-6.1-terra` as the judge hits 7%,
-its largest OpenAI cost, because each exercise comes before the slides and the slides carry marks
-for that exercise. To change at the start of phase 5, with a new calibration, before the judge's
-numbers are reported.
+its largest OpenAI cost. Its prompt puts each exercise before the slides, and the slides carry marks
+for that exercise, but moving the slides first was not enough. In a small test (2026-11-03, week 8's
+11 exercises and 2 first drafts with known errors), exercises sharing about 9000 tokens at the start
+hit 0%, sent one at a time or in parallel, while the same whole prompt sent again minutes later hit
+99.98%. A 90-second wait before the second call, a `prompt_cache_key` and the slides in a message of
+their own all hit 0% as well. Why is not known, and the search stopped there, as the rule set for it
+said. So the judge's layout stays, and a hit rate is measured before a saving is claimed.
+
+The same test shows what a layout change would risk. The judge run again on its own prompt changed
+the letters of 3 of the 13 and whether an exercise is fully fine on 1. The new layout changed 3 of
+13 against the first run, no more than that noise, and still flagged both known errors. 13 items
+show a direction only, but phase 5 has to report the judge's numbers with this noise in mind.
 
 ## LLM engineering candidates (review at the start of each phase)
 
