@@ -1500,6 +1500,21 @@ more misstatements; that is untested for answers.
 - Tokens / cost per valid exercise.
 - Across models. With vs without retrieval was settled in phase 4 (see "RAG").
 
+## Prompt layout for caching
+
+Decided 2026-11-03 (owner): every prompt is designed for a high cache hit rate where conditions
+allow. Providers reuse only an identical start of a prompt (OpenAI: from 1024 tokens), so stable
+content goes first: the system prompt, rules and shared course material. What varies per item goes
+last. The shared part stays the same byte for byte, with no per-item marks, dates or ids. With
+parallel calls and a large shared part, one call goes first to fill the cache. `cached_tokens` in
+the call log shows the result. Meaning comes first: a short prompt gains nothing and is not
+contorted, and reordering a calibrated prompt means calibrating it again.
+
+Measured so far: DeepSeek hits 53-75% on generate and repair. `gpt-6.1-terra` as the judge hits 7%,
+its largest OpenAI cost, because each exercise comes before the slides and the slides carry marks
+for that exercise. To change at the start of phase 5, with a new calibration, before the judge's
+numbers are reported.
+
 ## LLM engineering candidates (review at the start of each phase)
 
 Proposed 2026-10-26 from a survey of current LLM application engineering, mapped onto this
