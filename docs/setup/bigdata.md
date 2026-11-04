@@ -191,6 +191,35 @@ python -m tutor.envcheck     # one line per [requires] entry, with a hint for ea
 Exercises are generated into `batches/` inside the workspace. Until phase 3 (LLM generation),
 they are drafted with Claude Code from the lectures and checked with `python -m tutor.validation`.
 
+### A venv and VS Code terminal for this workspace
+
+Give each workspace its own venv, as a package one course needs can change another's results (numpy
+changes PySpark's `StatCounter`). With this repository's venv active:
+
+```bash
+python -m tutor.workspace init ~/smartcodereview-workspace/bigdata --extras bigdata,gen,dev
+```
+
+It creates what is missing and keeps every existing file, so the `workspace.toml` above stays: the
+`lectures/` folder, a minimal `workspace.toml`, `.venv` with this package and the extras named, and the
+`.vscode` files below. Run it again to finish an install that failed or to add extras. It changes nothing
+outside the folder, and installs no system software.
+
+Tests run outside this venv still pass, but nothing records them: the attempts plugin is installed only
+here, and it gives no warning when it is missing. VS Code's own activation did not reach our terminals on
+macOS, and the `conda` base environment stayed first on `PATH`. So `.vscode/settings.json` points `ZDOTDIR`
+at `.vscode/zsh`, whose `.zshrc` loads your `~/.zshrc` and then activates the venv. `~/.zshrc` is not
+changed. The settings also set `WORKSPACE_DIR` and `LECTURE_DIR`, which win over `.env`: it can name only
+one workspace, and the plugin skips tests in any other, again without a warning.
+
+Open the workspace folder itself in VS Code, open a new terminal and check:
+
+```bash
+which pytest     # must be this workspace's .venv/bin/pytest
+```
+
+This covers VS Code terminals on macOS only. Anywhere else, run `source .venv/bin/activate` first.
+
 ### Reading the lectures into text (optional)
 
 ```bash

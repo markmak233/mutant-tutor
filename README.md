@@ -240,6 +240,7 @@ a static check to prove code safe; a test-run container is planned for later pha
 src/tutor/
   config.py        find the workspace, refuse unsafe locations, load .env
   envcheck.py      check the machine against the workspace's [requires]
+  workspace.py     create a course workspace: folder, its own venv, terminal activation
   execution.py     run pytest in a temp dir, subprocess + timeout, kill the whole process group
   llm.py           a small client for OpenAI-compatible APIs (LM Studio, GLM, OpenAI,
                    DeepSeek): roles -> profiles, structured output, streaming, call log

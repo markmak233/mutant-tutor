@@ -42,7 +42,9 @@ container for isolation is fine; deploying the tool as a service is not.
   the repo only holds the generic checker `tutor/envcheck.py`, so it stays course-agnostic.
 - Check, don't install. `python -m tutor.envcheck` checks the current workspace, and it also runs
   once before validating a batch (not per exercise: importing pyspark alone takes a second or two).
-  `tests/test_env.py` runs the same checker.
+  `tests/test_env.py` runs the same checker. One exception (owner, 2026-11-05): `python -m tutor.workspace
+  init` creates a course's own `.venv` and installs Python packages into it, and changes nothing outside
+  the course's folder. System software is still only checked.
 - Installation: Python deps as per-course extras, `pip install -e ".[bigdata]"`; system deps (Java,
   Hadoop) in a per-course guide `docs/setup/<course>.md`, linked from README (decided 2026-10-25:
   README stays course-agnostic, and each course's system deps and pitfalls differ; the guide
@@ -109,9 +111,11 @@ container for isolation is fine; deploying the tool as a service is not.
     is global config. This covers VS Code terminals on macOS only.
   - Not added, tested in a scratch folder only: `required_plugins = tutor` in a workspace `pytest.ini`
     stops a run outside the venv with exit 4. It is the fallback if the gap returns.
-  - Known gap: `.env` names one workspace, and the plugin skips tests outside it without a word. A
-    second workspace's terminal has the right venv but records nothing until `WORKSPACE_DIR` is set
-    for it. Workspace creation has no command and `docs/setup/` does not list these steps yet.
+  - `.env` names one workspace, and the plugin skips tests outside it without a word, so these
+    terminals also set `WORKSPACE_DIR` and `LECTURE_DIR` to their folder.
+  - `python -m tutor.workspace init` writes all of this and keeps any file that exists (owner, 2026-11-05).
+    Checked end to end in a scratch folder, with a real venv and install, about 11 s; `docs/setup/bigdata.md`
+    has the step.
 - `config.py` refuses a `WORKSPACE_DIR` that has no `workspace.toml` (wrong directory) or that sits
   inside any git repository (same check for `LECTURE_DIR`). This is stricter than relying on `.gitignore`.
 - `.env` is read from the current directory by a ~10-line stdlib loader (no `python-dotenv`);
@@ -150,6 +154,7 @@ smartCodingReview/                       # public repo (the `tutor/` above), cod
 │   ├── __init__.py
 │   ├── config.py                        # P1 reads WORKSPACE_DIR, derives subpaths
 │   ├── envcheck.py                      # P1 checks the workspace's [requires]
+│   ├── workspace.py                     # creates a course workspace: folder, .venv, terminal files
 │   ├── execution.py                     # P1 copy to temp dir -> subprocess pytest -> delete
 │   ├── validation/                      # P1 the checks; P2 rule 0, P3a the safety check (internals designed before coding)
 │   ├── testkit.py                       # P2a run a file-level program, read part-*, compare output
@@ -2572,8 +2577,8 @@ so it comes late; the adaptive review screens can be built with it.
     commands (arbitrary commands; hallucinated package names can be squatted). A component
     or platform missing from the recipes is reported as needing a new recipe.
   - One click after uploading a new course's slides creates its workspace venv and terminal files
-    (owner's wish, 2026-11-04; see "Public repo vs private data"). The click above assumes one project
-    venv, so settle how the two fit when the GUI phase starts.
+    (owner's wish, 2026-11-04), by calling `python -m tutor.workspace init`. The click above assumes one
+    project venv, so settle how the two fit when the GUI phase starts.
   - This partly changes "Check, don't install" (see "Environment"): confirm with the owner
     when the GUI phase starts. The per-course test-run container (layer B, "Code execution
     safety") arrives with the generalization phase, before the GUI; whether setup also uses
