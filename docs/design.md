@@ -95,6 +95,23 @@ container for isolation is fine; deploying the tool as a service is not.
   under a sibling `smartcodereview-workspace/` directory (lectures, generated batches, attempts), located only via
   env var `WORKSPACE_DIR`. `LECTURE_DIR` is an optional override, default `$WORKSPACE_DIR/lectures`.
   Switching course = pointing `WORKSPACE_DIR` at another workspace.
+- Each workspace has its own `.venv`, as a package one course needs can change another's results
+  (numpy changes PySpark's `StatCounter`). Its VS Code terminals activate it through files kept in the
+  folder (owner, 2026-11-04, for every workspace from now on): `.vscode/settings.json` sets `ZDOTDIR`
+  through `terminal.integrated.env.osx` to `.vscode/zsh`, whose `.zshrc` loads `~/.zshrc` and then the
+  venv, and whose `.zprofile` forwards `~/.zprofile`.
+  - Why: seven solved exercises left no line in `attempts.jsonl`. The terminal was on conda's base
+    environment, where pytest runs normally but the attempts plugin is not installed, so nothing
+    warned. VS Code had the right interpreter selected, yet its own activation did not take in old or
+    new terminals; the cause was not found. Trusting `(.venv)` in the prompt had already failed once.
+  - Kept in the folder at the owner's request, so `~/.zshrc` is untouched. A `chpwd` hook in `~/.zshrc`
+    worked in a scratch shell and should also cover other terminal apps; it was not chosen because it
+    is global config. This covers VS Code terminals on macOS only.
+  - Not added, tested in a scratch folder only: `required_plugins = tutor` in a workspace `pytest.ini`
+    stops a run outside the venv with exit 4. It is the fallback if the gap returns.
+  - Known gap: `.env` names one workspace, and the plugin skips tests outside it without a word. A
+    second workspace's terminal has the right venv but records nothing until `WORKSPACE_DIR` is set
+    for it. Workspace creation has no command and `docs/setup/` does not list these steps yet.
 - `config.py` refuses a `WORKSPACE_DIR` that has no `workspace.toml` (wrong directory) or that sits
   inside any git repository (same check for `LECTURE_DIR`). This is stricter than relying on `.gitignore`.
 - `.env` is read from the current directory by a ~10-line stdlib loader (no `python-dotenv`);
@@ -164,6 +181,8 @@ smartCodingReview/                       # public repo (the `tutor/` above), cod
 smartcodereview-workspace/
 └── bigdata/                             # WORKSPACE_DIR points here; one workspace per course
     ├── workspace.toml                   # course name + [requires]; marks this as a workspace
+    ├── .venv/                           # this course's Python, shared by all its exercises
+    ├── .vscode/                         # settings.json, zsh/: terminals here activate .venv
     ├── AGENTS.md                        # orientation for an AI coding assistant opened here
     ├── CLAUDE.md                        # one line, `@AGENTS.md`, so Claude Code reads the same file
     ├── coverage.md                      # knowledge points per lecture -> exercise / design / not yet
@@ -2044,7 +2063,9 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
   `manifest.json`; a student.py that does not import counts as "error", not "failed"; any
   recording problem is a warning and never changes the test result. The entry point name
   equals the module name, so an explicit `-p tutor.attempts` is not registered twice. Adding
-  the entry point needed one `pip install -e .`.
+  the entry point needed one `pip install -e .`. A pytest from another environment has no plugin, so
+  it leaves no line and no warning: an empty log does not mean no work was done (see "Public repo vs
+  private data" for how a workspace's terminals avoid this).
 
 ## Roadmap (in priority order)
 
@@ -2550,6 +2571,9 @@ so it comes late; the adaptive review screens can be built with it.
     clicks "Check again". The GUI never runs system installs, and never runs LLM-written
     commands (arbitrary commands; hallucinated package names can be squatted). A component
     or platform missing from the recipes is reported as needing a new recipe.
+  - One click after uploading a new course's slides creates its workspace venv and terminal files
+    (owner's wish, 2026-11-04; see "Public repo vs private data"). The click above assumes one project
+    venv, so settle how the two fit when the GUI phase starts.
   - This partly changes "Check, don't install" (see "Environment"): confirm with the owner
     when the GUI phase starts. The per-course test-run container (layer B, "Code execution
     safety") arrives with the generalization phase, before the GUI; whether setup also uses
