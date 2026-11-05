@@ -167,6 +167,7 @@ smartCodingReview/                       # public repo (the `tutor/` above), cod
 │   ├── retrieval/                       # P4 the page corpus, labels, scores and each route
 │   └── eval/                            # P5 a report from the pipeline's own records, no model calls
 ├── examples/                            # P1 synthetic only, same shape as a real exercise
+│   ├── station-longest-rise/            # plain Python, no framework: running state per key
 │   ├── station-average-rdd/             # function-level: per-key average in PySpark RDD
 │   │   ├── exercise/
 │   │   └── solution/
@@ -945,6 +946,13 @@ Design approved 2026-10-28 (owner):
     fields now carry descriptions, which reach the model in the draft's JSON Schema, and
     the api messages say the names are defined, not called. There is still no "must call"
     constraint: what an exercise must use is checked by its tests and `forbidden_calls`.
+- A plain-Python example (2026-11-05): plain-Python items saw the Spark function-level example until
+  then, so `examples/station-longest-rise` was written for them, about 1000 tokens shorter. Spark items
+  keep theirs, so their prompts do not change. Rerunning 4 items of one long lecture with the same
+  settings took VALID first drafts from 2 to 4 of 4 and tokens from 590k to 394k. That shows it did no
+  harm, not that it helped: the two that passed both times cost about the same (201k and 203k), one
+  earlier failure was a `getattr` the course conventions have since ruled out, and the other a reply
+  that did not fit the schema, which may simply not recur.
 - Week 7 with five arms (2026-10-29/30): the same plan of 11 plain-Python items from
   lectures 7.1-7.2 (stream algorithms) for every arm, arm D on 4 of them. Repairs from the
   second on are V4-Pro with thinking in every API arm; "s/item" is one item at a time.

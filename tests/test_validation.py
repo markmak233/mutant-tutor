@@ -663,6 +663,16 @@ def test_hadoop_exercise_is_skipped_where_unsupported(monkeypatch):
     assert not report.valid
 
 
+def test_the_plain_python_example_is_valid():
+    """No JVM, so unlike the examples below this runs in the fast suite."""
+    name = "station-longest-rise"
+    exercise = load_exercise(EXAMPLES / name / "exercise", EXAMPLES / name / "solution")
+
+    report = validate(exercise)
+
+    assert report.valid, format_report(report)
+
+
 @pytest.mark.spark
 @pytest.mark.parametrize(
     "name",

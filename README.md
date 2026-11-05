@@ -69,11 +69,11 @@ Two interfaces, mixed in every batch:
 - **File-level**: write a program in the shape course assignments use (`run(inputPath, outputPath)`),
   read messy input files, write `part-*` output in an exact format. Ships a `sample_input/`.
 
-Four synthetic examples live in [`examples/`](examples/): `station-average-rdd` (function-level),
-`station-max-file` (file-level Spark RDD), `station-monthly-df` (DataFrame, one ordered output
-file, a command-line parameter) and `station-condition-share` (MRJob on a local Hadoop:
-order inversion, where a mutant that forgets the partitioner passes with one reducer and is
-caught with two).
+Five synthetic examples live in [`examples/`](examples/): `station-longest-rise` (plain Python,
+no framework), `station-average-rdd` (function-level), `station-max-file` (file-level Spark RDD),
+`station-monthly-df` (DataFrame, one ordered output file, a command-line parameter) and
+`station-condition-share` (MRJob on a local Hadoop: order inversion, where a mutant that forgets
+the partitioner passes with one reducer and is caught with two).
 
 ## How exercises are generated
 

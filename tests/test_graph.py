@@ -675,9 +675,22 @@ def test_the_example_leaves_out_hidden_and_binary_files(tmp_path, monkeypatch):
     (root / ".DS_Store").write_bytes(b"\x00\x00\x00\x01Bud1\x80")  # what macOS leaves
     (root / "exercise" / "data.bin").write_bytes(b"\x80\x81")
     monkeypatch.setattr(prompts, "EXAMPLES", tmp_path)
-    text = prompts.example("python", "function")
+    text = prompts.example("pyspark-rdd", "function")
     assert "=== exercise/student.py ===" in text
     assert ".DS_Store" not in text and "data.bin" not in text
+
+
+@pytest.mark.parametrize("interface", ["function", "file"])
+def test_a_plain_python_item_sees_a_plain_python_example(interface):
+    text = prompts.example("python", interface)
+    assert "station-longest-rise" in text
+    assert "spark" not in text.lower() and "mrjob" not in text.lower()
+
+
+def test_a_spark_item_keeps_its_example():
+    """Its prompts are calibrated, so adding another example must not change them."""
+    assert "Example exercise (station-average-rdd)" in prompts.example("pyspark-rdd", "function")
+    assert "Example exercise (station-max-file)" in prompts.example("pyspark-rdd", "file")
 
 
 def test_the_item_graph_keeps_no_checkpoints_of_its_own(workspace):
