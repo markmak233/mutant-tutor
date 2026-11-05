@@ -157,6 +157,55 @@ lectures are harder: on 13 of them the best route, hybrid + neighbours, found 0.
 pages within 4000 tokens. Generation never asks those. These results hold for this course only. The code stays in `src/tutor/retrieval/` for what was not tested, such as hints or a
 course with no labels; details are in [`docs/design.md`](docs/design.md) ("RAG").
 
+## Results
+
+From the pipeline's own logs on two courses, with no extra model calls. `python -m tutor.eval report`
+writes a private report for each workspace, and every recorded test run rebuilds it. This section is
+updated by hand from those reports, last on 2026-11-05.
+
+| Measure | Result |
+|---|---|
+| VALID with no repair round | 28 of 50 generation runs (56%) |
+| Saved as VALID, after up to 3 repair rounds | 48 of 50 (96%) |
+| Tokens per saved exercise: generate, repair and oracle, failed runs included | 83k |
+| Mutants killed in first drafts | 102 of 103, over 22 drafts |
+| Exercises flagged by a held-out check | 8 of 38 |
+
+A 51st run stopped on an error before the validator had its say, so it is not counted.
+
+| What stopped the first draft | Runs |
+|---|---|
+| Nothing | 28 |
+| A reply that did not parse or could not be written out as files | 13 |
+| Rule 1: the reference failed its own tests | 6 |
+| Rule 3: a mutant survived | 1 |
+| Rule 4: the reference disagreed with the oracle | 1 |
+| The static safety check | 1 |
+
+| Generating model | Runs | VALID with no repair | Saved | Tokens per saved |
+|---|---|---|---|---|
+| DeepSeek-V4-Flash (thinking on for 35) | 42 | 25 of 42 | 42 of 42 | 86k |
+| GLM-5.3-Flash | 3 | 0 of 3 | 1 of 3 | 216k |
+| GPT-6.1-Terra | 5, plus the error | 3 of 5 | 5 of 5 | 31k |
+
+What these numbers cannot show:
+
+- **They are no controlled experiment.** Batches differ in lecture, model and settings, and the last
+  two models ran on one week only, so the model table is a lead and no more. Lecture length alone moves
+  the cost: 65k tokens per exercise on one course, 143k on the other with its long lecture (a reading of
+  the logs, not a test). The full model comparison was not run, as 12 items separate only large
+  differences and [the week 7 arms](docs/design.md) had already chosen a generator.
+- **The mutant count proves little.** Rule 3 passes on every saved exercise by construction, and the
+  same model writes the tests and the mutants.
+- **A held-out flag is a finding to read, not a proven defect.** The checks ran on one course only:
+  4 of 24 generated exercises and 4 of 14 written by hand.
+- **The judge is noisy.** On the course it is calibrated on, it raised a serious point on 14 of 35
+  generated exercises and 5 of 14 written by hand, but a plain rerun changed its letters on 3 of 13. It
+  raised none on the other course's 11, where it is not calibrated, so that zero means little.
+- **The ratings come from one learner,** on the 24 exercises they solved. "Clear" got 14 of 19 generated
+  and 5 of 5 written by hand; fits the material, within what was taught and targets the concept got all
+  24.
+
 ## Quick start
 
 > **Setting up from scratch?** Follow [`docs/setup/bigdata.md`](docs/setup/bigdata.md):
@@ -254,6 +303,8 @@ src/tutor/
                    reference; `python -m tutor.hint`
   retrieval/       the routes compared in phase 4 and their scores; generation does not use
                    them; `python -m tutor.retrieval`
+  eval/            a private report from the pipeline's own records, no model calls, rebuilt
+                   after each recorded test run; `python -m tutor.eval`
   schema.py        the batch format (metadata.json, manifest.json); `python -m tutor.schema`
   validation/      rule 0 (format), a static safety check, rules 1-5 and the api check;
                    `python -m tutor.validation`
@@ -284,7 +335,8 @@ Phase numbers match `docs/design.md`.
 - **4** ✅ Retrieval compared by measurement: hybrid RAG (BM25 + vectors), agentic search and a
   concept index against the whole lecture, by recall within a token budget and by the exercises
   each one yields; none beat it, so [the whole lecture stayed](#does-it-need-rag)
-- **5** Evaluation: validity rate, mutant kill rate, cost per valid exercise, across models
+- **5** ✅ Evaluation from the pipeline's own logs, [results above](#results): validity, what stops
+  a first draft, held-out flags, tokens per saved exercise; the full model comparison was not run
 - **6** Second course: another language or framework, to prove nothing is shaped around one
   course; brings the container for running generated code
 - **7** Local GUI: a web app on the CLI's functions, localhost only; solving stays in the IDE.

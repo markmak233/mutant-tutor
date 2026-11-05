@@ -921,7 +921,7 @@ Design approved 2026-10-28 (owner):
   `resume --profile` finishes it with another model; the manifest names every model that
   generated its exercises.
 - Week 4 again with four models (2026-10-28/29, same plan items; small samples): GPT 6/6
-  VALID (about $0.07 each), DeepSeek 5/6 (about 0.06 RMB each, the fastest), GLM-5.3-Flash
+  VALID (about $0.07 each), DeepSeek 5/6 (about $0.01 each, the fastest), GLM-5.3-Flash
   saved 4 and discarded 2, GLM-5.3 discarded 3 of 3. DeepSeek became the `generate` role.
   The four discards that were not the model's fault changed two things:
   - GLM-5.3 lost all three to one mutant each whose `old` it invented (a "placeholder"
@@ -1534,10 +1534,20 @@ attempt log. Multiple choice and short answer are outside this: the validator ca
 
 ## Evaluation metrics (README results table)
 
+Decided 2026-11-05 (owner), for phase 5's light version. The numbers are in the README, "Results".
+
 - First-pass validity rate; validity after repair loop.
-- Mutant kill rate.
-- Tokens / cost per valid exercise.
-- Across models. With vs without retrieval was settled in phase 4 (see "RAG").
+- What stopped the first draft, by rule. This replaces the mutant kill rate, which is 100% on saved
+  exercises by rule 3. The kill rate on first drafts, tried in its place, came to 102 of 103 over 22
+  drafts, and the same model writes the tests and the mutants, so it says little too: it stays as one
+  line with that limit.
+- Held-out flag rate: how often a VALID exercise gets a finding to read (see "Independent checks").
+- Tokens per saved exercise, and no money: prices change, a price table would need upkeep, and some
+  models here run on a free tier, so an account's spend would not show what a run costs.
+- By model, labelled as no comparison. The full comparison was not run (owner, 2026-11-04): 12 items
+  separate only large differences, and week 7 had already chosen a generator. With vs without retrieval
+  was settled in phase 4 (see "RAG").
+- The judge and the owner's ratings, with the judge's noise stated beside them.
 
 `python -m tutor.eval report` reads a workspace's records, calls no model and writes its private
 `reports/report.md`: progress, generation, first drafts, checks on saved exercises and model calls, then
@@ -1700,10 +1710,13 @@ deterministic judge, hybrid RAG with recall@k, the phase 5 metrics, the hint lea
   to the first exercise, owner minutes spent fixing each exercise, validation wait, and
   whether a failed run can resume. The first batch is the hand-made baseline, taken from
   this document's batch notes (fixes: page references, stripes, an equivalent mutant,
-  too-regular data) and `attempts.jsonl`, with no new logging for the owner.
+  too-regular data) and `attempts.jsonl`, with no new logging for the owner. Reviewed 2026-11-05
+  (owner): only what the records hold, runs up to the first pass; minutes were never recorded,
+  so they are dropped.
 - [5] Local model as one more arm of the model comparison: validity, repair rounds and
   cost of a local model (run on the owner's Mac) against API models, judged by the same
-  deterministic validator.
+  deterministic validator. Moved to the backlog 2026-11-05 (owner), as the full comparison was
+  not run.
 - [5] Long-context baseline: "without RAG" means the whole week's material in the prompt
   (with caching), not no material, so the comparison shows whether retrieval earns its keep.
   A third arm (2026-10-28): the labelled page slice from `coverage.md`, i.e. perfect
@@ -2403,8 +2416,9 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
    6. **Done 2026-11-03, smaller (owner):** the whole lecture, the labelled slice and the three
       real routes on the same 12 items. None beats the whole lecture.
    7. **Done 2026-11-03.** The whole lecture stays; README results.
-5. Evaluation script + README results. First review the [5] items of "LLM engineering
-   candidates".
+5. **Done 2026-11-05, light version (owner):** `tutor.eval` reports from the existing records, with
+   no model calls, and the README's results; the [5] items of "LLM engineering candidates" are
+   reviewed there. The full model comparison was not run.
 
 ## Backlog (decided, not scheduled)
 
@@ -2418,6 +2432,8 @@ learner's code, so reaching the learner would go through `tutor.hint`; and the H
 cannot run on native Windows.
 
 - Batch API for whole-batch generation, once a cloud provider is used (see the [3] review in
+  "LLM engineering candidates").
+- A local model as one more arm, if a full model comparison is ever run (see the [5] items in
   "LLM engineering candidates").
 
 - C1 value-order check: done 2026-10-30, see rule 5 in "Exercise validation".
