@@ -200,8 +200,9 @@ What these numbers cannot show:
 - **A held-out flag is a finding to read, not a proven defect.** The checks ran on one course only:
   4 of 24 generated exercises and 4 of 14 written by hand.
 - **The judge is noisy.** On the course it is calibrated on, it raised a serious point on 14 of 35
-  generated exercises and 5 of 14 written by hand, but a plain rerun changed its letters on 3 of 13. It
-  raised none on the other course's 11, where it is not calibrated, so that zero means little.
+  generated exercises and 5 of 14 written by hand, but a plain rerun changed its letters on 3 of 13. On
+  the other course, where it is not calibrated, none of the 11 has one now: it raised one, which was real,
+  and the question was fixed. That zero means little.
 - **The ratings come from one learner,** on the 24 exercises they solved. "Clear" got 14 of 19 generated
   and 5 of 5 written by hand; fits the material, within what was taught and targets the concept got all
   24.
