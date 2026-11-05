@@ -2636,8 +2636,10 @@ gaps. Each was decided by the owner; change one only with the owner.
   changes to, and every plan is approved before anything is generated; whoever can edit them
   can edit `workspace.toml` or the code. Markers in a prompt do not stop injection anyway, and
   the suggested cut to 8,000 characters would drop rows of a real `coverage.md` (about 14,000).
-  The untrusted input is lecture material, answered by layer A and the test-run container (see
-  "Code execution safety").
+  The same holds for an exercise's sample data that the held-out writer sends: the generator
+  wrote it and saw it, and a list of allowed file names, also suggested, kept none of the 17 real
+  files (all under `sample_input/`). The untrusted input is lecture material, answered by layer A
+  and the test-run container (see "Code execution safety").
 
 ## Deferred
 
