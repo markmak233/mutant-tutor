@@ -1866,8 +1866,9 @@ timeout: Ctrl+C stops an endless loop, and testkit stops a leftover SparkContext
 program. Accepted for now (raised in the same review); `pytest-timeout` is the fix if hangs
 become a problem.
 
-The README states this boundary too ("Running exercise code is not sandboxed", 2026-10-26),
-since anyone who clones the repo validates code on their own machine.
+The README states this boundary too ("Running exercise code is not sandboxed", 2026-10-26;
+"Where exercise code runs" since the container shipped, 2026-11-06), since anyone who clones
+the repo validates code on their own machine.
 
 Where isolation goes (decided 2026-10-28; built with the [3] isolation item): whatever
 phase 3 adds (a container, a static check against network, subprocesses and files outside
@@ -1917,24 +1918,105 @@ themselves, so a cheap layer comes first and a stronger one later.
   - It is the only layer that also covers the learner's own `pytest test_student.py`,
     which runs generated tests outside the validator. Python is too dynamic for a static
     check to prove code safe: it is a filter that stops the obvious, not a sandbox.
-- B, test-run container: deferred to the generalization phase (second course) and the GUI
-  (owner, 2026-10-28), when courses with riskier libraries and other users arrive. Until
-  then phase 3 runs with layer A and material the user trusts, and a course whose modules
-  are rated medium or high risk (below) is refused rather than run unprotected. Draft:
-  the host orchestrates (validator logic, reports, attempts, hints, GUI, every LLM call)
-  and the container only executes. The one seam is `execution.run_pytest`: its subprocess
-  becomes `docker exec` in a long-lived per-course container (Docker or Podman, one
-  implementation for macOS, Linux and WSL) with the exercise mounted read-only and a
-  writable temp dir, `--network none`, a non-root user, a read-only root file system,
-  memory / CPU / process limits, and a whitelist of environment variables (never `.env` or
-  API keys). Results come back as they do now (exit code, JUnit XML, output), so `checks.py`
-  does not change. The image is built from `workspace.toml` `[requires]`, with envcheck run
-  inside and outside so both use the same versions. On medium / high risk courses the
-  learner's runs go through a command that runs in the container, and attempts are written
-  on the host from its result. Measure the overhead first; if it is too slow on macOS, the
-  fallback is the OS sandboxes coding assistants use (Seatbelt on macOS, bubblewrap on
-  Linux). Costs: debugging needs an editor that attaches to the container; the Docker VM
-  takes memory next to a local LLM.
+- B, test-run container: first deferred to the generalization phase and the GUI (owner,
+  2026-10-28), when courses with riskier libraries and other users arrive; until it ships,
+  phase 3 runs with layer A and material the user trusts, and a course whose modules are
+  rated medium or high risk (below) is refused rather than run unprotected. Measured and
+  decided 2026-11-05 (owner). `container.py` and the runner are written and tested (`pytest -m
+  docker` runs the limits below in real containers). Switched on for both private courses on
+  2026-11-06, after every saved exercise of both and the repo's examples (65: plain Python, MRJob
+  inline and on Hadoop, Spark RDD and DataFrame) validated in containers through `execution.py`
+  with the same verdict, rule statuses and mutant counts as their saved host reports: 700 s one
+  after another, about 650 container runs, none left behind, no file in a workspace changed.
+  - Shape: the host orchestrates (validator logic, reports, attempts, hints, GUI, every LLM
+    call) and the container only executes. The one seam is `execution.py`: `checks.py`, hints
+    and held-out checks do not change, since results come back as they do now (exit code,
+    JUnit XML, output).
+  - One fresh `docker run --rm` per test run (owner, 2026-11-05; this replaces the draft's
+    long-lived per-course container with `docker exec`):
+    `docker run --rm --pull never --init --name tutor-run-<random> --hostname localhost --network
+    none --read-only --tmpfs /tmp:rw,size=1g,mode=1777 --user <runner> --cap-drop ALL
+    --security-opt no-new-privileges --pids-limit 1024 --memory 2g --memory-swap 2g --cpus 4
+    -v <run dir>:/work -w /work -v <tutor package>:/opt/tutor/tutor:ro -e <this run's variables>
+    <image> timeout -s KILL <limit + 5> python -m pytest ...`. The run dir is the same throwaway
+    copy as today, so the container sees only that copy, with links already refused. Nothing
+    of the host's environment goes in, so never `.env` or API keys: the fixed values (`HOME=/tmp`,
+    `PYSPARK_PYTHON` and so on) are in the image, and `-e` carries only what a caller set for
+    that run.
+  - Why each flag that is not obvious. `--hostname localhost`: with `--network none` Docker
+    does not list the container's own name in `/etc/hosts`, and Hadoop stopped with
+    `UnknownHostException` (measured, reference failed; with the flag VALID). `--init`: without
+    it, processes nobody waits for stayed as zombies (seen under a long-lived `sleep`), and
+    the container ends with its main process, so a leftover JVM ends with it. `timeout`: the
+    container ends even if the validator is killed, when nothing is left to call `docker kill`.
+    `--pull never`: an image that went missing stops the run, and nothing is fetched from a
+    public registry under that name. `--cpus` (4) is capped at the VM's CPUs, as Docker refuses
+    more. The limits come from one Spark hypothesis run, which peaked at 393 processes and
+    threads and 486 MB; 512 left too little room, so 1024.
+  - Measured 2026-11-05, Docker Desktop on macOS (arm64, a 12-CPU VM with 7.66 GB). Median of
+    5 test runs, seconds, host / `docker exec` / `docker run`: plain 0.58 / 0.65 / 0.73, MRJob
+    inline 0.85 / 0.77 / 0.87, Spark 4.69 / 4.73 / 4.71, Spark hypothesis 8.25 / 8.07 / 8.18. An
+    empty `docker run` costs 0.14 s, an empty `docker exec` 0.07 s. Four Spark hypothesis runs
+    at once: host 11.9 s, `docker run` 10.9 s, against the 30 s limit. A whole example's
+    validation, median of 2, host / container: plain 1.4 / 1.8 s, Spark RDD 24.3 / 23.2,
+    file-level Spark 34.1 / 33.0, DataFrame 38.5 / 37.9, Hadoop 102.3 / 84.6; every one VALID
+    on both sides. With only 2 repeats (Hadoop on the host took 94 and 110 s), this shows no
+    real cost, about 0.4 s on the plain one, and not a gain. So the OS-sandbox fallback
+    (Seatbelt, bubblewrap) is not needed.
+  - Why not one long-lived container. Limits are per container, so runs share them: four
+    ordinary Spark runs in one container with a limit of 512 hit it 40 times (the cgroup's
+    `pids.events`; no memory kill), 3 failed with `unable to create native thread`, and the
+    fourth hung until I killed it at 329 s. A limit of 8192 passed, peaking near 1400, but then
+    it no longer stops one run from starving its neighbours, which would make false INVALIDs.
+    Killing a `docker exec` client also leaves the code running inside (1 process measured),
+    while `docker kill` on a `docker run` left nothing in 0.17 s. Runs would share `/tmp` too.
+    And a mount of a folder deleted and made again just before failed with `chdir to cwd` in
+    2 of 3 tries, most likely stale file sharing (inferred, not traced).
+  - Limits checked in a running container: uid not root, no internet and no DNS, cannot write
+    the root file system, its home or the mounted code, cannot see the host's home or `.env`,
+    511 processes then an error at a limit of 512, exit 137 over the memory limit, `/tmp`
+    writable. The only environment name holding KEY comes from the base image (`GPG_KEY`,
+    believed a public signing key).
+  - Which courses: `workspace.toml` `[isolation] runner = "container"`, looked up from the files of
+    each run, so every caller of the runner is covered. Unlike `[safety]`, every `workspace.toml`
+    above every source counts and one asking for the container wins, so a folder holding its own
+    file cannot switch it off, and a student file kept elsewhere (held-out candidates, simulated
+    hints) still runs with the course's tests in its container. A mistyped value or an unreadable
+    file stops the run. No choice made: the host, with one warning per process. `"host"`: a choice,
+    so no repeated warning. No `workspace.toml` at all (the repo's examples, CI): the host.
+  - No silent fallback (owner, 2026-11-05). A course on the container with no Docker or no
+    image raises `ContainerError`, which is no verdict on the code: `tutor.validation` and the
+    held-out check exit 2 and write no report, so a stopped Docker can never read as INVALID.
+    Generation checks before its first LLM call and again before each item, so that when
+    Docker stops in the middle of a batch, the item it hits reports an error like any other
+    and the ones after it spend no tokens. Every run asks whether the image exists, which costs
+    0.07 s and, importantly, waits while a stopped VM wakes (Resource Saver; measured 2.5 s on the
+    first call after idling), so those seconds do not count against the code's time limit.
+  - Image: `python -m tutor.container build`, one per course, generated from `[requires]`:
+    `python` picks the base image, `java` the JDK, `hadoop` the Apache tarball with its SHA-512
+    fixed in code (`downloads.apache.org`, about 3.3 MB/s, then the slower archive), and any other
+    name a pip package, at the host's exact version if it matches, else the prefix. `pytest`
+    and `hypothesis` at the host's versions. A plain Python course 184 MB; with Java and Spark
+    769 MB; with Hadoop too 1.73 GB (923 MB of that is Hadoop, with its documentation removed),
+    about 4-5 minutes from nothing. The tag holds a hash of the recipe without the host's
+    versions (two venvs of one course hold different pytest versions, and neither may call the
+    image out of date), so a changed `[requires]` says "rebuild"; validation never builds.
+    Envcheck then runs inside, against the same `workspace.toml`, and an image that fails is
+    removed. The `runner` user gets the host's uid, so the host can delete what a run wrote
+    (macOS tested with its uid, native Linux not).
+  - The report is read only if it is a regular file: the container can replace it with a link
+    or a FIFO, which would make the host read elsewhere or hang.
+  - Accepted gaps. A run can write to its own throwaway folder until its time limit, since a bind
+    mount has no quota; it is deleted afterwards. What it prints is held in memory on the host, as
+    it already is for a run on the host. The heavy-run cap still counts the host's cores, so a VM
+    given far fewer needs `TUTOR_MAX_HEAVY_RUNS`. The learner's `pytest test_student.py` stays on
+    the host for now (owner, 2026-11-05: debugging in the IDE), so a Spark or Hadoop course still
+    needs Java and Hadoop there too, and generated tests that passed in the container can still
+    behave differently on the host, since code can tell where it runs; only layer A covers that. The
+    command that runs a learner's tests in the container, with attempts written on the host from its
+    result, and the risk tiers below come when a course needs them. A container has no Mac GPU, so
+    torch exercises run on the CPU. The Docker VM takes memory next to a local LLM. Windows and
+    native Linux are not tested, and Windows stays on the host until they are. Podman is not tried.
 - Risk tiers for a course's modules (design for the generalization phase): pure
   computation (numpy, networkx) is low and runs on the host; file- or URL-capable libraries
   (pandas `read_csv` takes URLs, numpy `load` unpickles) are medium; system-level ones
@@ -2258,7 +2340,8 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
    minimal `llm.py`; the LangGraph generate-validate-repair loop with the [3] items adopted
    (model access, structured output, call log, caching, plan approval, preference chat),
    code exercises first; the oracle written in a separate context (see "Independent
-   checks"). Isolation layer B moved to the generalization phase (2026-10-28).
+   checks"). Isolation layer B moved to the generalization phase (2026-10-28); in the end it
+   was built after phase 5, before the GUI (2026-11-05).
    Prerequisites (from the 2026-10-25 slide review):
    image-only slides are read as images (a multimodal model or OCR) before anything is
    generated from them, and every source records slide footer, PDF page and any lab or
@@ -2570,15 +2653,14 @@ Later phases, after phase 5 (order decided 2026-10-26, numbered 2026-10-30): pha
 second course, phase 7 the local GUI, then packaging and release. Adaptive review is a
 maybe, not a phase (owner, 2026-10-30: batches are started by hand for now); exam mode
 is not done (see "Decisions not to do").
-- Second course: use the tool for another course (other language or framework) to prove
-  workspace, testkit and setup recipes are not shaped around one course. A long-term goal.
-  Brings isolation layer B, the module risk tiers and other languages (see "Code execution
-  safety"). A new framework's weight for the executor's caps (heavy: a JVM or similar per
-  run) moves from the code's table to the course's `workspace.toml`, decided when the
-  framework is set up, by measuring a smoke run (start-up time, peak memory, a `java` child,
-  cores used), and confirmed by the owner like a `[requires]` entry (owner, 2026-10-30). A
-  model may propose which frameworks the slides use, never how heavy they are; an
-  unmeasured framework counts as heavy.
+- Second course: use the tool for another course (other language or framework) to prove workspace,
+  testkit and setup recipes are not shaped around one course. A long-term goal. Brings the module
+  risk tiers and other languages (see "Code execution safety"); isolation layer B came first, after
+  phase 5 (2026-11-05). A new framework's weight for the executor's caps (heavy: a JVM or similar
+  per run) moves from the code's table to the course's `workspace.toml`, decided when the framework
+  is set up, by measuring a smoke run (start-up time, peak memory, a `java` child, cores used), and
+  confirmed by the owner like a `[requires]` entry (owner, 2026-10-30). A model may propose which
+  frameworks the slides use, never how heavy they are; an unmeasured framework counts as heavy.
 - Adaptive review (a maybe): use `attempts.jsonl` (failures, run counts, hints used) and `coverage.md`
   to find weak knowledge points and schedule `review`-mode batches with spaced repetition.
 - Packaging and release: `pipx install`, one command to start, CI on macOS and Windows

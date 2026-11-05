@@ -56,6 +56,7 @@ from pathlib import Path
 
 from tutor.attempts import ATTEMPTS_FILE
 from tutor.config import WorkspaceError, load_env, load_workspace
+from tutor.container import ContainerError
 from tutor.validation.checks import (
     RuleResult,
     Status,
@@ -333,7 +334,7 @@ def report_to_dict(exercise_id: str, results: list[HeldOutResult], checked_at: s
 
 def main(argv: list[str] | None = None) -> int:
     """Exit code 0: nothing flagged; 1: something flagged or an exercise would not load;
-    2: wrong usage or no workspace."""
+    2: wrong usage, no workspace, or no container for a course that asks for one."""
     args = sys.argv[1:] if argv is None else argv
     if not args:
         print("Usage: python -m tutor.validation.heldout <batch_dir> [<exercise_id> ...]")
@@ -359,7 +360,11 @@ def main(argv: list[str] | None = None) -> int:
             continue
         candidates = (owner_candidates(batch, exercise_id, attempts_dir)
                       + model_candidates(solution))
-        results = check_heldout(ex, candidates)
+        try:
+            results = check_heldout(ex, candidates)
+        except ContainerError as e:  # stops every exercise alike, and is no verdict on any
+            print(f"container: {e}", file=sys.stderr)
+            return 2
         print(format_report(exercise_id, results), flush=True)
         if not results:
             without += 1

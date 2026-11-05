@@ -270,19 +270,38 @@ slides' text and images, the generated code, and your code when you ask a model 
 hint) leave it. This is a personal project, not affiliated with any university or course, and
 it is provided as is (see [LICENSE](LICENSE)).
 
-## Running exercise code is not sandboxed
+## Where exercise code runs
 
-The validator runs exercise code (reference, skeleton, mutants, tests) in a subprocess with a
-timeout, in a temporary directory, and kills the whole process group afterwards. That keeps
-runs apart from each other and from the workspace, but it is **not a sandbox**: the code runs
-with your user's permissions and can read or write other files and use the network. Only
-validate exercises you wrote or reviewed. Phase 3 runs LLM-generated code the same way, so
-review it first or run the validator in a container or VM.
+Validation, generation, held-out checks and hints all run exercise code (reference, skeleton,
+mutants, tests), much of it written by a model. Each course chooses where, in its
+`workspace.toml`:
 
-Before anything runs, a static check reads every exercise file and rejects code outside an
-allowlist (modules, `os` / `sys` attributes, `eval` / `exec`, paths outside the exercise,
-shell commands through Spark or MRJob). It stops the obvious, but Python is too dynamic for
-a static check to prove code safe; a test-run container is planned for later phases.
+```toml
+[isolation]
+runner = "container"   # or "host"
+```
+
+- **`container`**: every test run starts a fresh Docker container from the course's image,
+  which `python -m tutor.container build` makes from `[requires]`. The container has no
+  network, a read-only system, a non-root user, no view of your home folder or `.env`, and
+  limits on memory, processes, CPUs and time; only the run's own throwaway folder is writable.
+  If Docker is not running or the image is missing, the command stops with an error and writes
+  no verdict; it never falls back to the host. `python -m tutor.container status` says whether
+  the image is ready. Validation takes about as long as on the host (measured in
+  [design.md](docs/design.md), "Code execution safety").
+- **`host`**: a subprocess with a timeout, in a temporary directory, its whole process group
+  killed afterwards. That keeps runs apart from each other and from the workspace, but it is
+  **not a sandbox**: the code runs with your user's permissions and can read or write other
+  files and use the network. Use it only for exercises you wrote or reviewed.
+
+A course that has not chosen runs on the host and prints a warning. Your own `pytest` runs
+while solving stay on the host either way. The container is tested on macOS with Docker
+Desktop; Linux and Windows are not tested yet, so use the host there.
+
+Before anything runs, in either mode, a static check reads every exercise file and rejects
+code outside an allowlist (modules, `os` / `sys` attributes, `eval` / `exec`, paths outside
+the exercise, shell commands through Spark or MRJob). It stops the obvious, but Python is too
+dynamic for a static check to prove code safe; the container is the boundary.
 
 ## Layout
 
@@ -291,7 +310,10 @@ src/tutor/
   config.py        find the workspace, refuse unsafe locations, load .env
   envcheck.py      check the machine against the workspace's [requires]
   workspace.py     create a course workspace: folder, its own venv, terminal activation
-  execution.py     run pytest in a temp dir, subprocess + timeout, kill the whole process group
+  execution.py     run pytest in a temp dir with a timeout: in a fresh container if the course
+                   asks for one, else a subprocess whose whole process group is killed
+  container.py     the course's Docker image from [requires] and the limits each run gets;
+                   `python -m tutor.container build | status`
   llm.py           a small client for OpenAI-compatible APIs (LM Studio, GLM, OpenAI,
                    DeepSeek): roles -> profiles, structured output, streaming, call log
   materials/       course PDFs -> a per-page markdown cache, image slides via a vision model;
@@ -328,7 +350,7 @@ Phase numbers match `docs/design.md`.
 - **3a** ✅ LLM generation: static check on generated code, slide reading with a cached
   text layer and vision transcription, LangGraph plan → owner approval → generate → oracle
   by a second model → validate → repair, exercises in parallel, three course weeks generated
-  (a container for running generated code is moved to a later phase)
+  (the container for running generated code came after phase 5, see below)
 - **3b** ✅ Checks that need a learner's real work: held-out solutions and mistakes, an LLM
   judge of teaching quality calibrated against the learner's ratings
 - **3c** ✅ Hint command: rules, mutant matching and a model's hint behind a leak check; a
@@ -338,8 +360,10 @@ Phase numbers match `docs/design.md`.
   each one yields; none beat it, so [the whole lecture stayed](#does-it-need-rag)
 - **5** ✅ Evaluation from the pipeline's own logs, [results above](#results): validity, what stops
   a first draft, held-out flags, tokens per saved exercise; the full model comparison was not run
+- ✅ After 5: [a container for every test run](#where-exercise-code-runs), one fresh Docker
+  container per run, chosen per course; every saved exercise validated in it as on the host
 - **6** Second course: another language or framework, to prove nothing is shaped around one
-  course; brings the container for running generated code
+  course
 - **7** Local GUI: a web app on the CLI's functions, localhost only; solving stays in the IDE.
   Then packaging and release: `pipx install`, one command to start, CI on macOS and Windows
 

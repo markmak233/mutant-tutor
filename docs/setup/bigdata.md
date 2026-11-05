@@ -12,6 +12,7 @@ Linux / WSL commands are the standard equivalents and have not been tested yet.
 | Java (JDK) | 17 | Spark, and Hadoop if installed; one JDK serves both | yes |
 | Hadoop | 3.3.x, standalone | MRJob exercises with a custom partitioner or sort order (e.g. `examples/station-condition-share`) | no. Without it those tests are skipped. On Windows they are always skipped (below) |
 | winutils | for Hadoop 3.3.x | Windows only: Spark reading and writing files | yes, on Windows |
+| Docker | Docker Desktop (tested with 4.25 on macOS) | running exercise code in a container (step 5) | no, but recommended before generating exercises. Not tested on Linux or Windows yet |
 | gitleaks | any | the pre-commit secret scan | only if you commit to the repo |
 
 Spark itself needs no separate install: `pip install pyspark` ships it.
@@ -219,6 +220,30 @@ which pytest     # must be this workspace's .venv/bin/pytest
 ```
 
 This covers VS Code terminals on macOS only. Anywhere else, run `source .venv/bin/activate` first.
+
+### Running exercise code in a container (recommended)
+
+Validation runs the exercise's code, and generated code is written by a model, so let every run
+happen in a fresh Docker container (README, "Where exercise code runs"). Install and start Docker
+Desktop yourself: the tool only calls the `docker` command and never installs it. Then, in this
+workspace's terminal (the image takes this venv's package versions):
+
+```bash
+python -m tutor.container build    # the image from [requires]; with Hadoop about 1.7 GB, 4-5 minutes
+python -m tutor.container status   # "ready" once the image matches [requires]
+```
+
+and add to `workspace.toml`:
+
+```toml
+[isolation]
+runner = "container"
+```
+
+From then on validation, generation and hints stop with an error when Docker is not running, rather
+than run the code on this machine. A changed `[requires]` needs a new build, and `status` says so.
+Your own `pytest test_student.py` still runs in this venv. Docker Desktop's Resource Saver stops its
+VM when idle; the first run after that waits a few seconds for it, outside the test's time limit.
 
 ### Reading the lectures into text (optional)
 

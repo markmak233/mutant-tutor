@@ -27,6 +27,21 @@ REPO = Path(__file__).resolve().parents[2]
 _COURSE = re.compile(r"^[\w.-]+$")
 _EXTRAS = re.compile(r"^[a-z]+(,[a-z]+)*$")
 
+# The minimal workspace.toml. [isolation] stays a comment: the container needs Docker and a
+# built image, which this command does not install, and a course that has not chosen runs on
+# the host with a warning naming both choices (tutor.container).
+WORKSPACE_TOML = """\
+course = "{course}"
+
+[requires]
+python = "{version}"
+
+# Where exercise code runs (README, "Where exercise code runs"). With Docker running and the
+# image built (`python -m tutor.container build`), uncomment to run every test in a container:
+# [isolation]
+# runner = "container"
+"""
+
 # ZDOTDIR makes this folder's terminals read .vscode/zsh instead of ~/.zshrc. The two paths win
 # over the repo's .env, which can name only one workspace: without them the attempts plugin
 # skips this folder's tests without a word.
@@ -95,7 +110,7 @@ def init(root: Path, course: str | None = None, extras: str = DEFAULT_EXTRAS,
     (root / "lectures").mkdir(parents=True, exist_ok=True)
     version = f"{sys.version_info.major}.{sys.version_info.minor}"
     files = {
-        WORKSPACE_FILE: f'course = "{course}"\n\n[requires]\npython = "{version}"\n',
+        WORKSPACE_FILE: WORKSPACE_TOML.format(course=course, version=version),
         ".vscode/settings.json": SETTINGS,
         ".vscode/zsh/.zshrc": ZSHRC,
         ".vscode/zsh/.zprofile": ZPROFILE,

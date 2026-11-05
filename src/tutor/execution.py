@@ -1,7 +1,10 @@
-"""Run an exercise's tests in a throwaway directory, in a child process, with a timeout.
+"""Run an exercise's tests in a throwaway directory, with a timeout: in a container if the
+course asks for it, else in a child process on this machine.
 
-This is isolation from the workspace, not a sandbox: the child can still read and write
-outside its directory and use the network (docs/design.md, "Code execution safety").
+The child process is isolation from the workspace, not a sandbox: it can still read and write
+outside its directory and use the network. The container is the sandbox, and a course that asks
+for it never falls back to the host (docs/design.md, "Code execution safety"). Both give the
+same RunResult, so the callers do not know which one ran.
 """
 
 from __future__ import annotations
@@ -15,17 +18,27 @@ import sys
 import tempfile
 import threading
 import time
+import uuid
 import xml.etree.ElementTree as ET
-from collections.abc import Mapping
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
+
+from tutor.container import ContainerError, image_for, image_problem, run_command, runner_uid
 
 if sys.platform == "win32":  # Job Objects stand in for process groups there
     from tutor import winjob
 
 DEFAULT_TIMEOUT_S = 30.0
 REPORT_FILE = "tutor-pytest-report.xml"  # pytest's JUnit XML, written inside the temp dir
+# no:cacheprovider: no .pytest_cache; the temp dir is discarded anyway.
+# --junitxml: the counts that tell "all passed" from "all skipped" (see _outcome).
+_PYTEST_ARGS = ["-m", "pytest", "-q", "-p", "no:cacheprovider", f"--junitxml={REPORT_FILE}"]
+# A container can leave anything under the report's name, and the host reads it after the run.
+_MAX_REPORT_BYTES = 50_000_000
+_DOCKER_FAILED = 125  # Docker's own exit code: the container never ran
+_KILLED = 137  # 128 + SIGKILL: the memory limit, or the container's own `timeout`
 # How many child runs may be alive at once in this process. Validation runs its checks in
 # parallel and a batch validates several exercises at once, so one cap holds for all of
 # them, and there are two: a heavy run starts a JVM that uses every core (Spark, Hadoop),
@@ -122,9 +135,14 @@ def run_pytest(
     The temp dir, and anything the run leaves behind (spark-warehouse/, caches), is
     deleted afterwards; the source files are never modified.
     `heavy`: the run starts a JVM (see ExerciseFiles.heavy); unknown code counts as heavy.
+    Raises ContainerError when the course asks for a container and none can run: that is not
+    a verdict on the code, so it must not come back as a failed run.
     """
+    image = image_for(files.values())
     with _slot(heavy), tempfile.TemporaryDirectory(prefix="tutor-run-") as tmp:
         workdir = _copy_in(files, Path(tmp))
+        if image:
+            return _run_in_container(image, workdir, timeout_s, env or {})
         return _run_in(workdir, timeout_s, env or {})
 
 
@@ -138,8 +156,11 @@ def run_script(
     """`python <script>` with no arguments, in a fresh temp dir holding `files`, the way a
     student runs `python student.py` in the exercise folder; isolated like run_pytest.
     PASSED: exit code 0; anything else is ERROR (or TIMEOUT)."""
+    image = image_for(files.values())
     with _slot(heavy), tempfile.TemporaryDirectory(prefix="tutor-run-") as tmp:
         workdir = _copy_in(files, Path(tmp))
+        if image:
+            return _run_in_container(image, workdir, timeout_s, env or {}, script)
         return _run_in(workdir, timeout_s, env or {}, [sys.executable, script])
 
 
@@ -212,10 +233,7 @@ def _run_in(workdir: Path, timeout_s: float, extra_env: Mapping[str, str],
     held-out checks) keeps stating the limit an exercise needs on macOS or Linux."""
     timeout_s *= timeout_factor()
     # sys.executable: the project venv, so student code can import pyspark and mrjob.
-    # no:cacheprovider: no .pytest_cache; the temp dir is discarded anyway.
-    # --junitxml: the counts that tell "all passed" from "all skipped" (see _outcome).
-    cmd = script or [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
-                     f"--junitxml={REPORT_FILE}"]
+    cmd = script or [sys.executable, *_PYTEST_ARGS]
     # PYSPARK_PYTHON: Spark workers otherwise start the `python3` on PATH, which may be a
     # different minor version than the driver (PYTHON_VERSION_MISMATCH).
     # PYTHONIOENCODING: the child's stdout is a pipe, and on Windows Python would write it
@@ -244,6 +262,33 @@ def _run_in(workdir: Path, timeout_s: float, extra_env: Mapping[str, str],
         _remove_run_tmp(Path(run_tmp))
 
 
+def _run_in_container(image: str, workdir: Path, timeout_s: float,
+                      extra_env: Mapping[str, str], script: str | None = None) -> RunResult:
+    """The same run in a fresh container of its own, so that one run's processes, memory and
+    /tmp cannot touch another's. `workdir` is the only folder of this machine it can write."""
+    timeout_s *= timeout_factor()
+    # Here, before the time limit starts: this waits while a stopped VM wakes, and those
+    # seconds must not count against the code. Every run asks, so that Docker going away in the
+    # middle of a batch stops the batch with the reason, and not as failed runs.
+    if problem := image_problem(image):
+        raise ContainerError(problem)
+    getuid = getattr(os, "getuid", None)
+    if getuid and getuid() != runner_uid():  # root on the host: the runner is another user
+        workdir.chmod(0o777)
+    name = f"tutor-run-{uuid.uuid4().hex[:12]}"
+    command = ["python", script] if script else ["python", *_PYTEST_ARGS]
+    # Resolved: on macOS the temp dir's path goes through a link, and Docker shares the target.
+    cmd = run_command(image, name, workdir.resolve(), timeout_s, extra_env, command)
+    result = _run_with_env(cmd, workdir, os.environ, timeout_s, command if script else None,
+                           make_tree=lambda *args: _ContainerRun(name, *args))
+    if result.returncode == _DOCKER_FAILED:
+        raise ContainerError(f"docker run failed: {result.output.strip()}")
+    if result.returncode == _KILLED:
+        return replace(result, output=f"{result.output}\n(the run was killed, exit {_KILLED}: "
+                                      "most likely over the container's memory limit)")
+    return result
+
+
 def _remove_run_tmp(path: Path, wait_s: float = 5.0) -> None:
     """Delete a run's temp dir, retrying for a moment. On Windows the native library a JVM
     unpacks there (liblz4-java-*.so) could not be deleted for a while after every process
@@ -264,10 +309,10 @@ def _remove_run_tmp(path: Path, wait_s: float = 5.0) -> None:
 
 
 def _run_with_env(cmd: list[str], workdir: Path, env: Mapping[str, str], timeout_s: float,
-                  script: list[str] | None) -> RunResult:
+                  script: list[str] | None, make_tree: Callable | None = None) -> RunResult:
     """Run `cmd` in `workdir` with `env` and turn the result into a RunResult."""
     start = time.monotonic()
-    with _ProcessTree(cmd, workdir, env) as tree:
+    with (make_tree or _ProcessTree)(cmd, workdir, env) as tree:
         proc = tree.proc
         try:
             output, _ = proc.communicate(timeout=timeout_s)
@@ -331,9 +376,38 @@ class _ProcessTree:
             self._job.close()  # KILL_ON_JOB_CLOSE: also ends what an exception left running
 
 
+class _ContainerRun(_ProcessTree):
+    """A `docker run` client and its container. Ending the client alone leaves the code
+    running inside (measured with `docker exec`), so the container is killed by name; every
+    process in it ends with it, and `--rm` removes it."""
+
+    def __init__(self, name: str, cmd: list[str], cwd: Path, env: Mapping[str, str]) -> None:
+        self._name = name
+        super().__init__(cmd, cwd, env)
+
+    def kill(self) -> None:
+        if self.proc.poll() is None:  # a client that has exited means the container has too
+            try:
+                subprocess.run(["docker", "kill", self._name], capture_output=True, timeout=30)
+                self.proc.wait(timeout=5)  # lets the client hand over the last output
+            except (OSError, subprocess.TimeoutExpired):
+                pass  # the client is ended below, and the container's `timeout` ends it
+        super().kill()
+
+    def __exit__(self, exc_type: object, *exc: object) -> None:
+        if exc_type is not None:  # Ctrl+C or a crash here: do not leave the container running
+            self.kill()
+        super().__exit__(exc_type, *exc)
+
+
 def _read_counts(report: Path) -> TestCounts | None:
-    """Totals over every <testsuite> in pytest's JUnit XML; None if it is missing or broken."""
+    """Totals over every <testsuite> in pytest's JUnit XML; None if it is missing or broken,
+    or not an ordinary file of a sane size: code in a container can leave a link there to
+    make this machine read something else, a FIFO to make it hang, or gigabytes of XML."""
     try:
+        info = report.lstat()
+        if not stat.S_ISREG(info.st_mode) or info.st_size > _MAX_REPORT_BYTES:
+            return None
         root = ET.parse(report).getroot()
     except (OSError, ET.ParseError):
         return None

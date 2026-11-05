@@ -52,6 +52,18 @@ def test_course_defaults_to_the_folder_name(tmp_path):
     assert tomllib.loads(text)["course"] == "neural-nets"
 
 
+def test_the_container_is_offered_but_left_off(tmp_path):
+    """Switching it on needs Docker and a built image, which init does not install; the
+    commented lines must still be a working switch once uncommented."""
+    make(tmp_path / "ws")
+
+    text = (tmp_path / "ws" / "workspace.toml").read_text(encoding="utf-8")
+    assert "isolation" not in tomllib.loads(text)
+    switched_on = text.replace("# [isolation]", "[isolation]").replace(
+        '# runner = "container"', 'runner = "container"')
+    assert tomllib.loads(switched_on)["isolation"] == {"runner": "container"}
+
+
 def test_terminals_get_the_venv_and_this_folders_paths(tmp_path):
     """Without WORKSPACE_DIR here, the attempts plugin skips the folder's tests silently."""
     make(tmp_path / "ws")

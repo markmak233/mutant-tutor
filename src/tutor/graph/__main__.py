@@ -36,6 +36,7 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from tutor.config import WorkspaceError, load_env, load_workspace
+from tutor.container import ContainerError, check_course
 from tutor.exchange import AwaitingAnswer
 from tutor.graph.nodes import (
     Deps,
@@ -123,10 +124,12 @@ def main(argv: list[str] | None = None) -> int:
     load_env()
     try:
         workspace = load_workspace().root
+        # Before the first LLM call: a draft that cannot be validated is a draft paid for.
+        check_course(workspace)
         if args.command == "item":
             return _item(args, workspace, build)
         return _batch(args, workspace, build)
-    except (WorkspaceError, LLMError, OSError, ValidationError, ValueError) as e:
+    except (WorkspaceError, ContainerError, LLMError, OSError, ValidationError, ValueError) as e:
         print(f"stopped: {e}", file=sys.stderr)
         return 1
 

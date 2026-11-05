@@ -25,6 +25,7 @@ from pathlib import Path
 
 from tutor.attempts import ATTEMPTS_FILE, exercise_of
 from tutor.config import WorkspaceError, load_env, load_workspace
+from tutor.container import ContainerError
 from tutor.execution import Outcome, run_pytest
 from tutor.hint import mutants
 from tutor.hint.llm_hint import HintModel, HintRefused, model_hint
@@ -200,7 +201,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         hint = hint_for(exercise_dir, model=model,
                         level=1 + (model_hints_given(exercise_dir) if model else 0))
-    except ExerciseError as e:
+    except (ExerciseError, ContainerError) as e:
         print(f"stopped: {e}", file=sys.stderr)
         return 1
     print("every test passes; also try TUTOR_PARTITIONS=4 pytest test_student.py"

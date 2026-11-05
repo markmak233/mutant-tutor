@@ -46,9 +46,12 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["spark: slow runs that start a JVM (Spark or Hadoop); run with `pytest -m spark`"]
-# Plain `pytest` stays fast; a later `-m spark` on the command line overrides this.
-addopts = "-m 'not spark'"
+markers = [
+    "spark: slow runs that start a JVM (Spark or Hadoop); run with `pytest -m spark`",
+    "docker: real containers, needs Docker running; run with `pytest -m docker`",
+]
+# Plain `pytest` stays fast and needs no Docker; a later `-m ...` on the command line overrides this.
+addopts = "-m 'not spark and not docker'"
 # mrjob 0.7.4 imports the stdlib `pipes` module (the reason it stops at Python 3.12).
 filterwarnings = ["ignore:'pipes' is deprecated:DeprecationWarning"]
 
