@@ -22,8 +22,9 @@ LOGO = ("Red", 400, 330, 300, 100)  # 8% of the page, clear of text: flagged unl
 
 
 def make_pdf(path: Path, pages: list[dict]) -> Path:
-    """A 720x540 PDF. Each page: "lines" of text, an optional "footer", and "images" as
-    (name, x, y, width, height). Enough PDF for pypdfium2, nothing more."""
+    """A 720x540 PDF. Each page: "lines" of text, an optional "footer", "placed" text as
+    (x, y, text), and "images" as (name, x, y, width, height). Enough PDF for pypdfium2,
+    nothing more."""
     objects = [
         b"<< /Type /Catalog /Pages 2 0 R >>",
         b"",  # the page tree, filled in below
@@ -38,6 +39,7 @@ def make_pdf(path: Path, pages: list[dict]) -> Path:
                for i, line in enumerate(page.get("lines", []))]
         if page.get("footer"):
             ops.append(f"BT /F1 10 Tf 350 20 Td ({page['footer']}) Tj ET")
+        ops += [f"BT /F1 10 Tf {x} {y} Td ({text}) Tj ET" for x, y, text in page.get("placed", [])]
         ops += [f"q {w} 0 0 {h} {x} {y} cm /{name} Do Q" for name, x, y, w, h in
                 page.get("images", [])]
         content = "\n".join(ops).encode()
@@ -82,6 +84,20 @@ def test_pages_have_text_labels_and_vision_flags(tmp_path):
     assert [p.label for p in pages] == ["2.31", "2.32", "2.33", None]
     # The logo covers 8% of every page but repeats, so only slide 3's diagram counts.
     assert [p.needs_vision for p in pages] == [False, False, True, False]
+
+
+def test_the_label_is_the_footer_not_a_number_near_it(tmp_path):
+    """A number in a slide's body can reach the footer band and a page counter can sit beside
+    the footer; each once became the label."""
+    pdf = make_pdf(tmp_path / "l.pdf", [
+        {"footer": "6.10", "placed": [(72, 50, "Step size: 2")]},
+        {"footer": "6.52", "placed": [(600, 20, "52")]},
+        {"placed": [(72, 10, "5"), (350, 30, "3")]},  # footers count PDF pages: this is page 3
+        {"placed": [(72, 100, "7")]},  # above the band: no footer at all
+        {"footer": "12"},  # a plain footer that is not the PDF page's number
+    ])
+
+    assert [p.label for p in read_pdf(pdf)] == ["6.10", "6.52", "3", None, "12"]
 
 
 def test_small_code_images_count_and_images_under_text_do_not(tmp_path):

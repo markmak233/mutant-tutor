@@ -30,7 +30,10 @@ REPEATED_SHARE = 0.30
 # A page whose content images cover at least this share of it goes to the vision model.
 VISION_SHARE = 0.05
 TEXT_ON_IMAGE = 5  # characters on top of an image that make it a text effect
-FOOTER_BAND = 0.12  # bottom share of the page searched for the label
+# Bottom shares of the page searched for the label, lowest first. A number in the slide's
+# body can reach a wide band ("Step size: 2" above the footer 6.10), so the lowest band
+# holding a number decides.
+FOOTER_BANDS = (0.03, 0.05, 0.07, 0.09, 0.12)
 LABEL = re.compile(r"^\d+(\.\d+)*$")  # "2.31", "12"
 
 
@@ -55,7 +58,7 @@ class _Raw:
 def read_pdf(path: Path) -> list[Page]:
     pdf = pdfium.PdfDocument(path)
     try:
-        raws = [_read_page(page) for page in pdf]
+        raws = [_read_page(page, number) for number, page in enumerate(pdf, 1)]
     finally:
         pdf.close()
     # The same image at the same place: three scanned pages share a box, not an image.
@@ -84,14 +87,32 @@ def render_png(path: Path, number: int, dpi: int = 150) -> bytes:
     return out.getvalue()
 
 
-def _read_page(page) -> _Raw:
+def _find_label(textpage, width: float, height: float, number: int) -> str | None:
+    """The slide number printed at the foot of PDF page `number`, None if there is none."""
+    def numbers(band: float) -> list[str]:
+        footer = textpage.get_text_bounded(left=0, bottom=0, right=width, top=band * height)
+        return [token for token in footer.split() if LABEL.match(token)]
+
+    for band in FOOTER_BANDS:
+        labels = numbers(band)
+        if labels:
+            # A dotted number is a slide number: "6.52" beats the page counter "52" beside it.
+            if dotted := [label for label in labels if "." in label]:
+                return dotted[-1]
+            # Plain footers that count PDF pages: the page's own number beats a stray "5" lower.
+            if str(number) in numbers(FOOTER_BANDS[-1]):
+                return str(number)
+            return labels[-1]
+    return None
+
+
+def _read_page(page, number: int) -> _Raw:
     width, height = page.get_size()
     textpage = page.get_textpage()
     text = "\n".join(line.rstrip() for line in textpage.get_text_range().splitlines()).strip()
     chars = [textpage.get_charbox(i) for i in range(textpage.count_chars())]
     centres = [((left + right) / 2, (bottom + top) / 2) for left, bottom, right, top in chars]
-    footer = textpage.get_text_bounded(left=0, bottom=0, right=width, top=FOOTER_BAND * height)
-    labels = [token for token in footer.split() if LABEL.match(token)]
+    label = _find_label(textpage, width, height, number)
     boxes, data = [], b""
     for obj in page.get_objects(max_depth=1):
         if obj.type == pdfium_c.FPDF_PAGEOBJ_IMAGE:
@@ -113,4 +134,4 @@ def _read_page(page) -> _Raw:
                       hashlib.sha256(image_data).hexdigest()[:16],
                       abs(right - left) * abs(top - bottom)))
         data += image_data
-    return _Raw(text, labels[-1] if labels else None, width * height, boxes, data)
+    return _Raw(text, label, width * height, boxes, data)
