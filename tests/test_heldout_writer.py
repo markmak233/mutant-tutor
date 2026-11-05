@@ -166,6 +166,50 @@ def test_other_numbers_in_a_lecture_name_keep_the_exercises_own_pages(tmp_path):
     assert "page 3 body" in cut and "page 4 body" in cut and "page 1 body" not in cut
 
 
+def add_lecture(workspace, name: str, pages: int = 3) -> None:
+    """A cached lecture under any file name."""
+    entries = [cache.Entry(n, str(n), "text", "h", f"{name} page {n}") for n in range(1, pages + 1)]
+    path = workspace / "cache" / "lectures" / f"{name}.pdf.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(cache.render(f"{name}.pdf", entries), encoding="utf-8")
+
+
+def test_the_exact_file_is_found_whatever_the_course_calls_it(tmp_path):
+    add_lecture(tmp_path, "Perceptrons")
+    add_lecture(tmp_path, "Week_3 Part 2")
+
+    for name in ("Perceptrons", "Week_3 Part 2"):
+        context = lecture_context(tmp_path, {"lecture": name, "pdf_pages": "p.2"})
+        assert f"## {name} p.2 · slide 2 · this exercise's page" in context
+        assert f"{name} page 3" in context  # it fits, so it goes whole
+
+
+def test_the_exact_file_comes_before_any_number_in_its_name(tmp_path):
+    """A name with no lecture number of its own form must not fall back to Lecture_7."""
+    add_lecture(tmp_path, "Lecture_7-Topic_G")
+    add_lecture(tmp_path, "L3 Topic C")
+
+    context = lecture_context(tmp_path, {"lecture": "L3 Topic C", "pdf_pages": "1"})
+
+    assert "L3 Topic C page 1" in context and "Topic_G" not in context
+
+
+def test_a_long_lecture_named_exactly_sends_its_own_pages_even_with_a_label(tmp_path):
+    add_lecture(tmp_path, "Topic_G", pages=5)
+
+    cut = lecture_context(tmp_path, {"lecture": "Topic_G", "pdf_pages": "L7 2-3"}, limit=10)
+
+    assert "Topic_G page 2" in cut and "Topic_G page 3" in cut and "Topic_G page 1" not in cut
+
+
+def test_a_lecture_name_cannot_read_outside_the_cache(tmp_path):
+    add_lecture(tmp_path, "Topic_G")
+    (tmp_path / "secret.pdf.md").write_text("private", encoding="utf-8")
+
+    with pytest.warns(UserWarning, match="no pages found"):
+        assert lecture_context(tmp_path, {"lecture": "../../secret", "pdf_pages": "1"}) == ""
+
+
 def test_a_named_lecture_with_no_pages_warns_and_a_synthetic_source_does_not(tmp_path, recwarn):
     workspace, _ = make_batch(tmp_path)
 

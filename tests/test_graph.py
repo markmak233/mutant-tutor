@@ -143,6 +143,28 @@ def test_too_few_mutants_left_is_still_a_format_error(tmp_path):
     assert not (tmp_path / "round-0" / "exercises").exists()
 
 
+def test_a_saved_exercise_names_its_exact_lecture_file_not_the_models_words(workspace):
+    """The model's words may hold a course code or a year; the rest of its source stays."""
+    worded = draft()
+    worded["metadata"]["source"]["lecture"] = "Lecture 1 (CS1234, Week 1, 2026)"
+    reply = ExerciseDraft.model_validate(worded)
+    d = deps(workspace, None, checks=[report()])
+
+    nodes.validate_draft({"item": ITEM, "draft": reply}, d)
+
+    saved = d.drafts / ITEM.id / "round-0" / "solutions" / ITEM.id / "metadata.json"
+    source = json.loads(saved.read_text(encoding="utf-8"))["source"]
+    assert source == {"lecture": ITEM.lecture, "slides": "1.3-1.4", "pdf_pages": "3-4"}
+    # Only the file changes: a repair round's prompt still shows what the model wrote.
+    assert reply.metadata.source.lecture == "Lecture 1 (CS1234, Week 1, 2026)"
+
+
+def test_the_schema_sent_to_the_model_has_no_field_for_the_lecture_file():
+    """The prompt stays as calibrated: the exact name needs no new field."""
+    assert set(nodes.DRAFT_SCHEMA["$defs"]["Source"]["properties"]) == {
+        "lecture", "slides", "pdf_pages", "lab", "assumptions"}
+
+
 def test_a_generated_exercise_is_always_under_rule_main(tmp_path):
     exercise, solution, _ = write_draft(ExerciseDraft.model_validate(draft()), "sum-list",
                                         tmp_path / "r")

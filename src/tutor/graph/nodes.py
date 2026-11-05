@@ -429,7 +429,7 @@ def validate_draft(state: ItemState, deps: Deps) -> ItemState:
         round_dir_path = deps.drafts / item.id / f"round-{round_}"
         try:
             exercise, solution, dropped = write_draft(state["draft"], item.id, round_dir_path,
-                                                      deps.mode)
+                                                      deps.mode, item.lecture)
         except DraftError as e:
             failure, format_error = f"format: {e}", True
         else:
@@ -485,12 +485,13 @@ def _report_text(report: ValidationReport) -> str:
                      for r in report.results) + ("\nVALID\n" if report.valid else "\nINVALID\n")
 
 
-def write_draft(draft: ExerciseDraft, exercise_id: str, root: Path,
-                mode: str | None = None) -> tuple[Path, Path, dict[str, str]]:
+def write_draft(draft: ExerciseDraft, exercise_id: str, root: Path, mode: str | None = None,
+                lecture: str | None = None) -> tuple[Path, Path, dict[str, str]]:
     """root/exercises/<id> and root/solutions/<id>, laid out like a batch, and the mutants
     left out: one that cannot be applied is left out (name -> why) while MIN_MUTANTS others
     remain, so one copying slip does not cost the whole exercise; fewer is a format error.
-    `mode`: the batch's, for the question's line under the title."""
+    `mode`: the batch's, for the question's line under the title. `lecture`: the plan item's,
+    the name of its cache file."""
     if draft.metadata.id != exercise_id:
         raise DraftError(f"metadata.id is {draft.metadata.id!r}, the plan names {exercise_id!r}")
     if draft.metadata.source == "synthetic":
@@ -510,6 +511,13 @@ def write_draft(draft: ExerciseDraft, exercise_id: str, root: Path,
         # A generated exercise is always under rule "main"; only the model's explicit
         # false (a framework-launched program) is kept.
         metadata = metadata.model_copy(update={"standalone": True})
+    if lecture is not None:
+        # The exact file in place of the model's words: the judge and the held-out writer find
+        # the pages by it, so a course may name its files anything, and a course code or a year
+        # in free text cannot cost them their slides. Only the file written changes, so a repair
+        # round's prompt stays as the model wrote it.
+        source = metadata.source.model_copy(update={"lecture": lecture})
+        metadata = metadata.model_copy(update={"source": source})
     files = {
         exercise / "student.py": draft.student_py,
         exercise / "test_student.py": draft.test_student_py,

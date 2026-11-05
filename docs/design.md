@@ -418,6 +418,15 @@ explained before code since it touches `validation/`):
   and required; `entry_point` is a list of names (`["StationMax.run"]`,
   `["mapper", "reducer"]`); `source` is `"synthetic"` or an object with slides, PDF pages,
   lab and assumptions.
+- Lecture files may have any name (owner, 2026-11-05). When an exercise is saved, code sets
+  `source.lecture` to the exact cache file's name, as a model's words once cost a judge its slides:
+  a course code and a year read as extra lectures, and 3 exercises of a long lecture were judged
+  with none. No field was added, as the schema is sent to the model, so its prompt is unchanged.
+  Exercises saved earlier keep their text, where only the number after the word for lecture counts.
+  The course order comes from the numbers in the file names ("L2" before "L10"); with a name that has
+  no number the order is unknown, so nothing is guessed and only the exercise's own lecture counts as
+  taught, with a warning. A named lecture that yields no pages is a warning too. Phase 4's retrieval
+  code still reads `Lecture_<n>-` names; generation does not use it.
 - The validator checks `metadata.json` first; if it fails, every other rule is SKIPPED,
   since they read their settings from it. The message names the field and the problem.
 - Unknown fields are errors (`extra="forbid"`) and types are strict (`"yes"` is not a bool),

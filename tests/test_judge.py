@@ -115,6 +115,30 @@ def test_lectures_taught_follow_the_course_order(tmp_path):
     # A course code or a year in the name must not count later lectures as taught.
     assert lectures_taught(tmp_path, {"lecture": "Lecture 5.2 (CS1234, Week 5, 2026)"}) == [
         "Lecture_5-A", "Lecture_5.2-B"]
+    # The exact name, as the pipeline writes it, in the same order.
+    assert lectures_taught(tmp_path, {"lecture": "Lecture_5.2-B"}) == [
+        "Lecture_5-A", "Lecture_5.2-B"]
+
+
+def test_lectures_taught_follow_the_numbers_in_any_file_name(tmp_path):
+    lectures = tmp_path / "cache" / "lectures"
+    lectures.mkdir(parents=True)
+    for name in ("CS1234_L10_Topic", "CS1234_L2_Topic", "CS1234_L3_Topic"):
+        (lectures / f"{name}.pdf.md").write_text("", encoding="utf-8")
+
+    assert lectures_taught(tmp_path, {"lecture": "CS1234_L3_Topic"}) == [
+        "CS1234_L2_Topic", "CS1234_L3_Topic"]  # 10 is later, though "10" < "2" as text
+
+
+def test_a_file_with_no_number_leaves_only_the_exercises_own_lecture_taught(tmp_path):
+    """Alphabetical order is not the course's, so nothing is guessed."""
+    lectures = tmp_path / "cache" / "lectures"
+    lectures.mkdir(parents=True)
+    for name in ("Backprop", "Perceptrons"):
+        (lectures / f"{name}.pdf.md").write_text("", encoding="utf-8")
+
+    with pytest.warns(UserWarning, match="course order is unknown"):
+        assert lectures_taught(tmp_path, {"lecture": "Perceptrons"}) == ["Perceptrons"]
 
 
 def test_a_verdict_is_saved_and_kept_while_nothing_changes(tmp_path):
