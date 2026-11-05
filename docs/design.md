@@ -2627,6 +2627,17 @@ gaps. Each was decided by the owner; change one only with the owner.
   This holds for this course and its size, on a small sample; a lecture too large for the prompt or
   a course with no `coverage.md` reopens it. All the numbers and reasons, and where retrieval could
   still earn its place, are in "RAG".
+- No opt-in flag before lecture text goes to a model, and no "untrusted data" wrapper around the
+  owner's own inputs to a prompt (owner, 2026-11-06, after GitHub's AI scanning flagged the
+  concept index and the plan's `coverage.md`). Sending the lecture to a model is what the tool
+  is for (generation, slide transcription, the judge), and the README says what leaves the
+  machine; a role in `[llm.roles]` is the opt-in, and it chooses the provider, local or cloud.
+  `coverage.md` and the preferences are written by the owner, whom the pipeline only proposes
+  changes to, and every plan is approved before anything is generated; whoever can edit them
+  can edit `workspace.toml` or the code. Markers in a prompt do not stop injection anyway, and
+  the suggested cut to 8,000 characters would drop rows of a real `coverage.md` (about 14,000).
+  The untrusted input is lecture material, answered by layer A and the test-run container (see
+  "Code execution safety").
 
 ## Deferred
 
