@@ -1517,6 +1517,21 @@ answers are right and cite the right pages. Start from hybrid + neighbours, whic
 found 0.90 across the course. The generation test's warning may carry over, as less context brought
 more misstatements; that is untested for answers.
 
+## Hand-calculation exercises
+
+Decided 2026-11-05 (owner), for a course examined closed-book with a calculator: the learner works numbers
+out by hand and writes them into `student.py` as named constants. No rule changes, as the format already
+fits. The tests compare each constant within a tolerance, a mutant is the numbers one specific mistake gives,
+and the oracle computes them from the formula, so a wrong answer key fails rule 4. A hand-made one and 9
+generated ones are VALID. The format lives in the workspace's `conventions.md`, not in the prompts, as other
+courses still write code.
+
+A failing test's traceback prints the expected value, which here is the answer: the generation setting
+`hide_answers` writes a `pytest.ini` in the batch folder, so a run shows only each test's name and result. It
+is set per run, as a code batch of the same course needs its tracebacks, and not inferred, as no field marks
+an exercise as hand calculation. The answers are still in `test_student.py`, and in `first_error` in the
+attempt log. Multiple choice and short answer are outside this: the validator cannot check them.
+
 ## Evaluation metrics (README results table)
 
 - First-pass validity rate; validity after repair loop.

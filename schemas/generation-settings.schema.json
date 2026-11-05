@@ -119,6 +119,12 @@
       ],
       "title": "Mode",
       "type": "string"
+    },
+    "hide_answers": {
+      "default": false,
+      "description": "For a batch of hand-calculation exercises: a pytest.ini in the batch folder makes a test run show only PASSED or FAILED, as a traceback would print the right number.",
+      "title": "Hide Answers",
+      "type": "boolean"
     }
   },
   "title": "GenerationSettings",

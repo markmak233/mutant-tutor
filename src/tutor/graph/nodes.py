@@ -60,6 +60,11 @@ OWN_FILES = {"student.py", "test_student.py", "hints.md", "question.md"}
 REPO = Path(__file__).resolve().parents[3]  # for the manifest's git commit
 PLAN_RETRIES = 2  # extra plan calls when the plan breaks a rule checked here
 UNREAD = ("pending", "partial")  # cached pages whose transcription is missing or cut off
+# On a hand-calculation exercise a failing test's traceback and summary print the answer. In
+# the batch folder, written by code: the validator's temp dirs never read it, and a model's
+# files may not hold a pytest.ini (the safe check).
+ANSWER_HIDING_INI = ("[pytest]\n# Hand-calculation batch: a traceback or summary would print "
+                     "the right numbers.\naddopts = --tb=no -rN -v\n")
 _LOG_LOCK = threading.Lock()  # items run in parallel threads and share the batch log
 
 
@@ -90,6 +95,7 @@ class Deps:
     max_tokens_no_thinking: int = DEFAULTS.max_tokens_no_thinking
     thinking: bool = DEFAULTS.thinking
     mode: str = DEFAULTS.mode
+    hide_answers: bool = DEFAULTS.hide_answers
     repair_temperature_step: float = DEFAULTS.repair_temperature_step
     plan_thinking: bool = DEFAULTS.plan_thinking
     stronger_repair_from: int = DEFAULTS.stronger_repair_from
@@ -763,6 +769,9 @@ def write_manifest(deps: Deps, items: list[PlanItem], notes: str | None = None,
     partial.write_text(manifest.model_dump_json(indent=2, exclude_none=True) + "\n",
                        encoding="utf-8")
     partial.replace(path)
+    ini = deps.batch_dir / "pytest.ini"
+    if deps.hide_answers and not ini.exists():  # an owner's own file stays
+        ini.write_text(ANSWER_HIDING_INI, encoding="utf-8")
 
 
 # --- the batch: plan, owner's decision, collect -----------------------------------------

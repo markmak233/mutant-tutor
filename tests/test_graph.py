@@ -2,6 +2,8 @@
 
 import json
 import re
+import subprocess
+import sys
 
 import pytest
 
@@ -518,6 +520,35 @@ def test_an_item_saved_before_is_not_saved_again_nor_overwritten(tmp_path):
     (d.batch_dir / "generation.jsonl").unlink()  # not saved by this pipeline: refuse
     with pytest.raises(FileExistsError, match="never overwrite"):
         nodes.save(state, d)
+
+
+def test_hide_answers_keeps_a_failing_test_from_printing_the_answer(tmp_path):
+    """The run still names the test and its result, and the number stays hidden."""
+    d = deps(tmp_path, None, hide_answers=True)
+    write_manifest(d, [ITEM])
+    exercise = d.batch_dir / "exercises" / "by-hand"
+    exercise.mkdir(parents=True)
+    (exercise / "test_student.py").write_text(
+        "def check(value, expected):\n    assert value == expected\n\n\n"
+        "def test_total():\n    check(None, 123.456)\n", encoding="utf-8")
+
+    run = subprocess.run([sys.executable, "-m", "pytest", "test_student.py"], cwd=exercise,
+                         capture_output=True, text=True)
+
+    assert "test_total FAILED" in run.stdout
+    assert "123.456" not in run.stdout + run.stderr
+
+
+def test_hide_answers_is_off_by_default_and_keeps_an_existing_file(tmp_path):
+    """A code exercise needs its tracebacks, so the file is only written when asked for."""
+    d = deps(tmp_path, None)
+    write_manifest(d, [ITEM])
+    assert not (d.batch_dir / "pytest.ini").exists()
+
+    (d.batch_dir / "pytest.ini").write_text("[pytest]\n", encoding="utf-8")
+    other = ITEM.model_copy(update={"id": "sum-squares"})
+    write_manifest(deps(tmp_path, None, hide_answers=True), [other])
+    assert (d.batch_dir / "pytest.ini").read_text(encoding="utf-8") == "[pytest]\n"
 
 
 def test_listing_saved_items_again_leaves_the_manifest_unchanged(tmp_path):
