@@ -25,12 +25,12 @@ def make_workspace(tmp_path: Path, mode: str | None = "review") -> Path:
     return exercise
 
 
-def run_pytest_in(folder: Path, workspace: Path) -> None:
+def run_pytest_in(folder: Path, workspace: Path) -> subprocess.CompletedProcess:
     """Run pytest the way the owner does, from the exercise folder, with the plugin."""
     env = {**os.environ, "WORKSPACE_DIR": str(workspace), "PYTHONDONTWRITEBYTECODE": "1"}
-    subprocess.run(
+    return subprocess.run(
         [sys.executable, "-m", "pytest", "-q", "-p", "tutor.attempts", "-p", "no:cacheprovider"],
-        cwd=folder, env=env, capture_output=True, timeout=60,
+        cwd=folder, env=env, capture_output=True, text=True, timeout=60,
     )
 
 
@@ -121,6 +121,39 @@ def test_runs_outside_the_workspace_are_not_recorded(tmp_path):
     run_pytest_in(elsewhere, tmp_path / "ws")
 
     assert not (tmp_path / "ws" / "attempts").exists()
+    assert not (tmp_path / "ws" / "reports").exists()
+
+
+def test_each_recorded_run_brings_the_report_up_to_date(tmp_path):
+    """Failing, then passing: the report follows, and holds no first error, which on a
+    hand-calculation exercise can be the answer."""
+    exercise = make_workspace(tmp_path)
+    manifest = tmp_path / "ws" / "batches" / "2026-10-25_p2-w2" / "manifest.json"
+    manifest.write_text(json.dumps({"exercises": ["word-count"]}), encoding="utf-8")
+    report = tmp_path / "ws" / "reports" / "report.md"
+
+    run_pytest_in(exercise, tmp_path / "ws")
+    # Exercises, Skip, Passed, Started, then the other columns.
+    assert "| 2026-10-25_p2-w2 | 1 | 0 | 0 | 1 |" in report.read_text(encoding="utf-8")
+    assert "adds wrong" not in report.read_text(encoding="utf-8")
+
+    (exercise / "test_student.py").write_text("def test_ok():\n    assert True\n", encoding="utf-8")
+    run_pytest_in(exercise, tmp_path / "ws")
+    assert "| 2026-10-25_p2-w2 | 1 | 0 | 1 | 0 |" in report.read_text(encoding="utf-8")
+
+
+def test_a_report_that_cannot_be_built_costs_only_a_warning(tmp_path):
+    """A file where the report's folder should be: the run keeps its result and its log line."""
+    exercise = make_workspace(tmp_path)
+    (exercise / "test_student.py").write_text("def test_ok():\n    assert True\n", encoding="utf-8")
+    (tmp_path / "ws" / "reports").write_text("in the way", encoding="utf-8")
+
+    run = run_pytest_in(exercise, tmp_path / "ws")
+
+    assert run.returncode == 0
+    assert "report not updated" in run.stdout
+    [line] = attempts(tmp_path / "ws")
+    assert line["result"] == "passed"
 
 
 def test_a_run_with_a_skipped_test_is_incomplete_not_passed(tmp_path):

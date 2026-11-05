@@ -19,9 +19,10 @@ attempts/code/<batch>/<exercise>/<hash>.py (one copy per distinct content), name
 line's "code" field: the owner's real mistakes, replayable as wrong solutions that an
 exercise's tests must catch (the held-out set, roadmap 3b).
 
-Nothing reads the file in phase 2; it is kept for choosing review batches later and as
-material for hint rules and mutants. Recording never changes a test result: any problem
-becomes a warning.
+The held-out checks, the hint command and the evaluation report read the file; it is also
+kept for choosing review batches later. After a run is recorded the workspace's private report
+is rebuilt (tutor.eval.report), so it follows the solving with no extra step. Recording never
+changes a test result: any problem becomes a warning.
 """
 
 from __future__ import annotations
@@ -36,7 +37,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from tutor.config import WorkspaceError, load_env, load_workspace
+from tutor.config import Workspace, WorkspaceError, load_env, load_workspace
 
 ATTEMPTS_FILE = "attempts.jsonl"
 CODE_DIR = "code"  # snapshots of failing student.py files, inside attempts/
@@ -49,6 +50,8 @@ _ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 
 @dataclass
 class _Tally:
+    """What the tests of one file, or of one exercise, did in this run."""
+
     passed: int = 0
     failed: int = 0
     errors: int = 0
@@ -56,12 +59,14 @@ class _Tally:
     first_error: str | None = None
 
 
+# pytest calls the hooks below as plain functions, so one run's state lives in the module.
 _config = None
 _started = 0.0
 _tallies: dict[Path, _Tally] = {}  # test file -> results
 
 
 def pytest_configure(config):
+    """The run starts: keep the config, whose rootpath turns a test's id into its file."""
     global _config, _started
     _config, _started = config, time.monotonic()
     _tallies.clear()
@@ -74,6 +79,7 @@ def pytest_collectreport(report):
 
 
 def pytest_runtest_logreport(report):
+    """Each test reports up to three times, for setup, call and teardown; one outcome counts."""
     if report.skipped and report.when in ("setup", "call"):
         _record(report, "skipped")
     elif report.when == "call":
@@ -86,6 +92,7 @@ def pytest_runtest_logreport(report):
 
 
 def pytest_sessionfinish(session, exitstatus):
+    """The run ended: write what it did."""
     try:
         _write(time.monotonic() - _started, interrupted=exitstatus == INTERRUPTED)
     except Exception as e:  # never let bookkeeping break a test run
@@ -104,6 +111,7 @@ def exercise_of(test_file: Path, workspace_root: Path) -> tuple[str, str] | None
 
 
 def _record(report, kind: str) -> None:
+    """Count one outcome against its test file, and keep the file's first error."""
     if _config is None:
         return
     test_file = _config.rootpath / report.nodeid.split("::")[0]
@@ -126,6 +134,8 @@ def _short_error(report) -> str:
 
 
 def _write(duration_s: float, interrupted: bool = False) -> None:
+    """Append one line per exercise this run touched, then rebuild the report. A run of no
+    workspace exercise (the validator's, the repo's own tests) leaves no trace."""
     if not _tallies:
         return
     # Tests run from a workspace folder, so the repo's .env is loaded by path.
@@ -133,6 +143,7 @@ def _write(duration_s: float, interrupted: bool = False) -> None:
     root = os.environ.get("WORKSPACE_DIR")
     if not root:
         return
+    # Add test files up per exercise: pytest started higher up may run several files of one.
     by_exercise: dict[tuple[str, str], _Tally] = {}
     for test_file, tally in _tallies.items():
         key = exercise_of(test_file, Path(root))
@@ -175,6 +186,19 @@ def _write(duration_s: float, interrupted: bool = False) -> None:
                 if code := _snapshot(student, workspace.attempts_dir, batch, exercise):
                     line["code"] = code
             f.write(json.dumps(line, ensure_ascii=False) + "\n")
+    _rebuild_report(workspace)  # after the file is closed, so the report holds this run
+
+
+def _rebuild_report(workspace: Workspace) -> None:
+    """Bring the private report up to date. Imported here as this plugin loads in every pytest
+    run of the venv and only a recorded run needs it. The attempt is already safe on disk, so a
+    failure here costs a stale report and a warning, and never the test result."""
+    try:
+        from tutor.eval.report import write_report
+
+        write_report(workspace.root, workspace.course)
+    except Exception as e:
+        warnings.warn(f"report not updated: {e}", stacklevel=1)
 
 
 def _snapshot(student: Path, attempts_dir: Path, batch: str, exercise: str) -> str | None:

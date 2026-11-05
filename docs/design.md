@@ -165,7 +165,7 @@ smartCodingReview/                       # public repo (the `tutor/` above), cod
 │   ├── llm.py                           # P3a thin OpenAI-compatible client, standard library only, no LangChain
 │   ├── graph/                           # P3 langgraph dependency added here
 │   ├── retrieval/                       # P4 the page corpus, labels, scores and each route
-│   └── eval/                            # P5
+│   └── eval/                            # P5 a report from the pipeline's own records, no model calls
 ├── examples/                            # P1 synthetic only, same shape as a real exercise
 │   ├── station-average-rdd/             # function-level: per-key average in PySpark RDD
 │   │   ├── exercise/
@@ -227,7 +227,7 @@ smartcodereview-workspace/
     ├── attempts/code/                   # the student.py of each failed run, once per content
     ├── ratings.jsonl                    # one teaching-quality rating per solved exercise
     ├── index/                           # P4 BM25 / vector index, rebuildable
-    └── runs/<date>_<label>/             # P5 evaluation outputs
+    └── reports/report.md                # P5 rebuilt after each recorded run; names exercises, so private
 ```
 
 - Batch name: `YYYY-MM-DD_p<phase>-<label>`, suffix `-2`, `-3` for repeat runs on the same day.
@@ -1538,6 +1538,16 @@ attempt log. Multiple choice and short answer are outside this: the validator ca
 - Mutant kill rate.
 - Tokens / cost per valid exercise.
 - Across models. With vs without retrieval was settled in phase 4 (see "RAG").
+
+`python -m tutor.eval report` reads a workspace's records, calls no model and writes its private
+`reports/report.md`: progress, generation, first drafts, checks on saved exercises and model calls, then
+what the numbers cannot show and the gaps in the records. The attempts plugin rebuilds it after every
+recorded run (owner, 2026-11-05), so it follows the solving with no extra step; a rebuild took about 0.05 s
+on 49 exercises, and a failure there is only a warning. It overwrites one file, not one per run, as a dated
+copy per test run would pile up. In a generated batch, an exercise whose `student.py` differs from its skeleton
+with no logged run is listed, which shows runs lost outside the course venv; a batch written by hand has a
+`student.py` that differs from the start, so there it cannot be seen. No `first_error`, failure detail or rating remark
+is copied, as any of them can hold an answer. The README's table is public, so it changes only on request.
 
 ## Prompt layout for caching
 
