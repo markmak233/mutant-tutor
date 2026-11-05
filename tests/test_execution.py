@@ -159,9 +159,7 @@ def test_timeout_kills_the_whole_process_group(tmp_path, monkeypatch):
     assert result.outcome is Outcome.TIMEOUT
     assert result.returncode is None
     assert result.duration_s < 10
-    child_pid = int(pid_file.read_text(encoding="utf-8"))
-    time.sleep(0.2)
-    assert not _alive(child_pid)
+    assert _ends_soon(int(pid_file.read_text(encoding="utf-8")))
 
 
 def test_a_process_left_behind_by_a_finished_run_is_killed(tmp_path):
@@ -182,7 +180,7 @@ def test_a_process_left_behind_by_a_finished_run_is_killed(tmp_path):
     result = run_pytest({"test_leaves.py": test})
 
     assert result.outcome is Outcome.PASSED
-    assert not _alive(int(pid_file.read_text(encoding="utf-8")))
+    assert _ends_soon(int(pid_file.read_text(encoding="utf-8")))
 
 
 def test_the_time_limit_is_scaled_on_windows_only(monkeypatch):
@@ -235,7 +233,28 @@ def test_temp_dir_is_removed_and_sources_untouched(tmp_path):
     assert sorted(p.name for p in tmp_path.iterdir()) == before
 
 
+def _ends_soon(pid: int, within_s: float = 5.0) -> bool:
+    """Whether the process ends within `within_s`. A SIGKILL is not instant: the process can
+    still be running for a moment, and once dead it stays a zombie until its new parent reaps
+    it, which os.kill(pid, 0) also counts as alive. Measured 2026-11-06 in a Linux container
+    after a finished run: 1 of 20 still running at the first look, gone 0.2 s later; with a
+    PID 1 that reaps nothing, all 20 zombies. Linux CI failed on that first look."""
+    deadline = time.monotonic() + within_s
+    while _alive(pid):
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.05)
+    return True
+
+
 def _alive(pid: int) -> bool:
+    """Running, or not yet killed; a zombie has ended (it holds no files and runs nothing)."""
+    if sys.platform.startswith("linux"):
+        try:
+            stat = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return False
+        return stat.rsplit(") ", 1)[1].split()[0] != "Z"  # the name in () may hold spaces
     if sys.platform == "win32":
         # os.kill(pid, 0) would terminate the process on Windows; ask for its exit code.
         import ctypes
