@@ -2,26 +2,31 @@
 
 Exercises name their lecture and pages in metadata `source`, in the forms the batches
 happen to use ("L2.2", "Lecture 5: Topic C", "Lecture_4.2-Topic_B"; pages "12-15, 20",
-"p.8-p.10", "L1.1 3-8; L1.2 5-9"). Only the lecture's number is reliable, so the cache
-file is found by it (cache/lectures/Lecture_<number>-....pdf.md).
+"p.8-p.10", "L1.1 3-8; L1.2 5-9"). A model writes that text, so only the number after the
+word for lecture is reliable, and the cache file is found by it
+(cache/lectures/Lecture_<number>-....pdf.md).
 
 Used by the held-out writer (tutor/heldout_writer.py) and the teaching-quality judge
 (tutor/judge/): both see the whole lecture with the exercise's own pages marked, as
-generation sees it when it fits.
+generation sees it when it fits. A named lecture that yields no pages is a warning: both
+still run without slides, and their results then mean less.
 """
 
 from __future__ import annotations
 
 import re
+import warnings
 from pathlib import Path
 
 from tutor.materials import cache
 
 # Characters of lecture pages a prompt may hold, as generation's context_chars: lectures
-# that fit go whole, else only the exercise's own pages (the largest lecture is ~53k).
+# that fit go whole, else only the exercise's own pages. Courses differ: one's largest lecture
+# is ~53k characters, another's ~200k.
 CONTEXT_CHARS = 120_000
-# A lecture number as names write it: "2.2", "5", "7.1".
-_NUMBER = re.compile(r"\d+(?:\.\d+)?")
+# A lecture's number where a name writes it: "L2.2", "Lecture 5:", "Lecture_7.1-", "Lectures 3".
+# Only right after that word, or "Lecture 7 (CS1234, Week 7, 2026)" would name four lectures.
+_NUMBER = re.compile(r"\b(?:Lectures?|L)[\s_]*(\d+(?:\.\d+)?)", re.IGNORECASE)
 # "L1.1 3-8, 12": a group of pages that names its lecture first.
 _LABELLED = re.compile(r"^\s*L(\d+(?:\.\d+)?)\s+(.*)$")
 # A cache file's name: "Lecture_7.1-Some_Topic.pdf.md" -> "7.1".
@@ -29,18 +34,20 @@ _CACHE_NAME = re.compile(r"^Lecture_(\d+(?:\.\d+)?)[-_]")
 
 
 def lecture_numbers(source) -> list[str]:
-    """The lecture numbers metadata `source.lecture` names, in order: "L2.1, L2.2" ->
-    ["2.1", "2.2"]. [] for a hand-made exercise's "synthetic" source."""
+    """The lecture numbers metadata `source.lecture` names, in order and each once:
+    "L2.1, L2.2" -> ["2.1", "2.2"]. [] for a hand-made exercise's "synthetic" source."""
     if not isinstance(source, dict):
         return []
-    return _NUMBER.findall(source.get("lecture") or "")
+    # Each once: pages without a label belong to "the only lecture", which a repeat would hide.
+    return list(dict.fromkeys(_NUMBER.findall(source.get("lecture") or "")))
 
 
 def lecture_context(workspace: Path, source, limit: int = CONTEXT_CHARS) -> str:
     """The lectures metadata `source` names, as "## <lecture> p.N · slide L" sections, the
     exercise's own pages (`source.pdf_pages`) marked. Whole lectures if they fit in
-    `limit` characters, else only the exercise's own pages. "" when no lecture is found (a
-    hand-made exercise's "synthetic" source, or a lecture not in the cache)."""
+    `limit` characters, else only the exercise's own pages. "" for a hand-made exercise's
+    "synthetic" source; also "", with a warning, when `source` names a lecture but no page of
+    it is found (not in the cache, or too long with its own pages unreadable)."""
     if not isinstance(source, dict):
         return ""
     numbers = lecture_numbers(source)
@@ -63,6 +70,9 @@ def lecture_context(workspace: Path, source, limit: int = CONTEXT_CHARS) -> str:
                 label = f" · slide {e.label}" if e.label else ""
                 mark = " · this exercise's page" if number in mine else ""
                 sections.append(f"## {name} p.{number}{label}{mark}\n{e.body}")
+    if not sections and source.get("lecture"):
+        warnings.warn(f"no pages found for lecture {source['lecture']!r} (pdf_pages "
+                      f"{source.get('pdf_pages')!r}): this runs without slides", stacklevel=2)
     return "\n\n".join(sections)
 
 

@@ -112,6 +112,9 @@ def test_lectures_taught_follow_the_course_order(tmp_path):
     assert lectures_taught(tmp_path, {"lecture": "L9"}) == [
         "Lecture_5-A", "Lecture_5.2-B", "Lecture_9-C"]  # 10 is later, though "10" < "9"
     assert lectures_taught(tmp_path, "synthetic") == []
+    # A course code or a year in the name must not count later lectures as taught.
+    assert lectures_taught(tmp_path, {"lecture": "Lecture 5.2 (CS1234, Week 5, 2026)"}) == [
+        "Lecture_5-A", "Lecture_5.2-B"]
 
 
 def test_a_verdict_is_saved_and_kept_while_nothing_changes(tmp_path):

@@ -17,7 +17,12 @@ from tutor.heldout_writer import (
     write,
 )
 from tutor.materials import cache
-from tutor.materials.slides import lecture_context, lecture_file, page_groups
+from tutor.materials.slides import (
+    lecture_context,
+    lecture_file,
+    lecture_numbers,
+    page_groups,
+)
 
 SKELETON = '"""Add two numbers."""\n\ndef add(a, b):\n    raise NotImplementedError\n'
 OWNER = "def add(a, b):\n    return a + b  # the owner's answer\n"
@@ -131,6 +136,46 @@ def test_a_lecture_that_fits_goes_whole_with_the_exercises_pages_marked(tmp_path
     cut = lecture_context(workspace, source, limit=10)  # too long: own pages only
     assert "page 3 body" in cut and "page 4 body" in cut and "page 1 body" not in cut
     assert lecture_context(workspace, "synthetic") == ""
+
+
+@pytest.mark.parametrize(("lecture", "expected"), [
+    ("L2.2", ["2.2"]),
+    ("L2.1, L2.2", ["2.1", "2.2"]),
+    ("Lecture 5: Topic C", ["5"]),
+    ("Lecture 7.1 Topic E", ["7.1"]),
+    ("Lecture_4.2-Topic_B", ["4.2"]),
+    ("Lectures 3.1, Lecture 3.2", ["3.1", "3.2"]),
+    ("lecture 6", ["6"]),
+    ("Lecture 7 - Topic G (CS1234 Some Course, Week 7, 2026)", ["7"]),  # not 1234, 7 and 2026
+    ("Lecture 7, again Lecture 7", ["7"]),  # one lecture, so unlabelled pages are its own
+    ("Level 3 of Topic A", []),
+    ("", []),
+])
+def test_only_the_number_after_the_word_for_lecture_counts(lecture, expected):
+    assert lecture_numbers({"lecture": lecture}) == expected
+
+
+def test_other_numbers_in_a_lecture_name_keep_the_exercises_own_pages(tmp_path):
+    """A long lecture sends only the exercise's pages. Reading 1234 or 2026 as lectures left the
+    pages with no owner, and the judge ran with no slides at all."""
+    workspace, _ = make_batch(tmp_path)
+    source = {"lecture": "Lecture 2.2 - Topic B (CS1234, Week 2, 2026)", "pdf_pages": "p.3-p.4"}
+
+    cut = lecture_context(workspace, source, limit=10)
+
+    assert "page 3 body" in cut and "page 4 body" in cut and "page 1 body" not in cut
+
+
+def test_a_named_lecture_with_no_pages_warns_and_a_synthetic_source_does_not(tmp_path, recwarn):
+    workspace, _ = make_batch(tmp_path)
+
+    assert lecture_context(workspace, "synthetic") == ""
+    assert len(recwarn) == 0
+
+    with pytest.warns(UserWarning, match="no pages found for lecture 'L9'"):
+        assert lecture_context(workspace, {"lecture": "L9", "pdf_pages": "1"}) == ""
+    with pytest.warns(UserWarning, match="runs without slides"):  # too long, own pages unknown
+        assert lecture_context(workspace, {"lecture": "L2.2", "pdf_pages": "?"}, limit=10) == ""
 
 
 def test_the_model_sees_question_skeleton_data_and_slides_only(tmp_path):
