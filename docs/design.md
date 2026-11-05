@@ -2663,22 +2663,45 @@ is not done (see "Decisions not to do").
   frameworks the slides use, never how heavy they are; an unmeasured framework counts as heavy.
 - Adaptive review (a maybe): use `attempts.jsonl` (failures, run counts, hints used) and `coverage.md`
   to find weak knowledge points and schedule `review`-mode batches with spaced repetition.
-- Packaging and release: `pipx install`, one command to start, CI on macOS and Windows
+- Packaging and release: an install line, one click to start, CI on macOS and Windows
   (WSL) as well, versioned releases after `v0.1.0`.
+  - One click (the owner's aim, 2026-11-05; a plan for the release, not built): one install
+    line gets `uv`, which fetches the Python it needs and installs the tool (`uv tool install`,
+    the same job as `pipx`, without needing Python first). `tutor gui` starts the server and
+    opens the browser with that launch's token. `tutor shortcut` writes a desktop shortcut on
+    this machine (`.command` or a small `.app`, `.lnk`, `.desktop`); made here and not
+    downloaded, it should not meet macOS Gatekeeper or need signing, to be tested. A second
+    click finds the running server from a small file with its port and token and only opens
+    the browser. Not a frozen app (PyInstaller): a build per platform, paid signing on macOS,
+    and each course's venv needs a real Python anyway.
+  - What a user still installs: that one line, for all; an IDE to solve in; an API key or a
+    local model to generate; Java and Hadoop for such courses, since the learner's runs stay
+    on the host (the page gives the commands); Docker Desktop to choose the container. A plain
+    Python course needs only the line and a key.
 
 Local GUI (phase 7: after the second course, just before packaging and release;
 discussed 2026-10-26). It sits on top of the files and functions the earlier phases build,
 so it comes late; the adaptive review screens can be built with it.
-- Shape: a local web app (FastAPI backend reusing the CLI functions, which a later MCP server
-  could share too, plus a light frontend), bound to `127.0.0.1` with a per-launch token or a
-  Host header check so other web pages cannot drive it.
-- Frontend without an npm build chain (candidate, owner 2026-10-27; confirm when the GUI
-  phase starts): server-rendered Jinja2 templates plus htmx as one vendored JS file.
+- Shape: a local web app (a thin Flask backend reusing the CLI functions, which a later MCP
+  server could share too, plus a light frontend), served by waitress, bound to `127.0.0.1`
+  with a per-launch token or a Host header check so other web pages cannot drive it.
+- Stack (owner, 2026-11-05; it was FastAPI, and the frontend a candidate since 2026-10-27),
+  chosen for low long-term upkeep: Flask, waitress and Jinja2 are 8 packages in a clean
+  Python 3.11 environment, against 17 for FastAPI, uvicorn, Jinja2 and `python-multipart`
+  (12 new here, since pydantic is already a dependency), 33 for Streamlit (it brings pandas
+  and pyarrow) and 50 for NiceGUI. Werkzeug parses uploads, so no `python-multipart`, which
+  had five advisories in 2026 so far, mostly denial of service, little on a local app, but
+  each one an upgrade. Flask is synchronous, as the `tutor` functions are. FastAPI would read
+  better on a CV and was the trade-off accepted. Long tasks (generation, validation) run the
+  existing CLI as a child process writing a log file, and the page polls it: no WebSocket, and
+  a GUI crash does not stop the task.
+- Frontend without an npm build chain: server-rendered Jinja2 templates, htmx 2.x as one
+  vendored JS file with a fixed version, and one small hand-written CSS file (htmx 4 shipped
+  in 2026-08 with breaking changes; a vendored file does not move until we move it).
   Reason: most security alerts in web projects come from deep npm dependency trees and
   build tools; without npm, Dependabot only watches the Python side. A desktop shell is no
   better (Electron ships Chromium and still uses npm). The screens are manage-and-browse
-  pages that do not need a SPA framework. What still needs care: the Python server deps
-  (FastAPI, Starlette, uvicorn, `python-multipart` for uploads), and escaping everything not
+  pages that do not need a SPA framework. What still needs care: escaping everything not
   written by us (lecture text, LLM hints, learner code) to prevent XSS.
 - Manage, do not edit: drag lectures and lab files into the workspace, pick sources and start
   generation with the preference chat box (approving the batch plan there if phase 3 adopts
@@ -2688,6 +2711,9 @@ so it comes late; the adaptive review screens can be built with it.
 - Solving stays in the IDE: an "Open in IDE" button runs `code <exercise dir>` (or a
   `vscode://file/...` link; JetBrains has its own launcher). The GUI never runs the learner's
   tests; the IDE's `pytest` and the attempts plugin stay the one record of attempts.
+- An "Open folder" button next to it (owner, 2026-11-05) on course, batch and exercise pages
+  shows the folder in Finder or Explorer. Only paths inside the workspace, and never a way
+  into `solutions/`.
 - Shows only `exercises/`; `solutions/` (reference, pseudocode) at most after the exercise is
   solved and on explicit request, matching the tutoring rule.
 - Files stay the source of truth; no database (SQLite remains deferred).
@@ -2711,18 +2737,35 @@ so it comes late; the adaptive review screens can be built with it.
     for each one: what it does, where it installs, whether it needs sudo / admin, what it
     changes outside the project (PATH, JAVA_HOME, shell profile), the download source, and
     how to undo it.
-  - Python packages into the project venv: one click, after the same review (a broken venv
+  - Python packages into the course's own venv (one venv per course, owner, 2026-11-05; the
+    project venv holds only the tool): one click, after the same review (a broken venv
     is deleted and rebuilt). Everything else, the user runs in their own terminal, then
     clicks "Check again". The GUI never runs system installs, and never runs LLM-written
     commands (arbitrary commands; hallucinated package names can be squatted). A component
     or platform missing from the recipes is reported as needing a new recipe.
   - One click after uploading a new course's slides creates its workspace venv and terminal files
-    (owner's wish, 2026-11-04), by calling `python -m tutor.workspace init`. The click above assumes one
-    project venv, so settle how the two fit when the GUI phase starts.
+    (owner's wish, 2026-11-04), by calling `python -m tutor.workspace init`.
   - This partly changes "Check, don't install" (see "Environment"): confirm with the owner
-    when the GUI phase starts. The per-course test-run container (layer B, "Code execution
-    safety") arrives with the generalization phase, before the GUI; whether setup also uses
-    it is decided when the GUI phase starts.
+    when the GUI phase starts.
+  - The test-run container (layer B, "Code execution safety"; owner, 2026-11-05). The GUI
+    itself stays on the host, since it opens the IDE and folders and reads keys; only test
+    runs go into the container. The page shows, per course: Docker missing, not running,
+    image missing or out of date, or ready, with the image's size and "Check again". A "Build
+    image" button is allowed, since the recipe comes from our code and not from a model; it
+    shows the recipe, download source and expected size first. The user installs and starts
+    Docker. The venv click does not build the image, which may be 2 GB: that waits until
+    `[requires]` is confirmed. The user chooses host or container for a new course, nothing
+    switched silently, with a warning when it matters: choosing the host (generated code runs
+    with their rights), and a course set to the container while Docker is not available.
+- Packaging the GUI itself as an image (owner asked, 2026-11-05: the aim is opening it in one click,
+  see "Packaging and release", which does not need this, so an image is at most a later option). The
+  costs: to start test containers from inside, it needs the Docker socket, which amounts to root on
+  the Docker host, so that form must say so plainly; "Open folder" cannot work, and "Open in IDE"
+  only as a `vscode://` link the browser opens; the OS keychain is out of reach; the sibling
+  containers' mounts need the host's paths, not the paths inside; inside it binds all interfaces
+  (the host side stays `-p 127.0.0.1:...`), so the token matters more. To keep that door open at no
+  cost: paths come from configuration, starting a run stays in one place (`execution.py`), and the
+  open-folder and IDE actions sit behind one small function that can report "not available".
 
 ## Open questions
 
