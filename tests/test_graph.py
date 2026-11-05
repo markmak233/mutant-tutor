@@ -376,11 +376,11 @@ def test_a_plan_breaking_the_rules_is_asked_for_again_with_the_problems(workspac
 
 
 def test_page_titles_skip_the_footer_line(workspace):
-    entries = [cache.Entry(13, "4.15", "text", "h", "4.15\nPassing Functions to RDD\n❖ Spark")]
+    entries = [cache.Entry(13, "6.7", "text", "h", "6.7\nA Made-Up Title\n❖ A topic")]
     cache.save(cache.cache_path(workspace, workspace / "lectures" / "L4.pdf"),
                cache.render("L4.pdf", entries))
     assert nodes.page_titles(workspace, "L4").splitlines()[1] == (
-        "  p.13 · slide 4.15: Passing Functions to RDD")
+        "  p.13 · slide 6.7: A Made-Up Title")
 
 
 def test_the_owner_may_edit_the_plan_before_approving():
