@@ -59,13 +59,15 @@ def test_no_docstring_or_broken_code_gives_no_question():
 def test_a_batch_gets_question_md_from_student_py_or_the_skeleton(tmp_path):
     for exercise_id, student in (("a", QUESTION), ("b", "def broken(:\n")):
         (tmp_path / "exercises" / exercise_id).mkdir(parents=True)
-        (tmp_path / "exercises" / exercise_id / "student.py").write_text(student)
+        (tmp_path / "exercises" / exercise_id / "student.py").write_text(student, encoding="utf-8")
         (tmp_path / "solutions" / exercise_id).mkdir(parents=True)
-        (tmp_path / "solutions" / exercise_id / "skeleton.py").write_text('"""B question"""\n')
+        (tmp_path / "solutions" / exercise_id / "skeleton.py").write_text('"""B question"""\n',
+                                                                          encoding="utf-8")
     assert main([str(tmp_path)]) == 0
-    assert (tmp_path / "exercises" / "a" / "question.md").read_text().startswith("# Average")
+    question_a = tmp_path / "exercises" / "a" / "question.md"
+    assert question_a.read_text(encoding="utf-8").startswith("# Average")
     # the owner's half-edited student.py does not parse: the skeleton's question is used
-    assert (tmp_path / "exercises" / "b" / "question.md").read_text().startswith(
+    assert (tmp_path / "exercises" / "b" / "question.md").read_text(encoding="utf-8").startswith(
         "# B question\n")
 
 
@@ -81,9 +83,9 @@ def test_how_to_run_names_the_exercise_folder(tmp_path):
 
 def test_a_draft_question_has_no_how_to_run(tmp_path):
     write_question(QUESTION, tmp_path)
-    assert "How to run" not in (tmp_path / "question.md").read_text()
+    assert "How to run" not in (tmp_path / "question.md").read_text(encoding="utf-8")
     write_question(QUESTION, tmp_path, location=tmp_path)
-    assert "## How to run" in (tmp_path / "question.md").read_text()
+    assert "## How to run" in (tmp_path / "question.md").read_text(encoding="utf-8")
 
 
 
@@ -124,7 +126,7 @@ METADATA = {"source": {"lecture": "Lecture 2", "slides": "2.4-2.5"},
 
 def test_the_markdown_layout_gets_its_frame_from_code(tmp_path):
     write_question(MARKDOWN, tmp_path, location=tmp_path, metadata=METADATA, mode="learn")
-    md = (tmp_path / "question.md").read_text()
+    md = (tmp_path / "question.md").read_text(encoding="utf-8")
 
     assert md.startswith("# Count the bits\n\n"
                          "> **Lecture 2** · slides 2.4-2.5 · learn mode · implementation · easy\n")
@@ -150,15 +152,15 @@ def test_the_examples_question_md_matches_their_student_py():
     root = Path(__file__).resolve().parents[1] / "examples"
     for example in sorted(p for p in root.iterdir() if (p / "exercise").is_dir()):
         exercise = example / "exercise"
-        metadata = json.loads((example / "solution" / "metadata.json").read_text())
+        metadata = json.loads((example / "solution" / "metadata.json").read_text(encoding="utf-8"))
         rendered = exercise / "question.md"
-        before = rendered.read_text()
-        write_question((exercise / "student.py").read_text(), exercise, location=exercise,
-                       metadata=metadata, mode="learn")
+        before = rendered.read_text(encoding="utf-8")
+        write_question((exercise / "student.py").read_text(encoding="utf-8"), exercise,
+                       location=exercise, metadata=metadata, mode="learn")
         try:
-            assert rendered.read_text() == before, example.name
+            assert rendered.read_text(encoding="utf-8") == before, example.name
         finally:
-            rendered.write_text(before)
+            rendered.write_text(before, encoding="utf-8")
 
 
 

@@ -21,8 +21,9 @@ bigdata = [
     "pyspark>=3.5,<3.6",
     "mrjob==0.7.4",
 ]
-# The phase 3 generation pipeline (python -m tutor.graph); only tutor/graph/build.py and
-# its CLI import it. It pulls in langchain-core, which the project does not use. The
+# The phase 3 generation pipeline (python -m tutor.graph) and phase 4's agent route; only
+# tutor/graph/build.py, its CLI and tutor/retrieval/agent.py import it. It pulls in
+# langchain-core, which the project does not use. The
 # SQLite checkpointer keeps a planned batch waiting for the owner's approval.
 gen = [
     "langgraph>=1.2,<2",
@@ -45,9 +46,12 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["spark: slow runs that start a JVM (Spark or Hadoop); run with `pytest -m spark`"]
-# Plain `pytest` stays fast; a later `-m spark` on the command line overrides this.
-addopts = "-m 'not spark'"
+markers = [
+    "spark: slow runs that start a JVM (Spark or Hadoop); run with `pytest -m spark`",
+    "docker: real containers, needs Docker running; run with `pytest -m docker`",
+]
+# Plain `pytest` stays fast and needs no Docker; a later `-m ...` on the command line overrides this.
+addopts = "-m 'not spark and not docker'"
 # mrjob 0.7.4 imports the stdlib `pipes` module (the reason it stops at Python 3.12).
 filterwarnings = ["ignore:'pipes' is deprecated:DeprecationWarning"]
 

@@ -42,7 +42,9 @@ container for isolation is fine; deploying the tool as a service is not.
   the repo only holds the generic checker `tutor/envcheck.py`, so it stays course-agnostic.
 - Check, don't install. `python -m tutor.envcheck` checks the current workspace, and it also runs
   once before validating a batch (not per exercise: importing pyspark alone takes a second or two).
-  `tests/test_env.py` runs the same checker.
+  `tests/test_env.py` runs the same checker. One exception (owner, 2026-11-05): `python -m tutor.workspace
+  init` creates a course's own `.venv` and installs Python packages into it, and changes nothing outside
+  the course's folder. System software is still only checked.
 - Installation: Python deps as per-course extras, `pip install -e ".[bigdata]"`; system deps (Java,
   Hadoop) in a per-course guide `docs/setup/<course>.md`, linked from README (decided 2026-10-25:
   README stays course-agnostic, and each course's system deps and pitfalls differ; the guide
@@ -62,6 +64,32 @@ container for isolation is fine; deploying the tool as a service is not.
   its `yarn` binary clashes with the JavaScript `yarn`. Runs on Java 17, so one JDK serves
   both Spark and Hadoop. Hadoop launches task scripts with the `python3` on `PATH`, so jobs must
   pass `--python-bin` pointing at the project's Python 3.11.
+- Platforms (decided 2026-10-31, owner): macOS, Linux and native Windows from one code base;
+  only a few functions branch on the platform (process tree kill, see "Code execution
+  safety"). Exception: the Hadoop runner is POSIX only (macOS, Linux, WSL). Measured on
+  Windows 11 with Hadoop 3.3.6 + winutils: Hadoop itself runs, but mrjob's Hadoop runner
+  hits one Windows gap after another (a space in `JAVA_HOME` breaks `hadoop.cmd`, `bin/hadoop`
+  is a bash script, the streaming jar is not found, tasks start with `/bin/sh`), and the
+  last could not be worked around: `hadoop.cmd` splits the comma-separated `-files` argument
+  into several. mrjob is unmaintained, so on Windows the Hadoop tests and exercises are
+  skipped with a pointer to WSL; the inline runner and Spark work there. Where (2026-11-01):
+  `run_mrjob(runner="hadoop")` skips the calling test (`testkit.HADOOP_UNSUPPORTED`), so a
+  learner sees one line instead of a `hadoop.cmd` error; the validator runs rules 0, safe
+  and api on such an exercise and reports every rule that runs tests as skipped with that
+  reason, so it is not VALID. Decided (owner): no separate "cannot check here" verdict for
+  now. Known cost: generating a `hadoop` exercise on Windows would send it to repair until
+  the rounds run out, so generate those in WSL. `tutor.envcheck` adds a `winutils` line on
+  Windows when the course requires `pyspark` or `hadoop` (both files, and the folder on `PATH`).
+  Every text file is read and written as UTF-8 explicitly: Windows' default is the ANSI
+  code page, so a `·` or any Chinese character failed or was garbled (16 of 468 tests on
+  2026-10-31). ruff's `unspecified-encoding` rule found 10 of the 296 calls, since it can
+  only type a few receivers, so `tests/test_encoding.py` checks the source with `ast`, and
+  catches a missing encoding on Linux CI too. Test runs get `PYTHONIOENCODING=utf-8` for
+  their output pipe only; the code under test opens files with the platform default, as
+  in the learner's own runs.
+  Spark on Windows reads and writes files through Hadoop's native library, so it needs
+  `HADOOP_HOME` with `winutils.exe` and `hadoop.dll`, and that `bin` folder on `PATH`
+  (measured: without `PATH`, every file-level exercise failed with `UnsatisfiedLinkError`).
 
 ## Public repo vs private data
 
@@ -69,6 +97,25 @@ container for isolation is fine; deploying the tool as a service is not.
   under a sibling `smartcodereview-workspace/` directory (lectures, generated batches, attempts), located only via
   env var `WORKSPACE_DIR`. `LECTURE_DIR` is an optional override, default `$WORKSPACE_DIR/lectures`.
   Switching course = pointing `WORKSPACE_DIR` at another workspace.
+- Each workspace has its own `.venv`, as a package one course needs can change another's results
+  (numpy changes PySpark's `StatCounter`). Its VS Code terminals activate it through files kept in the
+  folder (owner, 2026-11-04, for every workspace from now on): `.vscode/settings.json` sets `ZDOTDIR`
+  through `terminal.integrated.env.osx` to `.vscode/zsh`, whose `.zshrc` loads `~/.zshrc` and then the
+  venv, and whose `.zprofile` forwards `~/.zprofile`.
+  - Why: seven solved exercises left no line in `attempts.jsonl`. The terminal was on conda's base
+    environment, where pytest runs normally but the attempts plugin is not installed, so nothing
+    warned. VS Code had the right interpreter selected, yet its own activation did not take in old or
+    new terminals; the cause was not found. Trusting `(.venv)` in the prompt had already failed once.
+  - Kept in the folder at the owner's request, so `~/.zshrc` is untouched. A `chpwd` hook in `~/.zshrc`
+    worked in a scratch shell and should also cover other terminal apps; it was not chosen because it
+    is global config. This covers VS Code terminals on macOS only.
+  - Not added, tested in a scratch folder only: `required_plugins = tutor` in a workspace `pytest.ini`
+    stops a run outside the venv with exit 4. It is the fallback if the gap returns.
+  - `.env` names one workspace, and the plugin skips tests outside it without a word, so these
+    terminals also set `WORKSPACE_DIR` and `LECTURE_DIR` to their folder.
+  - `python -m tutor.workspace init` writes all of this and keeps any file that exists (owner, 2026-11-05).
+    Checked end to end in a scratch folder, with a real venv and install, about 11 s; `docs/setup/bigdata.md`
+    has the step.
 - `config.py` refuses a `WORKSPACE_DIR` that has no `workspace.toml` (wrong directory) or that sits
   inside any git repository (same check for `LECTURE_DIR`). This is stricter than relying on `.gitignore`.
 - `.env` is read from the current directory by a ~10-line stdlib loader (no `python-dotenv`);
@@ -107,6 +154,7 @@ smartCodingReview/                       # public repo (the `tutor/` above), cod
 │   ├── __init__.py
 │   ├── config.py                        # P1 reads WORKSPACE_DIR, derives subpaths
 │   ├── envcheck.py                      # P1 checks the workspace's [requires]
+│   ├── workspace.py                     # creates a course workspace: folder, .venv, terminal files
 │   ├── execution.py                     # P1 copy to temp dir -> subprocess pytest -> delete
 │   ├── validation/                      # P1 the checks; P2 rule 0, P3a the safety check (internals designed before coding)
 │   ├── testkit.py                       # P2a run a file-level program, read part-*, compare output
@@ -116,9 +164,10 @@ smartCodingReview/                       # public repo (the `tutor/` above), cod
 │   ├── materials/                       # P3a course files -> per-file md cache (pypdfium2), vision pages
 │   ├── llm.py                           # P3a thin OpenAI-compatible client, standard library only, no LangChain
 │   ├── graph/                           # P3 langgraph dependency added here
-│   ├── rag/                             # P4
-│   └── eval/                            # P5
+│   ├── retrieval/                       # P4 the page corpus, labels, scores and each route
+│   └── eval/                            # P5 a report from the pipeline's own records, no model calls
 ├── examples/                            # P1 synthetic only, same shape as a real exercise
+│   ├── station-longest-rise/            # plain Python, no framework: running state per key
 │   ├── station-average-rdd/             # function-level: per-key average in PySpark RDD
 │   │   ├── exercise/
 │   │   └── solution/
@@ -138,6 +187,8 @@ smartCodingReview/                       # public repo (the `tutor/` above), cod
 smartcodereview-workspace/
 └── bigdata/                             # WORKSPACE_DIR points here; one workspace per course
     ├── workspace.toml                   # course name + [requires]; marks this as a workspace
+    ├── .venv/                           # this course's Python, shared by all its exercises
+    ├── .vscode/                         # settings.json, zsh/: terminals here activate .venv
     ├── AGENTS.md                        # orientation for an AI coding assistant opened here
     ├── CLAUDE.md                        # one line, `@AGENTS.md`, so Claude Code reads the same file
     ├── coverage.md                      # knowledge points per lecture -> exercise / design / not yet
@@ -177,7 +228,7 @@ smartcodereview-workspace/
     ├── attempts/code/                   # the student.py of each failed run, once per content
     ├── ratings.jsonl                    # one teaching-quality rating per solved exercise
     ├── index/                           # P4 BM25 / vector index, rebuildable
-    └── runs/<date>_<label>/             # P5 evaluation outputs
+    └── reports/report.md                # P5 rebuilt after each recorded run; names exercises, so private
 ```
 
 - Batch name: `YYYY-MM-DD_p<phase>-<label>`, suffix `-2`, `-3` for repeat runs on the same day.
@@ -368,6 +419,15 @@ explained before code since it touches `validation/`):
   and required; `entry_point` is a list of names (`["StationMax.run"]`,
   `["mapper", "reducer"]`); `source` is `"synthetic"` or an object with slides, PDF pages,
   lab and assumptions.
+- Lecture files may have any name (owner, 2026-11-05). When an exercise is saved, code sets
+  `source.lecture` to the exact cache file's name, as a model's words once cost a judge its slides:
+  a course code and a year read as extra lectures, and 3 exercises of a long lecture were judged
+  with none. No field was added, as the schema is sent to the model, so its prompt is unchanged.
+  Exercises saved earlier keep their text, where only the number after the word for lecture counts.
+  The course order comes from the numbers in the file names ("L2" before "L10"); with a name that has
+  no number the order is unknown, so nothing is guessed and only the exercise's own lecture counts as
+  taught, with a warning. A named lecture that yields no pages is a warning too. Phase 4's retrieval
+  code still reads `Lecture_<n>-` names; generation does not use it.
 - The validator checks `metadata.json` first; if it fails, every other rule is SKIPPED,
   since they read their settings from it. The message names the field and the problem.
 - Unknown fields are errors (`extra="forbid"`) and types are strict (`"yes"` is not a bool),
@@ -831,7 +891,8 @@ Design approved 2026-10-28 (owner):
   below); `generate` = DeepSeek-V4-Flash since 2026-10-29 (the week 4 rerun below), with
   thinking on since 2026-10-30 (the week 7 comparison below); `repair` = V4-Pro from the
   second repair on; `oracle` = a different model family (GPT, decided 2026-10-28 in place
-  of local Gemma; GLM-5.3 once the OpenAI key expires, measured on week 7), since the same
+  of local Gemma; GLM-5.3-Flash at high effort once the OpenAI key expires, see the
+  week 4 cross experiment below), since the same
   model writing reference and oracle is not an independent check. The CLI refuses an oracle from the generating model's provider.
 - Experiment 2026-10-28, one item (a closure / accumulator debugging exercise from the
   week 4 slides), same validator:
@@ -870,7 +931,7 @@ Design approved 2026-10-28 (owner):
   `resume --profile` finishes it with another model; the manifest names every model that
   generated its exercises.
 - Week 4 again with four models (2026-10-28/29, same plan items; small samples): GPT 6/6
-  VALID (about $0.07 each), DeepSeek 5/6 (about 0.06 RMB each, the fastest), GLM-5.3-Flash
+  VALID (about $0.07 each), DeepSeek 5/6 (about $0.01 each, the fastest), GLM-5.3-Flash
   saved 4 and discarded 2, GLM-5.3 discarded 3 of 3. DeepSeek became the `generate` role.
   The four discards that were not the model's fault changed two things:
   - GLM-5.3 lost all three to one mutant each whose `old` it invented (a "placeholder"
@@ -885,6 +946,13 @@ Design approved 2026-10-28 (owner):
     fields now carry descriptions, which reach the model in the draft's JSON Schema, and
     the api messages say the names are defined, not called. There is still no "must call"
     constraint: what an exercise must use is checked by its tests and `forbidden_calls`.
+- A plain-Python example (2026-11-05): plain-Python items saw the Spark function-level example until
+  then, so `examples/station-longest-rise` was written for them, about 1000 tokens shorter. Spark items
+  keep theirs, so their prompts do not change. Rerunning 4 items of one long lecture with the same
+  settings took VALID first drafts from 2 to 4 of 4 and tokens from 590k to 394k. That shows it did no
+  harm, not that it helped: the two that passed both times cost about the same (201k and 203k), one
+  earlier failure was a `getattr` the course conventions have since ruled out, and the other a reply
+  that did not fit the schema, which may simply not recur.
 - Week 7 with five arms (2026-10-29/30): the same plan of 11 plain-Python items from
   lectures 7.1-7.2 (stream algorithms) for every arm, arm D on 4 of them. Repairs from the
   second on are V4-Pro with thinking in every API arm; "s/item" is one item at a time.
@@ -908,7 +976,8 @@ Design approved 2026-10-28 (owner):
     model's own test_oracle.py.
   - Layout: counted before the examples were rewritten in it (see "Learning rules").
   - Decided (owner, 2026-10-30): arm E's shape, Flash with thinking, Pro only when Flash's
-    repair fails, so the time stays bounded; GLM-5.3 as the oracle after 2026-11-04. The
+    repair fails, so the time stays bounded; GLM-5.3 as the oracle after 2026-11-04
+    (replaced 2026-11-01 by GLM-5.3-Flash, see the week 4 cross experiment). The
     oracle's thinking became its own setting, `oracle_thinking`, off by default: it
     followed `thinking`, so turning generation thinking on would have made GLM think.
   - Speed, measured 2026-10-30 on the same 11 items (owner asked for tests, not guesses):
@@ -1013,6 +1082,23 @@ Design approved 2026-10-28 (owner):
   first week 5 batch (GLM plan, Flash writing, Pro repairing with thinking, GPT oracle)
   saved 6 of 6: two after a Flash repair, four rescued by one Pro repair each, about $0.39
   in all at peak prices.
+- Week 4 cross experiment (2026-11-01, native Windows; owner asked for it). One plan by
+  GPT, then the same 4 RDD items in two arms, 4 at once each. DeepSeek writing with a GLM-5.3
+  oracle saved 4 of 4, 2 at the first round; its 3 first-round failures were all timeouts
+  (Spark on Windows, 4 exercises validating at once), fixed by one repair each. GLM-5.3
+  writing with a DeepSeek oracle failed on content (a mutant patch whose `old` text did not
+  occur, a wrong expected value, a surviving mutant, an oracle interface without the
+  question) and stopped after 2 items when GLM-5.3's quota ran out. So the planned oracle
+  for after 2026-11-04 had no quota. GLM-5.3-Flash rewrote the 4 oracles from the same
+  question and interface: at `reasoning_effort` high it matched GLM-5.3 exactly (reference
+  agrees 4 of 4; 14 of 18 mutants disagree with it, the 4 others change no output and are
+  killed by the tests) in 3-6 s each; thinking at the model's default (no effort field,
+  the deepest) gave the same result in 6-50 s. Decided (owner): the oracle becomes
+  GLM-5.3-Flash at high effort when the OpenAI key expires, through its own profile
+  (`glm-flash-oracle`, `reasoning_effort_on = "high"`, `oracle_thinking` on), since the plan
+  role uses `glm-flash` with the model's default. A FAIL of rule 4 on a mutant is not
+  "caught" by itself: when the check was first run without `JAVA_HOME`, 13 of 18 "caught"
+  were Spark failing to start.
 - A diagnosis first, and the oracle's own mistakes (2026-10-29). The draft's first field
   is `diagnosis`, filled by repairs before any file: what failed, the right result worked
   out by hand, which file is wrong and why. A scratchpad that works without thinking, and
@@ -1098,7 +1184,7 @@ Design approved 2026-10-28 (owner):
   format failures are counted apart from validation failures.
 - `validate` is pure Python and acts as the judge; repair receives the failure report.
 - `retrieve_context` before RAG (phase 3, decided 2026-10-28): the cache of the batch's
-  `sources`, whole (a lecture is roughly 15-25k tokens). When that does not fit the model's
+  `sources`, whole (a lecture is 4-11k tokens at 4 characters per token). When that does not fit the model's
   context, a slice instead: the slides that `coverage.md` lists for the batch plan's
   knowledge points. A slice is chosen by label, not by a query, so it is deterministic and the owner
   sees exactly which pages went in. For a local model, raising the context length it is
@@ -1113,25 +1199,406 @@ Design approved 2026-10-28 (owner):
 
 ## RAG
 
-- Reads the per-file md cache (see "Reading files"), not the PDFs; chunking by section / code
-  block, keeping source file, page and slide.
-- Retrieval filters by the batch's `sources` first, so a week-2 batch only draws on week-2
-  material; searching the whole course is the fallback, not the default.
-- Hybrid retrieval (BM25 + vectors): API names like `aggregateByKey` are exact-match problems
-  that pure vector search handles poorly.
-- Evaluate with 20-30 hand-labelled queries: recall@k for vector-only vs BM25-only vs hybrid.
-  The labels already exist by then (2026-10-28): each knowledge point in `coverage.md` with
-  its slides, and each exercise's `source.pdf_pages`, is a query with its relevant pages.
-- Chunks are the cache's page sections, the same unit phase 3's slices use, so the
-  chunker is not new work.
-- Vector store and embedding model not yet decided (Chroma or FAISS candidates).
+Decided 2026-11-02 (owner): phase 4 is a measured comparison, not a commitment to RAG. A
+course is small (about 570 pages, 70k tokens at 4 characters per token; a lecture 4-11k), and
+generation already sends the whole lecture, so a route has to beat that to be used. Saying
+"I measured whether retrieval earns its keep" shows more judgment than having a vector
+database. Code in `src/tutor/retrieval/`; every route is one `search(query, lectures)` that
+returns pages best first.
+
+Outcome (owner, 2026-11-02): generation keeps the whole lecture and no route is wired in. Perfect
+retrieval did not beat the whole lecture on generation ("Does retrieval help generation at all?"
+below), so the rest of the plan was cut down to one final retrieval table ("Final table" below). A
+smaller test with the three real routes (owner, 2026-11-03) agrees: none beats it. The code stays
+for what was not tested: hints, questions of unknown source, or a course with no `coverage.md`.
+
+Routes:
+- Hybrid RAG: BM25 + vectors, fused by reciprocal rank fusion. API names like
+  `aggregateByKey` are exact-match problems that pure vector search handles poorly.
+- Agentic search: a LangGraph loop in which a model searches (BM25: id, footer, first line of
+  the top 10), reads up to 5 pages at a time and finishes with its pages, at most 6 steps. It
+  chooses each action as JSON through the client's structured output, which every profile
+  supports, not through native tool calling, which would extend the client and differs by
+  provider. Evidence for this route is from coding agents and chat memory, not course slides.
+- Concept index, a small form of the "LLM wiki" pattern: one model call per lecture compiles
+  knowledge points -> pages; at query time a model sees only that index. For a second course
+  it is also an automatic first draft of `coverage.md`.
+
+Baselines, already in the pipeline: the whole lecture, and the labelled page slice (perfect
+retrieval by the labels, which is a reference, not a proven upper bound on what generation can
+produce from it). GraphRAG (through LightRAG) stays out unless the hybrid and
+agentic routes clearly fail the cross-lecture queries below: its strength is reasoning across
+several places (Han et al. 2025, arXiv 2502.11371), while a generation query is mostly "which
+pages teach this point". Routes read the page cache only, never `coverage.md`, which holds
+the answers they are measured against.
+
+Measurement, as planned. The outcome above dropped the pooling and the repeats:
+- Unit: the cache's page sections, the same unit phase 3's slices use, so there is no chunker.
+- Labels: each `coverage.md` row is a query (its knowledge point, in the words a batch plan
+  uses) with relevant pages (its slides). 71 rows qualify, against the 20-30 first planned. The
+  hash of each row alone splits them into dev (18, for tuning) and test (53, only for the final
+  comparison), so adding rows or lectures later never moves a query from one to the other.
+  Rewording a row would move it, so `--freeze-queries` snapshots every query and label in the
+  workspace, and the test and cross-lecture splits refuse to run without it. Only 1 of the 53
+  test queries shares a page with a dev query. `source.pdf_pages` of exercises adds nothing:
+  they come from the same rows.
+- Cross-lecture queries: 13 written by hand in the workspace's `retrieval/cross-lecture.jsonl`,
+  labelled from `coverage.md`'s rows, frozen by the owner 2026-11-02 before any route ran on
+  them, and run last, like the test split.
+- Scope: the batch's lecture first, as generation does, and also the whole course, which is
+  harder and is what cross-lecture queries and hints need. The lecture scope comes from the
+  labels: fair for generation, where the batch names its lecture, but prior knowledge for a
+  question of unknown source. Test queries from lectures with no dev query are also reported
+  apart, as the nearest thing here to unseen material.
+- Scores: recall@k and MRR assume a ranked list. Agentic search and the concept index return
+  a set of no fixed size, and returning more pages always raises recall, so every route is
+  also scored by recall within a token budget (500 to 4000), results taken in order. A route
+  may stop early, so what it actually returned is reported too.
+- Fixed before the test split: routes are chosen by recall within 2000 tokens searching the
+  lecture (about twice the labelled pages, under a third of a lecture); the rest is supporting
+  evidence. On dev, a change replaces a simpler setting only if at least 3 more queries improve
+  than worsen: one query moves a mean by up to 1/18, so means alone would chase noise.
+- Costs apart: tokens above measure pages delivered, by a rough estimate, not a run's cost. A
+  stored answer takes no time, so each keeps its first run's tokens and seconds, reported apart
+  from the cost of building an index and from generation. Each stored agent run also keeps its
+  trace, which tells a page never shown from one shown and not chosen.
+- Incomplete labels: a label is a slide range written for choosing batches, not a page-by-page
+  judgement, so it favours finding consecutive pages and may overlook a good page elsewhere.
+  Before the final table, pool for each query what every route and repeat returns within 2000
+  tokens, with the labelled pages. A judge of another model family, not told which route
+  returned a page, rules on all of them, existing labels included; the owner checks a sample.
+  Strict and pooled recall are reported side by side. Pooled recall is still no absolute truth.
+- Stability: routes that call a model run 3 times on the test split, each with its own `--run`
+  number (the same number reads the stored answers), and every run is reported.
+- Reach: these results hold for this course. They say nothing about another course.
+- Generation: the same plan of about 12 items with each context, counting first-pass VALID,
+  VALID after repair and cost per item, plus the judge's `fits` and `taught`, since material
+  likely affects those more than validity. 12 paired items show only large differences, so
+  counts are reported, not significance.
+- Decision rule, fixed before the numbers: a route that does not beat the whole lecture on
+  generation results or cost is not wired in. The result goes in the README either way.
+
+Choices:
+- Vector store: plain Python, a JSON-lines file of vectors, no Chroma, FAISS or numpy.
+  Measured 2026-11-02 on an M2 Pro, 1024 dimensions, ranking every page: 571 pages 8 ms per
+  query, 6000 pages 86 ms. numpy was approved first, and would be far faster at scale (60,000
+  pages 4.9 ms, 2 million 168 ms and 8.2 GB, the limit being memory), but a course does not
+  need it, and installing it where Spark runs changes PySpark: `StatCounter` then returns
+  numpy values, in the validator's environment and not in the learner's. numpy or FAISS can
+  replace the scoring inside `VectorRetriever` if a query ever passes about 100 ms.
+- Embeddings: a model reached through the `embedding` role, by any provider with an
+  OpenAI-compatible `/embeddings` endpoint. For now OpenAI's `text-embedding-3-small` at 1024
+  dimensions: 83k tokens for a course, $0.002 (2026-11-02). Zhipu's `embedding-3`, planned first
+  through the existing key, refused: it is outside the free quota and the account has no
+  balance. Each text is embedded once and kept in `cache/retrieval/`, so repeated runs cost
+  nothing and new lectures, changed pages or new queries pay only for themselves. Each model
+  has its own file, as vectors from two models cannot be compared; another model means
+  embedding the course again, which costs next to nothing.
+  A local model, tried 2026-11-02 with LM Studio's bundled `nomic-embed-text` v1.5 (84 MB, 768
+  dimensions): 12 s for all 571 pages, 12 ms per query, and on dev 0.85 against OpenAI's 0.87
+  within 2000 tokens searching the lecture, 0.70 against 0.74 the course. Not wired in: it saves
+  next to nothing, its one use is not needing a key, and it would need its task prefixes and a
+  store name that does not claim 1024 dimensions.
+- Reranker: not in the first round (see the [4] candidate).
+- A lecture file repeating another's slides under other footers would count as wrong when
+  found: the workspace's `[retrieval] exclude_lectures` leaves it out. It cannot be detected by
+  exact comparison, as the footers make every page differ.
+
+Dev scores (2026-11-02). 18 queries, which only guide the next steps; the test split decides.
+The labelled pages average 994 tokens per query, the whole lecture 6783.
+
+| Searching | Route | MRR | Recall within 1000 tokens | 2000 | 4000 |
+|---|---|---|---|---|---|
+| the lecture | BM25 | 0.78 | 0.66 | 0.81 | 0.89 |
+| the lecture | vector | 0.89 | 0.70 | 0.87 | 0.97 |
+| the lecture | hybrid | 0.91 | 0.68 | 0.85 | 0.97 |
+| the lecture | hybrid + neighbours | 0.88 | 0.71 | 0.89 | 0.99 |
+| the lecture | concept | 0.92 | 0.79 | 0.89 | 0.90 |
+| the lecture | agent | 0.97 | 0.77 | 0.87 | 0.87 |
+| the lecture | agent + thinking | 0.97 | 0.75 | 0.87 | 0.88 |
+| the lecture | agent + hybrid search | 0.97 | 0.78 | 0.89 | 0.89 |
+| the course | BM25 | 0.67 | 0.52 | 0.67 | 0.78 |
+| the course | vector | 0.79 | 0.62 | 0.74 | 0.86 |
+| the course | hybrid | 0.81 | 0.59 | 0.74 | 0.82 |
+| the course | hybrid + neighbours | 0.75 | 0.65 | 0.80 | 0.91 |
+| the course | concept | 0.82 | 0.71 | 0.82 | 0.82 |
+| the course | agent | 0.74 | 0.53 | 0.57 | 0.57 |
+| the course | agent + thinking | 0.89 | 0.73 | 0.81 | 0.81 |
+| the course | agent + hybrid search | 0.89 | 0.63 | 0.69 | 0.69 |
+
+Query by query at 2000 tokens, against the adoption rule. Searching the lecture nothing clears
+it: thinking 6 better and 5 worse against the plain agent, hybrid search 6 and 4, hybrid against
+vector 3 and 5, concept against vector 6 and 4. So the agent keeps BM25 and no thinking there,
+and three model-driven routes tie a rule with no model at all: hybrid + neighbours took 8 better
+and 3 worse against hybrid, at no cost. Neighbours may only fit the labels, which are consecutive
+ranges, and the pooled labels will tell. Searching the course, thinking clears the rule by far
+(10 better, 2 worse, mean +0.24), at about 5.5k tokens in, 880 out and 25 s per query; hybrid
+search also clears it (9 and 4, +0.12). The trace says why: 63 of the 64 pages the plain agent
+missed across the course were never shown by a search, so it needs better searches, not better
+choices. The same plain agent run twice moved by 0.05 to 0.07 on these means, so differences of
+that size are noise.
+
+Frozen 2026-11-02 (owner), no more tuning: the plain agent searching a lecture, the agent with
+thinking across the course and on the cross-lecture queries, both with BM25 search, 10 results
+and the second prompt. The corpus is frozen too: a lecture arriving later stays out of these
+measurements, as it would change every course-wide score. If measured at all, it is measured
+apart as unseen material, with labels written before any route runs on it. Once such a lecture
+is in the cache, repeating these numbers needs it in `exclude_lectures`.
+
+Does retrieval help generation at all? Tested first, as it decides whether the costly final
+retrieval run is worth doing (owner, 2026-11-02): the labelled slice is what a perfect route would
+return, so if it does not beat the whole lecture, no route can be expected to. Same 12 plan items,
+sampled by hash from three real batches, two arms, $0.81 in all:
+
+| | Whole lecture | Labelled slice |
+|---|---|---|
+| Saved after repair | 12 of 12 | 12 of 12 |
+| VALID at the first try | 8 | 7 |
+| Exercises the judge finds fully fine | 7 | 5 |
+| `clear` flagged | 4 | 6 |
+| `fits the material` flagged | 2 | 5 |
+| Serious flags | 5 | 10 |
+| Tokens, all rounds | 764k | 703k |
+
+The slice saves 8% of the tokens, about $0.02 on this run, and does no better on validity. The
+judge finds it worse on `fits`: 4 items better with the whole lecture, 1 with the slice. 12 items
+and an imperfect judge, which itself reads the whole lecture, show a direction and not a proof.
+Its flags were read only on the four slice items it rated below the whole lecture: three are real
+misstatements in the exercise's own explanation, the fourth was not checked, and the whole-lecture
+arm's flags were not read. A model that sees less around a page may overstate more easily, which
+is a reading and not a measurement. Most of the slice's first-try failures were replies cut off at
+the output limit (4 against 1), not wrong content (1 against 3).
+
+Then with the real routes (owner, 2026-11-03, about $1.72 before any cache discount): the same 12
+items and pipeline, the context being what a route returns within 2000 tokens for the item's
+knowledge point, searching its lecture, in page order. The plan line, its slide range included, is
+the same in every arm. A private script replaced the context step, so `graph/` did not change. The
+rule was written down first: a route wins only if it is VALID at the first try on at least as many
+items, and the judge finds at least 3 more items fully fine, or at most 1 fewer with at most 70% of
+the tokens, the route's own model tokens included.
+
+Why these arms. The whole lecture is what generation sends today, so it is what a route must beat.
+The labelled slice is what a perfect route would return. Hybrid + neighbours is the best route of
+the final table below and needs no model. Concept and the agent are the two other kinds of route
+this phase set out to compare, at their frozen settings. 2000 tokens is the budget the routes were
+to be chosen by. 12 items and not all 23 of the three batches: the owner chose the smaller run on
+cost, which also reuses the first two arms. Pooling and repeats stayed out, as seeing what a route's
+pages generate answers the question more directly than judging those pages again.
+
+| | Whole lecture | Labelled slice | Hybrid + neighbours | Concept | Agent |
+|---|---|---|---|---|---|
+| Context tokens per item, mean | 8183 | 772 | 1926 | 1142 | 815 |
+| Labelled pages covered | all | all | 0.94 | 0.89 | 0.81 |
+| Saved after repair | 12 | 12 | 12 | 12 | 12 |
+| VALID at the first try | 8 | 7 | 4 | 8 | 4 |
+| First try cut off / wrong | 1 / 3 | 4 / 1 | 5 / 3 | 0 / 4 | 5 / 3 |
+| Items repaired / repair rounds | 4 / 4 | 5 / 5 | 8 / 11 | 4 / 5 | 8 / 9 |
+| Exercises the judge finds fully fine | 7 | 5 | 3 | 3 | 5 |
+| `clear` flagged | 4 | 6 | 7 | 7 | 7 |
+| `fits the material` flagged | 2 | 5 | 5 | 3 | 4 |
+| `taught` flagged | 0 | 0 | 0 | 0 | 0 |
+| `targets` flagged | 1 | 0 | 1 | 1 | 1 |
+| Serious flags | 5 | 10 | 12 | 10 | 11 |
+| Tokens, all rounds | 764k | 703k | 946k | 637k | 808k |
+| The route's own model tokens | - | - | - | 22k | 43k |
+| Tokens, % of the whole lecture | 100 | 92 | 124 | 86 | 111 |
+
+Tokens count generation, repair and the oracle. Costs at list prices before any cache discount
+(DeepSeek-V4-Flash $0.14 in, $0.28 out; V4-Pro $1.74, $3.48; GPT-6.1-Terra $1, $5; from third-party
+price pages): the first two arms $0.81 (generate 0.24, repair 0.07, oracle 0.09, judge 0.41), the
+three routes $1.72 (generate 0.34, repair 0.60, of which 0.47 on V4-Pro, oracle 0.16, judge 0.62).
+The exercises, verdicts, a per-item table and each query's retrieval results stay in the private
+workspace's `experiments/`, as they are course content.
+
+Why retrieval has little to save here. An exercise takes about 64k tokens with the whole lecture,
+and the lecture is about 8k of them; over half of the generation tokens are the model's output, the
+dearer side. Even a perfect route can save about 7k tokens per exercise, about $0.001, and one extra
+repair costs more than that.
+
+No route wins. No exercise was fully fine from a route and not from the whole lecture, while the
+reverse held for 4 items with hybrid + neighbours, 4 with concept and 2 with the agent. Two routes
+cost more than the whole lecture: more first drafts were cut off at the output limit (5 each against
+1), and the repairs, five of them on the stronger model, cost more than the smaller context saves.
+Concept comes nearest on cost, with as many VALID at the first try and 14% fewer tokens, but 4 fewer
+fully fine. Why less material leads to worse explanations or more cut-offs was not measured.
+
+Flags were checked with the arms hidden: 3 from each arm, 15 in shuffled order, each against the
+exercise and the course, verdicts stored before the arms were revealed. All 15 are real defects, 2
+of them overrated as serious (one from the whole lecture, one from hybrid + neighbours). That tests
+what the judge says, not what it misses. 12 items show a direction only. 4 were fully fine in no
+arm and 2 in every arm, so for those the item decides rather than the context. Each arm ran once,
+and the judge reads the whole lecture in every arm.
+
+Final table (2026-11-03), the test split with the frozen settings: 53 queries, 1.45M GLM-5.3-Flash
+tokens. Simplified by the outcome above: every route ran once and the labels were not pooled, so
+these are strict scores against slide ranges, and a few hundredths may be noise. The labelled pages
+average 734 tokens per query, the whole lecture 6931. The CLI runs both scopes for every route, so a
+private script ran each agent setting on its own scope.
+
+| Searching | Route | MRR | Recall within 1000 tokens | 2000 | 4000 | Model tokens per query | Seconds |
+|---|---|---|---|---|---|---|---|
+| the lecture | BM25 | 0.89 | 0.75 | 0.88 | 0.94 | - | - |
+| the lecture | vector | 0.92 | 0.77 | 0.87 | 0.92 | - | - |
+| the lecture | hybrid | 0.94 | 0.77 | 0.89 | 0.94 | - | - |
+| the lecture | hybrid + neighbours | 0.94 | 0.81 | 0.93 | 0.98 | - | - |
+| the lecture | concept | 0.85 | 0.81 | 0.88 | 0.89 | 1.6k | 2.7 |
+| the lecture | agent | 0.94 | 0.82 | 0.87 | 0.87 | 3.9k | 13.7 |
+| the course | BM25 | 0.81 | 0.63 | 0.80 | 0.86 | - | - |
+| the course | vector | 0.88 | 0.72 | 0.81 | 0.89 | - | - |
+| the course | hybrid | 0.88 | 0.70 | 0.85 | 0.89 | - | - |
+| the course | hybrid + neighbours | 0.86 | 0.75 | 0.90 | 0.95 | - | - |
+| the course | concept | 0.85 | 0.80 | 0.89 | 0.89 | 15.2k | 5.1 |
+| the course | agent + thinking | 0.87 | 0.72 | 0.82 | 0.82 | 6.6k | 28.0 |
+
+Query by query at 2000 tokens. Searching the lecture, the score fixed in advance, no route with a
+model beats the best route without one: hybrid + neighbours took 11 better and 4 worse against
+hybrid, and concept against it took 7 and 11, the agent 1 and 18. Nor do they beat plain vector:
+concept 10 and 10, the agent 7 and 11. Vector's lead over BM25 on dev did not hold (9 and 8), while
+hybrid does beat vector (6 and 1, mean +0.017). Searching the course, concept ties hybrid +
+neighbours (8 and 9) and beats vector (16 and 7, +0.074); the thinking agent falls behind (7 and 16
+against hybrid + neighbours). The margin of 3 was set for 18 queries and is a low bar on 53: the
+thinking agent clears it against vector across the course with 13 and 10 and a mean of +0.005, which
+is nothing.
+
+So a later use should start from hybrid + neighbours, which needs no model, unless neighbours only
+fit the labels, which are consecutive ranges; that was for pooling to test, and it was dropped. The
+routes with a model still hold up in little room, returning 900-1200 tokens: within 1000 tokens,
+concept finds 0.80 across the course against 0.75, the agent 0.82 in the lecture against 0.81. On
+the 11 test queries from lectures with no dev query, the nearest thing here to unseen material,
+routes score 0.92 to 0.99 at 2000 tokens searching the lecture, the agent lowest.
+
+One of the 106 concept picks was cut off at its output limit. It counts as a miss and stays stored
+as one, as asking again until a reply works would flatter the route. Every agent run finished; two
+provider errors stopped the run, which resumed from the stored answers.
+
+Cross-lecture queries (2026-11-03): the 13 frozen queries, searching the course, run once, 0.29M
+GLM-5.3-Flash tokens. Their labelled pages average 14.7 pages and 2059 tokens, which fills a
+2000-token budget, so 4000 is the fairer score. The lectures holding them average 15.8k tokens.
+
+| Route | MRR | Recall within 2000 tokens | 4000 |
+|---|---|---|---|
+| BM25 | 0.82 | 0.35 | 0.47 |
+| vector | 0.94 | 0.37 | 0.54 |
+| hybrid | 0.94 | 0.37 | 0.51 |
+| hybrid + neighbours | 0.93 | 0.46 | 0.64 |
+| concept | 0.84 | 0.46 | 0.55 |
+| agent + thinking | 0.83 | 0.33 | 0.34 |
+
+Routes start well: a relevant page comes near the top, and only the agent, on one query, found none
+within 2000 tokens. But at best they find about two thirds of what a query needs, and no route found
+all of it for more than one query. The agent stops early, at about 1100 tokens. Query by query at
+2000 tokens, against hybrid + neighbours: hybrid 2 better and 10 worse, concept 4 and 6, the agent 2
+and 8. 13 queries show a direction. One concept request had no reply in 900 s and ran again.
+
+Hybrid and the agent fall well short here, which is the condition set above for trying LightRAG. It
+is still not built: generation does not look across lectures, so nothing here would use it. It is
+worth trying if hints or revision come to need that lookup.
+
+The concept route returns about 1100 tokens (7-8 pages) and stops there, so a larger budget
+adds nothing: so far it finds more than the others in little room, and less in a lot of room.
+Its index cost GLM-5.3-Flash about 90k tokens in and 21k out for the course (`concept` role).
+A lecture's index is about a fifth of the lecture, the course's about 16k tokens, which every
+course-wide query sends, at 2-3 s per query against milliseconds for the others. It holds 220
+points covering 496 of 571 pages; on the lecture checked, the rest were title, section and
+reference pages, and 3 of the 125 pages the dev queries label are in no point.
+
+The agent route ranks a relevant page first most often: it returns a small set too, and took
+4.8 steps and about 4.6k tokens per query with GLM-5.3-Flash, at 14 s. Its first prompt scored
+0.69 and 0.53 at 4000 tokens: 46 of the 51 pages it then missed within a lecture were within two
+pages of one it returned, so the prompt now asks for the pages around a good one. Tuning stopped
+there, as 18 queries are easy to fit. On the same dev queries the plain agent does not beat
+ranking with hybrid directly: 5 better and 5 worse searching the lecture, 2 and 9 the course.
+
+BM25 is hand-written, as the formula is short. Splitting camelCase, stop words, plural stripping
+and other `k1` / `b` values each moved its scores by a query or two, which is noise, so the
+tokenizer stays plain lowercase words.
+
+Where retrieval could still earn its place (owner, 2026-11-03; not scheduled). Generation is the
+easy case for doing without it: the plan names the pages and a lecture fits. These lack one or both:
+- A chat or question window, the clearest case: a question may come from any lecture, the context
+  goes again every turn, and an answer can cite its pages. Not on the roadmap, and phase 7's GUI
+  only wraps the existing functions, so it would be added on its own.
+- Material too large for a prompt: a textbook, several courses, or the public Spark documentation
+  corpus planned for a demo.
+- A local model with a small context: Gemma was loaded with 8192 tokens, which a course overflows.
+- A new course with no `coverage.md`: the plan cannot name pages until something finds them, and
+  the concept index is also a first draft of that file.
+- Revision across lectures, which is the routes' weak spot (0.64 at best above) and the case for
+  trying LightRAG.
+
+A chat window should be measured first too, not assumed. This course is about 71k tokens, so
+sending all of it costs about $0.01 of input per turn on DeepSeek-V4-Flash before any cache
+discount, against $0.0003 for 2000 tokens: about 35 times more, but little money for light use.
+Compare the whole course with caching against hybrid + neighbours on about 20 questions, by whether
+answers are right and cite the right pages. Start from hybrid + neighbours, which needs no model and
+found 0.90 across the course. The generation test's warning may carry over, as less context brought
+more misstatements; that is untested for answers.
+
+## Hand-calculation exercises
+
+Decided 2026-11-05 (owner), for a course examined closed-book with a calculator: the learner works numbers
+out by hand and writes them into `student.py` as named constants. No rule changes, as the format already
+fits. The tests compare each constant within a tolerance, a mutant is the numbers one specific mistake gives,
+and the oracle computes them from the formula, so a wrong answer key fails rule 4. A hand-made one and 9
+generated ones are VALID. The format lives in the workspace's `conventions.md`, not in the prompts, as other
+courses still write code.
+
+A failing test's traceback prints the expected value, which here is the answer: the generation setting
+`hide_answers` writes a `pytest.ini` in the batch folder, so a run shows only each test's name and result. It
+is set per run, as a code batch of the same course needs its tracebacks, and not inferred, as no field marks
+an exercise as hand calculation. The answers are still in `test_student.py`, and in `first_error` in the
+attempt log. Multiple choice and short answer are outside this: the validator cannot check them.
 
 ## Evaluation metrics (README results table)
 
+Decided 2026-11-05 (owner), for phase 5's light version. The numbers are in the README, "Results".
+
 - First-pass validity rate; validity after repair loop.
-- Mutant kill rate.
-- Tokens / cost per valid exercise.
-- With RAG vs without RAG; across models.
+- What stopped the first draft, by rule. This replaces the mutant kill rate, which is 100% on saved
+  exercises by rule 3. The kill rate on first drafts, tried in its place, came to 102 of 103 over 22
+  drafts, and the same model writes the tests and the mutants, so it says little too: it stays as one
+  line with that limit.
+- Held-out flag rate: how often a VALID exercise gets a finding to read (see "Independent checks").
+- Tokens per saved exercise, and no money: prices change, a price table would need upkeep, and some
+  models here run on a free tier, so an account's spend would not show what a run costs.
+- By model, labelled as no comparison. The full comparison was not run (owner, 2026-11-04): 12 items
+  separate only large differences, and week 7 had already chosen a generator. With vs without retrieval
+  was settled in phase 4 (see "RAG").
+- The judge and the owner's ratings, with the judge's noise stated beside them.
+
+`python -m tutor.eval report` reads a workspace's records, calls no model and writes its private
+`reports/report.md`: progress, generation, first drafts, checks on saved exercises and model calls, then
+what the numbers cannot show and the gaps in the records. The attempts plugin rebuilds it after every
+recorded run (owner, 2026-11-05), so it follows the solving with no extra step; a rebuild took about 0.05 s
+on 49 exercises, and a failure there is only a warning. It overwrites one file, not one per run, as a dated
+copy per test run would pile up. In a generated batch, an exercise whose `student.py` differs from its skeleton
+with no logged run is listed, which shows runs lost outside the course venv; a batch written by hand has a
+`student.py` that differs from the start, so there it cannot be seen. No `first_error`, failure detail or rating remark
+is copied, as any of them can hold an answer. The README's table is public, so it changes only on request.
+
+## Prompt layout for caching
+
+Decided 2026-11-03 (owner): every prompt is designed for a high cache hit rate where conditions
+allow. Providers reuse only an identical start of a prompt (OpenAI: from 1024 tokens), so stable
+content goes first: the system prompt, rules and shared course material. What varies per item goes
+last. The shared part stays the same byte for byte, with no per-item marks, dates or ids. With
+parallel calls and a large shared part, one call goes first to fill the cache. `cached_tokens` in
+the call log shows the result. Meaning comes first: a short prompt gains nothing and is not
+contorted, and reordering a calibrated prompt means calibrating it again.
+
+Measured so far: DeepSeek hits 53-75% on generate and repair. `gpt-6.1-terra` as the judge hits 7%,
+its largest OpenAI cost. Its prompt puts each exercise before the slides, and the slides carry marks
+for that exercise, but moving the slides first was not enough. In a small test (2026-11-03, week 8's
+11 exercises and 2 first drafts with known errors), exercises sharing about 9000 tokens at the start
+hit 0%, sent one at a time or in parallel, while the same whole prompt sent again minutes later hit
+99.98%. A 90-second wait before the second call, a `prompt_cache_key` and the slides in a message of
+their own all hit 0% as well. Why is not known, and the search stopped there, as the rule set for it
+said. So the judge's layout stays, and a hit rate is measured before a saving is claimed.
+
+The same test shows what a layout change would risk. The judge run again on its own prompt changed
+the letters of 3 of the 13 and whether an exercise is fully fine on 1. The new layout changed 3 of
+13 against the first run, no more than that noise, and still flagged both known errors. 13 items
+show a direction only, but phase 5 has to report the judge's numbers with this noise in mind.
 
 ## LLM engineering candidates (review at the start of each phase)
 
@@ -1254,23 +1721,29 @@ deterministic judge, hybrid RAG with recall@k, the phase 5 metrics, the hint lea
     wrong directions, with no false flag on the 38. Trusted on this data; planted bad
     hints are easier than real ones, so real requests (and review-mode batches) should
     be labelled when they come.
-- [4] Reranker after hybrid retrieval, as one more arm of the recall@k comparison.
+- [4] Reranker after hybrid retrieval, as one more arm of the recall@k comparison. Not in the
+  first round (2026-11-02): only if hybrid's misses are pages it found but ranked too low.
 - [5] Personal workflow cost (Codex review 4): steps and minutes from adding lecture files
   to the first exercise, owner minutes spent fixing each exercise, validation wait, and
   whether a failed run can resume. The first batch is the hand-made baseline, taken from
   this document's batch notes (fixes: page references, stripes, an equivalent mutant,
-  too-regular data) and `attempts.jsonl`, with no new logging for the owner.
+  too-regular data) and `attempts.jsonl`, with no new logging for the owner. Reviewed 2026-11-05
+  (owner): only what the records hold, runs up to the first pass; minutes were never recorded,
+  so they are dropped.
 - [5] Local model as one more arm of the model comparison: validity, repair rounds and
   cost of a local model (run on the owner's Mac) against API models, judged by the same
-  deterministic validator.
+  deterministic validator. Moved to the backlog 2026-11-05 (owner), as the full comparison was
+  not run.
 - [5] Long-context baseline: "without RAG" means the whole week's material in the prompt
   (with caching), not no material, so the comparison shows whether retrieval earns its keep.
   A third arm (2026-10-28): the labelled page slice from `coverage.md`, i.e. perfect
-  retrieval, the upper bound that shows how far RAG falls short of it.
+  retrieval, the upper bound that shows how far RAG falls short of it. Done in phase 4 (see
+  "RAG"), where the slice proved a reference and not an upper bound on generation.
 - [after 3, optional] MCP server exposing `validate` (and later `hint`) so any coding agent
   can check the exercises it writes.
 - Not proposed: fine-tuning or RL (too little data; model + validator suffices), multi-agent
-  debate, GraphRAG, a hosted vector database (a few hundred pages fit local FAISS / Chroma),
+  debate, GraphRAG unless the cross-lecture queries call for it (see "RAG"), a hosted vector
+  database (a few hundred pages fit in memory),
   an LLM judging validity (already in "Decisions not to do").
 
 ## Assistant mode
@@ -1326,8 +1799,8 @@ Plus) acting as the model for vision, planning, generation, oracle, repair and h
   commands and read PNGs (both do); an MCP layer (list / get with the image / submit) is
   built only if permission prompts get in the way, or with the GUI.
 - Open (owner chose to wait, 2026-10-29): the vision prompt does not say what to do with
-  text an image covers on the slide while the text layer still has it. On slide 5.21 a
-  screenshot covers the bullets and the StructType code: GLM filled them in from the text
+  text an image covers on the slide while the text layer still has it. On one slide a
+  screenshot covers the bullets and some code: GLM filled them in from the text
   layer, Codex wrote [?] ("cannot read: do not guess") and lost the code. Fix when pages
   are transcribed again for another reason: a rule to take covered text from the text
   layer and say it was covered, with PROMPT_VERSION raised (which re-transcribes every
@@ -1354,14 +1827,48 @@ whole process group is killed on timeout and after every run, because PySpark st
 under pytest that would otherwise be orphaned (a test covers this, and fails if only the parent
 is killed). This is isolation, not a sandbox: the child can still touch other files and the network.
 
+On Windows (native support decided 2026-10-31, owner: one code base for macOS, Linux and
+Windows, platform branches kept to a few functions) there are no process groups, and
+walking the parent-pid tree (`taskkill /T`) misses a JVM whose parent pytest has already
+exited: measured, the leftover process kept the temp dir open and deleting it failed
+(`WinError 32`). So the child is put into a Job Object (`tutor/winjob.py`, ctypes, no new
+dependency) right after it starts; its descendants join automatically, `TerminateJobObject`
+ends them all, and the runner waits until the job is empty before deleting the temp dir,
+since termination is asynchronous. `KILL_ON_JOB_CLOSE` also ends the job if the validator
+itself crashes. Accepted gap: a process the child started before being assigned would stay
+outside, but assignment follows `Popen` at once, while the child still spends far longer
+starting Python and importing pytest. A test covers a process left behind by a run that
+passed; both process tests fail on Windows when the child is kept out of the job.
+Time limits are 4x on Windows (`execution.timeout_factor`, `TUTOR_TIMEOUT_FACTOR`
+overrides it; measured 2026-10-31): Spark cannot fork its Python worker daemon there, so it
+starts a new Python process for every task, one after another, about 0.6 s each (a 4-task
+RDD job 2.4 s, a JVM-only job 0.09 s). An example's 25-case hypothesis check took 101 s
+against a 30 s limit; with 120 s the example was VALID. The factor is applied inside the
+runner, so metadata `timeout_s` keeps stating what an exercise needs on macOS or Linux.
+Each run also gets a temp dir of its own (`TEMP`, `TMP`, `TMPDIR`, outside the run's
+working dir, deleted afterwards), on every platform. Found 2026-11-01: with several Spark
+runs at once, one now and then hung until the timeout, waiting in `launch_gateway` for
+`spark-submit.cmd`. That script writes its launch command to
+`%TEMP%\spark-class-launcher-output-%RANDOM%.txt`, and cmd seeds `%RANDOM%` from the second
+it starts, so runs started in the same second shared one file (Spark's own fix, SPARK-28302,
+only checks whether the file exists, which two runs can both pass). Measured, three
+reference runs at a time: 3 of 30 hung with the shared `%TEMP%`, 0 of 48 with one per run.
+Deleting that dir found a second Windows gap: the native library the JVM unpacks there
+(`liblz4-java-*.so`) could not be deleted (`WinError 5`) although the job was already
+empty, most likely a virus scan of the new file. Removal retries for up to 5 s (measured:
+at most 0.2 s over 30 runs) and then leaves what is still locked, as the shared `%TEMP%`
+did before (it held 90 such leftovers).
+Part of the time the 4x factor covers may have been these hangs; it is to be measured again.
+
 Scope: the runner protects validation, which runs generated code. A learner running
 `pytest test_student.py` runs their own code in the terminal, in-process and without a
 timeout: Ctrl+C stops an endless loop, and testkit stops a leftover SparkContext after each
 program. Accepted for now (raised in the same review); `pytest-timeout` is the fix if hangs
 become a problem.
 
-The README states this boundary too ("Running exercise code is not sandboxed", 2026-10-26),
-since anyone who clones the repo validates code on their own machine.
+The README states this boundary too ("Running exercise code is not sandboxed", 2026-10-26;
+"Where exercise code runs" since the container shipped, 2026-11-06), since anyone who clones
+the repo validates code on their own machine.
 
 Where isolation goes (decided 2026-10-28; built with the [3] isolation item): whatever
 phase 3 adds (a container, a static check against network, subprocesses and files outside
@@ -1392,7 +1899,12 @@ themselves, so a cheap layer comes first and a stronger one later.
   runs on its own. Both checks cover every file a run copies in, subfolders included
   (pytest collects tests and conftest.py recursively; checked only at the top until
   2026-10-29, found in an outside review). A symbolic link anywhere in the exercise is
-  refused before that: the run copies what it points to, which may be outside the
+  refused before that, and so is a Windows directory junction (found 2026-10-31 when
+  porting to Windows: `is_symlink()` is False for a junction and any account may create
+  one, so a junction to a folder outside the exercise passed the check and its files were
+  copied into the run; `execution._is_link` checks the junction reparse tag, not every
+  reparse point, since OneDrive's files-on-demand are reparse points too): the run copies
+  what it points to, which may be outside the
   exercise (`execution.copied_files` lists a run's files the way copytree copies them, for
   this check and the hint cache). A failure makes the exercise INVALID and skips every rule that runs
   code. A file with a syntax error is not a finding: Python cannot run it either, and the
@@ -1406,24 +1918,105 @@ themselves, so a cheap layer comes first and a stronger one later.
   - It is the only layer that also covers the learner's own `pytest test_student.py`,
     which runs generated tests outside the validator. Python is too dynamic for a static
     check to prove code safe: it is a filter that stops the obvious, not a sandbox.
-- B, test-run container: deferred to the generalization phase (second course) and the GUI
-  (owner, 2026-10-28), when courses with riskier libraries and other users arrive. Until
-  then phase 3 runs with layer A and material the user trusts, and a course whose modules
-  are rated medium or high risk (below) is refused rather than run unprotected. Draft:
-  the host orchestrates (validator logic, reports, attempts, hints, GUI, every LLM call)
-  and the container only executes. The one seam is `execution.run_pytest`: its subprocess
-  becomes `docker exec` in a long-lived per-course container (Docker or Podman, one
-  implementation for macOS, Linux and WSL) with the exercise mounted read-only and a
-  writable temp dir, `--network none`, a non-root user, a read-only root file system,
-  memory / CPU / process limits, and a whitelist of environment variables (never `.env` or
-  API keys). Results come back as they do now (exit code, JUnit XML, output), so `checks.py`
-  does not change. The image is built from `workspace.toml` `[requires]`, with envcheck run
-  inside and outside so both use the same versions. On medium / high risk courses the
-  learner's runs go through a command that runs in the container, and attempts are written
-  on the host from its result. Measure the overhead first; if it is too slow on macOS, the
-  fallback is the OS sandboxes coding assistants use (Seatbelt on macOS, bubblewrap on
-  Linux). Costs: debugging needs an editor that attaches to the container; the Docker VM
-  takes memory next to a local LLM.
+- B, test-run container: first deferred to the generalization phase and the GUI (owner,
+  2026-10-28), when courses with riskier libraries and other users arrive; until it ships,
+  phase 3 runs with layer A and material the user trusts, and a course whose modules are
+  rated medium or high risk (below) is refused rather than run unprotected. Measured and
+  decided 2026-11-05 (owner). `container.py` and the runner are written and tested (`pytest -m
+  docker` runs the limits below in real containers). Switched on for both private courses on
+  2026-11-06, after every saved exercise of both and the repo's examples (65: plain Python, MRJob
+  inline and on Hadoop, Spark RDD and DataFrame) validated in containers through `execution.py`
+  with the same verdict, rule statuses and mutant counts as their saved host reports: 700 s one
+  after another, about 650 container runs, none left behind, no file in a workspace changed.
+  - Shape: the host orchestrates (validator logic, reports, attempts, hints, GUI, every LLM
+    call) and the container only executes. The one seam is `execution.py`: `checks.py`, hints
+    and held-out checks do not change, since results come back as they do now (exit code,
+    JUnit XML, output).
+  - One fresh `docker run --rm` per test run (owner, 2026-11-05; this replaces the draft's
+    long-lived per-course container with `docker exec`):
+    `docker run --rm --pull never --init --name tutor-run-<random> --hostname localhost --network
+    none --read-only --tmpfs /tmp:rw,size=1g,mode=1777 --user <runner> --cap-drop ALL
+    --security-opt no-new-privileges --pids-limit 1024 --memory 2g --memory-swap 2g --cpus 4
+    -v <run dir>:/work -w /work -v <tutor package>:/opt/tutor/tutor:ro -e <this run's variables>
+    <image> timeout -s KILL <limit + 5> python -m pytest ...`. The run dir is the same throwaway
+    copy as today, so the container sees only that copy, with links already refused. Nothing
+    of the host's environment goes in, so never `.env` or API keys: the fixed values (`HOME=/tmp`,
+    `PYSPARK_PYTHON` and so on) are in the image, and `-e` carries only what a caller set for
+    that run.
+  - Why each flag that is not obvious. `--hostname localhost`: with `--network none` Docker
+    does not list the container's own name in `/etc/hosts`, and Hadoop stopped with
+    `UnknownHostException` (measured, reference failed; with the flag VALID). `--init`: without
+    it, processes nobody waits for stayed as zombies (seen under a long-lived `sleep`), and
+    the container ends with its main process, so a leftover JVM ends with it. `timeout`: the
+    container ends even if the validator is killed, when nothing is left to call `docker kill`.
+    `--pull never`: an image that went missing stops the run, and nothing is fetched from a
+    public registry under that name. `--cpus` (4) is capped at the VM's CPUs, as Docker refuses
+    more. The limits come from one Spark hypothesis run, which peaked at 393 processes and
+    threads and 486 MB; 512 left too little room, so 1024.
+  - Measured 2026-11-05, Docker Desktop on macOS (arm64, a 12-CPU VM with 7.66 GB). Median of
+    5 test runs, seconds, host / `docker exec` / `docker run`: plain 0.58 / 0.65 / 0.73, MRJob
+    inline 0.85 / 0.77 / 0.87, Spark 4.69 / 4.73 / 4.71, Spark hypothesis 8.25 / 8.07 / 8.18. An
+    empty `docker run` costs 0.14 s, an empty `docker exec` 0.07 s. Four Spark hypothesis runs
+    at once: host 11.9 s, `docker run` 10.9 s, against the 30 s limit. A whole example's
+    validation, median of 2, host / container: plain 1.4 / 1.8 s, Spark RDD 24.3 / 23.2,
+    file-level Spark 34.1 / 33.0, DataFrame 38.5 / 37.9, Hadoop 102.3 / 84.6; every one VALID
+    on both sides. With only 2 repeats (Hadoop on the host took 94 and 110 s), this shows no
+    real cost, about 0.4 s on the plain one, and not a gain. So the OS-sandbox fallback
+    (Seatbelt, bubblewrap) is not needed.
+  - Why not one long-lived container. Limits are per container, so runs share them: four
+    ordinary Spark runs in one container with a limit of 512 hit it 40 times (the cgroup's
+    `pids.events`; no memory kill), 3 failed with `unable to create native thread`, and the
+    fourth hung until I killed it at 329 s. A limit of 8192 passed, peaking near 1400, but then
+    it no longer stops one run from starving its neighbours, which would make false INVALIDs.
+    Killing a `docker exec` client also leaves the code running inside (1 process measured),
+    while `docker kill` on a `docker run` left nothing in 0.17 s. Runs would share `/tmp` too.
+    And a mount of a folder deleted and made again just before failed with `chdir to cwd` in
+    2 of 3 tries, most likely stale file sharing (inferred, not traced).
+  - Limits checked in a running container: uid not root, no internet and no DNS, cannot write
+    the root file system, its home or the mounted code, cannot see the host's home or `.env`,
+    511 processes then an error at a limit of 512, exit 137 over the memory limit, `/tmp`
+    writable. The only environment name holding KEY comes from the base image (`GPG_KEY`,
+    believed a public signing key).
+  - Which courses: `workspace.toml` `[isolation] runner = "container"`, looked up from the files of
+    each run, so every caller of the runner is covered. Unlike `[safety]`, every `workspace.toml`
+    above every source counts and one asking for the container wins, so a folder holding its own
+    file cannot switch it off, and a student file kept elsewhere (held-out candidates, simulated
+    hints) still runs with the course's tests in its container. A mistyped value or an unreadable
+    file stops the run. No choice made: the host, with one warning per process. `"host"`: a choice,
+    so no repeated warning. No `workspace.toml` at all (the repo's examples, CI): the host.
+  - No silent fallback (owner, 2026-11-05). A course on the container with no Docker or no
+    image raises `ContainerError`, which is no verdict on the code: `tutor.validation` and the
+    held-out check exit 2 and write no report, so a stopped Docker can never read as INVALID.
+    Generation checks before its first LLM call and again before each item, so that when
+    Docker stops in the middle of a batch, the item it hits reports an error like any other
+    and the ones after it spend no tokens. Every run asks whether the image exists, which costs
+    0.07 s and, importantly, waits while a stopped VM wakes (Resource Saver; measured 2.5 s on the
+    first call after idling), so those seconds do not count against the code's time limit.
+  - Image: `python -m tutor.container build`, one per course, generated from `[requires]`:
+    `python` picks the base image, `java` the JDK, `hadoop` the Apache tarball with its SHA-512
+    fixed in code (`downloads.apache.org`, about 3.3 MB/s, then the slower archive), and any other
+    name a pip package, at the host's exact version if it matches, else the prefix. `pytest`
+    and `hypothesis` at the host's versions. A plain Python course 184 MB; with Java and Spark
+    769 MB; with Hadoop too 1.73 GB (923 MB of that is Hadoop, with its documentation removed),
+    about 4-5 minutes from nothing. The tag holds a hash of the recipe without the host's
+    versions (two venvs of one course hold different pytest versions, and neither may call the
+    image out of date), so a changed `[requires]` says "rebuild"; validation never builds.
+    Envcheck then runs inside, against the same `workspace.toml`, and an image that fails is
+    removed. The `runner` user gets the host's uid, so the host can delete what a run wrote
+    (macOS tested with its uid, native Linux not).
+  - The report is read only if it is a regular file: the container can replace it with a link
+    or a FIFO, which would make the host read elsewhere or hang.
+  - Accepted gaps. A run can write to its own throwaway folder until its time limit, since a bind
+    mount has no quota; it is deleted afterwards. What it prints is held in memory on the host, as
+    it already is for a run on the host. The heavy-run cap still counts the host's cores, so a VM
+    given far fewer needs `TUTOR_MAX_HEAVY_RUNS`. The learner's `pytest test_student.py` stays on
+    the host for now (owner, 2026-11-05: debugging in the IDE), so a Spark or Hadoop course still
+    needs Java and Hadoop there too, and generated tests that passed in the container can still
+    behave differently on the host, since code can tell where it runs; only layer A covers that. The
+    command that runs a learner's tests in the container, with attempts written on the host from its
+    result, and the risk tiers below come when a course needs them. A container has no Mac GPU, so
+    torch exercises run on the CPU. The Docker VM takes memory next to a local LLM. Windows and
+    native Linux are not tested, and Windows stays on the host until they are. Podman is not tried.
 - Risk tiers for a course's modules (design for the generalization phase): pure
   computation (numpy, networkx) is low and runs on the host; file- or URL-capable libraries
   (pandas `read_csv` takes URLs, numpy `load` unpickles) are medium; system-level ones
@@ -1612,7 +2205,9 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
   `manifest.json`; a student.py that does not import counts as "error", not "failed"; any
   recording problem is a warning and never changes the test result. The entry point name
   equals the module name, so an explicit `-p tutor.attempts` is not registered twice. Adding
-  the entry point needed one `pip install -e .`.
+  the entry point needed one `pip install -e .`. A pytest from another environment has no plugin, so
+  it leaves no line and no warning: an empty log does not mean no work was done (see "Public repo vs
+  private data" for how a workspace's terminals avoid this).
 
 ## Roadmap (in priority order)
 
@@ -1713,7 +2308,10 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
      semantics checks -> local practice feedback; AI exercises, IDE practice, autograding
      and no-answer hints alone all have precedents) and a built / planned table, so
      generation, RAG and hints are never read as existing features (Codex review 4).
-2b. Code tracing and design exercises (raised from "deferred" on 2026-10-24; scope revised
+2b. **Moved to the backlog 2026-11-02 (owner):** the primary goal is the portfolio, and
+   phases 4 and 5 are what it still lacks. Tracing and design practice happen in chat for now,
+   running every snippet to confirm the answer, which worked well on week 7.
+   Code tracing and design exercises (raised from "deferred" on 2026-10-24; scope revised
    2026-10-25). The course is examined in writing, so beyond runnable
    code two more types (concept questions are out of scope: the owner generates those in chat
    for exam revision):
@@ -1742,7 +2340,8 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
    minimal `llm.py`; the LangGraph generate-validate-repair loop with the [3] items adopted
    (model access, structured output, call log, caching, plan approval, preference chat),
    code exercises first; the oracle written in a separate context (see "Independent
-   checks"). Isolation layer B moved to the generalization phase (2026-10-28).
+   checks"). Isolation layer B moved to the generalization phase (2026-10-28); in the end it
+   was built after phase 5, before the GUI (2026-11-05).
    Prerequisites (from the 2026-10-25 slide review):
    image-only slides are read as images (a multimodal model or OCR) before anything is
    generated from them, and every source records slide footer, PDF page and any lab or
@@ -1901,9 +2500,25 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
    (name every exact match, rank guesses by similarity): 30/32 named, the other 2 named
    among the indistinguishable pair, none wrong. Real students' code will differ more from
    a mutant than a mutant does from itself, so this is an upper bound for layer 2.
-4. Hybrid RAG. First review the [4] items of "LLM engineering candidates".
-5. Evaluation script + README results. First review the [5] items of "LLM engineering
-   candidates".
+4. Retrieval, compared by measurement (see "RAG"; plan approved 2026-11-02), one step each:
+   1. **Done 2026-11-02.** Page corpus, labels from `coverage.md`, scores and BM25, no LLM.
+   2. **Done 2026-11-02.** Vectors, and their fusion with BM25 into hybrid retrieval.
+   3. **Done 2026-11-02.** Concept index (tried on one lecture first, as agreed).
+   4. **Done 2026-11-02.** Agentic search. It uses the LangGraph library and leaves `graph/` as
+      it is.
+      **Done 2026-11-02, after a Codex review:** a folder per complete configuration, so a changed
+      setting cannot replay old answers; `--run` for true repeats; traces and first-run costs;
+      query-by-query comparison; frozen queries; and on dev, thinking, hybrid search for the agent
+      and a neighbour-page control.
+   5. **Done 2026-11-03, simplified (owner):** the final retrieval table from the test split, run
+      once and not pooled, then the cross-lecture split. Hybrid and the agent fall well short on
+      it, the condition for trying LightRAG, which is still not built as nothing here needs it.
+   6. **Done 2026-11-03, smaller (owner):** the whole lecture, the labelled slice and the three
+      real routes on the same 12 items. None beats the whole lecture.
+   7. **Done 2026-11-03.** The whole lecture stays; README results.
+5. **Done 2026-11-05, light version (owner):** `tutor.eval` reports from the existing records, with
+   no model calls, and the README's results; the [5] items of "LLM engineering candidates" are
+   reviewed there. The full model comparison was not run.
 
 ## Backlog (decided, not scheduled)
 
@@ -1911,9 +2526,14 @@ Order agreed 2026-10-30, around 3b: C1 first (small, and before the owner solves
 week 3 MapReduce batch, so an exercise relying on value order is fixed before it is
 solved), then 3b, then the hint-quality judge of [3c] (it reuses 3b's judge and needs
 real hint requests from solving week 7), then 2b together with C2 (both ask how good a
-design is, and share the Hadoop counters).
+design is, and share the Hadoop counters). Since 2026-11-02 2b and C2 wait until after phases
+4 and 5, to be weighed again then: as designed, C2's warnings read the reference, not the
+learner's code, so reaching the learner would go through `tutor.hint`; and the Hadoop counters
+cannot run on native Windows.
 
 - Batch API for whole-batch generation, once a cloud provider is used (see the [3] review in
+  "LLM engineering candidates").
+- A local model as one more arm, if a full model comparison is ever run (see the [5] items in
   "LLM engineering candidates").
 
 - C1 value-order check: done 2026-10-30, see rule 5 in "Exercise validation".
@@ -1965,8 +2585,8 @@ gaps. Each was decided by the owner; change one only with the owner.
   prompt + validator, then + repair, then + RAG, each with validity gain, manual edits
   saved and cost). Too much for one person who still has the first batch to solve. Phase
   5 keeps the arms already planned (first-pass validity, after repair, with / without RAG,
-  long-context baseline, models), which cover most of the ladder; no separate study of
-  manual edit time per arm. Instead, user effort shows up as preference / revision
+  settled in phase 4, long-context baseline, models), which cover most of the ladder; no
+  separate study of manual edit time per arm. Instead, user effort shows up as preference / revision
   requests in the generation chat (see the [3] preference-chat candidate), counted per
   batch.
 - No license change and no closed generator (decided 2026-10-26, misuse discussion). The
@@ -1998,6 +2618,26 @@ gaps. Each was decided by the owner; change one only with the owner.
   code editor, a different product from a tutor that leaves solving to the IDE. Practice
   batches stay free of exam pressure (a write-everything-before-the-first-test-run rule
   was turned down, 2026-10-24).
+- No RAG in exercise generation (owner, 2026-11-03): generation sends the whole lecture. Same 12
+  items, a rule fixed first: the whole lecture had 8 VALID at the first try, 7 exercises the judge
+  finds fully fine and 5 serious flags; perfect retrieval 7, 5 and 10; hybrid + neighbours 4, 3 and
+  12; concept 8, 3 and 10; the agent 4, 5 and 11. Tokens were 86% to 124% of the whole lecture's: a
+  lecture is about 8k of an exercise's 64k, so there is little to save, and one extra repair costs
+  more than it does. A plan already names each exercise's pages, so there is little to find too.
+  This holds for this course and its size, on a small sample; a lecture too large for the prompt or
+  a course with no `coverage.md` reopens it. All the numbers and reasons, and where retrieval could
+  still earn its place, are in "RAG".
+- No opt-in flag before lecture text goes to a model, and no "untrusted data" wrapper around the
+  owner's own inputs to a prompt (owner, 2026-11-06, after GitHub's AI scanning flagged the
+  concept index and the plan's `coverage.md`). Sending the lecture to a model is what the tool
+  is for (generation, slide transcription, the judge), and the README says what leaves the
+  machine; a role in `[llm.roles]` is the opt-in, and it chooses the provider, local or cloud.
+  `coverage.md` and the preferences are written by the owner, whom the pipeline only proposes
+  changes to, and every plan is approved before anything is generated; whoever can edit them
+  can edit `workspace.toml` or the code. Markers in a prompt do not stop injection anyway, and
+  the suggested cut to 8,000 characters would drop rows of a real `coverage.md` (about 14,000).
+  The untrusted input is lecture material, answered by layer A and the test-run container (see
+  "Code execution safety").
 
 ## Deferred
 
@@ -2024,33 +2664,55 @@ Later phases, after phase 5 (order decided 2026-10-26, numbered 2026-10-30): pha
 second course, phase 7 the local GUI, then packaging and release. Adaptive review is a
 maybe, not a phase (owner, 2026-10-30: batches are started by hand for now); exam mode
 is not done (see "Decisions not to do").
-- Second course: use the tool for another course (other language or framework) to prove
-  workspace, testkit and setup recipes are not shaped around one course. A long-term goal.
-  Brings isolation layer B, the module risk tiers and other languages (see "Code execution
-  safety"). A new framework's weight for the executor's caps (heavy: a JVM or similar per
-  run) moves from the code's table to the course's `workspace.toml`, decided when the
-  framework is set up, by measuring a smoke run (start-up time, peak memory, a `java` child,
-  cores used), and confirmed by the owner like a `[requires]` entry (owner, 2026-10-30). A
-  model may propose which frameworks the slides use, never how heavy they are; an
-  unmeasured framework counts as heavy.
+- Second course: use the tool for another course (other language or framework) to prove workspace,
+  testkit and setup recipes are not shaped around one course. A long-term goal. Brings the module
+  risk tiers and other languages (see "Code execution safety"); isolation layer B came first, after
+  phase 5 (2026-11-05). A new framework's weight for the executor's caps (heavy: a JVM or similar
+  per run) moves from the code's table to the course's `workspace.toml`, decided when the framework
+  is set up, by measuring a smoke run (start-up time, peak memory, a `java` child, cores used), and
+  confirmed by the owner like a `[requires]` entry (owner, 2026-10-30). A model may propose which
+  frameworks the slides use, never how heavy they are; an unmeasured framework counts as heavy.
 - Adaptive review (a maybe): use `attempts.jsonl` (failures, run counts, hints used) and `coverage.md`
   to find weak knowledge points and schedule `review`-mode batches with spaced repetition.
-- Packaging and release: `pipx install`, one command to start, CI on macOS and Windows
+- Packaging and release: an install line, one click to start, CI on macOS and Windows
   (WSL) as well, versioned releases after `v0.1.0`.
+  - One click (the owner's aim, 2026-11-05; a plan for the release, not built): one install
+    line gets `uv`, which fetches the Python it needs and installs the tool (`uv tool install`,
+    the same job as `pipx`, without needing Python first). `tutor gui` starts the server and
+    opens the browser with that launch's token. `tutor shortcut` writes a desktop shortcut on
+    this machine (`.command` or a small `.app`, `.lnk`, `.desktop`); made here and not
+    downloaded, it should not meet macOS Gatekeeper or need signing, to be tested. A second
+    click finds the running server from a small file with its port and token and only opens
+    the browser. Not a frozen app (PyInstaller): a build per platform, paid signing on macOS,
+    and each course's venv needs a real Python anyway.
+  - What a user still installs: that one line, for all; an IDE to solve in; an API key or a
+    local model to generate; Java and Hadoop for such courses, since the learner's runs stay
+    on the host (the page gives the commands); Docker Desktop to choose the container. A plain
+    Python course needs only the line and a key.
 
 Local GUI (phase 7: after the second course, just before packaging and release;
 discussed 2026-10-26). It sits on top of the files and functions the earlier phases build,
 so it comes late; the adaptive review screens can be built with it.
-- Shape: a local web app (FastAPI backend reusing the CLI functions, which a later MCP server
-  could share too, plus a light frontend), bound to `127.0.0.1` with a per-launch token or a
-  Host header check so other web pages cannot drive it.
-- Frontend without an npm build chain (candidate, owner 2026-10-27; confirm when the GUI
-  phase starts): server-rendered Jinja2 templates plus htmx as one vendored JS file.
+- Shape: a local web app (a thin Flask backend reusing the CLI functions, which a later MCP
+  server could share too, plus a light frontend), served by waitress, bound to `127.0.0.1`
+  with a per-launch token or a Host header check so other web pages cannot drive it.
+- Stack (owner, 2026-11-05; it was FastAPI, and the frontend a candidate since 2026-10-27),
+  chosen for low long-term upkeep: Flask, waitress and Jinja2 are 8 packages in a clean
+  Python 3.11 environment, against 17 for FastAPI, uvicorn, Jinja2 and `python-multipart`
+  (12 new here, since pydantic is already a dependency), 33 for Streamlit (it brings pandas
+  and pyarrow) and 50 for NiceGUI. Werkzeug parses uploads, so no `python-multipart`, which
+  had five advisories in 2026 so far, mostly denial of service, little on a local app, but
+  each one an upgrade. Flask is synchronous, as the `tutor` functions are. FastAPI would read
+  better on a CV and was the trade-off accepted. Long tasks (generation, validation) run the
+  existing CLI as a child process writing a log file, and the page polls it: no WebSocket, and
+  a GUI crash does not stop the task.
+- Frontend without an npm build chain: server-rendered Jinja2 templates, htmx 2.x as one
+  vendored JS file with a fixed version, and one small hand-written CSS file (htmx 4 shipped
+  in 2026-08 with breaking changes; a vendored file does not move until we move it).
   Reason: most security alerts in web projects come from deep npm dependency trees and
   build tools; without npm, Dependabot only watches the Python side. A desktop shell is no
   better (Electron ships Chromium and still uses npm). The screens are manage-and-browse
-  pages that do not need a SPA framework. What still needs care: the Python server deps
-  (FastAPI, Starlette, uvicorn, `python-multipart` for uploads), and escaping everything not
+  pages that do not need a SPA framework. What still needs care: escaping everything not
   written by us (lecture text, LLM hints, learner code) to prevent XSS.
 - Manage, do not edit: drag lectures and lab files into the workspace, pick sources and start
   generation with the preference chat box (approving the batch plan there if phase 3 adopts
@@ -2060,6 +2722,9 @@ so it comes late; the adaptive review screens can be built with it.
 - Solving stays in the IDE: an "Open in IDE" button runs `code <exercise dir>` (or a
   `vscode://file/...` link; JetBrains has its own launcher). The GUI never runs the learner's
   tests; the IDE's `pytest` and the attempts plugin stay the one record of attempts.
+- An "Open folder" button next to it (owner, 2026-11-05) on course, batch and exercise pages
+  shows the folder in Finder or Explorer. Only paths inside the workspace, and never a way
+  into `solutions/`.
 - Shows only `exercises/`; `solutions/` (reference, pseudocode) at most after the exercise is
   solved and on explicit request, matching the tutoring rule.
 - Files stay the source of truth; no database (SQLite remains deferred).
@@ -2083,15 +2748,35 @@ so it comes late; the adaptive review screens can be built with it.
     for each one: what it does, where it installs, whether it needs sudo / admin, what it
     changes outside the project (PATH, JAVA_HOME, shell profile), the download source, and
     how to undo it.
-  - Python packages into the project venv: one click, after the same review (a broken venv
+  - Python packages into the course's own venv (one venv per course, owner, 2026-11-05; the
+    project venv holds only the tool): one click, after the same review (a broken venv
     is deleted and rebuilt). Everything else, the user runs in their own terminal, then
     clicks "Check again". The GUI never runs system installs, and never runs LLM-written
     commands (arbitrary commands; hallucinated package names can be squatted). A component
     or platform missing from the recipes is reported as needing a new recipe.
+  - One click after uploading a new course's slides creates its workspace venv and terminal files
+    (owner's wish, 2026-11-04), by calling `python -m tutor.workspace init`.
   - This partly changes "Check, don't install" (see "Environment"): confirm with the owner
-    when the GUI phase starts. The per-course test-run container (layer B, "Code execution
-    safety") arrives with the generalization phase, before the GUI; whether setup also uses
-    it is decided when the GUI phase starts.
+    when the GUI phase starts.
+  - The test-run container (layer B, "Code execution safety"; owner, 2026-11-05). The GUI
+    itself stays on the host, since it opens the IDE and folders and reads keys; only test
+    runs go into the container. The page shows, per course: Docker missing, not running,
+    image missing or out of date, or ready, with the image's size and "Check again". A "Build
+    image" button is allowed, since the recipe comes from our code and not from a model; it
+    shows the recipe, download source and expected size first. The user installs and starts
+    Docker. The venv click does not build the image, which may be 2 GB: that waits until
+    `[requires]` is confirmed. The user chooses host or container for a new course, nothing
+    switched silently, with a warning when it matters: choosing the host (generated code runs
+    with their rights), and a course set to the container while Docker is not available.
+- Packaging the GUI itself as an image (owner asked, 2026-11-05: the aim is opening it in one click,
+  see "Packaging and release", which does not need this, so an image is at most a later option). The
+  costs: to start test containers from inside, it needs the Docker socket, which amounts to root on
+  the Docker host, so that form must say so plainly; "Open folder" cannot work, and "Open in IDE"
+  only as a `vscode://` link the browser opens; the OS keychain is out of reach; the sibling
+  containers' mounts need the host's paths, not the paths inside; inside it binds all interfaces
+  (the host side stays `-p 127.0.0.1:...`), so the token matters more. To keep that door open at no
+  cost: paths come from configuration, starting a run stays in one place (`execution.py`), and the
+  open-folder and IDE actions sit behind one small function that can report "not available".
 
 ## Open questions
 

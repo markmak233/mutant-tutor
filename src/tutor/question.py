@@ -294,7 +294,7 @@ def write_question(student_source: str, exercise_dir: Path,
         text = question_markdown(student_source)
         if location is not None:
             text += run_block(location)
-    (exercise_dir / QUESTION_FILE).write_text(text)
+    (exercise_dir / QUESTION_FILE).write_text(text, encoding="utf-8")
     return True
 
 
@@ -305,18 +305,19 @@ def main(argv: list[str]) -> int:
         return 2
     batch = Path(argv[0])
     manifest = batch / "manifest.json"
-    mode = json.loads(manifest.read_text()).get("mode") if manifest.is_file() else None
+    mode = (json.loads(manifest.read_text(encoding="utf-8")).get("mode")
+            if manifest.is_file() else None)
     for solution in sorted((batch / "solutions").glob("*/")):
         exercise = batch / "exercises" / solution.name
         if not exercise.is_dir():
             continue
         meta = solution / "metadata.json"
-        metadata = json.loads(meta.read_text()) if meta.is_file() else None
+        metadata = json.loads(meta.read_text(encoding="utf-8")) if meta.is_file() else None
         # student.py holds the question in every batch (week 1-3 skeletons are code only);
         # the skeleton is the fallback when the owner's half-edited student.py does not parse.
         sources = [exercise / "student.py", solution / "skeleton.py"]
-        written = any(path.is_file() and write_question(path.read_text(), exercise, exercise,
-                                                         metadata, mode)
+        written = any(path.is_file() and write_question(path.read_text(encoding="utf-8"),
+                                                         exercise, exercise, metadata, mode)
                       for path in sources)
         print(f"{solution.name}: {'question.md' if written else 'no question'}")
     return 0

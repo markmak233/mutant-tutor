@@ -18,7 +18,7 @@ from tutor.llm import LLMConfig
 
 
 def workspace(tmp_path, generation=""):
-    (tmp_path / "workspace.toml").write_text('course = "demo"\n' + generation)
+    (tmp_path / "workspace.toml").write_text('course = "demo"\n' + generation, encoding="utf-8")
     return tmp_path
 
 
@@ -57,7 +57,8 @@ def test_a_resumed_batch_keeps_its_settings_and_takes_changes(tmp_path):
     ws = workspace(tmp_path, "[generation]\nmax_rounds = 2\n")
     run = tmp_path / "run.json"
     _write_run(run, {"oracle_profile": "gpt"}, resolve(ws, {}))
-    (ws / "workspace.toml").write_text('course = "demo"\n[generation]\nmax_rounds = 5\n')
+    (ws / "workspace.toml").write_text('course = "demo"\n[generation]\nmax_rounds = 5\n',
+                                       encoding="utf-8")
     profiles, settings = _read_run(run)
     assert (profiles, settings.max_rounds) == ({"oracle_profile": "gpt"}, 2)  # as planned
     assert resolve(ws, {"max_rounds": "3"}, base=settings).max_rounds == 3
@@ -68,7 +69,8 @@ def test_a_run_file_from_before_the_settings_still_resumes(tmp_path):
 
     run = tmp_path / "run.json"
     run.write_text(json.dumps({"profile": None, "oracle_profile": "gpt", "thinking": "low",
-                               "repair_thinking": "on", "mode": "review", "parallel": 3}))
+                               "repair_thinking": "on", "mode": "review", "parallel": 3}),
+                   encoding="utf-8")
     profiles, settings = _read_run(run)
     assert profiles == {"oracle_profile": "gpt"}
     assert (settings.thinking, settings.repair_thinking, settings.mode, settings.parallel) == (

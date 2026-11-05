@@ -14,7 +14,8 @@ import pytest
 from tutor.config import load_env
 from tutor.execution import DEFAULT_TIMEOUT_S
 from tutor.schema import Metadata, problems
-from tutor.validation import ExerciseError, Status, heldout, load_exercise, validate
+from tutor.testkit import HADOOP_UNSUPPORTED, hadoop_runner_supported
+from tutor.validation import ExerciseError, Status, checks, heldout, load_exercise, validate
 from tutor.validation.__main__ import format_report, main
 from tutor.validation.api import count_uses, find_violations
 from tutor.validation.heldout import (
@@ -91,21 +92,22 @@ def make_exercise(tmp_path, *, tests=TESTS, reference=REFERENCE, skeleton=SKELET
     exercise, solution = tmp_path / "exercise", tmp_path / "solution"
     (solution / "mutants").mkdir(parents=True)
     exercise.mkdir()
-    (exercise / "test_student.py").write_text(tests)
-    (exercise / "student.py").write_text(skeleton)
-    (exercise / "hints.md").write_text("# Hints\n")
+    (exercise / "test_student.py").write_text(tests, encoding="utf-8")
+    (exercise / "student.py").write_text(skeleton, encoding="utf-8")
+    (exercise / "hints.md").write_text("# Hints\n", encoding="utf-8")
     for name, text in (extra_files or {}).items():
         (exercise / name).parent.mkdir(parents=True, exist_ok=True)
-        (exercise / name).write_text(text)
-    (solution / "metadata.json").write_text(json.dumps({**METADATA, **(metadata or {})}))
-    (solution / "reference.py").write_text(reference)
-    (solution / "skeleton.py").write_text(skeleton)
+        (exercise / name).write_text(text, encoding="utf-8")
+    (solution / "metadata.json").write_text(json.dumps({**METADATA, **(metadata or {})}),
+                                            encoding="utf-8")
+    (solution / "reference.py").write_text(reference, encoding="utf-8")
+    (solution / "skeleton.py").write_text(skeleton, encoding="utf-8")
     for name, text in mutants.items():
-        (solution / "mutants" / f"{name}.py").write_text(text)
+        (solution / "mutants" / f"{name}.py").write_text(text, encoding="utf-8")
     if oracle is not None:
-        (solution / "oracle.py").write_text(oracle)
+        (solution / "oracle.py").write_text(oracle, encoding="utf-8")
     if oracle_test is not None:
-        (solution / "test_oracle.py").write_text(oracle_test)
+        (solution / "test_oracle.py").write_text(oracle_test, encoding="utf-8")
     return exercise, solution
 
 
@@ -140,7 +142,7 @@ def test_metadata_that_breaks_the_format_skips_every_other_rule(tmp_path, metada
     exercise, solution = make_exercise(tmp_path)
     data = {**METADATA, **metadata}
     (solution / "metadata.json").write_text(
-        json.dumps({k: v for k, v in data.items() if v is not None}))
+        json.dumps({k: v for k, v in data.items() if v is not None}), encoding="utf-8")
     report = run((exercise, solution))
 
     assert report.result("0").status is Status.FAIL
@@ -175,13 +177,13 @@ def test_unsafe_code_is_never_run(tmp_path, extra_files, expected):
     assert not report.valid
 
 
-def test_a_link_in_the_exercise_is_never_run(tmp_path):
+def test_a_link_in_the_exercise_is_never_run(tmp_path, symlink):
     """A run copies what a link points to, which may be outside the exercise."""
     outside = tmp_path / "outside"
     outside.mkdir()
     (outside / "conftest.py").write_text("import subprocess\n")
     exercise, solution = make_exercise(tmp_path, extra_files={"data/a.csv": "1\n"})
-    (exercise / "data" / "more").symlink_to(outside, target_is_directory=True)
+    symlink(exercise / "data" / "more", outside, target_is_directory=True)
     report = run((exercise, solution))
     assert report.result("safe").status is Status.FAIL
     assert "data/more is a link" in report.result("safe").detail
@@ -204,7 +206,8 @@ def test_a_mutant_is_checked_too(tmp_path):
 def test_examples_fit_the_batch_format():
     """Fast check without Spark; `pytest -m spark` validates the examples end to end."""
     for metadata in sorted(EXAMPLES.glob("*/solution/metadata.json")):
-        assert problems(Metadata, json.loads(metadata.read_text())) == [], metadata.parent
+        data = json.loads(metadata.read_text(encoding="utf-8"))
+        assert problems(Metadata, data) == [], metadata.parent
 
 
 # --- rules 1-3 -------------------------------------------------------------------------
@@ -624,7 +627,7 @@ def test_cli_saves_the_report_as_json(tmp_path):
     overwrites it."""
     exercise, solution = make_exercise(tmp_path, mutants={})
     main([str(exercise), str(solution)])
-    data = json.loads((solution / "validation.json").read_text())
+    data = json.loads((solution / "validation.json").read_text(encoding="utf-8"))
 
     assert data["exercise_id"] == "demo"
     assert data["valid"] is False
@@ -633,14 +636,41 @@ def test_cli_saves_the_report_as_json(tmp_path):
     assert data["results"][4]["status"] == "FAIL"  # zero mutants fails rule 3
     assert "validated_at" in data and "tool_commit" in data
 
-    (solution / "mutants" / "m01_sub.py").write_text(MUTANT_SUB)
+    (solution / "mutants" / "m01_sub.py").write_text(MUTANT_SUB, encoding="utf-8")
     main([str(exercise), str(solution)])
-    assert json.loads((solution / "validation.json").read_text())["valid"] is True
+    assert json.loads((solution / "validation.json").read_text(encoding="utf-8"))["valid"] is True
 
 
 # --- real examples, with Spark ----------------------------------------------------------
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
+
+
+def test_hadoop_exercise_is_skipped_where_unsupported(monkeypatch):
+    """On native Windows a hadoop-runner exercise runs no tests: the static rules still
+    run, every rule that runs tests is skipped with the reason, and it is not VALID."""
+    monkeypatch.setattr(checks, "hadoop_runner_supported", lambda: False)
+    root = EXAMPLES / "station-condition-share"
+    exercise = load_exercise(root / "exercise", root / "solution")
+
+    report = validate(exercise)
+
+    status = {r.rule: r.status for r in report.results}
+    assert status["0"] is status["safe"] is status["api"] is Status.OK
+    for rule in ("1", "2", "3", "4", "5", "main"):
+        assert status[rule] is Status.SKIPPED
+    assert all("WSL" in r.detail for r in report.results if r.status is Status.SKIPPED)
+    assert not report.valid
+
+
+def test_the_plain_python_example_is_valid():
+    """No JVM, so unlike the examples below this runs in the fast suite."""
+    name = "station-longest-rise"
+    exercise = load_exercise(EXAMPLES / name / "exercise", EXAMPLES / name / "solution")
+
+    report = validate(exercise)
+
+    assert report.valid, format_report(report)
 
 
 @pytest.mark.spark
@@ -653,6 +683,8 @@ def test_examples_are_valid(name):
     load_env()
     if name == "station-condition-share" and not os.environ.get("HADOOP_HOME"):
         pytest.skip("needs HADOOP_HOME")
+    if name == "station-condition-share" and not hadoop_runner_supported():
+        pytest.skip(HADOOP_UNSUPPORTED)
     exercise = load_exercise(EXAMPLES / name / "exercise", EXAMPLES / name / "solution")
 
     report = validate(exercise)
@@ -703,6 +735,21 @@ def test_the_failure_excerpt_keeps_what_a_fix_needs_and_no_home_paths():
         "test_student.py:57: ValueError")
     assert "someone" not in failure_excerpt(PYTEST_OUTPUT)
     assert len(failure_excerpt(PYTEST_OUTPUT, limit=40)) == 40 + len("\n...")
+
+
+def test_the_summary_is_pytest_s_line_even_when_lines_follow_it():
+    """On Windows PySpark's exit prints taskkill's line after pytest's summary."""
+    from tutor.execution import Outcome, RunResult
+
+    def summary(output):
+        return checks._summary(RunResult(Outcome.FAILED, 1, 1.0, output))
+
+    taskkill = "SUCCESS: The process with PID 4242 (child process of PID 4200) has been terminated."
+    assert summary(PYTEST_OUTPUT + taskkill + "\n") == "2 failed, 1 passed in 12.92s"
+    assert summary("== 3 passed in 75.33s (0:01:15) ==\n" + taskkill) == (
+        "3 passed in 75.33s (0:01:15)")
+    assert summary("Traceback ...\nKeyboardInterrupt\n") == "KeyboardInterrupt"
+    assert summary("") == "(no output)"
 
 
 def test_required_definitions_accepts_a_method_named_with_its_class():
@@ -831,7 +878,7 @@ SMALL_ONLY = "def add(a, b):\n    return a + b if abs(a) < 1000 else 0\n"
 
 def candidate(tmp_path, kind, code, label=None):
     path = tmp_path / f"{kind}-{abs(hash(code))}.py"
-    path.write_text(code)
+    path.write_text(code, encoding="utf-8")
     return Candidate(kind, label or ("student.py" if kind == CORRECT else "attempt"), path,
                      path.name)
 
@@ -904,17 +951,17 @@ def test_held_out_never_runs_an_exercise_that_fails_the_safety_check(tmp_path):
 def write_attempts(attempts_dir, *runs):
     attempts_dir.mkdir(parents=True, exist_ok=True)
     lines = [run if isinstance(run, str) else json.dumps(run) for run in runs]
-    (attempts_dir / "attempts.jsonl").write_text("\n".join(lines) + "\n")
+    (attempts_dir / "attempts.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def test_owner_candidates_come_from_the_attempts_log(tmp_path):
     batch = tmp_path / "batches" / "b1"
     (batch / "exercises" / "demo").mkdir(parents=True)
-    (batch / "exercises" / "demo" / "student.py").write_text(SWAPPED)
+    (batch / "exercises" / "demo" / "student.py").write_text(SWAPPED, encoding="utf-8")
     attempts = tmp_path / "attempts"
     (attempts / "code" / "b1" / "demo").mkdir(parents=True)
     for name in ("aaa", "bbb", "ccc"):
-        (attempts / "code" / "b1" / "demo" / f"{name}.py").write_text(MUTANT_SUB)
+        (attempts / "code" / "b1" / "demo" / f"{name}.py").write_text(MUTANT_SUB, encoding="utf-8")
 
     def run(result, time, code=None, batch="b1", exercise="demo"):
         line = {"time": time, "batch": batch, "exercise": exercise, "result": result}
@@ -941,7 +988,7 @@ def test_owner_candidates_come_from_the_attempts_log(tmp_path):
 def test_without_a_passing_run_the_student_file_is_not_a_correct_solution(tmp_path):
     batch = tmp_path / "b1"
     (batch / "exercises" / "demo").mkdir(parents=True)
-    (batch / "exercises" / "demo" / "student.py").write_text(SKELETON)
+    (batch / "exercises" / "demo" / "student.py").write_text(SKELETON, encoding="utf-8")
     write_attempts(tmp_path / "attempts",
                    {"time": "2026-10-30T10:00:00", "batch": "b1", "exercise": "demo",
                     "result": "incomplete"})
@@ -954,7 +1001,7 @@ def test_heldout_cli_reports_and_saves_only_exercises_with_candidates(tmp_path, 
                                                                        capsys):
     workspace = tmp_path / "ws"
     workspace.mkdir()
-    (workspace / "workspace.toml").write_text('course = "demo"\n')
+    (workspace / "workspace.toml").write_text('course = "demo"\n', encoding="utf-8")
     monkeypatch.setenv("WORKSPACE_DIR", str(workspace))
     batch = workspace / "batches" / "b1"
     for exercise_id in ("demo", "other"):
@@ -964,7 +1011,7 @@ def test_heldout_cli_reports_and_saves_only_exercises_with_candidates(tmp_path, 
         (batch / "solutions").mkdir(exist_ok=True)
         exercise.rename(batch / "exercises" / exercise_id)
         solution.rename(batch / "solutions" / exercise_id)
-    (batch / "exercises" / "demo" / "student.py").write_text(SWAPPED)
+    (batch / "exercises" / "demo" / "student.py").write_text(SWAPPED, encoding="utf-8")
     write_attempts(workspace / "attempts",
                    {"time": "2026-10-31T09:00:00", "batch": "b1", "exercise": "demo",
                     "result": "passed"})
@@ -973,7 +1020,7 @@ def test_heldout_cli_reports_and_saves_only_exercises_with_candidates(tmp_path, 
     out = capsys.readouterr().out
     assert "other\n  no held-out solutions yet" in out
     assert "held-out: 0 flagged; 1 exercise(s) without held-out solutions" in out
-    data = json.loads((batch / "solutions" / "demo" / "heldout.json").read_text())
+    data = json.loads((batch / "solutions" / "demo" / "heldout.json").read_text(encoding="utf-8"))
     assert data["flagged"] == 0
     assert [(r["kind"], r["check"], r["status"]) for r in data["results"]] == [
         ("correct", "tests", "ok"), ("correct", "distribution", "n/a"),
@@ -991,7 +1038,7 @@ INT_REPR_TESTS = "from student import add\n\ndef test_add():\n    assert repr(ad
 
 def by_model(tmp_path, kind, code, note=""):
     path = tmp_path / f"model-{kind}-{abs(hash(code))}.py"
-    path.write_text(code)
+    path.write_text(code, encoding="utf-8")
     return Candidate(kind, f"model {kind}.py", path, path.name, MODEL, note)
 
 
@@ -1002,9 +1049,9 @@ def test_a_models_files_are_read_with_their_notes(tmp_path):
     folder = solution / "heldout" / "model"
     folder.mkdir(parents=True)
     for name in ("correct.py", "slides.py", "wrong_01.py", "wrong_02.py", "scratch.py"):
-        (folder / name).write_text(REFERENCE)
+        (folder / name).write_text(REFERENCE, encoding="utf-8")
     (folder / "meta.json").write_text(json.dumps(
-        {"notes": {"slides.py": "the slides round", "wrong_01.py": "subtracts"}}))
+        {"notes": {"slides.py": "the slides round", "wrong_01.py": "subtracts"}}), encoding="utf-8")
 
     found = model_candidates(solution)
     assert [(c.kind, c.label, c.note) for c in found] == [

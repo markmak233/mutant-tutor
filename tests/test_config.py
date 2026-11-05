@@ -9,7 +9,7 @@ from tutor.config import WorkspaceError, load_env, load_workspace
 def make_workspace(path: Path, toml: str = 'course = "demo"\n') -> Path:
     """Create a minimal workspace: a directory holding the given workspace.toml."""
     path.mkdir(parents=True, exist_ok=True)
-    (path / "workspace.toml").write_text(toml)
+    (path / "workspace.toml").write_text(toml, encoding="utf-8")
     return path
 
 
@@ -85,12 +85,12 @@ def test_refuses_default_lectures_that_are_a_nested_repo(tmp_path):
         load_workspace({"WORKSPACE_DIR": str(root)})
 
 
-def test_refuses_default_lectures_symlinked_into_a_repo(tmp_path):
+def test_refuses_default_lectures_symlinked_into_a_repo(tmp_path, symlink):
     root = make_workspace(tmp_path / "ws")
     repo = tmp_path / "repo"
     (repo / ".git").mkdir(parents=True)
     (repo / "slides").mkdir()
-    (root / "lectures").symlink_to(repo / "slides")
+    symlink(root / "lectures", repo / "slides", target_is_directory=True)
 
     with pytest.raises(WorkspaceError, match="inside the git repository"):
         load_workspace({"WORKSPACE_DIR": str(root)})
@@ -100,7 +100,7 @@ def test_load_env_does_not_override_existing(tmp_path, monkeypatch):
     """.env fills in missing variables (comments skipped, quotes stripped) but never
     overrides a variable already exported in the shell."""
     env_file = tmp_path / ".env"
-    env_file.write_text('# comment\nTUTOR_A="from file"\nTUTOR_B=from file\n')
+    env_file.write_text('# comment\nTUTOR_A="from file"\nTUTOR_B=from file\n', encoding="utf-8")
     monkeypatch.delenv("TUTOR_A", raising=False)
     monkeypatch.setenv("TUTOR_B", "from shell")
 

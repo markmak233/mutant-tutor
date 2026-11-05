@@ -113,7 +113,7 @@ def test_frameworks_add_their_own_modules():
 
 def test_workspace_toml_adds_course_modules(tmp_path):
     (tmp_path / "workspace.toml").write_text(
-        'course = "x"\n[safety]\nallow_imports = ["numpy", "pandas"]\n')
+        'course = "x"\n[safety]\nallow_imports = ["numpy", "pandas"]\n', encoding="utf-8")
     exercise = tmp_path / "batches" / "b" / "exercises" / "e"
     exercise.mkdir(parents=True)
 
@@ -128,7 +128,8 @@ def test_outside_a_workspace_there_are_no_extra_modules(tmp_path):
 
 
 def test_a_malformed_allow_list_is_an_error(tmp_path):
-    (tmp_path / "workspace.toml").write_text('course = "x"\n[safety]\nallow_imports = "numpy"\n')
+    (tmp_path / "workspace.toml").write_text('course = "x"\n[safety]\nallow_imports = "numpy"\n',
+                                             encoding="utf-8")
     with pytest.raises(ValueError, match="allow_imports must be a list"):
         workspace_allow_imports(tmp_path)
 
@@ -141,9 +142,10 @@ def test_pytest_config_files_are_reported_in_subfolders_too():
 def test_the_examples_pass():
     """Every .py file of the repo's examples, under its own framework's allowlist."""
     for solution in sorted(EXAMPLES.glob("*/solution")):
-        framework = json.loads((solution / "metadata.json").read_text())["framework"]
+        metadata = json.loads((solution / "metadata.json").read_text(encoding="utf-8"))
+        framework = metadata["framework"]
         allowed = allowed_imports(framework)
         files = [*solution.parent.glob("exercise/*.py"), *solution.glob("*.py"),
                  *solution.glob("mutants/*.py")]
         for path in files:
-            assert find_hazards(path.read_text(), allowed) == [], path
+            assert find_hazards(path.read_text(encoding="utf-8"), allowed) == [], path

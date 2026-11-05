@@ -17,7 +17,12 @@ from tutor.heldout_writer import (
     write,
 )
 from tutor.materials import cache
-from tutor.materials.slides import lecture_context, lecture_file, page_groups
+from tutor.materials.slides import (
+    lecture_context,
+    lecture_file,
+    lecture_numbers,
+    page_groups,
+)
 
 SKELETON = '"""Add two numbers."""\n\ndef add(a, b):\n    raise NotImplementedError\n'
 OWNER = "def add(a, b):\n    return a + b  # the owner's answer\n"
@@ -38,19 +43,20 @@ def make_batch(tmp_path, pdf_pages="3-4"):
     (exercise / "sample_output").mkdir()
     solution.mkdir(parents=True)
     (exercise / "question.md").write_text("# Add\n\nAdd `a` and `b`.\n")
-    (exercise / "student.py").write_text(OWNER)
-    (exercise / "test_student.py").write_text(TESTS)
-    (exercise / "hints.md").write_text("# Hints\nthe generator's reading\n")
-    (exercise / "sample_input" / "numbers.txt").write_text("2 3\n")
-    (exercise / "sample_output" / "part-00000").write_text("5\n")
-    (solution / "skeleton.py").write_text(SKELETON)
+    (exercise / "student.py").write_text(OWNER, encoding="utf-8")
+    (exercise / "test_student.py").write_text(TESTS, encoding="utf-8")
+    (exercise / "hints.md").write_text("# Hints\nthe generator's reading\n", encoding="utf-8")
+    (exercise / "sample_input" / "numbers.txt").write_text("2 3\n", encoding="utf-8")
+    (exercise / "sample_output" / "part-00000").write_text("5\n", encoding="utf-8")
+    (solution / "skeleton.py").write_text(SKELETON, encoding="utf-8")
     (solution / "metadata.json").write_text(json.dumps({
         "id": "demo", "framework": "python", "entry_point": ["add"],
-        "source": {"lecture": "L2.2", "slides": "2.3-2.4", "pdf_pages": pdf_pages}}))
+        "source": {"lecture": "L2.2", "slides": "2.3-2.4", "pdf_pages": pdf_pages}}),
+        encoding="utf-8")
     entries = [cache.Entry(n, f"2.{n}", "text", "h", f"page {n} body") for n in range(1, 6)]
     path = workspace / "cache" / "lectures" / "Lecture_2.2-Demo.pdf.md"
     path.parent.mkdir(parents=True)
-    path.write_text(cache.render("Lecture_2.2-Demo.pdf", entries))
+    path.write_text(cache.render("Lecture_2.2-Demo.pdf", entries), encoding="utf-8")
     return workspace, batch
 
 
@@ -111,7 +117,7 @@ def test_a_lecture_number_matches_its_cache_file_exactly(tmp_path):
     lectures = tmp_path / "cache" / "lectures"
     lectures.mkdir(parents=True)
     for name in ("Lecture_5-Topic_C.pdf.md", "Lecture_5.2-Topic_D.pdf.md"):
-        (lectures / name).write_text("")
+        (lectures / name).write_text("", encoding="utf-8")
 
     assert lecture_file(tmp_path, "5").name == "Lecture_5-Topic_C.pdf.md"
     assert lecture_file(tmp_path, "5.2").name == "Lecture_5.2-Topic_D.pdf.md"
@@ -130,6 +136,90 @@ def test_a_lecture_that_fits_goes_whole_with_the_exercises_pages_marked(tmp_path
     cut = lecture_context(workspace, source, limit=10)  # too long: own pages only
     assert "page 3 body" in cut and "page 4 body" in cut and "page 1 body" not in cut
     assert lecture_context(workspace, "synthetic") == ""
+
+
+@pytest.mark.parametrize(("lecture", "expected"), [
+    ("L2.2", ["2.2"]),
+    ("L2.1, L2.2", ["2.1", "2.2"]),
+    ("Lecture 5: Topic C", ["5"]),
+    ("Lecture 7.1 Topic E", ["7.1"]),
+    ("Lecture_4.2-Topic_B", ["4.2"]),
+    ("Lectures 3.1, Lecture 3.2", ["3.1", "3.2"]),
+    ("lecture 6", ["6"]),
+    ("Lecture 7 - Topic G (CS1234 Some Course, Week 7, 2026)", ["7"]),  # not 1234, 7 and 2026
+    ("Lecture 7, again Lecture 7", ["7"]),  # one lecture, so unlabelled pages are its own
+    ("Level 3 of Topic A", []),
+    ("", []),
+])
+def test_only_the_number_after_the_word_for_lecture_counts(lecture, expected):
+    assert lecture_numbers({"lecture": lecture}) == expected
+
+
+def test_other_numbers_in_a_lecture_name_keep_the_exercises_own_pages(tmp_path):
+    """A long lecture sends only the exercise's pages. Reading 1234 or 2026 as lectures left the
+    pages with no owner, and the judge ran with no slides at all."""
+    workspace, _ = make_batch(tmp_path)
+    source = {"lecture": "Lecture 2.2 - Topic B (CS1234, Week 2, 2026)", "pdf_pages": "p.3-p.4"}
+
+    cut = lecture_context(workspace, source, limit=10)
+
+    assert "page 3 body" in cut and "page 4 body" in cut and "page 1 body" not in cut
+
+
+def add_lecture(workspace, name: str, pages: int = 3) -> None:
+    """A cached lecture under any file name."""
+    entries = [cache.Entry(n, str(n), "text", "h", f"{name} page {n}") for n in range(1, pages + 1)]
+    path = workspace / "cache" / "lectures" / f"{name}.pdf.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(cache.render(f"{name}.pdf", entries), encoding="utf-8")
+
+
+def test_the_exact_file_is_found_whatever_the_course_calls_it(tmp_path):
+    add_lecture(tmp_path, "Perceptrons")
+    add_lecture(tmp_path, "Week_3 Part 2")
+
+    for name in ("Perceptrons", "Week_3 Part 2"):
+        context = lecture_context(tmp_path, {"lecture": name, "pdf_pages": "p.2"})
+        assert f"## {name} p.2 · slide 2 · this exercise's page" in context
+        assert f"{name} page 3" in context  # it fits, so it goes whole
+
+
+def test_the_exact_file_comes_before_any_number_in_its_name(tmp_path):
+    """A name with no lecture number of its own form must not fall back to Lecture_7."""
+    add_lecture(tmp_path, "Lecture_7-Topic_G")
+    add_lecture(tmp_path, "L3 Topic C")
+
+    context = lecture_context(tmp_path, {"lecture": "L3 Topic C", "pdf_pages": "1"})
+
+    assert "L3 Topic C page 1" in context and "Topic_G" not in context
+
+
+def test_a_long_lecture_named_exactly_sends_its_own_pages_even_with_a_label(tmp_path):
+    add_lecture(tmp_path, "Topic_G", pages=5)
+
+    cut = lecture_context(tmp_path, {"lecture": "Topic_G", "pdf_pages": "L7 2-3"}, limit=10)
+
+    assert "Topic_G page 2" in cut and "Topic_G page 3" in cut and "Topic_G page 1" not in cut
+
+
+def test_a_lecture_name_cannot_read_outside_the_cache(tmp_path):
+    add_lecture(tmp_path, "Topic_G")
+    (tmp_path / "secret.pdf.md").write_text("private", encoding="utf-8")
+
+    with pytest.warns(UserWarning, match="no pages found"):
+        assert lecture_context(tmp_path, {"lecture": "../../secret", "pdf_pages": "1"}) == ""
+
+
+def test_a_named_lecture_with_no_pages_warns_and_a_synthetic_source_does_not(tmp_path, recwarn):
+    workspace, _ = make_batch(tmp_path)
+
+    assert lecture_context(workspace, "synthetic") == ""
+    assert len(recwarn) == 0
+
+    with pytest.warns(UserWarning, match="no pages found for lecture 'L9'"):
+        assert lecture_context(workspace, {"lecture": "L9", "pdf_pages": "1"}) == ""
+    with pytest.warns(UserWarning, match="runs without slides"):  # too long, own pages unknown
+        assert lecture_context(workspace, {"lecture": "L2.2", "pdf_pages": "?"}, limit=10) == ""
 
 
 def test_the_model_sees_question_skeleton_data_and_slides_only(tmp_path):
@@ -156,8 +246,8 @@ def test_one_call_per_file_and_each_saved_with_its_note(tmp_path):
     assert [kind for kind, _ in model.calls] == ["correct", "slides", "wrong", "wrong", "wrong"]
     assert sorted(p.name for p in out.glob("*.py")) == [
         "correct.py", "slides.py", "wrong_01.py", "wrong_02.py", "wrong_03.py"]
-    assert (out / "wrong_02.py").read_text() == WRONG[1]
-    meta = json.loads((out / "meta.json").read_text())
+    assert (out / "wrong_02.py").read_text(encoding="utf-8") == WRONG[1]
+    meta = json.loads((out / "meta.json").read_text(encoding="utf-8"))
     assert meta["notes"] == {"slides.py": "the slides round first", "wrong_01.py": MISTAKES[0],
                              "wrong_02.py": MISTAKES[1], "wrong_03.py": MISTAKES[2]}
     assert meta["model"] == "fake: fake-1" and meta["dropped"] == {}
@@ -195,10 +285,11 @@ def test_an_unsafe_file_is_sent_back_and_dropped_if_it_stays_unsafe(tmp_path):
     second = [messages for kind, messages in model.calls if kind == "wrong"][2]
     assert "That reply has problems: line 1: import of 'subprocess'" in second[-1]["content"]
     assert outcome == "written: correct, slides, 2 wrong; dropped wrong_02.py"
-    meta = json.loads((batch / "solutions/demo/heldout/model/meta.json").read_text())
+    model_dir = batch / "solutions/demo/heldout/model"
+    meta = json.loads((model_dir / "meta.json").read_text(encoding="utf-8"))
     assert "import of 'subprocess'" in meta["dropped"]["wrong_02.py"]
     # The next file is numbered by its place in the plan, and told only the kept mistakes.
-    assert (batch / "solutions/demo/heldout/model/wrong_03.py").read_text() == WRONG[2]
+    assert (model_dir / "wrong_03.py").read_text(encoding="utf-8") == WRONG[2]
 
 
 def test_a_fixed_reply_replaces_the_unsafe_one(tmp_path):

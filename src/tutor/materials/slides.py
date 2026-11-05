@@ -1,27 +1,32 @@
 """An exercise's lecture pages, from the lecture cache, for a model that reads them.
 
-Exercises name their lecture and pages in metadata `source`, in the forms the batches
-happen to use ("L2.2", "Lecture 5: Topic C", "Lecture_4.2-Topic_B"; pages "12-15, 20",
-"p.8-p.10", "L1.1 3-8; L1.2 5-9"). Only the lecture's number is reliable, so the cache
-file is found by it (cache/lectures/Lecture_<number>-....pdf.md).
+Exercises name their lecture and pages in metadata `source`. The pipeline writes the exact
+name of the cache file (cache/lectures/<name>.pdf.md), so a course may name its files anything.
+Earlier batches hold what a model wrote ("L2.2", "Lecture 5: Topic C"; pages "12-15, 20",
+"p.8-p.10", "L1.1 3-8; L1.2 5-9"): there only the number after the word for lecture is
+reliable, and the cache file is found by it (Lecture_<number>-....pdf.md).
 
 Used by the held-out writer (tutor/heldout_writer.py) and the teaching-quality judge
 (tutor/judge/): both see the whole lecture with the exercise's own pages marked, as
-generation sees it when it fits.
+generation sees it when it fits. A named lecture that yields no pages is a warning: both
+still run without slides, and their results then mean less.
 """
 
 from __future__ import annotations
 
 import re
+import warnings
 from pathlib import Path
 
 from tutor.materials import cache
 
 # Characters of lecture pages a prompt may hold, as generation's context_chars: lectures
-# that fit go whole, else only the exercise's own pages (the largest lecture is ~53k).
+# that fit go whole, else only the exercise's own pages. Courses differ: one's largest lecture
+# is ~53k characters, another's ~200k.
 CONTEXT_CHARS = 120_000
-# A lecture number as names write it: "2.2", "5", "7.1".
-_NUMBER = re.compile(r"\d+(?:\.\d+)?")
+# A lecture's number where a name writes it: "L2.2", "Lecture 5:", "Lecture_7.1-", "Lectures 3".
+# Only right after that word, or "Lecture 7 (CS1234, Week 7, 2026)" would name four lectures.
+_NUMBER = re.compile(r"\b(?:Lectures?|L)[\s_]*(\d+(?:\.\d+)?)", re.IGNORECASE)
 # "L1.1 3-8, 12": a group of pages that names its lecture first.
 _LABELLED = re.compile(r"^\s*L(\d+(?:\.\d+)?)\s+(.*)$")
 # A cache file's name: "Lecture_7.1-Some_Topic.pdf.md" -> "7.1".
@@ -29,30 +34,39 @@ _CACHE_NAME = re.compile(r"^Lecture_(\d+(?:\.\d+)?)[-_]")
 
 
 def lecture_numbers(source) -> list[str]:
-    """The lecture numbers metadata `source.lecture` names, in order: "L2.1, L2.2" ->
-    ["2.1", "2.2"]. [] for a hand-made exercise's "synthetic" source."""
+    """The lecture numbers metadata `source.lecture` names, in order and each once:
+    "L2.1, L2.2" -> ["2.1", "2.2"]. [] for a hand-made exercise's "synthetic" source."""
     if not isinstance(source, dict):
         return []
-    return _NUMBER.findall(source.get("lecture") or "")
+    # Each once: pages without a label belong to "the only lecture", which a repeat would hide.
+    return list(dict.fromkeys(_NUMBER.findall(source.get("lecture") or "")))
 
 
 def lecture_context(workspace: Path, source, limit: int = CONTEXT_CHARS) -> str:
     """The lectures metadata `source` names, as "## <lecture> p.N · slide L" sections, the
     exercise's own pages (`source.pdf_pages`) marked. Whole lectures if they fit in
-    `limit` characters, else only the exercise's own pages. "" when no lecture is found (a
-    hand-made exercise's "synthetic" source, or a lecture not in the cache)."""
+    `limit` characters, else only the exercise's own pages. "" for a hand-made exercise's
+    "synthetic" source; also "", with a warning, when `source` names a lecture but no page of
+    it is found (not in the cache, or too long with its own pages unreadable)."""
     if not isinstance(source, dict):
         return ""
-    numbers = lecture_numbers(source)
-    own: dict[str, set[int]] = {}
-    for lecture, pages in page_groups(source.get("pdf_pages") or "", numbers):
-        own.setdefault(lecture, set()).update(pages)
+    pdf_pages = source.get("pdf_pages") or ""
     lectures = []  # (name, its pages, the exercise's pages in it)
-    for number in dict.fromkeys([*numbers, *own]):  # in order, each once
-        path = lecture_file(workspace, number)
-        if path is not None:
-            lectures.append((path.name.removesuffix(".pdf.md"), cache.load(path),
-                             own.get(number, set())))
+    if (named := _named_file(workspace, source)) is not None:
+        # One lecture, so every group of pages is its own, labelled or not.
+        mine = {page for _, pages in page_groups(pdf_pages, [_lecture_name(named)])
+                for page in pages}
+        lectures.append((_lecture_name(named), cache.load(named), mine))
+    else:
+        numbers = lecture_numbers(source)
+        own: dict[str, set[int]] = {}
+        for lecture, pages in page_groups(pdf_pages, numbers):
+            own.setdefault(lecture, set()).update(pages)
+        for number in dict.fromkeys([*numbers, *own]):  # in order, each once
+            path = lecture_file(workspace, number)
+            if path is not None:
+                lectures.append((_lecture_name(path), cache.load(path),
+                                 own.get(number, set())))
     whole = sum(len(e.body) for _, entries, _ in lectures
                 for e in entries.values()) <= limit
     sections = []
@@ -63,6 +77,9 @@ def lecture_context(workspace: Path, source, limit: int = CONTEXT_CHARS) -> str:
                 label = f" · slide {e.label}" if e.label else ""
                 mark = " · this exercise's page" if number in mine else ""
                 sections.append(f"## {name} p.{number}{label}{mark}\n{e.body}")
+    if not sections and source.get("lecture"):
+        warnings.warn(f"no pages found for lecture {source['lecture']!r} (pdf_pages "
+                      f"{source.get('pdf_pages')!r}): this runs without slides", stacklevel=2)
     return "\n\n".join(sections)
 
 
@@ -99,20 +116,56 @@ def lecture_file(workspace: Path, number: str) -> Path | None:
     return found[0] if found else None
 
 
+def _lecture_name(path: Path) -> str:
+    """A cache file's lecture: Lecture_5-Topic_C.pdf.md -> "Lecture_5-Topic_C"."""
+    return path.name.removesuffix(".pdf.md")
+
+
+def _named_file(workspace: Path, source: dict) -> Path | None:
+    """The cache file `source.lecture` names exactly, or None. A plain name only: a model may
+    have written the text, and "../" must not read outside the cache."""
+    lecture = source.get("lecture") or ""
+    if not lecture or Path(lecture).name != lecture:
+        return None
+    path = workspace / "cache" / "lectures" / f"{lecture}.pdf.md"
+    return path if path.is_file() else None
+
+
+def _file_order(name: str) -> tuple:
+    """Sort key for the course order, from the numbers in a file's name wherever they stand:
+    "L2" before "L10", "Week_5" before "Week_5.2", "CS1234_L3" before "CS1234_L10"."""
+    return tuple(int(number) for number in re.findall(r"\d+", name)), name.lower()
+
+
 def lectures_taught(workspace: Path, source) -> list[str]:
     """The cached lectures up to and including the exercise's last one, in course order,
     by name ("Lecture_5-Topic_C"): what a student has been taught when solving it.
     [] when the source names no lecture."""
+    if isinstance(source, dict) and (named := _named_file(workspace, source)) is not None:
+        names = sorted((_lecture_name(path)
+                        for path in (workspace / "cache" / "lectures").glob("*.pdf.md")),
+                       key=_file_order)
+        if unordered := [name for name in names if not re.search(r"\d", name)]:
+            # No guessing: alphabetical order is not the course's.
+            warnings.warn(f"no number in the name of {unordered}, so the course order is unknown: "
+                          f"only {_lecture_name(named)!r} counts as taught", stacklevel=2)
+            return [_lecture_name(named)]
+        return names[:names.index(_lecture_name(named)) + 1]
     numbers = lecture_numbers(source)
     if not numbers:
         return []
     last = max(_order(n) for n in numbers)
-    taught = []
+    return [_lecture_name(path) for number, path in cached_lectures(workspace)
+            if _order(number) <= last]
+
+
+def cached_lectures(workspace: Path) -> list[tuple[str, Path]]:
+    """(lecture number, cache file) of every cached lecture, in course order."""
+    found = []
     for path in (workspace / "cache" / "lectures").glob("*.pdf.md"):
-        named = _CACHE_NAME.match(path.name)
-        if named and _order(named.group(1)) <= last:
-            taught.append((_order(named.group(1)), path.name.removesuffix(".pdf.md")))
-    return [name for _, name in sorted(taught)]
+        if named := _CACHE_NAME.match(path.name):
+            found.append((named.group(1), path))
+    return sorted(found, key=lambda item: _order(item[0]))
 
 
 def _order(number: str) -> tuple[int, ...]:

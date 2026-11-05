@@ -55,7 +55,7 @@ generate = "glm-flash"
 
 
 def workspace(tmp_path, llm=WORKSPACE_LLM):
-    (tmp_path / "workspace.toml").write_text('course = "demo"\n' + llm)
+    (tmp_path / "workspace.toml").write_text('course = "demo"\n' + llm, encoding="utf-8")
     return tmp_path
 
 
@@ -126,9 +126,9 @@ def test_chat_sends_an_openai_request_and_logs_without_the_key(sent, tmp_path):
     url = body["messages"][0]["content"][1]["image_url"]["url"]
     assert base64.b64decode(url.removeprefix("data:image/png;base64,")) == b"\x89PNG fake"
     assert (reply.text, reply.input_tokens, reply.output_tokens) == ("## Mean v1", 1200, 80)
-    line = json.loads(log.read_text())
+    line = json.loads(log.read_text(encoding="utf-8"))
     assert (line["purpose"], line["outcome"], line["output_tokens"]) == ("vision", "ok", 80)
-    assert SECRET not in log.read_text()
+    assert SECRET not in log.read_text(encoding="utf-8")
 
 
 def test_no_authorization_header_without_a_key(sent):
@@ -145,7 +145,7 @@ def test_an_unreachable_server_is_a_clear_error_and_is_logged(monkeypatch, tmp_p
     with pytest.raises(LLMError, match="is the server running"):
         chat(LLMConfig("p", "lmstudio", "http://localhost:1234/v1", "gemma"), [], purpose="vision",
              log_path=log)
-    assert json.loads(log.read_text())["outcome"] == "error"
+    assert json.loads(log.read_text(encoding="utf-8"))["outcome"] == "error"
 
 
 def test_cached_input_tokens_are_read_and_logged(monkeypatch, tmp_path):
@@ -161,7 +161,7 @@ def test_cached_input_tokens_are_read_and_logged(monkeypatch, tmp_path):
     reply = chat(LLMConfig("p", "openai", "https://api.openai.com/v1", "gpt-6.1-terra"), [],
                  purpose="repair", log_path=log)
     assert reply.cached_tokens == 5504
-    assert json.loads(log.read_text())["cached_tokens"] == 5504
+    assert json.loads(log.read_text(encoding="utf-8"))["cached_tokens"] == 5504
 
 
 def test_a_byte_that_is_not_utf8_does_not_crash_the_call(monkeypatch):
@@ -202,7 +202,7 @@ def test_an_error_that_echoes_the_key_is_logged_and_raised_without_it(monkeypatc
     with pytest.raises(LLMError) as raised:
         chat(config, [], purpose="vision", log_path=log)
     assert "HTTP 401" in str(raised.value) and "invalid key [key]" in str(raised.value)
-    assert SECRET not in str(raised.value) and SECRET not in log.read_text()
+    assert SECRET not in str(raised.value) and SECRET not in log.read_text(encoding="utf-8")
 
 
 def test_thinking_off_tries_each_switch_until_the_model_accepts_one(monkeypatch, tmp_path):
@@ -312,7 +312,7 @@ def test_a_stream_that_ends_without_finishing_is_an_error(monkeypatch, tmp_path)
     with pytest.raises(LLMError, match="ended after 7 characters without finishing"):
         chat(LLMConfig("p", "deepseek", "https://api.deepseek.com", "deepseek-v4-flash"),
              [], purpose="generate", stream=True, log_path=log)
-    assert json.loads(log.read_text())["outcome"] == "error"
+    assert json.loads(log.read_text(encoding="utf-8"))["outcome"] == "error"
 
 
 def test_only_providers_known_to_accept_it_are_asked_for_usage_in_a_stream(monkeypatch):
@@ -335,4 +335,93 @@ def test_an_error_inside_a_stream_is_an_llm_error(monkeypatch, tmp_path):
     with pytest.raises(LLMError, match="error in the stream.*overloaded"):
         chat(LLMConfig("p", "openai", "http://x/v1", "gpt"), [], purpose="generate",
              stream=True, log_path=tmp_path / "calls.jsonl")
-    assert json.loads((tmp_path / "calls.jsonl").read_text())["outcome"] == "error"
+    assert json.loads((tmp_path / "calls.jsonl").read_text(encoding="utf-8"))["outcome"] == "error"
+
+
+# --- embeddings ------------------------------------------------------------------------------
+
+def embedding_reply(vectors, tokens=7):
+    rows = [{"index": i, "embedding": v} for i, v in vectors]
+    return json.dumps({"data": rows, "usage": {"prompt_tokens": tokens}}).encode()
+
+
+def embed_config():
+    return LLMConfig("embed", "glm", "http://server/v4", "embedding-3", api_key="secret-key")
+
+
+def fake_server(monkeypatch, body):
+    requests = []
+
+    def urlopen(request, timeout):
+        requests.append(request)
+        return FakeResponse(body)
+
+    monkeypatch.setattr(llm.urllib.request, "urlopen", urlopen)
+    return requests
+
+
+def test_embed_posts_the_texts_and_returns_vectors_in_input_order(monkeypatch):
+    # Out of order on purpose: the reply's index says which input a vector belongs to.
+    requests = fake_server(monkeypatch, embedding_reply([(1, [0.2]), (0, [0.1])]))
+    assert llm.embed(embed_config(), ["a", "b"], purpose="t", dimensions=1024) == [[0.1], [0.2]]
+    assert requests[0].full_url == "http://server/v4/embeddings"
+    assert json.loads(requests[0].data) == {"model": "embedding-3", "input": ["a", "b"],
+                                            "dimensions": 1024}
+
+
+def test_embed_leaves_out_dimensions_when_not_asked(monkeypatch):
+    requests = fake_server(monkeypatch, embedding_reply([(0, [0.1])]))
+    llm.embed(embed_config(), ["a"], purpose="t")
+    assert "dimensions" not in json.loads(requests[0].data)
+
+
+def test_embed_logs_its_tokens_without_the_key(monkeypatch, tmp_path):
+    fake_server(monkeypatch, embedding_reply([(0, [0.1])], tokens=42))
+    log = tmp_path / "calls.jsonl"
+    llm.embed(embed_config(), ["a"], purpose="embedding", log_path=log)
+    text = log.read_text(encoding="utf-8")
+    entry = json.loads(text)
+    assert (entry["purpose"], entry["input_tokens"], entry["outcome"]) == ("embedding", 42, "ok")
+    assert "secret-key" not in text
+
+
+def test_embed_refuses_a_reply_with_too_few_vectors(monkeypatch, tmp_path):
+    fake_server(monkeypatch, embedding_reply([(0, [0.1])]))
+    log = tmp_path / "calls.jsonl"
+    with pytest.raises(LLMError, match="1 vectors for 2 texts"):
+        llm.embed(embed_config(), ["a", "b"], purpose="t", log_path=log)
+    assert json.loads(log.read_text(encoding="utf-8"))["outcome"] == "error"
+
+
+def test_embed_reports_a_reply_of_another_shape(monkeypatch):
+    fake_server(monkeypatch, b'{"choices": []}')
+    with pytest.raises(LLMError, match="unexpected reply"):
+        llm.embed(embed_config(), ["a"], purpose="t")
+
+
+def test_embed_http_error_is_redacted_and_logged(monkeypatch, tmp_path):
+    def refuse(request, timeout):
+        raise urllib.error.HTTPError(request.full_url, 429, "busy", {},
+                                     io.BytesIO(b"limit for secret-key"))
+
+    monkeypatch.setattr(llm.urllib.request, "urlopen", refuse)
+    log = tmp_path / "calls.jsonl"
+    with pytest.raises(LLMError, match="HTTP 429") as caught:
+        llm.embed(embed_config(), ["a"], purpose="t", log_path=log)
+    assert "secret-key" not in str(caught.value)
+    assert "secret-key" not in log.read_text(encoding="utf-8")
+
+
+def test_embed_unreachable_server_is_a_clear_error(monkeypatch):
+    def refuse(request, timeout):
+        raise urllib.error.URLError("refused")
+
+    monkeypatch.setattr(llm.urllib.request, "urlopen", refuse)
+    with pytest.raises(LLMError, match="cannot reach"):
+        llm.embed(embed_config(), ["a"], purpose="t")
+
+
+def test_embed_is_not_for_an_assistant_profile():
+    config = LLMConfig("helper", "assistant", "assistant:helper", "helper")
+    with pytest.raises(LLMError, match="no API"):
+        llm.embed(config, ["a"], purpose="t")

@@ -56,6 +56,7 @@ from pathlib import Path
 
 from tutor.attempts import ATTEMPTS_FILE
 from tutor.config import WorkspaceError, load_env, load_workspace
+from tutor.container import ContainerError
 from tutor.validation.checks import (
     RuleResult,
     Status,
@@ -115,7 +116,7 @@ def owner_candidates(batch_dir: Path, exercise_id: str, attempts_dir: Path) -> l
     log = attempts_dir / ATTEMPTS_FILE
     runs = []
     if log.is_file():
-        for raw in log.read_text().splitlines():
+        for raw in log.read_text(encoding="utf-8").splitlines():
             try:
                 run = json.loads(raw)
             except json.JSONDecodeError:
@@ -154,7 +155,7 @@ def model_candidates(solution_dir: Path) -> list[Candidate]:
     meta = folder / MODEL_META
     if not meta.is_file():
         return []
-    notes = json.loads(meta.read_text()).get("notes", {})
+    notes = json.loads(meta.read_text(encoding="utf-8")).get("notes", {})
     found = []
     for path in sorted(folder.glob("*.py")):  # correct, slides, then wrong_01, wrong_02, ...
         if path.stem in (CORRECT, SLIDES):
@@ -187,7 +188,8 @@ def check_heldout(ex: ExerciseFiles, candidates: list[Candidate],
     # A model's file is code from outside, like a generated exercise: the same static check
     # before anything runs it. The owner's own code is not checked, as in their own runs.
     allowed = allowed_imports(ex.metadata["framework"], workspace_allow_imports(ex.exercise_dir))
-    hazards = {c.path: find_hazards(c.path.read_text(), allowed) if c.author == MODEL else []
+    hazards = {c.path: (find_hazards(c.path.read_text(encoding="utf-8"), allowed)
+                        if c.author == MODEL else [])
                for c in candidates}
     # Candidates are independent: check them at once (execution.py caps how many test runs
     # go at a time) and flatten the results back into the candidates' order.
@@ -332,7 +334,7 @@ def report_to_dict(exercise_id: str, results: list[HeldOutResult], checked_at: s
 
 def main(argv: list[str] | None = None) -> int:
     """Exit code 0: nothing flagged; 1: something flagged or an exercise would not load;
-    2: wrong usage or no workspace."""
+    2: wrong usage, no workspace, or no container for a course that asks for one."""
     args = sys.argv[1:] if argv is None else argv
     if not args:
         print("Usage: python -m tutor.validation.heldout <batch_dir> [<exercise_id> ...]")
@@ -358,13 +360,18 @@ def main(argv: list[str] | None = None) -> int:
             continue
         candidates = (owner_candidates(batch, exercise_id, attempts_dir)
                       + model_candidates(solution))
-        results = check_heldout(ex, candidates)
+        try:
+            results = check_heldout(ex, candidates)
+        except ContainerError as e:  # stops every exercise alike, and is no verdict on any
+            print(f"container: {e}", file=sys.stderr)
+            return 2
         print(format_report(exercise_id, results), flush=True)
         if not results:
             without += 1
             continue  # no file for an exercise nobody has run yet
         data = report_to_dict(exercise_id, results, datetime.now().isoformat(timespec="seconds"))
-        (solution / REPORT_FILE).write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+        (solution / REPORT_FILE).write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n",
+                                            encoding="utf-8")
         flagged += data["flagged"]
     print(f"held-out: {flagged} flagged; {without} exercise(s) without held-out solutions"
           + (f"; {broken} would not load" if broken else ""))

@@ -96,6 +96,9 @@ class GenerationSettings(BaseModel):
         "validation runs Spark on every core)."))
     mode: Literal["learn", "review"] = Field("learn", description=(
         "learn: questions may explain the cause of a bug; review: only its symptom."))
+    hide_answers: bool = Field(False, description=(
+        "For a batch of hand-calculation exercises: a pytest.ini in the batch folder makes a "
+        "test run show only PASSED or FAILED, as a traceback would print the right number."))
 
 
 DEFAULTS = GenerationSettings()
@@ -104,7 +107,8 @@ DEFAULTS = GenerationSettings()
 # item. max_count and parallel act on the whole batch instead.
 DEPS_FIELDS = ("max_rounds", "stronger_repair_from", "repair_temperature_step", "thinking",
                "repair_thinking", "plan_thinking", "oracle_thinking", "concept_lines", "max_tokens",
-               "max_tokens_no_thinking", "item_token_budget", "context_chars", "mode")
+               "max_tokens_no_thinking", "item_token_budget", "context_chars", "mode",
+               "hide_answers")
 
 
 def workspace_table(workspace: Path) -> dict:

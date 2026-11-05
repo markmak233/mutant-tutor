@@ -34,7 +34,14 @@ from pathlib import Path
 
 from tutor.execution import Outcome, RunResult, copied_files, links, run_pytest, run_script
 from tutor.schema import Metadata, problems
-from tutor.testkit import COMBINER_ENV, DEFAULT_PARTITIONS, PARTITIONS_ENV, VALUE_ORDER_ENV
+from tutor.testkit import (
+    COMBINER_ENV,
+    DEFAULT_PARTITIONS,
+    HADOOP_UNSUPPORTED,
+    PARTITIONS_ENV,
+    VALUE_ORDER_ENV,
+    hadoop_runner_supported,
+)
 from tutor.validation.api import count_uses, find_violations, is_main_block
 from tutor.validation.exercise import STUDENT_FILE, ExerciseFiles
 from tutor.validation.safety import (
@@ -111,6 +118,18 @@ def validate(ex: ExerciseFiles, timeout_s: float | None = None,
         # Code that fails the safety check is never run, not even the reference.
         return ValidationReport(ex.exercise_id, [
             fmt, safe, *_skipped_after_safety("skipped: the code must pass the safety check"),
+        ])
+    if ex.metadata.get("runner") == "hadoop" and not hadoop_runner_supported():
+        # Every test run would skip, so no rule that runs tests can say anything; the
+        # static API check still runs. Skipped counts against validity (design.md).
+        reason = f"skipped: {HADOOP_UNSUPPORTED}"
+        return ValidationReport(ex.exercise_id, [
+            fmt,
+            safe,
+            RuleResult("1", "reference passes", Status.SKIPPED, reason, 0.0),
+            *_skipped_test_rules(reason),
+            check_api_constraints(ex),
+            RuleResult("main", "runs on its own", Status.SKIPPED, reason, 0.0),
         ])
     if timeout_s is None:
         timeout_s = ex.timeout_s
@@ -208,7 +227,8 @@ def check_safety(ex: ExerciseFiles) -> RuleResult:
     found = [f"{name} is not allowed in an exercise (pytest runs it on its own)"
              for name in config_files(copied)]
     for name, path in files.items():
-        found += [f"{name} {hazard}" for hazard in find_hazards(path.read_text(), allowed)]
+        found += [f"{name} {hazard}"
+                  for hazard in find_hazards(path.read_text(encoding="utf-8"), allowed)]
     if found:
         return RuleResult("safe", "static safety", Status.FAIL, "; ".join(found), 0.0)
     return RuleResult("safe", "static safety", Status.OK, f"{len(files)} files checked", 0.0)
@@ -235,7 +255,7 @@ def check_main(ex: ExerciseFiles, timeout_s: float) -> RuleResult:
     # Both sides need the block: the skeleton is what the student starts from.
     missing = [name for name, path in (("student.py", ex.skeleton), ("reference.py",
                                                                      ex.reference))
-               if not has_main_block(path.read_text())]
+               if not has_main_block(path.read_text(encoding="utf-8"))]
     if missing:
         return RuleResult("main", "runs on its own", Status.FAIL,
                           f"{' and '.join(missing)} lack an `if __name__ == \"__main__\":` "
@@ -422,7 +442,7 @@ def check_api_constraints(ex: ExerciseFiles) -> RuleResult:
     if not constraints:
         return RuleResult("api", "api constraints", Status.NOT_APPLICABLE,
                           "no constraints in metadata", 0.0)
-    source = ex.reference.read_text()
+    source = ex.reference.read_text(encoding="utf-8")
     violations = find_violations(source, constraints)
     if violations:
         detail = "reference breaks its own constraints: " + "; ".join(violations)
@@ -449,9 +469,18 @@ def _run(
     return run_pytest(ex.run_files(candidate), timeout_s, env, heavy=ex.heavy)
 
 
+# pytest's closing line ends with the run time, e.g. "in 8.70s" or "in 75.33s (0:01:15)".
+_PYTEST_SUMMARY = re.compile(r"\bin \d+(\.\d+)?s( \(\d+:\d\d:\d\d\))?$")
+
+
 def _summary(r: RunResult) -> str:
-    """pytest's last line, e.g. "4 passed in 8.7s"."""
+    """pytest's summary line, e.g. "4 passed in 8.7s". It is searched from the end, as
+    lines can follow it (on Windows PySpark's exit prints taskkill's "SUCCESS: The
+    process ... terminated."); without one (timeout, crash) the last line is used."""
     lines = [line.strip("= ") for line in r.output.splitlines() if line.strip()]
+    for line in reversed(lines):
+        if _PYTEST_SUMMARY.search(line):
+            return line
     return lines[-1] if lines else "(no output)"
 
 

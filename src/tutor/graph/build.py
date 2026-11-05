@@ -29,6 +29,7 @@ from __future__ import annotations
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Send, interrupt
 
+from tutor.container import check_course
 from tutor.exchange import AwaitingAnswer
 from tutor.graph import nodes
 from tutor.graph.nodes import Deps
@@ -86,6 +87,9 @@ def build_batch(deps: Deps, checkpointer):
         plan_item = PlanItem.model_validate(payload["item"])
         final: ItemState = {"item": plan_item}
         try:
+            # Docker may have stopped since the batch began. The item that finds out reports
+            # an error like any other, and the ones after it spend no tokens to do the same.
+            check_course(deps.workspace)
             for update in item_graph.stream({"item": plan_item}, stream_mode="updates"):
                 for node, change in update.items():
                     final.update(change or {})

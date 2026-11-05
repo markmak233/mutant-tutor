@@ -152,17 +152,17 @@ class Inputs:
 def gather(batch_dir: Path, exercise_id: str, workspace: Path) -> Inputs:
     solution = batch_dir / "solutions" / exercise_id
     exercise = batch_dir / "exercises" / exercise_id
-    metadata = json.loads((solution / "metadata.json").read_text())
+    metadata = json.loads((solution / "metadata.json").read_text(encoding="utf-8"))
     # The original skeleton, never exercises/<id>/student.py: that file may hold the
     # owner's answer, which must not shape the model's reading.
-    skeleton = (solution / "skeleton.py").read_text()
+    skeleton = (solution / "skeleton.py").read_text(encoding="utf-8")
     question_md = exercise / "question.md"
-    question = (question_md.read_text() if question_md.is_file()
+    question = (question_md.read_text(encoding="utf-8") if question_md.is_file()
                 else ast.get_docstring(ast.parse(skeleton)) or "")
     # Sample data only: every non-Python, non-hidden file a test run would copy in.
     files = {path.name: path for path in sorted(exercise.iterdir())
              if path.name not in _HIDDEN and not path.name.startswith(".")}
-    data = {name: path.read_text(errors="replace")[:SAMPLE_CHARS]
+    data = {name: path.read_text(errors="replace", encoding="utf-8")[:SAMPLE_CHARS]
             for name, path in copied_files(files).items()
             if not name.endswith(".py") and not any(part.startswith(".")
                                                     for part in name.split("/"))}
@@ -337,7 +337,7 @@ def write(batch_dir: Path, exercise_id: str, workspace: Path, writer: Writer,
     meta_path = out / META_FILE
     model_name = f"{writer.config.name}: {writer.config.model}"
     if not force and meta_path.is_file():
-        old = json.loads(meta_path.read_text())
+        old = json.loads(meta_path.read_text(encoding="utf-8"))
         # Kept only if the same model wrote it from the same inputs: another model's files
         # are its reading, not this one's.
         if old.get("inputs") == inputs.key() and old.get("model") == model_name:
@@ -364,7 +364,7 @@ def write(batch_dir: Path, exercise_id: str, workspace: Path, writer: Writer,
     for old in out.glob("*.py"):  # a rewrite replaces the whole set
         old.unlink()
     for name, (code, _) in files.items():
-        (out / name).write_text(code if code.endswith("\n") else code + "\n")
+        (out / name).write_text(code if code.endswith("\n") else code + "\n", encoding="utf-8")
     meta = {
         "written_at": datetime.now().isoformat(timespec="seconds"),
         "model": model_name,
@@ -374,7 +374,7 @@ def write(batch_dir: Path, exercise_id: str, workspace: Path, writer: Writer,
         "dropped": dropped,
         "tokens": tokens,
     }
-    meta_path.write_text(json.dumps(meta, indent=2, ensure_ascii=False) + "\n")
+    meta_path.write_text(json.dumps(meta, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     wrong = sum(name.startswith("wrong_") for name in files)
     kinds = [k for k in ("correct", "slides") if f"{k}.py" in files] + [f"{wrong} wrong"]
     return "written: " + ", ".join(kinds) + (f"; dropped {', '.join(dropped)}" if dropped else "")

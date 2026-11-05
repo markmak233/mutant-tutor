@@ -35,21 +35,22 @@ def make_batch(tmp_path):
     exercise, solution = batch / "exercises" / "demo", batch / "solutions" / "demo"
     (solution / "mutants").mkdir(parents=True)
     exercise.mkdir(parents=True)
-    (batch / "manifest.json").write_text(json.dumps({"mode": "learn"}))
-    (exercise / "test_student.py").write_text(TESTS)
-    (exercise / "hints.md").write_text("# Hints\n")
+    (batch / "manifest.json").write_text(json.dumps({"mode": "learn"}), encoding="utf-8")
+    (exercise / "test_student.py").write_text(TESTS, encoding="utf-8")
+    (exercise / "hints.md").write_text("# Hints\n", encoding="utf-8")
     (exercise / "student.py").write_text("def add(a, b):\n    raise NotImplementedError\n")
-    (solution / "metadata.json").write_text(json.dumps({"id": "demo", "framework": "python"}))
-    (solution / "reference.py").write_text(REFERENCE)
+    (solution / "metadata.json").write_text(json.dumps({"id": "demo", "framework": "python"}),
+                                            encoding="utf-8")
+    (solution / "reference.py").write_text(REFERENCE, encoding="utf-8")
     (solution / "skeleton.py").write_text("def add(a, b):\n    raise NotImplementedError\n")
     for name, code in MUTANTS.items():
-        (solution / "mutants" / f"{name}.py").write_text(code)
+        (solution / "mutants" / f"{name}.py").write_text(code, encoding="utf-8")
     return workspace, batch
 
 
 def fake_tests(files, timeout, env, heavy=True):
     """m02 (a * b) passes this fake run, as a mutant caught only elsewhere would."""
-    code = files["student.py"].read_text()
+    code = files["student.py"].read_text(encoding="utf-8")
     if "a * b" in code:
         return RunResult(Outcome.PASSED, 0, 0.1, "1 passed")
     return RunResult(Outcome.FAILED, 1, 0.1,
@@ -112,9 +113,9 @@ def test_mutants_play_students_and_the_hint_model_never_reads_their_bug(tmp_path
     assert "assert -1 == 5" in found[0]["first_error"]
     sent = json.dumps(chat.calls)
     assert "Mutant:" not in sent and "subtracts instead" not in sent
-    assert (out / "students" / "demo__m01_sub.py").read_text().startswith("def add")
-    assert len((out / HINTS_FILE).read_text().splitlines()) == 2
-    sheet = (out / "labels.md").read_text()
+    assert (out / "students" / "demo__m01_sub.py").read_text(encoding="utf-8").startswith("def add")
+    assert len((out / HINTS_FILE).read_text(encoding="utf-8").splitlines()) == 2
+    sheet = (out / "labels.md").read_text(encoding="utf-8")
     assert "## 1. demo/m01_sub@L1" in sheet and "Real bug: subtracts instead of adding" in sheet
 
 
@@ -141,7 +142,8 @@ def test_the_judge_is_scored_against_the_owners_labels(tmp_path):
              out, run_tests=fake_tests)
     (out / LABELS_FILE).write_text(
         json.dumps({"id": "demo/m01_sub@L1", "leaks": False, "direction": True}) + "\n"
-        + json.dumps({"id": "demo/m03_max@L1", "leaks": True, "direction": False}) + "\n")
+        + json.dumps({"id": "demo/m03_max@L1", "leaks": True, "direction": False}) + "\n",
+        encoding="utf-8")
     chat = KeyedChat({"subtracts instead of adding": verdict(False, True),
                       "returns the larger number": verdict(False, False)})
 

@@ -1,3 +1,4 @@
+import os
 import platform
 from pathlib import Path
 
@@ -5,6 +6,7 @@ import pytest
 
 from tutor.config import Workspace
 from tutor.envcheck import (
+    check_winutils,
     check_workspace,
     parse_hadoop_version,
     parse_java_version,
@@ -73,3 +75,43 @@ def test_java_without_java_home_fails(monkeypatch):
     [result] = check_workspace(make_ws({"java": "17"}))
     assert not result.ok
     assert "JAVA_HOME" in result.hint
+
+
+def _hadoop_home(tmp_path, files=("winutils.exe", "hadoop.dll")):
+    bin_dir = tmp_path / "hadoop" / "bin"
+    bin_dir.mkdir(parents=True)
+    for name in files:
+        (bin_dir / name).write_bytes(b"")
+    return str(tmp_path / "hadoop"), bin_dir
+
+
+def test_winutils_ok_when_files_present_and_bin_on_path(tmp_path):
+    home, bin_dir = _hadoop_home(tmp_path)
+    path = os.pathsep.join(["/somewhere/else", str(bin_dir)])
+
+    assert check_winutils(home, path).ok
+
+
+@pytest.mark.parametrize(
+    ("files", "on_path", "hint"),
+    [
+        (("winutils.exe",), True, "hadoop.dll"),
+        ((), True, "winutils.exe and hadoop.dll"),
+        (("winutils.exe", "hadoop.dll"), False, "to PATH"),
+    ],
+)
+def test_winutils_names_what_is_missing(tmp_path, files, on_path, hint):
+    """Each gap is a different fix, so the hint names the one that applies; without PATH
+    every file-level Spark exercise failed with UnsatisfiedLinkError."""
+    home, bin_dir = _hadoop_home(tmp_path, files)
+    path = str(bin_dir) if on_path else "/somewhere/else"
+
+    result = check_winutils(home, path)
+
+    assert not result.ok
+    assert hint in result.hint
+
+
+def test_winutils_without_hadoop_home():
+    result = check_winutils(None, "")
+    assert not result.ok and "HADOOP_HOME" in result.hint

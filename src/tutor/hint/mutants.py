@@ -52,7 +52,7 @@ def mutant_signatures(ex: ExerciseFiles, solution_dir: Path,
     is what else shapes a run (timeout, environment)."""
     path = solution_dir / CACHE
     try:
-        cached = json.loads(path.read_text())
+        cached = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         cached = {}
     result, changed = {}, False
@@ -67,7 +67,7 @@ def mutant_signatures(ex: ExerciseFiles, solution_dir: Path,
         cached[mutant.stem] = entry
     if changed:
         path.parent.mkdir(exist_ok=True)
-        path.write_text(json.dumps(cached, indent=1) + "\n")
+        path.write_text(json.dumps(cached, indent=1) + "\n", encoding="utf-8")
     return result
 
 
@@ -110,7 +110,7 @@ def indistinguishable(mutants: dict[str, Signature]) -> list[tuple[str, str]]:
 def bug_of(mutant: Path) -> tuple[str, str]:
     """(the bug, what goes wrong) from the mutant's docstring "Mutant: <bug>, <effect>."."""
     try:
-        doc = ast.get_docstring(ast.parse(mutant.read_text())) or ""
+        doc = ast.get_docstring(ast.parse(mutant.read_text(encoding="utf-8"))) or ""
     except SyntaxError:
         doc = ""
     text = doc.removeprefix("Mutant:").strip().rstrip(".")

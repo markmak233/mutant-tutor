@@ -1,5 +1,6 @@
-# Install once per clone: .venv/bin/pre-commit install
-# Uses the system gitleaks (brew install gitleaks) instead of building it from source.
+# Install once per clone: .venv/bin/pre-commit install (Windows: .venv\Scripts\pre-commit install)
+# Uses the system gitleaks instead of building it from source: brew install gitleaks
+# (Windows: winget install Gitleaks.Gitleaks, then open a new shell so it is on PATH).
 repos:
   - repo: local
     hooks:

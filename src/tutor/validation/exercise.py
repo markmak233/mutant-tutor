@@ -114,7 +114,7 @@ def load_exercise(exercise_dir: Path, solution_dir: Path) -> ExerciseFiles:
             raise ExerciseError(f"missing {path}")
 
     try:
-        metadata = json.loads((solution_dir / "metadata.json").read_text())
+        metadata = json.loads((solution_dir / "metadata.json").read_text(encoding="utf-8"))
         exercise_id = metadata["id"]
     except (json.JSONDecodeError, KeyError) as e:
         raise ExerciseError(f"{solution_dir / 'metadata.json'} needs an `id`: {e}") from e

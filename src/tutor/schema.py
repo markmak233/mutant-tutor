@@ -222,7 +222,7 @@ _UNREADABLE = object()  # not None: a file may hold JSON null, which is a proble
 
 def _load_json(path: Path, label: str, found: list[str]) -> object:
     try:
-        return json.loads(path.read_text())
+        return json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
         found.append(f"missing {label}")
     except json.JSONDecodeError as e:
@@ -255,7 +255,7 @@ def export(out_dir: Path) -> list[Path]:
     written = []
     for name, schema in json_schemas().items():
         path = out_dir / name
-        path.write_text(json.dumps(schema, indent=2, ensure_ascii=False) + "\n")
+        path.write_text(json.dumps(schema, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
         written.append(path)
     return written
 

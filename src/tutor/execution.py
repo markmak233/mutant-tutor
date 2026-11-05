@@ -1,7 +1,10 @@
-"""Run an exercise's tests in a throwaway directory, in a child process, with a timeout.
+"""Run an exercise's tests in a throwaway directory, with a timeout: in a container if the
+course asks for it, else in a child process on this machine.
 
-This is isolation from the workspace, not a sandbox: the child can still read and write
-outside its directory and use the network (docs/design.md, "Code execution safety").
+The child process is isolation from the workspace, not a sandbox: it can still read and write
+outside its directory and use the network. The container is the sandbox, and a course that asks
+for it never falls back to the host (docs/design.md, "Code execution safety"). Both give the
+same RunResult, so the callers do not know which one ran.
 """
 
 from __future__ import annotations
@@ -9,19 +12,33 @@ from __future__ import annotations
 import os
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
 import threading
 import time
+import uuid
 import xml.etree.ElementTree as ET
-from collections.abc import Mapping
-from dataclasses import dataclass
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
 
+from tutor.container import ContainerError, image_for, image_problem, run_command, runner_uid
+
+if sys.platform == "win32":  # Job Objects stand in for process groups there
+    from tutor import winjob
+
 DEFAULT_TIMEOUT_S = 30.0
 REPORT_FILE = "tutor-pytest-report.xml"  # pytest's JUnit XML, written inside the temp dir
+# no:cacheprovider: no .pytest_cache; the temp dir is discarded anyway.
+# --junitxml: the counts that tell "all passed" from "all skipped" (see _outcome).
+_PYTEST_ARGS = ["-m", "pytest", "-q", "-p", "no:cacheprovider", f"--junitxml={REPORT_FILE}"]
+# A container can leave anything under the report's name, and the host reads it after the run.
+_MAX_REPORT_BYTES = 50_000_000
+_DOCKER_FAILED = 125  # Docker's own exit code: the container never ran
+_KILLED = 137  # 128 + SIGKILL: the memory limit, or the container's own `timeout`
 # How many child runs may be alive at once in this process. Validation runs its checks in
 # parallel and a batch validates several exercises at once, so one cap holds for all of
 # them, and there are two: a heavy run starts a JVM that uses every core (Spark, Hadoop),
@@ -34,6 +51,23 @@ MAX_HEAVY_RUNS_ENV = "TUTOR_MAX_HEAVY_RUNS"
 MAX_RUNS_ENV = "TUTOR_MAX_RUNS"
 _slots: dict[bool, threading.BoundedSemaphore] = {}  # heavy? -> its cap
 _slots_lock = threading.Lock()
+# Every run's time limit is multiplied by this. Windows: 4, because Spark cannot fork a
+# Python worker daemon there and starts a new Python process for every task, one after
+# another, about 0.6 s each (measured 2026-10-31: a 4-task RDD job 2.4 s, a JVM-only job
+# 0.09 s); an example's 25-case hypothesis check took 101 s against the 30 s it needs on
+# macOS, and validated with 120 s. TUTOR_TIMEOUT_FACTOR overrides it (read at every run).
+TIMEOUT_FACTOR_ENV = "TUTOR_TIMEOUT_FACTOR"
+WINDOWS_TIMEOUT_FACTOR = 4.0
+
+
+def timeout_factor() -> float:
+    raw = os.environ.get(TIMEOUT_FACTOR_ENV, "")
+    try:
+        if float(raw) > 0:
+            return float(raw)
+    except ValueError:
+        pass  # unset or not a number: the platform default
+    return WINDOWS_TIMEOUT_FACTOR if sys.platform == "win32" else 1.0
 
 
 def max_runs(heavy: bool) -> int:
@@ -101,9 +135,14 @@ def run_pytest(
     The temp dir, and anything the run leaves behind (spark-warehouse/, caches), is
     deleted afterwards; the source files are never modified.
     `heavy`: the run starts a JVM (see ExerciseFiles.heavy); unknown code counts as heavy.
+    Raises ContainerError when the course asks for a container and none can run: that is not
+    a verdict on the code, so it must not come back as a failed run.
     """
+    image = image_for(files.values())
     with _slot(heavy), tempfile.TemporaryDirectory(prefix="tutor-run-") as tmp:
         workdir = _copy_in(files, Path(tmp))
+        if image:
+            return _run_in_container(image, workdir, timeout_s, env or {})
         return _run_in(workdir, timeout_s, env or {})
 
 
@@ -117,12 +156,16 @@ def run_script(
     """`python <script>` with no arguments, in a fresh temp dir holding `files`, the way a
     student runs `python student.py` in the exercise folder; isolated like run_pytest.
     PASSED: exit code 0; anything else is ERROR (or TIMEOUT)."""
+    image = image_for(files.values())
     with _slot(heavy), tempfile.TemporaryDirectory(prefix="tutor-run-") as tmp:
         workdir = _copy_in(files, Path(tmp))
+        if image:
+            return _run_in_container(image, workdir, timeout_s, env or {}, script)
         return _run_in(workdir, timeout_s, env or {}, [sys.executable, script])
 
 
 def _copy_in(files: Mapping[str, Path], workdir: Path) -> Path:
+    """Copy each source to its name inside `workdir`; directories whole (links followed)."""
     for name, source in files.items():
         target = workdir / name
         if source.is_dir():
@@ -149,50 +192,136 @@ def copied_files(files: Mapping[str, Path]) -> dict[str, Path]:
 
 
 def links(files: Mapping[str, Path]) -> list[str]:
-    """The symbolic links among `files` and inside their directories, by path in the run
-    directory; run_pytest would copy what each one points to."""
+    """The links among `files` and inside their directories (symbolic links, and
+    directory junctions on Windows), by path in the run directory; run_pytest would copy
+    what each one points to."""
     found = []
     for name, source in files.items():
-        if source.is_symlink():
+        if _is_link(source):
             found.append(name)
         elif source.is_dir():
-            for root, dirs, names in os.walk(source):  # not into linked directories
+            for root, dirs, names in os.walk(source):
                 found += [f"{name}/{(Path(root) / n).relative_to(source).as_posix()}"
-                          for n in sorted(dirs + names) if (Path(root) / n).is_symlink()]
+                          for n in sorted(dirs + names) if _is_link(Path(root) / n)]
+                # Not into linked directories: os.walk skips symbolic links itself, but
+                # walks into a junction, which it does not count as a link.
+                dirs[:] = [d for d in dirs if not _is_link(Path(root) / d)]
     return found
+
+
+def _is_link(path: Path) -> bool:
+    """A symbolic link, or on Windows a directory junction. A junction needs no privilege
+    to create (a symbolic link needs Developer Mode), copytree follows it like a link, and
+    is_symlink() is False for it: measured 2026-10-31, a junction to a folder outside the
+    exercise passed the link check and its file was copied into the run. Only the junction
+    tag counts, not every reparse point: OneDrive's files-on-demand are reparse points too."""
+    if path.is_symlink():
+        return True
+    if sys.platform != "win32":
+        return False
+    try:
+        tag = path.lstat().st_reparse_tag  # 0 for an ordinary file or folder
+    except OSError:
+        return False
+    return tag == stat.IO_REPARSE_TAG_MOUNT_POINT
 
 
 def _run_in(workdir: Path, timeout_s: float, extra_env: Mapping[str, str],
             script: list[str] | None = None) -> RunResult:
-    """Run pytest in `workdir`, or the command `script` (a Python file run directly)."""
+    """Run pytest in `workdir`, or the command `script` (a Python file run directly).
+    `timeout_s` is scaled by timeout_factor() here, so every caller (validation, hints,
+    held-out checks) keeps stating the limit an exercise needs on macOS or Linux."""
+    timeout_s *= timeout_factor()
     # sys.executable: the project venv, so student code can import pyspark and mrjob.
-    # no:cacheprovider: no .pytest_cache; the temp dir is discarded anyway.
-    # --junitxml: the counts that tell "all passed" from "all skipped" (see _outcome).
-    cmd = script or [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
-                     f"--junitxml={REPORT_FILE}"]
+    cmd = script or [sys.executable, *_PYTEST_ARGS]
     # PYSPARK_PYTHON: Spark workers otherwise start the `python3` on PATH, which may be a
     # different minor version than the driver (PYTHON_VERSION_MISMATCH).
+    # PYTHONIOENCODING: the child's stdout is a pipe, and on Windows Python would write it
+    # in the ANSI code page (cp1252), failing on any non-Latin character in test output.
+    # Only stdio: what the code under test opens keeps the platform default, as in the
+    # learner's own runs.
+    # TEMP / TMP / TMPDIR: a temp dir of its own per run, outside workdir so the tests see
+    # the same files as before. On Windows, spark-submit.cmd writes its launch command to
+    # %TEMP%\spark-class-launcher-output-%RANDOM%.txt, and cmd seeds %RANDOM% from the
+    # second it starts: Spark runs started in the same second (parallel validation) shared
+    # one file, and one of them hung until the timeout (3 of 30 runs; 0 of 48 with this).
+    run_tmp = tempfile.mkdtemp(prefix="tutor-tmp-")
     env = {
         **os.environ,
         "PYTHONDONTWRITEBYTECODE": "1",
         "PYSPARK_PYTHON": sys.executable,
+        "PYTHONIOENCODING": "utf-8",
+        "TEMP": run_tmp,
+        "TMP": run_tmp,
+        "TMPDIR": run_tmp,
         **extra_env,
     }
-    start = time.monotonic()
-    # New session = new process group, so a timeout can kill grandchildren too
-    # (PySpark starts a JVM under pytest; killing only pytest would orphan it).
-    proc = subprocess.Popen(
-        cmd, cwd=workdir, env=env, text=True,
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True,
-    )
     try:
-        output, _ = proc.communicate(timeout=timeout_s)
-    except subprocess.TimeoutExpired:
-        _kill_group(proc.pid)
-        output, _ = proc.communicate()
-        return RunResult(Outcome.TIMEOUT, None, time.monotonic() - start, output)
-    duration = time.monotonic() - start
-    _kill_group(proc.pid)  # leftovers such as a JVM that was never stopped
+        return _run_with_env(cmd, workdir, env, timeout_s, script)
+    finally:
+        _remove_run_tmp(Path(run_tmp))
+
+
+def _run_in_container(image: str, workdir: Path, timeout_s: float,
+                      extra_env: Mapping[str, str], script: str | None = None) -> RunResult:
+    """The same run in a fresh container of its own, so that one run's processes, memory and
+    /tmp cannot touch another's. `workdir` is the only folder of this machine it can write."""
+    timeout_s *= timeout_factor()
+    # Here, before the time limit starts: this waits while a stopped VM wakes, and those
+    # seconds must not count against the code. Every run asks, so that Docker going away in the
+    # middle of a batch stops the batch with the reason, and not as failed runs.
+    if problem := image_problem(image):
+        raise ContainerError(problem)
+    getuid = getattr(os, "getuid", None)
+    if getuid and getuid() != runner_uid():  # root on the host: the runner is another user
+        workdir.chmod(0o777)
+    name = f"tutor-run-{uuid.uuid4().hex[:12]}"
+    command = ["python", script] if script else ["python", *_PYTEST_ARGS]
+    # Resolved: on macOS the temp dir's path goes through a link, and Docker shares the target.
+    cmd = run_command(image, name, workdir.resolve(), timeout_s, extra_env, command)
+    result = _run_with_env(cmd, workdir, os.environ, timeout_s, command if script else None,
+                           make_tree=lambda *args: _ContainerRun(name, *args))
+    if result.returncode == _DOCKER_FAILED:
+        raise ContainerError(f"docker run failed: {result.output.strip()}")
+    if result.returncode == _KILLED:
+        return replace(result, output=f"{result.output}\n(the run was killed, exit {_KILLED}: "
+                                      "most likely over the container's memory limit)")
+    return result
+
+
+def _remove_run_tmp(path: Path, wait_s: float = 5.0) -> None:
+    """Delete a run's temp dir, retrying for a moment. On Windows the native library a JVM
+    unpacks there (liblz4-java-*.so) could not be deleted for a while after every process
+    of the run had exited (WinError 5; most likely a virus scan of the new file). What is
+    still locked after `wait_s` is left behind, as it was in the shared %TEMP% before."""
+    deadline = time.monotonic() + wait_s
+    while True:
+        try:
+            shutil.rmtree(path)
+            return
+        except FileNotFoundError:
+            return
+        except OSError:
+            if time.monotonic() >= deadline:
+                shutil.rmtree(path, ignore_errors=True)  # delete what it can
+                return
+            time.sleep(0.1)
+
+
+def _run_with_env(cmd: list[str], workdir: Path, env: Mapping[str, str], timeout_s: float,
+                  script: list[str] | None, make_tree: Callable | None = None) -> RunResult:
+    """Run `cmd` in `workdir` with `env` and turn the result into a RunResult."""
+    start = time.monotonic()
+    with (make_tree or _ProcessTree)(cmd, workdir, env) as tree:
+        proc = tree.proc
+        try:
+            output, _ = proc.communicate(timeout=timeout_s)
+        except subprocess.TimeoutExpired:
+            tree.kill()
+            output, _ = proc.communicate()  # what it printed before the kill
+            return RunResult(Outcome.TIMEOUT, None, time.monotonic() - start, output)
+        duration = time.monotonic() - start
+        tree.kill()  # leftovers such as a JVM that was never stopped
     if script:  # no test report: the exit code is the whole answer
         outcome = Outcome.PASSED if proc.returncode == 0 else Outcome.ERROR
         return RunResult(outcome, proc.returncode, duration, output)
@@ -201,16 +330,84 @@ def _run_in(workdir: Path, timeout_s: float, extra_env: Mapping[str, str],
                      counts)
 
 
-def _kill_group(pgid: int) -> None:
-    try:
-        os.killpg(pgid, signal.SIGKILL)
-    except ProcessLookupError:
-        pass  # the whole group has already exited
+class _ProcessTree:
+    """The child and every process it starts, killed as one. PySpark starts a JVM under
+    pytest, and killing only pytest would orphan it, still running in the temp dir.
+
+    POSIX: a new session is a new process group, which the child's descendants join, so
+    one killpg reaches them all, even after their parent has exited.
+    Windows has no process groups: a Job Object does the same (tutor/winjob.py). The child
+    is assigned to the job right after it starts; a process it started in that moment
+    would stay outside, but Python takes far longer to start up and import pytest than
+    that, and only then do tests start anything."""
+
+    def __init__(self, cmd: list[str], cwd: Path, env: Mapping[str, str]) -> None:
+        self._job = winjob.Job() if sys.platform == "win32" else None
+        self.proc = subprocess.Popen(
+            # The output is decoded as UTF-8 (what PYTHONIOENCODING makes the child write);
+            # bytes a program wrote some other way are replaced, not a crash.
+            cmd, cwd=cwd, env=env, encoding="utf-8", errors="replace",
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            start_new_session=self._job is None,  # POSIX only; the job replaces it
+        )
+        if self._job is not None:
+            try:
+                self._job.add(self.proc.pid)
+            except OSError:  # not contained, so do not let it run: end it and report
+                self.proc.kill()
+                self.proc.communicate()
+                self._job.close()
+                raise
+
+    def kill(self) -> None:
+        if self._job is not None:
+            self._job.kill()  # returns once every process in the job is gone
+            return
+        try:
+            os.killpg(self.proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass  # the whole group has already exited
+
+    def __enter__(self) -> _ProcessTree:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        if self._job is not None:
+            self._job.close()  # KILL_ON_JOB_CLOSE: also ends what an exception left running
+
+
+class _ContainerRun(_ProcessTree):
+    """A `docker run` client and its container. Ending the client alone leaves the code
+    running inside (measured with `docker exec`), so the container is killed by name; every
+    process in it ends with it, and `--rm` removes it."""
+
+    def __init__(self, name: str, cmd: list[str], cwd: Path, env: Mapping[str, str]) -> None:
+        self._name = name
+        super().__init__(cmd, cwd, env)
+
+    def kill(self) -> None:
+        if self.proc.poll() is None:  # a client that has exited means the container has too
+            try:
+                subprocess.run(["docker", "kill", self._name], capture_output=True, timeout=30)
+                self.proc.wait(timeout=5)  # lets the client hand over the last output
+            except (OSError, subprocess.TimeoutExpired):
+                pass  # the client is ended below, and the container's `timeout` ends it
+        super().kill()
+
+    def __exit__(self, exc_type: object, *exc: object) -> None:
+        if exc_type is not None:  # Ctrl+C or a crash here: do not leave the container running
+            self.kill()
+        super().__exit__(exc_type, *exc)
 
 
 def _read_counts(report: Path) -> TestCounts | None:
-    """Totals over every <testsuite> in pytest's JUnit XML; None if it is missing or broken."""
+    """Totals over every <testsuite> in pytest's JUnit XML; None if it is missing or broken,
+    or not an ordinary file of a sane size: code in a container can leave a link there to
+    make this machine read something else, a FIFO to make it hang, or gigabytes of XML."""
     try:
+        info = report.lstat()
+        if not stat.S_ISREG(info.st_mode) or info.st_size > _MAX_REPORT_BYTES:
+            return None
         root = ET.parse(report).getroot()
     except (OSError, ET.ParseError):
         return None

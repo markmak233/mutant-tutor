@@ -1,12 +1,17 @@
 import os
+import shutil
+import sys
+import tempfile
 import time
 from pathlib import Path
 
-from tutor.execution import Outcome, run_pytest
+import pytest
+
+from tutor.execution import TIMEOUT_FACTOR_ENV, Outcome, run_pytest, timeout_factor
 
 
 def write(path: Path, text: str) -> Path:
-    path.write_text(text)
+    path.write_text(text, encoding="utf-8")
     return path
 
 
@@ -56,6 +61,60 @@ def test_extra_env_reaches_the_tests(tmp_path):
     assert "TUTOR_PARTITIONS" not in os.environ
 
 
+def test_each_run_gets_its_own_temp_dir(tmp_path):
+    """Spark's Windows launcher names its temp file by a seed of the start second, so runs
+    sharing %TEMP% could hang; each run gets a temp dir of its own, deleted afterwards."""
+    # The run writes the temp dir it sees to the file named in SEEN, outside the run.
+    test = write(
+        tmp_path / "test_tmp.py",
+        "import os, tempfile\n\ndef test_tmp():\n"
+        "    assert os.environ['TEMP'] == os.environ['TMP'] == os.environ['TMPDIR']\n"
+        "    with open(os.environ['SEEN'], 'w', encoding='utf-8') as f:\n"
+        "        f.write(tempfile.gettempdir())\n",
+    )
+
+    seen = []
+    for i in range(2):
+        out = tmp_path / f"seen{i}.txt"
+        result = run_pytest({"test_tmp.py": test}, env={"SEEN": str(out)})
+        assert result.outcome is Outcome.PASSED, result.output
+        seen.append(Path(out.read_text(encoding="utf-8")))
+
+    assert seen[0] != seen[1]
+    for run_tmp in seen:
+        assert run_tmp.parent == Path(tempfile.gettempdir())  # not inside the run's workdir
+        assert not run_tmp.exists()
+
+
+def test_run_temp_dir_removal_retries_then_gives_up(tmp_path, monkeypatch):
+    """A file a virus scan still holds is retried for a moment; one that stays locked is
+    left behind instead of failing the run."""
+    from tutor import execution
+
+    real_rmtree = shutil.rmtree
+    calls = []
+
+    def locked_twice(path, ignore_errors=False):
+        calls.append(ignore_errors)
+        if len(calls) <= 2:
+            raise PermissionError("locked")
+        real_rmtree(path)
+
+    run_tmp = tmp_path / "run-tmp"
+    run_tmp.mkdir()
+    monkeypatch.setattr(execution.shutil, "rmtree", locked_twice)
+    execution._remove_run_tmp(run_tmp)
+    assert len(calls) == 3 and not run_tmp.exists()
+
+    def always_locked(path, ignore_errors=False):
+        if not ignore_errors:
+            raise PermissionError("locked")
+
+    run_tmp.mkdir()
+    monkeypatch.setattr(execution.shutil, "rmtree", always_locked)
+    execution._remove_run_tmp(run_tmp, wait_s=0.3)  # returns, does not raise
+
+
 def test_syntax_error_is_error_not_failed(tmp_path):
     """Code that cannot even be imported -> ERROR, kept apart from a genuine test failure."""
     broken = write(tmp_path / "broken.py", "def add(a, b)\n    return a + b\n")
@@ -76,15 +135,21 @@ def test_no_tests_collected_is_error(tmp_path):
     assert result.returncode == 5
 
 
-def test_timeout_kills_the_whole_process_group(tmp_path):
+# A process that sleeps for a minute, started from inside a test the way PySpark starts a
+# JVM. Python rather than `sleep`, which Windows does not have.
+SLEEPER = "[sys.executable, '-c', 'import time; time.sleep(60)']"
+
+
+def test_timeout_kills_the_whole_process_group(tmp_path, monkeypatch):
     """An endless test is stopped at the limit, and so is any process it started
     (the way PySpark starts a JVM): the child's pid must be gone afterwards."""
+    monkeypatch.setenv(TIMEOUT_FACTOR_ENV, "1")  # the 2 s limit as given, on every platform
     pid_file = tmp_path / "child.pid"
     test = write(
         tmp_path / "test_hang.py",
-        "import subprocess, time\n"
+        "import subprocess, sys, time\n"
         "def test_hang():\n"
-        "    child = subprocess.Popen(['sleep', '60'])\n"
+        f"    child = subprocess.Popen({SLEEPER})\n"
         f"    open({str(pid_file)!r}, 'w').write(str(child.pid))\n"
         "    time.sleep(60)\n",
     )
@@ -94,9 +159,58 @@ def test_timeout_kills_the_whole_process_group(tmp_path):
     assert result.outcome is Outcome.TIMEOUT
     assert result.returncode is None
     assert result.duration_s < 10
-    child_pid = int(pid_file.read_text())
-    time.sleep(0.2)
-    assert not _alive(child_pid)
+    assert _ends_soon(int(pid_file.read_text(encoding="utf-8")))
+
+
+def test_a_process_left_behind_by_a_finished_run_is_killed(tmp_path):
+    """A test that passes but leaves a process running (a JVM never stopped) gets it
+    killed after the run, although its parent, pytest, has already exited; the process
+    sat in the temp dir, so the run returning at all shows the dir could be deleted."""
+    pid_file = tmp_path / "child.pid"
+    test = write(
+        tmp_path / "test_leaves.py",
+        "import subprocess, sys\n"
+        "def test_leaves():\n"
+        # Not on pytest's output pipe, which the runner reads until it closes.
+        f"    child = subprocess.Popen({SLEEPER}, stdout=subprocess.DEVNULL,\n"
+        "                             stderr=subprocess.DEVNULL)\n"
+        f"    open({str(pid_file)!r}, 'w').write(str(child.pid))\n",
+    )
+
+    result = run_pytest({"test_leaves.py": test})
+
+    assert result.outcome is Outcome.PASSED
+    assert _ends_soon(int(pid_file.read_text(encoding="utf-8")))
+
+
+def test_the_time_limit_is_scaled_on_windows_only(monkeypatch):
+    """Spark starts a Python process per task on Windows, so limits are 4x there."""
+    monkeypatch.delenv(TIMEOUT_FACTOR_ENV, raising=False)
+    monkeypatch.setattr(sys, "platform", "win32")
+    assert timeout_factor() == 4.0
+    monkeypatch.setattr(sys, "platform", "darwin")
+    assert timeout_factor() == 1.0
+
+
+def test_the_time_limit_factor_can_be_overridden(monkeypatch):
+    """TUTOR_TIMEOUT_FACTOR wins; a value that is not a positive number is ignored."""
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setenv(TIMEOUT_FACTOR_ENV, "2.5")
+    assert timeout_factor() == 2.5
+    for bad in ("0", "-1", "fast"):
+        monkeypatch.setenv(TIMEOUT_FACTOR_ENV, bad)
+        assert timeout_factor() == 1.0
+
+
+def test_a_scaled_limit_lets_a_slow_run_finish(tmp_path, monkeypatch):
+    """The factor reaches the run itself: 2 s given, 4x applied, a 3 s test passes."""
+    monkeypatch.setenv(TIMEOUT_FACTOR_ENV, "4")
+    test = write(tmp_path / "test_slow.py",
+                 "import time\n\ndef test_slow():\n    time.sleep(3)\n")
+
+    result = run_pytest({"test_slow.py": test}, timeout_s=2)
+
+    assert result.outcome is Outcome.PASSED
 
 
 def test_temp_dir_is_removed_and_sources_untouched(tmp_path):
@@ -119,7 +233,41 @@ def test_temp_dir_is_removed_and_sources_untouched(tmp_path):
     assert sorted(p.name for p in tmp_path.iterdir()) == before
 
 
+def _ends_soon(pid: int, within_s: float = 5.0) -> bool:
+    """Whether the process ends within `within_s`. A SIGKILL is not instant: the process can
+    still be running for a moment, and once dead it stays a zombie until its new parent reaps
+    it, which os.kill(pid, 0) also counts as alive. Measured 2026-11-06 in a Linux container
+    after a finished run: 1 of 20 still running at the first look, gone 0.2 s later; with a
+    PID 1 that reaps nothing, all 20 zombies. Linux CI failed on that first look."""
+    deadline = time.monotonic() + within_s
+    while _alive(pid):
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.05)
+    return True
+
+
 def _alive(pid: int) -> bool:
+    """Running, or not yet killed; a zombie has ended (it holds no files and runs nothing)."""
+    if sys.platform.startswith("linux"):
+        try:
+            stat = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return False
+        return stat.rsplit(") ", 1)[1].split()[0] != "Z"  # the name in () may hold spaces
+    if sys.platform == "win32":
+        # os.kill(pid, 0) would terminate the process on Windows; ask for its exit code.
+        import ctypes
+
+        kernel32 = ctypes.WinDLL("kernel32")
+        kernel32.OpenProcess.restype = ctypes.c_void_p
+        handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+        if not handle:
+            return False  # no such process any more
+        code = ctypes.c_ulong()
+        kernel32.GetExitCodeProcess(ctypes.c_void_p(handle), ctypes.byref(code))
+        kernel32.CloseHandle(ctypes.c_void_p(handle))
+        return code.value == 259  # STILL_ACTIVE
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -191,19 +339,40 @@ def test_a_run_that_ends_before_its_report_is_an_error_not_a_failure(tmp_path):
     assert result.outcome is Outcome.ERROR
 
 
-def test_copied_files_follow_links_as_the_run_does(tmp_path):
+def test_copied_files_follow_links_as_the_run_does(tmp_path, symlink):
     from tutor.execution import copied_files, links
 
     target = tmp_path / "target"
     target.mkdir()
-    (target / "x.py").write_text("")
+    (target / "x.py").write_text("", encoding="utf-8")
     data = tmp_path / "data"
     data.mkdir()
-    (data / "a.csv").write_text("1\n")
-    (data / "more").symlink_to(target, target_is_directory=True)
+    (data / "a.csv").write_text("1\n", encoding="utf-8")
+    symlink(data / "more", target, target_is_directory=True)
     assert copied_files({"data": data}) == {"data/a.csv": data / "a.csv",
                                              "data/more/x.py": data / "more" / "x.py"}
     assert links({"data": data}) == ["data/more"]
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="junctions exist on Windows only")
+def test_a_windows_junction_counts_as_a_link(tmp_path):
+    """A junction needs no privilege and is_symlink() is False for it, yet the run copies
+    what it points to: it must be found like any link, once, without walking into it."""
+    from conftest import make_junction
+
+    from tutor.execution import links
+
+    outside = tmp_path / "outside"
+    (outside / "inner").mkdir(parents=True)
+    (outside / "secret.txt").write_text("x", encoding="utf-8")
+    data = tmp_path / "data"
+    data.mkdir()
+    make_junction(data / "more", outside)
+    make_junction(outside / "inner" / "loop", outside)  # reached only by walking into it
+
+    assert not (data / "more").is_symlink()
+    assert links({"data": data}) == ["data/more"]
+    assert links({"more": data / "more"}) == ["more"]
 
 
 def test_the_cap_on_runs_at_once_holds_across_threads(tmp_path, monkeypatch):

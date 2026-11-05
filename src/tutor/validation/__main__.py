@@ -13,6 +13,7 @@ from datetime import datetime
 from pathlib import Path
 
 from tutor.config import load_env
+from tutor.container import ContainerError
 from tutor.validation import ExerciseError, ValidationReport, load_exercise, validate
 
 REPORT_FILE = "validation.json"
@@ -71,13 +72,18 @@ def main(argv: list[str] | None = None) -> int:
     except ExerciseError as e:
         print(f"exercise: {e}", file=sys.stderr)
         return 1
-    report = validate(exercise)
+    try:
+        report = validate(exercise)
+    except ContainerError as e:
+        # No verdict and no report: the code did not run, so it is neither valid nor invalid.
+        print(f"container: {e}", file=sys.stderr)
+        return 2
     print(format_report(report))
     # Only the command line writes the file; validate() stays free of side effects, so the
     # phase 3 graph can call it without leaving files behind.
     data = report_to_dict(report, datetime.now().isoformat(timespec="seconds"), _tool_commit())
     path = Path(args[1]) / REPORT_FILE
-    path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+    path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     print(f"report saved to {path}")
     return 0 if report.valid else 1
 

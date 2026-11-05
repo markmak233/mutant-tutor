@@ -17,26 +17,28 @@ def make_workspace(tmp_path: Path, mode: str | None = "review") -> Path:
     ws = tmp_path / "ws"
     exercise = ws / "batches" / "2026-10-25_p2-w2" / "exercises" / "word-count"
     exercise.mkdir(parents=True)
-    (ws / "workspace.toml").write_text('course = "demo"\n')
+    (ws / "workspace.toml").write_text('course = "demo"\n', encoding="utf-8")
     if mode:
         manifest = ws / "batches" / "2026-10-25_p2-w2" / "manifest.json"
-        manifest.write_text(json.dumps({"mode": mode}))
-    (exercise / "test_student.py").write_text(TESTS)
+        manifest.write_text(json.dumps({"mode": mode}), encoding="utf-8")
+    (exercise / "test_student.py").write_text(TESTS, encoding="utf-8")
     return exercise
 
 
-def run_pytest_in(folder: Path, workspace: Path) -> None:
+def run_pytest_in(folder: Path, workspace: Path) -> subprocess.CompletedProcess:
     """Run pytest the way the owner does, from the exercise folder, with the plugin."""
     env = {**os.environ, "WORKSPACE_DIR": str(workspace), "PYTHONDONTWRITEBYTECODE": "1"}
-    subprocess.run(
+    return subprocess.run(
         [sys.executable, "-m", "pytest", "-q", "-p", "tutor.attempts", "-p", "no:cacheprovider"],
-        cwd=folder, env=env, capture_output=True, timeout=60,
+        cwd=folder, env=env, capture_output=True, text=True, timeout=60,
     )
 
 
 def attempts(workspace: Path) -> list[dict]:
     path = workspace / "attempts" / "attempts.jsonl"
-    return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
 
 
 def test_exercise_of_recognises_only_batch_exercises(tmp_path):
@@ -75,14 +77,14 @@ def test_a_failing_run_keeps_its_student_py_once_and_a_passing_run_none(tmp_path
     (exercise / "student.py").write_text("def add(a, b):\n    return a * b\n")
     run_pytest_in(exercise, tmp_path / "ws")
     run_pytest_in(exercise, tmp_path / "ws")  # the same mistake again
-    (exercise / "test_student.py").write_text("def test_ok():\n    assert True\n")
+    (exercise / "test_student.py").write_text("def test_ok():\n    assert True\n", encoding="utf-8")
     run_pytest_in(exercise, tmp_path / "ws")
 
     first, again, passing = attempts(tmp_path / "ws")
     assert first["code"] == again["code"]
     assert first["code"].startswith("code/2026-10-25_p2-w2/word-count/")
     kept = tmp_path / "ws" / "attempts" / first["code"]
-    assert kept.read_text() == "def add(a, b):\n    return a * b\n"
+    assert kept.read_text(encoding="utf-8") == "def add(a, b):\n    return a * b\n"
     assert len(list(kept.parent.iterdir())) == 1
     assert "code" not in passing
 
@@ -100,8 +102,9 @@ def test_every_run_appends_a_line(tmp_path):
 def test_a_broken_student_file_is_an_error(tmp_path):
     """A syntax error stops the test file from importing: result "error", not "failed"."""
     exercise = make_workspace(tmp_path)
-    (exercise / "student.py").write_text("def f(:\n")
-    (exercise / "test_student.py").write_text("from student import f\n\ndef test_f():\n    f()\n")
+    (exercise / "student.py").write_text("def f(:\n", encoding="utf-8")
+    (exercise / "test_student.py").write_text("from student import f\n\ndef test_f():\n    f()\n",
+                                              encoding="utf-8")
     run_pytest_in(exercise, tmp_path / "ws")
 
     [line] = attempts(tmp_path / "ws")
@@ -114,17 +117,50 @@ def test_runs_outside_the_workspace_are_not_recorded(tmp_path):
     make_workspace(tmp_path)
     elsewhere = tmp_path / "validator-temp"
     elsewhere.mkdir()
-    (elsewhere / "test_student.py").write_text(TESTS)
+    (elsewhere / "test_student.py").write_text(TESTS, encoding="utf-8")
     run_pytest_in(elsewhere, tmp_path / "ws")
 
     assert not (tmp_path / "ws" / "attempts").exists()
+    assert not (tmp_path / "ws" / "reports").exists()
+
+
+def test_each_recorded_run_brings_the_report_up_to_date(tmp_path):
+    """Failing, then passing: the report follows, and holds no first error, which on a
+    hand-calculation exercise can be the answer."""
+    exercise = make_workspace(tmp_path)
+    manifest = tmp_path / "ws" / "batches" / "2026-10-25_p2-w2" / "manifest.json"
+    manifest.write_text(json.dumps({"exercises": ["word-count"]}), encoding="utf-8")
+    report = tmp_path / "ws" / "reports" / "report.md"
+
+    run_pytest_in(exercise, tmp_path / "ws")
+    # Exercises, Skip, Passed, Started, then the other columns.
+    assert "| 2026-10-25_p2-w2 | 1 | 0 | 0 | 1 |" in report.read_text(encoding="utf-8")
+    assert "adds wrong" not in report.read_text(encoding="utf-8")
+
+    (exercise / "test_student.py").write_text("def test_ok():\n    assert True\n", encoding="utf-8")
+    run_pytest_in(exercise, tmp_path / "ws")
+    assert "| 2026-10-25_p2-w2 | 1 | 0 | 1 | 0 |" in report.read_text(encoding="utf-8")
+
+
+def test_a_report_that_cannot_be_built_costs_only_a_warning(tmp_path):
+    """A file where the report's folder should be: the run keeps its result and its log line."""
+    exercise = make_workspace(tmp_path)
+    (exercise / "test_student.py").write_text("def test_ok():\n    assert True\n", encoding="utf-8")
+    (tmp_path / "ws" / "reports").write_text("in the way", encoding="utf-8")
+
+    run = run_pytest_in(exercise, tmp_path / "ws")
+
+    assert run.returncode == 0
+    assert "report not updated" in run.stdout
+    [line] = attempts(tmp_path / "ws")
+    assert line["result"] == "passed"
 
 
 def test_a_run_with_a_skipped_test_is_incomplete_not_passed(tmp_path):
     exercise = make_workspace(tmp_path)
     (exercise / "test_student.py").write_text(
         "import pytest\n\ndef test_ok():\n    assert True\n\n"
-        "@pytest.mark.skip\ndef test_later():\n    pass\n")
+        "@pytest.mark.skip\ndef test_later():\n    pass\n", encoding="utf-8")
     run_pytest_in(exercise, tmp_path / "ws")
     [line] = attempts(tmp_path / "ws")
     assert (line["result"], line["passed"], line["skipped"]) == ("incomplete", 1, 1)
@@ -133,7 +169,7 @@ def test_a_run_with_a_skipped_test_is_incomplete_not_passed(tmp_path):
 def test_a_run_where_every_test_is_skipped_is_still_recorded(tmp_path):
     exercise = make_workspace(tmp_path)
     (exercise / "test_student.py").write_text(
-        "import pytest\n\ndef test_a():\n    pytest.skip('no Hadoop here')\n")
+        "import pytest\n\ndef test_a():\n    pytest.skip('no Hadoop here')\n", encoding="utf-8")
     run_pytest_in(exercise, tmp_path / "ws")
     [line] = attempts(tmp_path / "ws")
     assert (line["result"], line["skipped"]) == ("incomplete", 1)

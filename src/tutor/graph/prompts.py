@@ -21,8 +21,11 @@ from tutor.validation.safety import CORE_IMPORTS
 
 EXAMPLES = Path(__file__).resolve().parents[3] / "examples"
 # The example shown for each (framework, interface): the closest hand-made, validated
-# exercise. There is no plain-Python example yet; those items get the function-level one.
+# exercise. Plain-Python items saw the Spark function-level one until 2026-11-05, with a
+# SparkContext fixture and a shuffle to explain; a file-level one has no example of its own.
 EXAMPLE_FOR = {
+    ("python", "function"): "station-longest-rise",
+    ("python", "file"): "station-longest-rise",
     ("pyspark-rdd", "function"): "station-average-rdd",
     ("pyspark-rdd", "file"): "station-max-file",
     ("pyspark-df", "file"): "station-monthly-df",
@@ -189,7 +192,9 @@ def example(framework: str, interface: str) -> str:
                 or path.name in ("validation.json", "question.md")):  # question.md: a copy
             continue
         try:
-            parts.append(f"=== {rel} ===\n{path.read_text()}")
+            # as_posix: the model sees exercise/student.py on Windows too, and writes paths
+            # the same way back
+            parts.append(f"=== {rel.as_posix()} ===\n{path.read_text(encoding='utf-8')}")
         except UnicodeDecodeError:
             continue
     return "\n\n".join(parts)

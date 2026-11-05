@@ -75,7 +75,7 @@ def _calibrate(args, root: Path, model: Judge) -> int:
     print(report(results, reviews))
     path = out / "results.json"
     path.write_text(json.dumps(results_to_dict(results, model_name(model), reviews),
-                               indent=2, ensure_ascii=False) + "\n")
+                               indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     print(f"\nsaved to {path}")
     return 0
 

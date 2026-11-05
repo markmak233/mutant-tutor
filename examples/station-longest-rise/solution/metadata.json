@@ -1,0 +1,15 @@
+{
+  "id": "station-longest-rise",
+  "title": "Longest rising run per station",
+  "topic": "python/running-state-per-key",
+  "type": "implementation",
+  "difficulty": "easy",
+  "framework": "python",
+  "interface": "function",
+  "entry_point": ["longest_rise"],
+  "constraints": {
+    "required_definitions": ["longest_rise"]
+  },
+  "standalone": true,
+  "source": "synthetic"
+}

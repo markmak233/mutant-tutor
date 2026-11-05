@@ -9,11 +9,12 @@ deterministic checks before anyone sees it**. No LLM judges whether an exercise 
 It started as revision for a big data management course, inspired by its course
 materials (none are included here), and is built as an AI engineering portfolio project:
 exercises are generated from the lecture slides by a LangGraph pipeline (plan → generate →
-validate → repair), and the next phase grounds them in course material with hybrid RAG.
+validate → repair). Hybrid RAG, an agent searching with tools and a compiled concept index were
+measured against simply sending the whole lecture, and [the whole lecture stayed](#does-it-need-rag).
 
-**Status:** the validation harness (phases 1, 2a) is complete, and LLM generation (phase
-3a) works end to end: two course weeks were generated with it, every saved exercise VALID.
-Checks that need the learner's own work (3b), a hint command (3c) and RAG (4) are next.
+**Status:** the validation harness (phases 1, 2a), LLM generation (3a), the checks that need
+the learner's own work (3b), the hint command (3c) and the retrieval comparison (4) are complete;
+three course weeks were generated, every saved exercise VALID.
 
 ## Why validation comes first
 
@@ -68,11 +69,11 @@ Two interfaces, mixed in every batch:
 - **File-level**: write a program in the shape course assignments use (`run(inputPath, outputPath)`),
   read messy input files, write `part-*` output in an exact format. Ships a `sample_input/`.
 
-Four synthetic examples live in [`examples/`](examples/): `station-average-rdd` (function-level),
-`station-max-file` (file-level Spark RDD), `station-monthly-df` (DataFrame, one ordered output
-file, a command-line parameter) and `station-condition-share` (MRJob on a local Hadoop:
-order inversion, where a mutant that forgets the partitioner passes with one reducer and is
-caught with two).
+Five synthetic examples live in [`examples/`](examples/): `station-longest-rise` (plain Python,
+no framework), `station-average-rdd` (function-level), `station-max-file` (file-level Spark RDD),
+`station-monthly-df` (DataFrame, one ordered output file, a command-line parameter) and
+`station-condition-share` (MRJob on a local Hadoop: order inversion, where a mutant that forgets
+the partitioner passes with one reducer and is caught with two).
 
 ## How exercises are generated
 
@@ -115,6 +116,96 @@ about 60% of its time (3 min against 5 per exercise). The difference is reasonin
 size: most failed first drafts had expected test values traced wrongly by hand. GLM-5.3 as
 the oracle wrote 19 of 19 usable oracles in 9 s each. Samples are small; the full table is in
 [`docs/design.md`](docs/design.md) ("Week 7 with five arms").
+
+## Does it need RAG?
+
+Not for generating exercises from this course, so retrieval is not wired in. The course is small
+(571 pages, about 71k tokens; a lecture 4-11k), and a batch's plan already names each exercise's
+pages. The deciding test generated 12 real plan items from each context: the whole lecture, only
+the pages labelled for the item (perfect retrieval), and what each of three routes found within
+2000 tokens.
+
+| | Whole lecture | Labelled pages | Hybrid + neighbours | Concept index | Agent |
+|---|---|---|---|---|---|
+| Saved after repair | 12 | 12 | 12 | 12 | 12 |
+| VALID at the first try | 8 | 7 | 4 | 8 | 4 |
+| Judge finds fully fine | 7 | 5 | 3 | 3 | 5 |
+| Serious flags | 5 | 10 | 12 | 10 | 11 |
+| Tokens, % of the whole lecture | 100 | 92 | 124 | 86 | 111 |
+
+No route met the rule fixed before the run, and no exercise was fully fine from a route and not
+from the whole lecture. Less context did not reliably save money either: more first drafts were cut
+off, and repairs cost more than the smaller prompts saved. 15 of the judge's flags, checked by hand
+with the arms hidden, were all real. 12 items, each run once, and a judge that reads the whole
+lecture in every arm show a direction and not a proof.
+
+The routes themselves find the right pages. Recall within 2000 tokens, under a third of a lecture,
+on 53 test queries held back from tuning, each route run once:
+
+| Route | Searching the lecture | Searching the course | Model tokens per query |
+|---|---|---|---|
+| BM25 | 0.88 | 0.80 | none |
+| Vectors | 0.87 | 0.81 | none (embeddings: $0.002, once) |
+| Hybrid | 0.89 | 0.85 | none |
+| Hybrid + neighbouring pages | 0.93 | 0.90 | none |
+| Concept index | 0.88 | 0.89 | 1.6k / 15k |
+| Agent (with thinking across the course) | 0.87 | 0.82 | 3.9k / 6.6k |
+
+The routes with a model find no more than those without. The labels are consecutive page ranges,
+which may favour adding neighbours, and they were not judged again. Questions spanning several
+lectures are harder: on 13 of them the best route, hybrid + neighbours, found 0.64 of the labelled
+pages within 4000 tokens. Generation never asks those. These results hold for this course only. The code stays in `src/tutor/retrieval/` for what was not tested, such as hints or a
+course with no labels; details are in [`docs/design.md`](docs/design.md) ("RAG").
+
+## Results
+
+From the pipeline's own logs on two courses, with no extra model calls. `python -m tutor.eval report`
+writes a private report for each workspace, and every recorded test run rebuilds it. This section is
+updated by hand from those reports, last on 2026-11-05.
+
+| Measure | Result |
+|---|---|
+| VALID with no repair round | 28 of 50 generation runs (56%) |
+| Saved as VALID, after up to 3 repair rounds | 48 of 50 (96%) |
+| Tokens per saved exercise: generate, repair and oracle, failed runs included | 83k |
+| Mutants killed in first drafts | 102 of 103, over 22 drafts |
+| Exercises flagged by a held-out check | 8 of 38 |
+
+A 51st run stopped on an error before the validator had its say, so it is not counted.
+
+| What stopped the first draft | Runs |
+|---|---|
+| Nothing | 28 |
+| A reply that did not parse or could not be written out as files | 13 |
+| Rule 1: the reference failed its own tests | 6 |
+| Rule 3: a mutant survived | 1 |
+| Rule 4: the reference disagreed with the oracle | 1 |
+| The static safety check | 1 |
+
+| Generating model | Runs | VALID with no repair | Saved | Tokens per saved |
+|---|---|---|---|---|
+| DeepSeek-V4-Flash (thinking on for 35) | 42 | 25 of 42 | 42 of 42 | 86k |
+| GLM-5.3-Flash | 3 | 0 of 3 | 1 of 3 | 216k |
+| GPT-6.1-Terra | 5, plus the error | 3 of 5 | 5 of 5 | 31k |
+
+What these numbers cannot show:
+
+- **They are no controlled experiment.** Batches differ in lecture, model and settings, and the last
+  two models ran on one week only, so the model table is a lead and no more. Lecture length alone moves
+  the cost: 65k tokens per exercise on one course, 143k on the other with its long lecture (a reading of
+  the logs, not a test). The full model comparison was not run, as 12 items separate only large
+  differences and [the week 7 arms](docs/design.md) had already chosen a generator.
+- **The mutant count proves little.** Rule 3 passes on every saved exercise by construction, and the
+  same model writes the tests and the mutants.
+- **A held-out flag is a finding to read, not a proven defect.** The checks ran on one course only:
+  4 of 24 generated exercises and 4 of 14 written by hand.
+- **The judge is noisy.** On the course it is calibrated on, it raised a serious point on 14 of 35
+  generated exercises and 5 of 14 written by hand, but a plain rerun changed its letters on 3 of 13. On
+  the other course, where it is not calibrated, none of the 11 has one now: it raised one, which was real,
+  and the question was fixed. That zero means little.
+- **The ratings come from one learner,** on the 24 exercises they solved. "Clear" got 14 of 19 generated
+  and 5 of 5 written by hand; fits the material, within what was taught and targets the concept got all
+  24.
 
 ## Quick start
 
@@ -179,19 +270,38 @@ slides' text and images, the generated code, and your code when you ask a model 
 hint) leave it. This is a personal project, not affiliated with any university or course, and
 it is provided as is (see [LICENSE](LICENSE)).
 
-## Running exercise code is not sandboxed
+## Where exercise code runs
 
-The validator runs exercise code (reference, skeleton, mutants, tests) in a subprocess with a
-timeout, in a temporary directory, and kills the whole process group afterwards. That keeps
-runs apart from each other and from the workspace, but it is **not a sandbox**: the code runs
-with your user's permissions and can read or write other files and use the network. Only
-validate exercises you wrote or reviewed. Phase 3 runs LLM-generated code the same way, so
-review it first or run the validator in a container or VM.
+Validation, generation, held-out checks and hints all run exercise code (reference, skeleton,
+mutants, tests), much of it written by a model. Each course chooses where, in its
+`workspace.toml`:
 
-Before anything runs, a static check reads every exercise file and rejects code outside an
-allowlist (modules, `os` / `sys` attributes, `eval` / `exec`, paths outside the exercise,
-shell commands through Spark or MRJob). It stops the obvious, but Python is too dynamic for
-a static check to prove code safe; a test-run container is planned for later phases.
+```toml
+[isolation]
+runner = "container"   # or "host"
+```
+
+- **`container`**: every test run starts a fresh Docker container from the course's image,
+  which `python -m tutor.container build` makes from `[requires]`. The container has no
+  network, a read-only system, a non-root user, no view of your home folder or `.env`, and
+  limits on memory, processes, CPUs and time; only the run's own throwaway folder is writable.
+  If Docker is not running or the image is missing, the command stops with an error and writes
+  no verdict; it never falls back to the host. `python -m tutor.container status` says whether
+  the image is ready. Validation takes about as long as on the host (measured in
+  [design.md](docs/design.md), "Code execution safety").
+- **`host`**: a subprocess with a timeout, in a temporary directory, its whole process group
+  killed afterwards. That keeps runs apart from each other and from the workspace, but it is
+  **not a sandbox**: the code runs with your user's permissions and can read or write other
+  files and use the network. Use it only for exercises you wrote or reviewed.
+
+A course that has not chosen runs on the host and prints a warning. Your own `pytest` runs
+while solving stay on the host either way. The container is tested on macOS with Docker
+Desktop; Linux and Windows are not tested yet, so use the host there.
+
+Before anything runs, in either mode, a static check reads every exercise file and rejects
+code outside an allowlist (modules, `os` / `sys` attributes, `eval` / `exec`, paths outside
+the exercise, shell commands through Spark or MRJob). It stops the obvious, but Python is too
+dynamic for a static check to prove code safe; the container is the boundary.
 
 ## Layout
 
@@ -199,7 +309,11 @@ a static check to prove code safe; a test-run container is planned for later pha
 src/tutor/
   config.py        find the workspace, refuse unsafe locations, load .env
   envcheck.py      check the machine against the workspace's [requires]
-  execution.py     run pytest in a temp dir, subprocess + timeout, kill the whole process group
+  workspace.py     create a course workspace: folder, its own venv, terminal activation
+  execution.py     run pytest in a temp dir with a timeout: in a fresh container if the course
+                   asks for one, else a subprocess whose whole process group is killed
+  container.py     the course's Docker image from [requires] and the limits each run gets;
+                   `python -m tutor.container build | status`
   llm.py           a small client for OpenAI-compatible APIs (LM Studio, GLM, OpenAI,
                    DeepSeek): roles -> profiles, structured output, streaming, call log
   materials/       course PDFs -> a per-page markdown cache, image slides via a vision model;
@@ -210,6 +324,10 @@ src/tutor/
   hint/            hints while solving: rules, then the exercise's known mistakes (its
                    mutants), then a model's hint checked for giving code away; never the
                    reference; `python -m tutor.hint`
+  retrieval/       the routes compared in phase 4 and their scores; generation does not use
+                   them; `python -m tutor.retrieval`
+  eval/            a private report from the pipeline's own records, no model calls, rebuilt
+                   after each recorded test run; `python -m tutor.eval`
   schema.py        the batch format (metadata.json, manifest.json); `python -m tutor.schema`
   validation/      rule 0 (format), a static safety check, rules 1-5 and the api check;
                    `python -m tutor.validation`
@@ -229,28 +347,31 @@ Phase numbers match `docs/design.md`.
   examples
 - **2** ✅ Golden exercises: a first batch of 10 course exercises, validated, its must
   exercises solved by hand and rated to run the full loop
-- **2b** Code-tracing exercises ("what does this print and why")
 - **3a** ✅ LLM generation: static check on generated code, slide reading with a cached
   text layer and vision transcription, LangGraph plan → owner approval → generate → oracle
   by a second model → validate → repair, exercises in parallel, three course weeks generated
-  (a container for running generated code is moved to a later phase)
-- **3b** Checks that need a learner's real work: held-out solutions and mistakes, an LLM
+  (the container for running generated code came after phase 5, see below)
+- **3b** ✅ Checks that need a learner's real work: held-out solutions and mistakes, an LLM
   judge of teaching quality calibrated against the learner's ratings
-- **3c** ✅ Hint command: rules, mutant matching and a model's hint behind a leak check;
-  a calibrated judge of hint quality later
-- **4** Hybrid RAG over course material (BM25 + vectors), evaluated with recall@k
-- **5** Evaluation: validity rate, mutant kill rate, cost per valid exercise, with vs without RAG
+- **3c** ✅ Hint command: rules, mutant matching and a model's hint behind a leak check; a
+  judge of hint quality calibrated on simulated students
+- **4** ✅ Retrieval compared by measurement: hybrid RAG (BM25 + vectors), agentic search and a
+  concept index against the whole lecture, by recall within a token budget and by the exercises
+  each one yields; none beat it, so [the whole lecture stayed](#does-it-need-rag)
+- **5** ✅ Evaluation from the pipeline's own logs, [results above](#results): validity, what stops
+  a first draft, held-out flags, tokens per saved exercise; the full model comparison was not run
+- ✅ After 5: [a container for every test run](#where-exercise-code-runs), one fresh Docker
+  container per run, chosen per course; every saved exercise validated in it as on the host
 - **6** Second course: another language or framework, to prove nothing is shaped around one
-  course; brings the container for running generated code
+  course
 - **7** Local GUI: a web app on the CLI's functions, localhost only; solving stays in the IDE.
   Then packaging and release: `pipx install`, one command to start, CI on macOS and Windows
 
 Maybe: adaptive review, spaced `review` batches for the weak knowledge points in the
 attempt log (batches are started by hand for now).
 
-Decided, next to 3b:
-- A calibrated judge of hint quality, after 3b, whose judge it reuses: does a hint give the
-  answer away, does it point the right way
+Decided, to weigh again after phases 4 and 5:
+- **2b** Code-tracing exercises ("what does this print and why") and design exercises
 - Algorithm-quality warnings, with 2b's design exercises (e.g. how much a combiner cut),
   reported, never failing an exercise
 - `v0.1.0`: pinned dependency versions, a changelog and a tag, once the GUI or the whole

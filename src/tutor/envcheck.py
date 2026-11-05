@@ -60,8 +60,31 @@ def parse_hadoop_version(jar_names: list[str]) -> str | None:
 
 
 def check_workspace(ws: Workspace) -> list[CheckResult]:
-    """Check every [requires] entry of the workspace, in the order they are written."""
-    return [_check(name, required, ws.course) for name, required in ws.requires.items()]
+    """Check every [requires] entry of the workspace, in the order they are written, plus
+    Hadoop's native files on Windows when the course needs Spark or Hadoop."""
+    results = [_check(name, required, ws.course) for name, required in ws.requires.items()]
+    if sys.platform == "win32" and ({"pyspark", "hadoop"} & set(ws.requires)):
+        results.append(check_winutils(os.environ.get("HADOOP_HOME"), os.environ.get("PATH", "")))
+    return results
+
+
+def check_winutils(hadoop_home: str | None, path: str) -> CheckResult:
+    """Spark on Windows reads and writes files through Hadoop's native library: it needs
+    winutils.exe and hadoop.dll in $HADOOP_HOME/bin, and that folder on PATH (without
+    PATH every file-level exercise failed with UnsatisfiedLinkError, 2026-11-01).
+    Not a version, so `required` and `found` are both "present" when it is ok."""
+    name, required = "winutils", "present"
+    if not hadoop_home:
+        return CheckResult(name, required, None, "set HADOOP_HOME in .env (docs/setup/bigdata.md)")
+    bin_dir = Path(hadoop_home) / "bin"
+    missing = [f for f in ("winutils.exe", "hadoop.dll") if not (bin_dir / f).is_file()]
+    if missing:
+        return CheckResult(name, required, None,
+                           f"put {' and '.join(missing)} in {bin_dir} (docs/setup/bigdata.md)")
+    want = os.path.normcase(os.path.normpath(bin_dir))
+    if not any(os.path.normcase(os.path.normpath(p)) == want for p in path.split(os.pathsep) if p):
+        return CheckResult(name, required, None, f"add {bin_dir} to PATH, then open a new shell")
+    return CheckResult(name, required, "present")
 
 
 def _check(name: str, required: str, course: str) -> CheckResult:

@@ -25,5 +25,8 @@ deliberate, not gaps to report.
 
 ## Code execution
 
-- Run generated or untrusted code only through the isolated runner
-  (subprocess + timeout + temporary working directory).
+- Run generated or untrusted code only through the isolated runner (`tutor.execution`): a fresh
+  container when the course's `workspace.toml` says `[isolation] runner = "container"`, else
+  subprocess + timeout + temporary working directory. Never call the code directly to get around it.
+- Do not switch a course to `runner = "host"`, or add a fallback to the host, to get past a
+  stopped Docker or a missing image: report it to the owner.

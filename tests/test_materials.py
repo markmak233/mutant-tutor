@@ -22,8 +22,9 @@ LOGO = ("Red", 400, 330, 300, 100)  # 8% of the page, clear of text: flagged unl
 
 
 def make_pdf(path: Path, pages: list[dict]) -> Path:
-    """A 720x540 PDF. Each page: "lines" of text, an optional "footer", and "images" as
-    (name, x, y, width, height). Enough PDF for pypdfium2, nothing more."""
+    """A 720x540 PDF. Each page: "lines" of text, an optional "footer", "placed" text as
+    (x, y, text), and "images" as (name, x, y, width, height). Enough PDF for pypdfium2,
+    nothing more."""
     objects = [
         b"<< /Type /Catalog /Pages 2 0 R >>",
         b"",  # the page tree, filled in below
@@ -38,6 +39,7 @@ def make_pdf(path: Path, pages: list[dict]) -> Path:
                for i, line in enumerate(page.get("lines", []))]
         if page.get("footer"):
             ops.append(f"BT /F1 10 Tf 350 20 Td ({page['footer']}) Tj ET")
+        ops += [f"BT /F1 10 Tf {x} {y} Td ({text}) Tj ET" for x, y, text in page.get("placed", [])]
         ops += [f"q {w} 0 0 {h} {x} {y} cm /{name} Do Q" for name, x, y, w, h in
                 page.get("images", [])]
         content = "\n".join(ops).encode()
@@ -82,6 +84,20 @@ def test_pages_have_text_labels_and_vision_flags(tmp_path):
     assert [p.label for p in pages] == ["2.31", "2.32", "2.33", None]
     # The logo covers 8% of every page but repeats, so only slide 3's diagram counts.
     assert [p.needs_vision for p in pages] == [False, False, True, False]
+
+
+def test_the_label_is_the_footer_not_a_number_near_it(tmp_path):
+    """A number in a slide's body can reach the footer band and a page counter can sit beside
+    the footer; each once became the label."""
+    pdf = make_pdf(tmp_path / "l.pdf", [
+        {"footer": "6.10", "placed": [(72, 50, "Step size: 2")]},
+        {"footer": "6.52", "placed": [(600, 20, "52")]},
+        {"placed": [(72, 10, "5"), (350, 30, "3")]},  # footers count PDF pages: this is page 3
+        {"placed": [(72, 100, "7")]},  # above the band: no footer at all
+        {"footer": "12"},  # a plain footer that is not the PDF page's number
+    ])
+
+    assert [p.label for p in read_pdf(pdf)] == ["6.10", "6.52", "3", None, "12"]
 
 
 def test_small_code_images_count_and_images_under_text_do_not(tmp_path):
@@ -190,24 +206,25 @@ def test_cache_path_mirrors_the_workspace(tmp_path):
         cache.cache_path(tmp_path / "workspace", tmp_path / "other" / "l.pdf")
 
 
-def test_an_outside_lecture_folder_is_cached_like_the_default_one(tmp_path, monkeypatch, capsys):
+def test_an_outside_lecture_folder_is_cached_like_the_default_one(tmp_path, monkeypatch, capsys,
+                                                                   symlink):
     """LECTURE_DIR may be outside the workspace, or lectures/ a link to another folder."""
     workspace, elsewhere = tmp_path / "ws", tmp_path / "course-pdfs"
     workspace.mkdir()
     elsewhere.mkdir()
-    (workspace / "workspace.toml").write_text('course = "demo"\n')
+    (workspace / "workspace.toml").write_text('course = "demo"\n', encoding="utf-8")
     lecture(elsewhere / "L1.pdf")
     monkeypatch.setenv("WORKSPACE_DIR", str(workspace))
     monkeypatch.setenv("LECTURE_DIR", str(elsewhere))
     assert main([str(elsewhere)]) == 0
     assert cache.lecture_cache(workspace, "L1").is_file()
-    (workspace / "lectures").symlink_to(elsewhere, target_is_directory=True)
+    symlink(workspace / "lectures", elsewhere, target_is_directory=True)
     assert cache.cache_path(workspace, workspace / "lectures" / "L1.pdf") == (
         cache.lecture_cache(workspace, "L1"))
 
 
 def test_cli_writes_the_cache_and_skips_unchanged_pages(tmp_path, monkeypatch, capsys):
-    (tmp_path / "workspace.toml").write_text('course = "demo"\n')
+    (tmp_path / "workspace.toml").write_text('course = "demo"\n', encoding="utf-8")
     (tmp_path / "lectures").mkdir()
     lecture(tmp_path / "lectures" / "l.pdf")
     monkeypatch.setenv("WORKSPACE_DIR", str(tmp_path))
@@ -243,7 +260,7 @@ def test_a_wrapping_markdown_fence_is_removed():
 
 
 def test_cli_vision_needs_a_model_and_profile_needs_vision(tmp_path, monkeypatch, capsys):
-    (tmp_path / "workspace.toml").write_text('course = "demo"\n')
+    (tmp_path / "workspace.toml").write_text('course = "demo"\n', encoding="utf-8")
     monkeypatch.setenv("WORKSPACE_DIR", str(tmp_path))
     monkeypatch.delenv("LLM_MODEL", raising=False)
     monkeypatch.setattr("tutor.materials.__main__.load_env", lambda: None)
@@ -316,7 +333,7 @@ def test_an_assistant_is_asked_for_every_image_page_in_one_run(tmp_path, monkeyp
 
     (tmp_path / "workspace.toml").write_text(
         'course = "demo"\n[llm.profiles.claude-code]\nprovider = "assistant"\n'
-        '[llm.roles]\nvision = "claude-code"\n')
+        '[llm.roles]\nvision = "claude-code"\n', encoding="utf-8")
     (tmp_path / "lectures").mkdir()
     pdf = make_pdf(tmp_path / "lectures" / "l.pdf", [
         {"lines": [f"Figure {n}"], "images": [(name, 0, 20, 720, 380)]}
