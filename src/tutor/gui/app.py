@@ -36,19 +36,25 @@ Lectures and new courses (step 5): uploads go into the course's lecture folder a
 by `python -m tutor.materials` as a task; a new course is `python -m tutor.workspace init`
 as a task, after its PDFs are saved (lectures.py). Uploads and the other forms refuse with
 the problems listed, each naming the file it is about.
+
+Settings (step 6): the Keys page writes `.env` (keys.py), and a course's Models page its
+workspace.toml's [llm] (llm_settings.py). A key is never sent back to the browser: a page
+shows its last 4 characters, and a refused key is not put back in the form.
 """
 
 from __future__ import annotations
 
 import hmac
+import os
 import sys
 from pathlib import Path
 from types import ModuleType
 
 from flask import Flask, abort, make_response, redirect, render_template, request, url_for
 
+from tutor import llm
 from tutor.eval import report
-from tutor.gui import courses, generation, launch, lectures, rendering, tasks
+from tutor.gui import courses, generation, keys, launch, lectures, llm_settings, rendering, tasks
 
 COOKIE = "tutor_token"
 _HEADERS = {
@@ -84,6 +90,15 @@ NOTICES = {
                               "most."),
     "plan-moved": ("bad", "The batch is no longer at that step; this page shows where it is "
                           "now."),
+    "key-saved": ("ok", "Saved in .env. Commands started from now on use it."),
+    "key-deleted": ("ok", "Removed from .env."),
+    "model-saved": ("ok", "Saved in workspace.toml (the file before is workspace.toml.bak)."),
+    "model-deleted": ("ok", "Removed from workspace.toml (the file before is "
+                            "workspace.toml.bak)."),
+    "roles-saved": ("ok", "Roles saved in workspace.toml (the file before is "
+                          "workspace.toml.bak)."),
+    "models-copied": ("ok", "Models copied into workspace.toml. Keys are shared through "
+                            ".env, so they work here too."),
     "nothing-to-transcribe": ("ok", "No image page is waiting for the vision model."),
     "no-vision-model": ("bad", "No vision model is set: add `vision = \"<profile>\"` to "
                                "[llm.roles] in workspace.toml."),
@@ -103,15 +118,17 @@ UPLOAD_LIMIT_BYTES = 500 * 1024 * 1024  # one upload request, all its files toge
 
 
 def create_app(root: Path, token: str, port: int | None = None,
-               launcher: ModuleType = launch) -> Flask:
+               launcher: ModuleType = launch, env_file: Path | None = None) -> Flask:
     """`root`: the folder holding the course folders. `port`: the one the server listens on,
     for the Host check; set later through app.config["PORT"] when the server picks it.
-    `launcher`: what opens folders and VS Code (tests pass a stand-in)."""
+    `launcher`: what opens folders and VS Code (tests pass a stand-in). `env_file`: where
+    the Keys page keeps keys, by default the repository's .env, which the commands read."""
     app = Flask(__name__)
     # MAX_CONTENT_LENGTH: a request larger than this gets 413 before it is read; each PDF has
     # its own limit (lectures.MAX_PDF_BYTES).
     app.config.update(ROOT=root.resolve(), TOKEN=token, PORT=port,
-                      MAX_CONTENT_LENGTH=UPLOAD_LIMIT_BYTES)
+                      MAX_CONTENT_LENGTH=UPLOAD_LIMIT_BYTES,
+                      ENV_FILE=env_file or tasks.REPO / ".env")
 
     @app.before_request
     def check_request():
@@ -524,5 +541,123 @@ def create_app(root: Path, token: str, port: int | None = None,
         task = tasks.start(folder, f"Create {folder.name}", commands, env,
                            meta={"kind": "create"})
         return redirect(url_for("task", name=folder.name, task_id=task.id), code=303)
+
+    # --- settings (step 6): keys in .env, a course's models in its workspace.toml -------------
+
+    def keys_page(problems: list[str], code: int = 200, name: str = ""):
+        found = courses.find_courses(app.config["ROOT"])[0]
+        return render_template("keys.html", problems=problems, name=name,
+                               rows=keys.rows(app.config["ENV_FILE"],
+                                              llm_settings.key_users(found))), code
+
+    @app.get("/keys/")
+    def key_list():
+        return keys_page([])
+
+    @app.post("/keys/set")
+    def set_key():
+        """Add or replace a key. The value is never put back in a page, even when refused."""
+        name = request.form.get("name", "").strip()
+        problem = keys.set_key(app.config["ENV_FILE"], name, request.form.get("value", ""))
+        if problem:
+            return keys_page([problem], 400, name if keys.NAME.match(name) else "")
+        return redirect(url_for("key_list") + "?notice=key-saved", code=303)
+
+    @app.post("/keys/delete")
+    def delete_key():
+        found = courses.find_courses(app.config["ROOT"])[0]
+        problem = keys.delete_key(app.config["ENV_FILE"], request.form.get("name", ""),
+                                  llm_settings.key_users(found))
+        if problem:
+            return keys_page([problem], 400)
+        return redirect(url_for("key_list") + "?notice=key-deleted", code=303)
+
+    def models_page(course: courses.Course, problems: list[str], code: int = 200):
+        others = [c for c in courses.find_courses(app.config["ROOT"])[0]
+                  if c.folder != course.folder and llm_settings.section(c).get("profiles")]
+        values = keys.read(app.config["ENV_FILE"])
+        return render_template("models.html", course=course, problems=problems,
+                               profiles=llm_settings.profiles(course),
+                               roles=llm_settings.section(course).get("roles", {}),
+                               groups=llm_settings.ROLE_GROUPS, others=others,
+                               key_set={n for n in values} | set(os.environ)), code
+
+    @app.get("/c/<name>/models/")
+    def models(name: str):
+        return models_page(course_or_404(name), [])
+
+    def profile_page(course: courses.Course, original: str | None, values: dict,
+                     problems: list[str], code: int = 200):
+        return render_template("profile.html", course=course, original=original,
+                               values=values, problems=problems, fields=llm_settings.FIELDS,
+                               providers=list(llm.PROVIDERS)), code
+
+    @app.get("/c/<name>/models/new")
+    def new_model(name: str):
+        return profile_page(course_or_404(name), None, {"name": ""}, [])
+
+    @app.get("/c/<name>/models/m/<profile>/")
+    def edit_model(name: str, profile: str):
+        course = course_or_404(name)
+        data = llm_settings.section(course).get("profiles", {}).get(profile)
+        if not isinstance(data, dict):
+            abort(404, "No such model.")
+        return profile_page(course, profile, {"name": profile, **{k: str(v) for k, v in
+                                                                  data.items()}}, [])
+
+    @app.post("/c/<name>/models/save")
+    def save_model(name: str):
+        course = course_or_404(name)
+        form = {k: request.form.get(k, "") for k in ("name", *llm_settings.FIELDS)}
+        original = request.form.get("original") or None
+        profile = form["name"].strip()
+        data, problems = llm_settings.check_profile(course, profile, form)
+        if data is not None:
+            problems = llm_settings.save_profile(course, original, profile, data)
+        if problems:
+            return profile_page(course, original, form, problems, 400)
+        return redirect(url_for("models", name=name) + "?notice=model-saved", code=303)
+
+    @app.post("/c/<name>/models/m/<profile>/delete")
+    def delete_model(name: str, profile: str):
+        course = course_or_404(name)
+        problems = llm_settings.delete_profile(course, profile)
+        if problems:
+            return models_page(course, problems, 400)
+        return redirect(url_for("models", name=name) + "?notice=model-deleted", code=303)
+
+    @app.post("/c/<name>/models/roles")
+    def save_roles(name: str):
+        course = course_or_404(name)
+        chosen = {role: request.form.get(role, "") for role in llm_settings.ROLES
+                  if role in request.form}
+        problems = llm_settings.save_roles(course, chosen)
+        if problems:
+            return models_page(course, problems, 400)
+        return redirect(url_for("models", name=name) + "?notice=roles-saved", code=303)
+
+    @app.post("/c/<name>/models/copy")
+    def copy_models(name: str):
+        course = course_or_404(name)
+        source = courses.get_course(app.config["ROOT"], request.form.get("source", ""))
+        if source is None:
+            abort(404, "No such course.")
+        problems = llm_settings.copy_models(course, source)
+        if problems:
+            return models_page(course, problems, 400)
+        return redirect(url_for("models", name=name) + "?notice=models-copied", code=303)
+
+    @app.post("/c/<name>/models/check")
+    def check_models(name: str):
+        """One tiny request per model (`python -m tutor.llm check`), as a task."""
+        course = course_or_404(name)
+        known = [p.name for p in llm_settings.profiles(course)]
+        wanted = request.form.get("profile", "")
+        names = [wanted] if wanted else known
+        if not names or any(n not in known for n in names):
+            abort(404, "No such model.")
+        title = f"Check {wanted}" if wanted else "Check the models"
+        return start_task(course, title, [llm_settings.check_command(names)],
+                          meta={"kind": "check"})
 
     return app

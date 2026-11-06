@@ -9,6 +9,7 @@
   <div class="actions">
     <a class="button" href="{{ url_for('new_batch', name=course.folder) }}">New batch</a>
     <a class="button" href="{{ url_for('lecture_list', name=course.folder) }}">Lectures</a>
+    <a class="button" href="{{ url_for('models', name=course.folder) }}">Models</a>
     {{ action(url_for('open_course_folder', name=course.folder), "Open folder") }}
   </div>
 </div>

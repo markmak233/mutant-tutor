@@ -26,6 +26,9 @@ LLM_BASE_URL / LLM_API_KEY form a single default profile.
 
 Every call appends one JSON line to a call log (purpose, profile, model, tokens including
 those served from the provider's prompt cache, seconds, outcome); the key is never logged.
+
+`python -m tutor.llm check [PROFILE ...]` sends each profile one tiny request, so a wrong key
+or model name shows before a run that spends more.
 """
 
 from __future__ import annotations
@@ -422,3 +425,68 @@ def _log(path: Path | None, purpose: str, config: LLMConfig, reply: Reply | None
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as f:
         f.write(json.dumps(line, ensure_ascii=False) + "\n")
+
+
+# --- python -m tutor.llm check: does each model answer? ---------------------------------------
+
+CHECK_PROMPT = "Reply with the single word: ok"
+
+
+def check(config: LLMConfig, log_path: Path | None = None, embedding: bool = False) -> str:
+    """One tiny request, to see that the key, the address and the model name work, before a
+    run that would spend more finds out halfway (the GUI's "Check" button). Thinking off and
+    a few output tokens: it costs next to nothing. Returns a line saying how it went; raises
+    LLMError, with the provider's reason, when it did not."""
+    if config.provider == "assistant":
+        return "nothing to check: a coding assistant answers its requests"
+    started = time.monotonic()
+    if embedding:
+        vectors = embed(config, ["ok"], purpose="check", log_path=log_path)
+        return f"ok, {len(vectors[0])} dimensions, {time.monotonic() - started:.1f} s"
+    reply = chat(config, [{"role": "user", "content": CHECK_PROMPT}], purpose="check",
+                 log_path=log_path, max_tokens=32, thinking=False)
+    said = " ".join(reply.text.split())[:40] or "(an empty reply)"
+    return f"ok, answered {said!r} in {reply.seconds:.1f} s"
+
+
+def main(argv: list[str] | None = None) -> int:
+    """python -m tutor.llm check [PROFILE ...]: every profile of the workspace, or those named."""
+    import sys
+
+    from tutor.config import WorkspaceError, load_env, load_workspace
+
+    args = sys.argv[1:] if argv is None else argv
+    if not args or args[0] != "check":
+        print("Usage: python -m tutor.llm check [PROFILE ...]  (default: every profile in "
+              "workspace.toml's [llm.profiles])", file=sys.stderr)
+        return 2
+    load_env()
+    try:
+        workspace = load_workspace().root
+    except WorkspaceError as e:
+        print(f"setup: {e}", file=sys.stderr)
+        return 1
+    section = _llm_section(workspace)
+    names = args[1:] or sorted(section.get("profiles", {}))
+    if not names:
+        print("workspace.toml has no [llm.profiles] to check", file=sys.stderr)
+        return 1
+    used: dict[str, set[str]] = {}
+    for role, name in section.get("roles", {}).items():
+        used.setdefault(name, set()).add(role)
+    failed = 0
+    for name in names:
+        try:
+            config = config_for("check", name, workspace)
+            # A profile only the embedding role uses is an embedding model: no chat endpoint.
+            line = check(config, workspace / "logs" / "llm_calls.jsonl",
+                         embedding=used.get(name) == {"embedding"})
+        except LLMError as e:
+            failed += 1
+            line = f"failed: {e}"
+        print(f"{name}: {line}", flush=True)
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

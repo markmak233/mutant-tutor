@@ -325,7 +325,7 @@ def test_a_new_course_page_lists_what_is_still_to_set_up(root):
 
     page = _browser(root).get("/c/fresh/", base_url=BASE).get_data(as_text=True)
 
-    assert "No lectures yet" in page and "No models set" in page
+    assert "No lectures yet" in page and "No model writes exercises" in page
     assert "not chosen" in page and "No coverage.md" in page
 
 

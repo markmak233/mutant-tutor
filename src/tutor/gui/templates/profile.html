@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{# One model: a profile in [llm.profiles]. The key itself stays in .env; this names it. #}
+{% block title %}{{ original or "New model" }} · {{ course.workspace.course }}{% endblock %}
+{% block crumbs %}
+<a href="{{ url_for('course', name=course.folder) }}">{{ course.workspace.course }}</a>
+<a href="{{ url_for('models', name=course.folder) }}">Models</a>
+<span>{{ original or "New model" }}</span>
+{% endblock %}
+{% block content %}
+<h1>{{ original or "New model" }}</h1>
+{% if problems %}
+<ul class="notice notice-bad form-problems">{% for line in problems %}<li>{{ line }}</li>{% endfor %}</ul>
+{% endif %}
+<form method="post" action="{{ url_for('save_model', name=course.folder) }}" class="form">
+  {% if original %}<input type="hidden" name="original" value="{{ original }}">{% endif %}
+  <label class="field">Name
+    <span class="muted">what the roles call it, e.g. deepseek-flash{% if original %}; renaming moves its roles with it{% endif %}</span>
+    <input type="text" name="name" value="{{ values.name }}" required maxlength="40" pattern="[a-z0-9][a-z0-9._\-]*" autocomplete="off">
+  </label>
+  <label class="field">Provider
+    <span class="muted">lmstudio: a model on this machine; custom: any other OpenAI-compatible server (give its base URL); assistant: a coding assistant answers request files</span>
+    <select name="provider">{% for p in providers %}<option value="{{ p }}"{% if values.provider == p %} selected{% endif %}>{{ p }}</option>{% endfor %}</select>
+  </label>
+  <label class="field">Model
+    <span class="muted">the provider's name for it, e.g. deepseek-v4-flash</span>
+    <input type="text" name="model" value="{{ values.model }}" maxlength="120" autocomplete="off">
+  </label>
+  <label class="field">Key's name
+    <span class="muted">the variable in .env that holds its key, e.g. DEEPSEEK_API_KEY; empty for a local model. Never the key itself.</span>
+    <input type="text" name="api_key_env" value="{{ values.api_key_env }}" maxlength="64" pattern="[A-Z][A-Z0-9_]*" autocomplete="off">
+  </label>
+  <details{% if values.base_url or values.reasoning_effort or values.reasoning_effort_on or values.timeout_s %} open{% endif %}>
+    <summary>More</summary>
+    <label class="field">Base URL <span class="muted">empty: the provider's own</span>
+      <input type="text" name="base_url" value="{{ values.base_url }}" maxlength="200" autocomplete="off"></label>
+    <label class="field">Reasoning effort with thinking off <span class="muted">e.g. low; empty: the provider's way to turn thinking off</span>
+      <input type="text" name="reasoning_effort" value="{{ values.reasoning_effort }}" maxlength="20" autocomplete="off"></label>
+    <label class="field">Reasoning effort with thinking on <span class="muted">empty: the model's default depth</span>
+      <input type="text" name="reasoning_effort_on" value="{{ values.reasoning_effort_on }}" maxlength="20" autocomplete="off"></label>
+    <label class="field">Time limit per call, seconds <span class="muted">empty: 300</span>
+      <input type="number" name="timeout_s" value="{{ values.timeout_s }}" min="1" max="3600"></label>
+  </details>
+  <div class="actions"><button type="submit" class="primary">Save</button>
+    <a class="button" href="{{ url_for('models', name=course.folder) }}">Cancel</a></div>
+</form>
+{% endblock %}

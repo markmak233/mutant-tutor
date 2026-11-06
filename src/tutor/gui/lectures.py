@@ -278,8 +278,8 @@ def setup_gaps(course: Course, rows: list[LectureRow]) -> list[str]:
     elif unread := [r for r in rows if not r.read]:
         gaps.append(f"{len(unread)} lecture{'s' if len(unread) > 1 else ''} not read yet.")
     if not data.get("llm", {}).get("roles", {}).get("generate"):
-        gaps.append("No models set: add [llm.profiles] and [llm.roles] to workspace.toml "
-                    "(docs/setup); the settings page comes in a later step.")
+        gaps.append("No model writes exercises yet: choose one for the generate role on "
+                    "the Models page, or copy another course's models there.")
     runner = data.get("isolation", {}).get("runner")
     if runner is None:
         gaps.append("Where tests run is not chosen, so they run on this machine with a "

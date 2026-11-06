@@ -1149,7 +1149,8 @@ Design approved 2026-10-28 (owner):
   the per-item token budget, context size, plan size, parallelism, mode. Three sources,
   later ones winning: the defaults (the measured values; `Deps` takes its defaults from
   them, so tests and scripts run like the CLI), workspace.toml `[generation]` (the owner by
-  hand now, a GUI later; the pipeline reads workspace.toml and never writes it), and the
+  hand; the GUI's settings page writes only [llm] so far; the pipeline reads
+  workspace.toml and never writes it), and the
   run's flags (`--set name=value`, plus the older named flags). Unknown names and values
   out of range are errors that name them. A batch saves what it resolved in run.json, so
   every resume runs with the same values even if `[generation]` changed; `resume --set`
@@ -2703,7 +2704,7 @@ late; the adaptive review screens can be built with it.
   folder"; (3) long tasks: a CLI command as a child process, its log polled (htmx comes here);
   (4) generation: lectures, preferences, approving the plan in the page (it was expected to
   touch `graph/__main__.py`; it did not, see below); (5) uploading lectures and a new
-  course; (6) settings: models and keys; (7) the environment page. Steps 1 to 5 are built.
+  course; (6) settings: models and keys; (7) the environment page. Steps 1 to 6 are built.
 - Courses (owner, 2026-11-06): every folder under one root that holds a `workspace.toml`, as
   `tutor.workspace init` lays them out; the root is `--root`, else the folder above
   `WORKSPACE_DIR`. Each is checked like any workspace (refused inside a git repository). A
@@ -2823,8 +2824,8 @@ late; the adaptive review screens can be built with it.
   sha256. Its config turns off eval, script tags in swapped HTML and its inline indicator
   styles, so the CSP did not change. `selfRequestsOnly` keeps its requests on this server.
 - Dependencies: the `gui` extra, so the rest of the tool does not carry them: Flask and
-  waitress (8 packages), markdown-it-py, its dollar-math plugin and latex2mathml (12 in all, all
-  pure Python and MIT).
+  waitress (8 packages), markdown-it-py, its dollar-math plugin, latex2mathml and tomlkit
+  (13 in all, all pure Python and MIT).
 - Shape: a local web app (a thin Flask backend reusing the CLI functions, which a later MCP
   server could share too, plus a light frontend), served by waitress, bound to `127.0.0.1`
   with a per-launch token or a Host header check so other web pages cannot drive it.
@@ -2865,8 +2866,33 @@ late; the adaptive review screens can be built with it.
   solved and on explicit request, matching the tutoring rule.
 - Files stay the source of truth; no database (SQLite remains deferred).
 - Local only, per "Local-first": no accounts, no hosting. A settings page picks the model
-  (API or local) and stores the user's own key in `.env` or the OS keychain, never shown
-  again in full, with the data-flow note next to it.
+  (API or local) and stores the user's own key, never shown again in full, with the
+  data-flow note next to it (built in step 6, below).
+- Settings (step 6, owner, 2026-11-06):
+  - Keys in the repository's `.env`, the file the commands already read, not the OS
+    keychain for now (that would need a dependency and a change to how llm.py reads keys,
+    and Linux without a desktop has none). The user adds and removes keys by name, any
+    key-like name (`…_KEY`, `…_TOKEN`, `…_SECRET`) or one a profile names; WORKSPACE_DIR
+    and the other settings in the file are never listed or touched. A page shows the last
+    4 characters of a long key and never sends one back, even in a refused form. The file
+    is parsed as text, never loaded into the GUI's environment, kept line for line
+    otherwise, replaced in one step and readable by its owner only. A key also set in the
+    environment the GUI started from wins (load_env's rule), and the page says so.
+  - A course's Models page writes its workspace.toml's [llm] with tomlkit (owner), which
+    keeps the owner's comments; a changed value loses only its own line's comment. Every
+    save is checked before the file is replaced: read back with tomllib, [llm] must be
+    exactly what was intended, worked out from the old data and not from tomlkit, and every
+    other table unchanged; the file before is kept as `workspace.toml.bak`. A new key in a
+    table goes after its last key, not after the comments that end it and belong to the
+    next table (tomlkit's `Container._insert_after`, pinned by a test). Profiles are
+    checked by llm.py's own rules; roles by generation's (the oracle from another provider
+    than generate and repair); a profile in use cannot be removed, and a renamed one takes
+    its roles along. "Copy from another course" fills a course that has none.
+  - "Check" (owner): `python -m tutor.llm check [PROFILE ...]`, as a task, sends each model
+    one tiny request (thinking off, 32 output tokens) and says ok or the provider's reason,
+    so a wrong key or model name shows before a run that spends more. An assistant profile
+    has nothing to check; a profile only the embedding role uses gets an embedding call.
+  - Not in this step: the `[generation]` tunables (their defaults are measured values).
 - Environment page:
   - Infer requirements from course material: an LLM reads lectures and labs for named tools
     and versions and drafts `[requires]`; the owner confirms before `workspace.toml` is

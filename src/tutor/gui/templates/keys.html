@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{# API keys in .env (keys.py). A key is shown only by its last 4 characters; the forms never
+   carry one back to the browser. #}
+{% from "_macros.html" import action %}
+{% block title %}Keys{% endblock %}
+{% block crumbs %}<span>Keys</span>{% endblock %}
+{% block content %}
+<h1>API keys</h1>
+<p class="muted">Kept in the repository's <code>.env</code>, readable by you only, and shared by
+  every course. A key goes only to its provider's API, from the commands that call a model;
+  never into a test container, a log, or this page again in full.</p>
+{% if problems %}
+<ul class="notice notice-bad form-problems">{% for line in problems %}<li>{{ line }}</li>{% endfor %}</ul>
+{% endif %}
+{% if rows %}
+<table>
+  <thead><tr><th>Name</th><th>Key</th><th>Used by</th><th></th></tr></thead>
+  <tbody>
+  {% for row in rows %}
+    <tr>
+      <td><code>{{ row.name }}</code>
+        {% if row.shadowed %}<div class="muted">Also set where the GUI was started; commands use that one, not .env.</div>{% endif %}</td>
+      <td>{% if row.is_set %}set {{ row.tail }}{% else %}<span class="chip chip-not-set">not set</span>{% endif %}</td>
+      <td class="muted">{{ row.used_by | join(", ") or "no model names it" }}</td>
+      <td>
+        <form method="post" action="{{ url_for('set_key') }}" class="inline-form">
+          <input type="hidden" name="name" value="{{ row.name }}">
+          <input type="password" name="value" required autocomplete="new-password" placeholder="{{ 'new key' if row.is_set else 'paste the key' }}" aria-label="Key for {{ row.name }}">
+          <button type="submit">{{ "Replace" if row.is_set else "Save" }}</button>
+        </form>
+        {% if row.is_set %}<form method="post" action="{{ url_for('delete_key') }}" class="action"><input type="hidden" name="name" value="{{ row.name }}"><button type="submit">Remove</button></form>{% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+<form method="post" action="{{ url_for('set_key') }}" class="form">
+  <h2>Add a key</h2>
+  <label class="field">Name
+    <span class="muted">capital letters, digits and '_', e.g. DEEPSEEK_API_KEY; a model names it in "Key's name"</span>
+    <input type="text" name="name" value="{{ name }}" required maxlength="64" pattern="[A-Z][A-Z0-9_]*" autocomplete="off">
+  </label>
+  <label class="field">Key
+    <input type="password" name="value" required autocomplete="new-password">
+  </label>
+  <div class="actions"><button type="submit" class="primary">Save</button></div>
+</form>
+{% endblock %}

@@ -131,7 +131,7 @@ a.button:hover { border-color: var(--accent); }
 .form .field { display: flex; flex-direction: column; gap: 0.25rem; font-weight: 600; }
 .form .field .muted { font-weight: 400; }
 .form .check { display: block; padding: 0.15rem 0; }
-.form input[type="text"], .form input[type="number"], .form textarea {
+.form input[type="text"], .form input[type="number"], .form input[type="password"], .form textarea {
   font: inherit; font-weight: 400; padding: 0.4rem 0.55rem; border-radius: 6px;
   border: 1px solid var(--line); background: var(--card); color: var(--fg);
 }
@@ -179,3 +179,21 @@ table.plan { margin: 1rem 0; }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
+
+/* Settings (step 6): keys and models */
+.header-link { margin-left: auto; color: var(--muted); }
+.inline-form { display: inline-flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; margin: 0.15rem 0; }
+.inline-form input, .inline-form select, .form select {
+  font: inherit; padding: 0.3rem 0.5rem; border-radius: 6px; border: 1px solid var(--line);
+  background: var(--card); color: var(--fg);
+}
+.inline-form button, .row-actions button {
+  font: inherit; font-size: 0.9em; padding: 0.3rem 0.7rem; border-radius: 6px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--card); color: var(--fg);
+}
+.inline-form button.primary { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+.row-actions { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+.form .role { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: 0.3rem 0; }
+.form details summary { cursor: pointer; font-weight: 600; margin-bottom: 0.5rem; }
+.form details .field { margin-bottom: 0.75rem; }
+.chip-not-set { background: var(--bad-bg); color: var(--bad); }
