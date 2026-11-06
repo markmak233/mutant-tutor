@@ -44,7 +44,8 @@ container for isolation is fine; deploying the tool as a service is not.
   once before validating a batch (not per exercise: importing pyspark alone takes a second or two).
   `tests/test_env.py` runs the same checker. One exception (owner, 2026-11-05): `python -m tutor.workspace
   init` creates a course's own `.venv` and installs Python packages into it, and changes nothing outside
-  the course's folder. System software is still only checked.
+  the course's folder. The GUI may run that command and `python -m tutor.container build`, whose
+  recipe is our code's (owner, 2026-11-06). System software is still only checked.
 - Installation: Python deps as per-course extras, `pip install -e ".[bigdata]"`; system deps (Java,
   Hadoop) in a per-course guide `docs/setup/<course>.md`, linked from README (decided 2026-10-25:
   README stays course-agnostic, and each course's system deps and pitfalls differ; the guide
@@ -2663,9 +2664,11 @@ format (see "Learning rules").
   no mistranslated rule); whether `hints.md` and `tutor.hint` follow.
 
 Later phases, after phase 5 (order decided 2026-10-26, numbered 2026-10-30): phase 6 the
-second course, phase 7 the local GUI, then packaging and release. Adaptive review is a
-maybe, not a phase (owner, 2026-10-30: batches are started by hand for now); exam mode
-is not done (see "Decisions not to do").
+second course, phase 7 the local GUI, then packaging and release. Changed by the owner on
+2026-11-05 and 2026-11-06: the test-run container first, then the GUI, then the rest of phase 6
+(another language or framework), since the second course so far is plain Python. Adaptive
+review is a maybe, not a phase (owner, 2026-10-30: batches are started by hand for now); exam
+mode is not done (see "Decisions not to do").
 - Second course: use the tool for another course (other language or framework) to prove workspace,
   testkit and setup recipes are not shaped around one course. A long-term goal. Brings the module
   risk tiers and other languages (see "Code execution safety"); isolation layer B came first, after
@@ -2692,9 +2695,41 @@ is not done (see "Decisions not to do").
     on the host (the page gives the commands); Docker Desktop to choose the container. A plain
     Python course needs only the line and a key.
 
-Local GUI (phase 7: after the second course, just before packaging and release;
-discussed 2026-10-26). It sits on top of the files and functions the earlier phases build,
-so it comes late; the adaptive review screens can be built with it.
+Local GUI (phase 7, started 2026-11-06 ahead of the rest of phase 6, see above; discussed
+2026-10-26). It sits on top of the files and functions the earlier phases build, so it comes
+late; the adaptive review screens can be built with it.
+- Build order (owner, 2026-11-06), one step at a time, each usable on its own: (1) read-only
+  pages: courses, batches, exercises with progress and validation; (2) "Open in IDE" and "Open
+  folder"; (3) long tasks: a CLI command as a child process, its log polled (htmx comes here);
+  (4) generation: lectures, preferences, approving the plan in the page (touches
+  `graph/__main__.py`, so its design is explained first); (5) uploading lectures and a new
+  course; (6) settings: models and keys; (7) the environment page. Step 1 is built.
+- Courses (owner, 2026-11-06): every folder under one root that holds a `workspace.toml`, as
+  `tutor.workspace init` lays them out; the root is `--root`, else the folder above
+  `WORKSPACE_DIR`. Each is checked like any workspace (refused inside a git repository). A
+  command the GUI starts gets that course's `WORKSPACE_DIR` and `LECTURE_DIR`.
+- Access (step 1): the server listens on 127.0.0.1 only. A random token per launch is in the
+  link the command prints and opens; the first request swaps it for an HttpOnly,
+  SameSite=Strict cookie and redirects to the page without it, and every request without it
+  gets 403. The Host header must be 127.0.0.1 or localhost with this port, against DNS
+  rebinding. Jinja2 escapes every value and the Content-Security-Policy allows scripts from
+  the server only, none inline. Names from a URL or a manifest are followed only as plain,
+  visible folder names that stay inside their parent once links are resolved. Step 1 has GET
+  routes only; the routes that change files will rely on the SameSite cookie.
+- Step 1's pages (owner, 2026-11-06, after the first version looked like a file browser): a
+  dashboard per course (progress bar, must exercises passed, the next must exercise not yet
+  passed in the newest batch that has one, the last runs with time and result, never a run's
+  `first_error`), batches with progress bars, and the question rendered.
+- Questions are rendered, not shown as source (owner, 2026-11-06): Markdown by markdown-it-py
+  with raw HTML off; `<details>` blocks (17 of 60 questions) by recognising their exact shape
+  and writing only fixed tags; LaTeX (31 of 60) as MathML made on the server, so no script and
+  no change to the CSP (KaTeX would need inline styles). latex2mathml copies text it does not
+  understand into its output (`\text{<script>}` came out as a script tag), so its output is
+  kept only if every element and attribute is plain presentation MathML, else the formula is
+  shown as escaped source: over the 60 questions, 1131 formulas, all MathML, 9 ms at most.
+- Dependencies: the `gui` extra, so the rest of the tool does not carry them: Flask and
+  waitress (8 packages), markdown-it-py, its dollar-math plugin and latex2mathml (12 in all, all
+  pure Python and MIT).
 - Shape: a local web app (a thin Flask backend reusing the CLI functions, which a later MCP
   server could share too, plus a light frontend), served by waitress, bound to `127.0.0.1`
   with a per-launch token or a Host header check so other web pages cannot drive it.
@@ -2758,8 +2793,10 @@ so it comes late; the adaptive review screens can be built with it.
     or platform missing from the recipes is reported as needing a new recipe.
   - One click after uploading a new course's slides creates its workspace venv and terminal files
     (owner's wish, 2026-11-04), by calling `python -m tutor.workspace init`.
-  - This partly changes "Check, don't install" (see "Environment"): confirm with the owner
-    when the GUI phase starts.
+  - How far this relaxes "Check, don't install" (owner, 2026-11-06): the GUI installs Python
+    packages only into a course's own venv (through `tutor.workspace init`) and builds the
+    test image (through `tutor.container build`); it never runs a system install, which the
+    user runs in their own terminal before "Check again".
   - The test-run container (layer B, "Code execution safety"; owner, 2026-11-05). The GUI
     itself stays on the host, since it opens the IDE and folders and reads keys; only test
     runs go into the container. The page shows, per course: Docker missing, not running,

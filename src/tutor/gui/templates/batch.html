@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% from "_macros.html" import bar, chip %}
+{% block title %}{{ batch.name }}{% endblock %}
+{% block crumbs %}
+<a href="{{ url_for('course', name=course.folder) }}">{{ course.workspace.course }}</a>
+<span>{{ batch.name }}</span>
+{% endblock %}
+{% block content %}
+<h1>{{ batch.name }}</h1>
+<p class="muted">Mode: {{ batch.mode }}</p>
+{{ bar(batch.count("passed"), batch.exercises | length) }}
+<table>
+  <thead><tr><th>Exercise</th><th>Priority</th><th>Progress</th>
+    <th class="num">Runs to pass</th><th>Validated</th></tr></thead>
+  <tbody>
+  {% for row in batch.exercises %}
+    <tr class="priority-{{ row.priority }}">
+      <td><a href="{{ url_for('exercise', name=course.folder, batch=batch.name, exercise=row.id) }}">{{ row.title }}</a>
+        <div class="muted">{{ row.id }}</div></td>
+      <td>{{ row.priority }}</td>
+      <td>{{ chip(row.status, labels[row.status]) }}</td>
+      <td class="num">{{ row.runs_to_pass or "" }}</td>
+      <td>{% if row.valid is none %}<span class="muted">no report</span>{% elif row.valid %}valid{% else %}{{ chip("invalid") }}{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

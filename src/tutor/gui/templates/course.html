@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% from "_macros.html" import bar, chip %}
+{% set course = view.course %}
+{% block title %}{{ course.workspace.course }}{% endblock %}
+{% block crumbs %}<span>{{ course.workspace.course }}</span>{% endblock %}
+{% block content %}
+<h1>{{ course.workspace.course }}</h1>
+{{ bar(view.count("passed"), view.rows | length) }}
+{% set next = view.next %}
+{% if next %}
+<p class="next">Next:
+  <a href="{{ url_for('exercise', name=course.folder, batch=next[0].name, exercise=next[1].id) }}">{{ next[1].title }}</a>
+  <span class="muted">{{ next[0].name }}</span> {{ chip(next[1].status, labels[next[1].status]) }}</p>
+{% endif %}
+<h2>Batches</h2>
+{% if view.batches %}
+<table>
+  <thead><tr><th>Batch</th><th>Mode</th><th>Passed</th><th>Not passed yet</th></tr></thead>
+  <tbody>
+  {% for batch in view.batches %}
+    <tr>
+      <td><a href="{{ url_for('batch', name=course.folder, batch=batch.name) }}">{{ batch.name }}</a></td>
+      <td>{{ batch.mode }}</td>
+      <td class="bar-cell">{{ bar(batch.count("passed"), batch.exercises | length) }}</td>
+      <td>{% for status in labels if status != "passed" and batch.count(status) %}{{ chip(status, batch.count(status) ~ " " ~ labels[status]) }} {% endfor %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p>No batches yet.</p>
+{% endif %}
+{% if view.recent %}
+<h2>Recent runs</h2>
+<ul class="runs">
+{% for run in view.recent %}
+  <li>{{ chip(run.result) }}
+    {% if run.listed %}<a href="{{ url_for('exercise', name=course.folder, batch=run.batch, exercise=run.exercise) }}">{{ run.title }}</a>{% else %}{{ run.title }}{% endif %}
+    <span class="muted">{{ run.batch }} · {{ run.time }}</span></li>
+{% endfor %}
+</ul>
+{% endif %}
+{% if view.gaps %}
+<h2>Not counted</h2>
+<ul class="problems">{% for line in view.gaps %}<li>{{ line }}</li>{% endfor %}</ul>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,95 @@
+/* The GUI's one stylesheet, hand-written: no build step, no framework (docs/design.md). */
+:root {
+  --bg: #f7f6f3; --card: #ffffff; --fg: #1d1d1b; --muted: #6b6b66; --line: #e3e2de;
+  --accent: #2d5fa8; --track: #e9e7e1; --code-bg: #f1f0ec;
+  --passed: #2f7a3e; --passed-bg: #e3f1e5; --started: #9a5f0c; --started-bg: #fbeedb;
+  --unlogged: #7d4291; --unlogged-bg: #f2e6f6; --bad: #b3261e; --bad-bg: #fbe4e2;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #161615; --card: #1f1f1d; --fg: #e8e7e3; --muted: #9d9c96; --line: #34332f;
+    --accent: #8ab4f0; --track: #34332f; --code-bg: #2a2a27;
+    --passed: #8fd19c; --passed-bg: #20352a; --started: #f0b660; --started-bg: #3a2c16;
+    --unlogged: #d7a6e6; --unlogged-bg: #33233b; --bad: #f5978f; --bad-bg: #40211e;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; background: var(--bg); color: var(--fg);
+  font: 15px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+header {
+  display: flex; flex-wrap: wrap; gap: 0.25rem 1rem; align-items: baseline;
+  padding: 0.75rem 1rem; border-bottom: 1px solid var(--line); background: var(--card);
+}
+.brand { font-weight: 650; color: var(--fg); text-decoration: none; }
+nav a, nav span { color: var(--muted); }
+nav a::after, nav span:not(:last-child)::after { content: " /"; color: var(--line); }
+main { max-width: 64rem; margin: 0 auto; padding: 1.25rem 1rem 3rem; }
+h1 { font-size: 1.55rem; margin: 0.25rem 0 1rem; }
+h2 { font-size: 1.1rem; margin: 2rem 0 0.75rem; }
+h3 { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin: 1.25rem 0 0.5rem; }
+a { color: var(--accent); }
+code { background: var(--code-bg); padding: 0 0.25em; border-radius: 3px; font-size: 0.92em; }
+.muted { color: var(--muted); font-size: 0.9em; }
+
+/* Course cards on the home page */
+.cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr)); gap: 1rem; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 1rem 1.1rem; }
+.card-head { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; }
+.card h2 { margin: 0 0 0.75rem; font-size: 1.25rem; }
+.card h2 a { color: var(--fg); text-decoration: none; }
+.card h2 a:hover { text-decoration: underline; }
+.next { margin: 0.75rem 0 0; }
+
+/* Progress bars: a <progress> element, since inline widths are not allowed (CSP) */
+.bar { display: flex; align-items: center; gap: 0.6rem; }
+.bar progress {
+  flex: 1; height: 0.6rem; min-width: 5rem; border: 0; border-radius: 99px;
+  background: var(--track); overflow: hidden; appearance: none; -webkit-appearance: none;
+}
+.bar progress::-webkit-progress-bar { background: var(--track); border-radius: 99px; }
+.bar progress::-webkit-progress-value { background: var(--passed); border-radius: 99px; }
+.bar progress::-moz-progress-bar { background: var(--passed); border-radius: 99px; }
+.bar-text { font-variant-numeric: tabular-nums; font-size: 0.9em; color: var(--muted); white-space: nowrap; }
+.bar-cell { min-width: 10rem; }
+
+/* Status chips */
+.chip {
+  display: inline-block; padding: 0.05rem 0.5rem; border-radius: 99px; font-size: 0.82em;
+  font-weight: 600; background: var(--track); color: var(--muted); white-space: nowrap;
+}
+.chip-passed { background: var(--passed-bg); color: var(--passed); }
+.chip-started, .chip-failed { background: var(--started-bg); color: var(--started); }
+.chip-changed-no-run-logged { background: var(--unlogged-bg); color: var(--unlogged); }
+.chip-error, .chip-invalid { background: var(--bad-bg); color: var(--bad); }
+.runs { list-style: none; padding: 0; margin: 0; }
+.runs li { padding: 0.25rem 0; }
+
+/* Tables */
+table { width: 100%; border-collapse: collapse; background: var(--card); border-radius: 10px; }
+th, td { text-align: left; padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-weight: 600; font-size: 0.82em; color: var(--muted); }
+.num { text-align: right; font-variant-numeric: tabular-nums; }
+.priority-skip { opacity: 0.5; }
+
+/* The exercise page */
+.facts-line { display: flex; flex-wrap: wrap; gap: 0.4rem 1rem; align-items: center; margin-bottom: 0.25rem; }
+.question {
+  background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+  padding: 0.5rem 1.5rem 1.25rem; margin-top: 1rem; overflow-wrap: anywhere;
+}
+.question h1 { font-size: 1.45rem; margin-top: 1rem; }
+.question h2 { border-bottom: 1px solid var(--line); padding-bottom: 0.25rem; }
+.question pre { background: var(--code-bg); padding: 0.75rem 1rem; border-radius: 6px; overflow-x: auto; }
+.question pre code { background: none; padding: 0; }
+.question blockquote { margin: 0; padding: 0.25rem 1rem; border-left: 3px solid var(--line); color: var(--muted); }
+.question table { width: auto; }
+.question th, .question td { border: 1px solid var(--line); }
+.problems { color: var(--muted); }
+
+/* Narrow screens: tables scroll inside themselves, not the page. */
+@media (max-width: 40rem) {
+  table { display: block; overflow-x: auto; }
+  .cards { grid-template-columns: 1fr; }
+}

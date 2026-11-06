@@ -257,6 +257,16 @@ pyspark = "3.5"
 mrjob = "0.7"
 ```
 
+To browse your courses in the browser (read-only so far: batches, progress, validation):
+
+```bash
+pip install -e ".[gui]"
+python -m tutor.gui             # every course folder next to WORKSPACE_DIR's, or --root DIR
+```
+
+It listens on 127.0.0.1 only and opens a link with a token for this launch; other pages
+in the browser cannot use it.
+
 A gitleaks pre-commit hook blocks secrets and absolute home-directory paths
 (`pre-commit install` once per clone; needs `gitleaks` installed).
 
@@ -328,6 +338,8 @@ src/tutor/
                    them; `python -m tutor.retrieval`
   eval/            a private report from the pipeline's own records, no model calls, rebuilt
                    after each recorded test run; `python -m tutor.eval`
+  gui/             the local web GUI (Flask, server-rendered pages, no npm), reading the same
+                   files; `python -m tutor.gui`
   schema.py        the batch format (metadata.json, manifest.json); `python -m tutor.schema`
   validation/      rule 0 (format), a static safety check, rules 1-5 and the api check;
                    `python -m tutor.validation`
@@ -364,8 +376,9 @@ Phase numbers match `docs/design.md`.
   container per run, chosen per course; every saved exercise validated in it as on the host
 - **6** Second course: another language or framework, to prove nothing is shaped around one
   course
-- **7** Local GUI: a web app on the CLI's functions, localhost only; solving stays in the IDE.
-  Then packaging and release: `pipx install`, one command to start, CI on macOS and Windows
+- **7** Local GUI, in progress ahead of 6: a web app on the CLI's functions, localhost only;
+  solving stays in the IDE. Read-only pages done. Then packaging and release: one install line,
+  one click to start, CI on macOS and Windows
 
 Maybe: adaptive review, spaced `review` batches for the weak knowledge points in the
 attempt log (batches are started by hand for now).

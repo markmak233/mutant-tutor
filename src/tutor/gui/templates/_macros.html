@@ -1,0 +1,12 @@
+{# Small pieces the pages share. A <progress> element, not a styled div: the
+   Content-Security-Policy forbids inline style attributes, which a width would need. #}
+{% macro bar(done, total) -%}
+<div class="bar">
+  <progress value="{{ done }}" max="{{ total or 1 }}" aria-label="{{ done }} of {{ total }} passed"></progress>
+  <span class="bar-text">{{ done }} / {{ total }}</span>
+</div>
+{%- endmacro %}
+
+{% macro chip(value, text=None) -%}
+<span class="chip chip-{{ value | replace(',', '') | replace(' ', '-') }}">{{ text or value }}</span>
+{%- endmacro %}

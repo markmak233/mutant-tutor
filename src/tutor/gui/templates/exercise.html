@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% from "_macros.html" import chip %}
+{% block title %}{{ row.title }}{% endblock %}
+{% block crumbs %}
+<a href="{{ url_for('course', name=course.folder) }}">{{ course.workspace.course }}</a>
+<a href="{{ url_for('batch', name=course.folder, batch=batch.name) }}">{{ batch.name }}</a>
+<span>{{ row.id }}</span>
+{% endblock %}
+{% block content %}
+<div class="facts-line">
+  {{ chip(row.status, labels[row.status]) }}
+  <span>{{ row.priority }}</span>
+  {% if row.runs_to_pass %}<span class="muted">passed in {{ row.runs_to_pass }} logged run{{ "s" if row.runs_to_pass > 1 }}</span>{% endif %}
+  <span class="muted">{% if row.valid is none %}no validation report{% elif row.valid %}validated{% else %}invalid{% endif %}</span>
+</div>
+<p class="muted">Solve it in your IDE: <code>student.py</code> in this exercise's folder.</p>
+{% if question %}
+{# Markdown rendered with raw HTML off (rendering.py); the only value marked safe. #}
+<article class="question">{{ question }}</article>
+{% else %}
+<h1>{{ row.title }}</h1>
+<p>No question.md: the question is the docstring of <code>student.py</code>.</p>
+{% endif %}
+{% endblock %}

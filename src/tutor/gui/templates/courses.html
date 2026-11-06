@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% from "_macros.html" import bar, chip %}
+{% block content %}
+<h1>Your courses</h1>
+<div class="cards">
+{% for view in views %}
+  {% set course = view.course %}
+  <section class="card">
+    <div class="card-head">
+      <h2><a href="{{ url_for('course', name=course.folder) }}">{{ course.workspace.course }}</a></h2>
+      <span class="muted">{{ view.batches | length }} batch{{ "es" if view.batches | length != 1 }}</span>
+    </div>
+    {{ bar(view.count("passed"), view.rows | length) }}
+    <p class="muted">Must exercises: {{ view.count("passed", "must") }} of {{ view.count(None, "must") }} passed</p>
+    {% set next = view.next %}
+    {% if next %}
+    <p class="next">Next:
+      <a href="{{ url_for('exercise', name=course.folder, batch=next[0].name, exercise=next[1].id) }}">{{ next[1].title }}</a>
+      <span class="muted">{{ next[0].name }}</span> {{ chip(next[1].status, labels[next[1].status]) }}</p>
+    {% elif view.rows %}
+    <p class="next">Every must exercise has passed.</p>
+    {% else %}
+    <p class="next muted">No exercises yet.</p>
+    {% endif %}
+    {% if view.recent %}
+    <h3>Recent runs</h3>
+    <ul class="runs">
+    {% for run in view.recent[:3] %}
+      <li>{{ chip(run.result) }}
+        {% if run.listed %}<a href="{{ url_for('exercise', name=course.folder, batch=run.batch, exercise=run.exercise) }}">{{ run.title }}</a>{% else %}{{ run.title }}{% endif %}
+        <span class="muted">{{ run.time }}</span></li>
+    {% endfor %}
+    </ul>
+    {% endif %}
+  </section>
+{% else %}
+  <p>No course folder here yet: a course is a folder with a <code>workspace.toml</code>
+  (<code>python -m tutor.workspace init DIR</code> makes one).</p>
+{% endfor %}
+</div>
+<p class="muted">Course folders in <code>{{ root }}</code></p>
+{% if problems %}
+<h2>Not shown</h2>
+<ul class="problems">{% for line in problems %}<li>{{ line }}</li>{% endfor %}</ul>
+{% endif %}
+{% endblock %}

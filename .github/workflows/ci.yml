@@ -28,7 +28,8 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
           cache-dependency-path: pyproject.toml
-      - run: pip install -e ".[bigdata,dev]"
+      # gui: tests/test_gui.py skips without Flask, and CI should run it.
+      - run: pip install -e ".[bigdata,dev,gui]"
       - run: ruff check .
       # No JDK on purpose: the fast suite starts no JVM (the `spark` marker is deselected).
       - run: pytest
