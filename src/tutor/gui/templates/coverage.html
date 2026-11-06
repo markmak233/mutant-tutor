@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{# A course's coverage.md and a model's draft of it (gui/coverage.py). The draft runs only
+   from its button, as it may cost money; it never writes over coverage.md: it becomes
+   coverage.md only for a course that has none, and adds only the lectures one lacks, at its
+   end. Its run comes back to this page when it succeeds. #}
+{% from "_macros.html" import action, chip %}
+{% block title %}Coverage · {{ course.workspace.course }}{% endblock %}
+{% block crumbs %}
+<a href="{{ url_for('course', name=course.folder) }}">{{ course.workspace.course }}</a>
+<span>Coverage</span>
+{% endblock %}
+{% block content %}
+<div class="title-line">
+  <h1>Coverage</h1>
+  <div class="actions">
+    {% if view.exists %}<form method="post" action="{{ url_for('edit_coverage', name=course.folder) }}" class="action"><input type="hidden" name="file" value="coverage"><button type="submit">Edit coverage.md in VS Code</button></form>{% endif %}
+  </div>
+</div>
+<p class="muted"><code>coverage.md</code> lists what each lecture teaches and how it is practised. A new batch's plan chooses its knowledge points from the rows marked <code>gap-code</code>; without the file it chooses from the slides' titles alone.</p>
+{% if running %}
+<p class="notice notice-bad">A task is running in this course:
+  <a href="{{ url_for('task', name=course.folder, task_id=running.id) }}">{{ running.title }}</a>.
+  A draft starts when it ends.</p>
+{% endif %}
+{% if problems %}
+<ul class="notice notice-bad form-problems">{% for line in problems %}<li>{{ line }}</li>{% endfor %}</ul>
+<p class="muted">Nothing was written.</p>
+{% endif %}
+
+{% set d = view.draft %}
+<section class="step">
+<h2>Draft from the lectures</h2>
+<p class="muted">A model splits each lecture into its knowledge points, with their slides and the kind of practice that fits. Lectures asked before and unchanged are not asked again, so a new lecture costs only itself. Points whose pages are not in the lecture are dropped.</p>
+{% if not (d.sections or d.todo) %}
+<p>No lecture is read yet: read them on the <a href="{{ url_for('lecture_list', name=course.folder) }}">Lectures</a> page first.</p>
+{% else %}
+{% if d.todo %}
+<div class="notice notice-ok">
+  {{ d.todo | length }} lecture{{ "s" if d.todo | length != 1 }} not drafted yet{% if d.sections %}, or changed since{% endif %}.
+  {% if view.model %}This asks {{ view.model }}, one request per lecture, {% if view.tokens_k %}about {{ view.tokens_k }} thousand{% else %}under a thousand{% endif %} input tokens in all: a paid model charges for them.
+  {{ action(url_for('draft_coverage', name=course.folder), "Draft " ~ (d.todo | length) ~ " lecture" ~ ("s" if d.todo | length != 1 else "")) }}
+  {% else %}No model is set for it: choose one for the setup, plan or generate role on the <a href="{{ url_for('models', name=course.folder) }}">Models</a> page.{% endif %}
+</div>
+{% endif %}
+{% if d.sections %}
+<p class="muted">{{ d.sections | length }} lecture{{ "s" if d.sections | length != 1 }} drafted, by {{ d.models | join(", ") }}.</p>
+
+{% if not view.exists %}
+<div class="actions">
+  {{ action(url_for('use_coverage', name=course.folder), "Use as coverage.md", primary=True) }}
+  <span class="muted">Check the rows below first; once it is coverage.md, edit it in VS Code.</span>
+</div>
+{% elif missing %}
+<form method="post" action="{{ url_for('add_coverage', name=course.folder) }}" class="form wide">
+  <p>coverage.md has no section for {{ missing | length }} drafted lecture{{ "s" if missing | length != 1 }}. The ticked ones are added at its end; nothing already in it changes.</p>
+  {% if not (missing | selectattr("ticked") | list) %}<p class="muted">This coverage.md names its lectures its own way, so the page cannot tell which it has: tick only the ones it lacks.</p>{% endif %}
+  {% for m in missing %}
+  <label class="check"><input type="checkbox" name="lecture" value="{{ m.lecture }}"{% if m.ticked %} checked{% endif %}> {{ m.lecture }}</label>
+  {% endfor %}
+  <div class="actions"><button type="submit" class="primary">Add the ticked lectures to coverage.md</button></div>
+</form>
+{% else %}
+<p>{{ chip("done") }} coverage.md has a section for every drafted lecture.</p>
+{% endif %}
+{% if view.draft_file %}<form method="post" action="{{ url_for('edit_coverage', name=course.folder) }}" class="action"><input type="hidden" name="file" value="draft"><button type="submit">Open the draft in VS Code</button></form>{% endif %}
+
+<h3>The draft</h3>
+{% for s in d.sections %}
+<details class="review">
+  <summary>{{ s.lecture }} <span class="muted">{{ s.rows | length }} point{{ "s" if s.rows | length != 1 }}{% if s.gap_code %}, {{ s.gap_code }} gap-code{% endif %}</span></summary>
+  <table class="coverage">
+    <thead><tr><th>Slides</th><th>Point</th><th>Status</th></tr></thead>
+    <tbody>{% for r in s.rows %}<tr><td>{{ r.slides }}</td><td>{{ r.point }}</td><td>{{ r.status }}</td></tr>{% endfor %}</tbody>
+  </table>
+  {% if s.uncovered %}<p class="muted">{{ s.uncovered | length }} page{{ "s" if s.uncovered | length != 1 }} no point covers.</p>{% endif %}
+  {% if s.dropped %}<ul class="sources">{% for why in s.dropped %}<li class="muted">Dropped: {{ why }}</li>{% endfor %}</ul>{% endif %}
+</details>
+{% endfor %}
+{% endif %}
+{% endif %}
+</section>
+
+{% if view.exists %}
+<h2>coverage.md</h2>
+<div class="coverage-file">{{ view.html }}</div>
+{% endif %}
+{% endblock %}

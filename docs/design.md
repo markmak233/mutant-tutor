@@ -2832,7 +2832,8 @@ late; the adaptive review screens can be built with it.
     printed its steps only at the end; it now prints each as it happens, and a line before
     the install). Once ready, htmx's poll is answered with `HX-Redirect` to the course page;
     a failed one stays on its log. A course page lists what still stands between it and
-    generating: lectures not read, no models, where tests run not chosen, no `coverage.md`.
+    generating: lectures not read, no models, where tests run not chosen, no `coverage.md`;
+    each line links to the page that fixes it (owner, 2026-11-06).
   - A "discard plan" button stays out for now (owner): it would remove a draft folder, so
     it gets its own step, hiding the folder rather than deleting it.
 - htmx 2.0.11, the newest 2.x on npm (2026-09-22, 0BSD), vendored as
@@ -3024,6 +3025,38 @@ late; the adaptive review screens can be built with it.
     `[requires]` is confirmed. The user chooses host or container for a new course, nothing
     switched silently, with a warning when it matters: choosing the host (generated code runs
     with their rights), and a course set to the container while Docker is not available.
+- Coverage page (owner, 2026-11-06): a course's `coverage.md` shown, and a model's draft of
+  it (`python -m tutor.materials.coverage`, a task from the page's button, which names the
+  model and the input tokens). A course without the file plans from slide titles alone.
+  - The model and the storing are the [requires] draft's: the `setup` role's model, else
+    `plan`'s, else `generate`'s; one request per cached lecture, instructions first; the
+    answer stored as given in `cache/coverage/<lecture>.json`, keyed by the lecture's text
+    and the prompt version, so a lecture is asked once and a new lecture costs only itself.
+    Each answer lists the lecture's knowledge points, each with its first and last page, a
+    status (gap-code, gap-tracing, gap-design, concept, n/a) and, for gap-code, what an
+    exercise could check.
+  - Checked when read: a point whose pages are not in the lecture, or run backwards, is
+    dropped; pages become slide footers ("1.2-1.3"; "p.N" where a page has none), as the
+    plan and its slices read them; the pages no point covers are listed per lecture; a `|`
+    in a point cannot break the table. `ex:<id>` is never guessed: the plan already lists the
+    existing exercises and avoids them, and the owner marks rows as batches are made.
+  - `coverage-draft.md` is rewritten by each run, so it is never the file to edit. It never
+    writes over `coverage.md`: "Use as coverage.md" creates that file only when there is none
+    (opened for exclusive creation), with the header of a kept file. Each lecture's section
+    has the lecture's file name as its heading, so a later run can tell which lectures the
+    file has.
+  - Adding as lectures come (owner, 2026-11-06, "能做到增量添加吗"): the drafted lectures
+    `coverage.md` has no section for are offered with a tick; the ticked ones are appended at
+    its end, each with a line saying it came from the draft. Nothing already in the file
+    changes (the old text must be the start of the new), and the file before is kept as
+    `coverage.md.bak`. A hand-made file that names its lectures its own way (no heading is a
+    lecture's file name) cannot be matched, so nothing is ticked there and the page says so.
+  - Measured on the private test course with GLM-5.3-Flash (free): 20 lectures, 80k tokens
+    in and 13.5k out, 276 points (65 gap-code, 46 gap-tracing, 3 gap-design, 145 concept,
+    17 n/a), none dropped, a page or two uncovered in 5 lectures. Its PDFs have no slide
+    footers, so its ranges are PDF pages; generation sends such a lecture whole anyway.
+    Using the draft is the owner's click. Checked by a click in Chrome on a scratch course:
+    use, then add a second lecture after a hand-written line, which stayed.
 - Packaging the GUI itself as an image (owner asked, 2026-11-05: the aim is opening it in one click,
   see "Packaging and release", which does not need this, so an image is at most a later option). The
   costs: to start test containers from inside, it needs the Docker socket, which amounts to root on

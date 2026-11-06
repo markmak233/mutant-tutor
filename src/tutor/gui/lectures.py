@@ -269,24 +269,29 @@ def remove_new(folder: Path) -> None:
 # --- what a course still lacks ------------------------------------------------------------------
 
 
-def setup_gaps(course: Course, rows: list[LectureRow]) -> list[str]:
-    """What stands between this course and generating, one line each; [] when nothing."""
+def setup_gaps(course: Course, rows: list[LectureRow]) -> list[tuple[str, str | None, str]]:
+    """What stands between this course and generating, one (text, the page that fixes it
+    as a route name or None, the link's words) each; [] when nothing. The course page links
+    each line to its page (owner, 2026-11-06)."""
     data = _toml(course.workspace.root)
-    gaps = []
+    gaps: list[tuple[str, str | None, str]] = []
     if not rows:
-        gaps.append("No lectures yet: upload the lecture PDFs.")
+        gaps.append(("No lectures yet: upload the lecture PDFs.", "lecture_list",
+                     "Lectures"))
     elif unread := [r for r in rows if not r.read]:
-        gaps.append(f"{len(unread)} lecture{'s' if len(unread) > 1 else ''} not read yet.")
+        gaps.append((f"{len(unread)} lecture{'s' if len(unread) > 1 else ''} not read yet.",
+                     "lecture_list", "Lectures"))
     if not data.get("llm", {}).get("roles", {}).get("generate"):
-        gaps.append("No model writes exercises yet: choose one for the generate role on "
-                    "the Models page, or copy another course's models there.")
+        gaps.append(("No model writes exercises yet: choose one for the generate role, or "
+                     "copy another course's models.", "models", "Models"))
     runner = data.get("isolation", {}).get("runner")
     if runner is None:
-        gaps.append("Where tests run is not chosen, so they run on this machine with a "
-                    "warning: choose on the Environment page.")
+        gaps.append(("Where tests run is not chosen, so they run on this machine with a "
+                     "warning.", "environment_view", "Environment"))
     if not (course.workspace.root / "coverage.md").is_file():
-        gaps.append("No coverage.md (optional): plans choose knowledge points from the "
-                    "slides' titles alone, without knowing which are covered already.")
+        gaps.append(("No coverage.md (optional): plans choose knowledge points from the "
+                     "slides' titles alone, without knowing which are covered already.",
+                     "coverage_view", "Coverage"))
     return gaps
 
 

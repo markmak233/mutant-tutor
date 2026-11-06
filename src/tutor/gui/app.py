@@ -61,6 +61,7 @@ from tutor import llm
 from tutor.eval import report
 from tutor.gui import (
     courses,
+    coverage,
     environment,
     generation,
     keys,
@@ -145,6 +146,11 @@ NOTICES.update({
     "installed": ("ok", "Installed into .venv: step 2's check below is fresh."),
     "image-built": ("ok", "The test image is built and checked: step 4 below."),
     "draft-ready": ("ok", "The lectures were looked at: tick what to add in step 1."),
+    "coverage-drafted": ("ok", "The draft is ready below: check it against the slides."),
+    "coverage-used": ("ok", "coverage.md is written from the draft. Edit it as batches are made."),
+    "opened-coverage": ("ok", "Opened in VS Code. Reload this page to see your changes."),
+    "coverage-added": ("ok", "The ticked lectures were added at the end of coverage.md; nothing "
+                             "else in it changed (the file before is coverage.md.bak)."),
 })
 ENVIRONMENT_NOTICES = {"install": "installed", "build": "image-built",
                        "requires-draft": "draft-ready"}
@@ -358,6 +364,8 @@ def create_app(root: Path, token: str, port: int | None = None,
             return url_for("batch", name=name, batch=batch), batch, "validated"
         if kind == "check":
             return url_for("models", name=name), "Models", "models-checked"
+        if kind == "coverage-draft":
+            return url_for("coverage_view", name=name), "Coverage", "coverage-drafted"
         if kind in ENVIRONMENT_NOTICES:
             return (url_for("environment_view", name=name), "Environment",
                     ENVIRONMENT_NOTICES[kind])
@@ -835,5 +843,60 @@ def create_app(root: Path, token: str, port: int | None = None,
             return redirect(f"{back}?notice={view.state}", code=303)
         return start_task(course, "Build the test image", [environment.build_command(course)],
                           meta={"kind": "build"})
+
+    # --- coverage.md (owner, 2026-11-06): the course's table, and a model's draft of it --------
+
+    def coverage_page(course: courses.Course, problems: list[str], code: int = 200):
+        found = coverage.view(course)
+        return render_template("coverage.html", course=course, view=found, problems=problems,
+                               missing=coverage.missing(course, found),
+                               running=tasks.running(course.workspace.root)), code
+
+    @app.get("/c/<name>/coverage/")
+    def coverage_view(name: str):
+        return coverage_page(course_or_404(name), [])
+
+    @app.post("/c/<name>/coverage/draft")
+    def draft_coverage(name: str):
+        """A model splits each lecture not asked yet into knowledge points (it may cost
+        money, so only on this click); coverage.md itself is not touched."""
+        course = course_or_404(name)
+        if environment.setup_model(course) is None:
+            return redirect(url_for("coverage_view", name=name) + "?notice=no-setup-model",
+                            code=303)
+        return start_task(course, "Draft coverage.md from the lectures",
+                          [coverage.draft_command()], meta={"kind": "coverage-draft"})
+
+    @app.post("/c/<name>/coverage/use")
+    def use_coverage(name: str):
+        """The draft becomes coverage.md, only for a course that has none."""
+        course = course_or_404(name)
+        problems = coverage.use_draft(course)
+        if problems:
+            return coverage_page(course, problems, 400)
+        return redirect(url_for("coverage_view", name=name) + "?notice=coverage-used",
+                        code=303)
+
+    @app.post("/c/<name>/coverage/add")
+    def add_coverage(name: str):
+        """The ticked lectures' sections, appended to coverage.md; nothing in it changes."""
+        course = course_or_404(name)
+        problems = coverage.add_sections(course, request.form.getlist("lecture"))
+        if problems:
+            return coverage_page(course, problems, 400)
+        return redirect(url_for("coverage_view", name=name) + "?notice=coverage-added",
+                        code=303)
+
+    @app.post("/c/<name>/coverage/edit")
+    def edit_coverage(name: str):
+        """coverage.md, or the draft to copy from, in VS Code."""
+        course = course_or_404(name)
+        which = coverage.COVERAGE_FILE if request.form.get("file") != "draft" \
+            else coverage.DRAFT_FILE
+        path = course.workspace.root / which
+        if not path.is_file():
+            abort(404, f"There is no {which}.")
+        return act(lambda: launcher.open_in_vscode(course.workspace.root, path),
+                   url_for("coverage_view", name=name), done="opened-coverage")
 
     return app

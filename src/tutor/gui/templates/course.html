@@ -11,6 +11,7 @@
     <a class="button" href="{{ url_for('lecture_list', name=course.folder) }}">Lectures</a>
     <a class="button" href="{{ url_for('models', name=course.folder) }}">Models</a>
     <a class="button" href="{{ url_for('environment_view', name=course.folder) }}">Environment</a>
+    <a class="button" href="{{ url_for('coverage_view', name=course.folder) }}">Coverage</a>
     {{ action(url_for('open_course_folder', name=course.folder), "Open folder") }}
   </div>
 </div>
@@ -23,7 +24,8 @@
 {% endif %}
 {% if gaps %}
 <h2>Still to set up</h2>
-<ul class="setup">{% for line in gaps %}<li>{{ line }}</li>{% endfor %}</ul>
+{# Each line links to the page that fixes it (lectures.setup_gaps), when there is one. #}
+<ul class="setup">{% for text, page, label in gaps %}<li>{{ text }}{% if page %} <a href="{{ url_for(page, name=course.folder) }}">{{ label }} →</a>{% endif %}</li>{% endfor %}</ul>
 {% endif %}
 {% if plans %}
 <h2>Plans</h2>

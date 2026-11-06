@@ -327,13 +327,18 @@ def test_a_new_course_page_lists_what_is_still_to_set_up(root):
 
     assert "No lectures yet" in page and "No model writes exercises" in page
     assert "not chosen" in page and "No coverage.md" in page
+    # Each line links to the page that fixes it (owner, 2026-11-06).
+    for target, label in (("lectures", "Lectures"), ("models", "Models"),
+                          ("environment", "Environment")):
+        assert f'<a href="/c/fresh/{target}/">{label} →</a>' in page
 
 
 def test_a_course_with_everything_set_lists_only_what_is_missing(course):
     _write(course.workspace.root / "coverage.md", "| lecture |\n")
     rows = lectures.lecture_rows(course)
 
-    assert lectures.setup_gaps(course, rows) == ["1 lecture not read yet."]
+    assert lectures.setup_gaps(course, rows) == [
+        ("1 lecture not read yet.", "lecture_list", "Lectures")]
 
 
 def test_the_home_page_offers_a_new_course(root):

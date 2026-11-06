@@ -279,10 +279,10 @@ def test_an_empty_table_starts_with_one_blank_row(root):
     assert text.count('name="name" value=""') == 1
 
 
-def test_the_course_page_links_to_it_and_the_gap_says_where_to_choose(root):
+def test_the_course_page_links_to_it_and_the_gap_links_where_to_choose(root):
     text = _browser(root).get("/c/fresh/", base_url=BASE).get_data(as_text=True)
-    assert "/c/fresh/environment/" in text
-    assert "choose on the Environment page" in text
+    assert 'class="button" href="/c/fresh/environment/"' in text
+    assert 'warning. <a href="/c/fresh/environment/">Environment →</a>' in text
 
 
 def test_the_check_part_shows_each_result(root, monkeypatch):
