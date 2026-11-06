@@ -1,10 +1,13 @@
 {% extends "base.html" %}
-{% from "_macros.html" import bar, chip %}
+{% from "_macros.html" import action, bar, chip %}
 {% set course = view.course %}
 {% block title %}{{ course.workspace.course }}{% endblock %}
 {% block crumbs %}<span>{{ course.workspace.course }}</span>{% endblock %}
 {% block content %}
-<h1>{{ course.workspace.course }}</h1>
+<div class="title-line">
+  <h1>{{ course.workspace.course }}</h1>
+  <div class="actions">{{ action(url_for('open_course_folder', name=course.folder), "Open folder") }}</div>
+</div>
 {{ bar(view.count("passed"), view.rows | length) }}
 {% set next = view.next %}
 {% if next %}

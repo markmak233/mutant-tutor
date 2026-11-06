@@ -93,3 +93,18 @@ th { font-weight: 600; font-size: 0.82em; color: var(--muted); }
   table { display: block; overflow-x: auto; }
   .cards { grid-template-columns: 1fr; }
 }
+
+/* Actions: POST forms that look like buttons, and the notice an action leaves */
+.title-line { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 0.5rem 1rem; }
+.title-line h1 { margin-bottom: 0.5rem; }
+.actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin: 0.5rem 0; }
+form.action { margin: 0; }
+form.action button {
+  font: inherit; font-size: 0.9em; padding: 0.35rem 0.8rem; border-radius: 6px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--card); color: var(--fg);
+}
+form.action button:hover { border-color: var(--accent); }
+form.action button.primary { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+.notice { padding: 0.5rem 0.8rem; border-radius: 6px; margin: 0 0 1rem; }
+.notice-ok { background: var(--passed-bg); color: var(--passed); }
+.notice-bad { background: var(--bad-bg); color: var(--bad); }

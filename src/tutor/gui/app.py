@@ -16,17 +16,24 @@ generated text cannot become markup or script; the one exception is a question's
 which rendering.py turns into HTML with raw HTML off. The Content-Security-Policy
 allows scripts from this server only, with no inline script, as a second line. This step only
 reads: every route is GET and changes nothing.
+
+Actions. A route that does something on this machine (open a folder, open VS Code) answers
+POST only, so a link or an image cannot trigger it; the SameSite cookie already keeps other
+sites out, and the Origin header must also be this server's. The action then redirects to its
+page (303) with a fixed notice code, so a reload does not repeat it and the page never echoes
+text from the request.
 """
 
 from __future__ import annotations
 
 import hmac
 from pathlib import Path
+from types import ModuleType
 
-from flask import Flask, abort, redirect, render_template, request
+from flask import Flask, abort, redirect, render_template, request, url_for
 
 from tutor.eval import report
-from tutor.gui import courses, rendering
+from tutor.gui import courses, launch, rendering
 
 COOKIE = "tutor_token"
 _HEADERS = {
@@ -34,17 +41,31 @@ _HEADERS = {
                                 "img-src 'self'; frame-ancestors 'none'; base-uri 'none'; "
                                 "form-action 'self'"),
     "X-Content-Type-Options": "nosniff",
-    "Referrer-Policy": "no-referrer",
+    # Not "no-referrer": under it the browser sends `Origin: null` on every POST (the Fetch
+    # spec; seen in Chrome, 2026-11-06), and the Origin check refused our own buttons. Under
+    # "same-origin" this server's pages send their origin, and other sites get no referrer.
+    "Referrer-Policy": "same-origin",
     "Cache-Control": "no-store",  # pages hold private course material
 }
 # How each state reads on a page, in the report's order.
 STATUS_LABELS = {report.PASSED: "passed", report.STARTED: "started",
                  report.UNLOGGED: "changed, no run logged", report.NOT_STARTED: "not started"}
+# What an action can report back, by code; nothing else is ever shown. (kind, text)
+NOTICES = {
+    "opened-folder": ("ok", "Opened in the file manager."),
+    "opened-ide": ("ok", "Opened in VS Code: the course folder, with this exercise's student.py."),
+    "no-vscode": ("bad", "VS Code was not found. Install it, or in VS Code run "
+                         "\"Shell Command: Install 'code' command in PATH\"."),
+    "no-file-manager": ("bad", "No file manager command (xdg-open) was found."),
+    "failed": ("bad", "It could not be started."),
+}
 
 
-def create_app(root: Path, token: str, port: int | None = None) -> Flask:
+def create_app(root: Path, token: str, port: int | None = None,
+               launcher: ModuleType = launch) -> Flask:
     """`root`: the folder holding the course folders. `port`: the one the server listens on,
-    for the Host check; set later through app.config["PORT"] when the server picks it."""
+    for the Host check; set later through app.config["PORT"] when the server picks it.
+    `launcher`: what opens folders and VS Code (tests pass a stand-in)."""
     app = Flask(__name__)
     app.config.update(ROOT=root.resolve(), TOKEN=token, PORT=port)
 
@@ -61,7 +82,14 @@ def create_app(root: Path, token: str, port: int | None = None) -> Flask:
             return response
         if not hmac.compare_digest(request.cookies.get(COOKIE, ""), token):
             abort(403, "Open the link that `python -m tutor.gui` printed.")
+        if request.method != "GET" and request.headers.get("Origin") != f"http://{request.host}":
+            abort(403, "An action must come from this GUI's own pages.")
         return None
+
+    @app.context_processor
+    def notice():
+        found = NOTICES.get(request.args.get("notice", ""))
+        return {"notice": {"kind": found[0], "text": found[1]} if found else None}
 
     @app.after_request
     def add_headers(response):
@@ -70,6 +98,7 @@ def create_app(root: Path, token: str, port: int | None = None) -> Flask:
 
     @app.errorhandler(403)
     @app.errorhandler(404)
+    @app.errorhandler(405)
     def error(e):
         return render_template("error.html", code=e.code, message=e.description), e.code
 
@@ -78,6 +107,31 @@ def create_app(root: Path, token: str, port: int | None = None) -> Flask:
         if course is None:
             abort(404, "No such course.")
         return course
+
+    def batch_or_404(name: str, batch: str) -> tuple[courses.Course, courses.BatchView]:
+        course = course_or_404(name)
+        view = courses.batch_view(course, batch)
+        if view is None:
+            abort(404, "No such batch.")
+        return course, view
+
+    def exercise_or_404(name: str, batch: str, exercise: str):
+        """Only an exercise the batch's manifest lists, as on its page."""
+        course, view = batch_or_404(name, batch)
+        row = next((r for r in view.exercises if r.id == exercise), None)
+        folder = courses.exercise_dir(course, batch, exercise)
+        if row is None or folder is None:
+            abort(404, "No such exercise.")
+        return course, view, row, folder
+
+    def act(action, back: str, done: str = "opened-folder"):
+        """Run one launcher call, then go back to the page with what happened: `done`, or the
+        LaunchError's code. Both are keys of NOTICES."""
+        try:
+            action()
+        except launch.LaunchError as e:
+            done = str(e)
+        return redirect(f"{back}?notice={done}", code=303)
 
     @app.get("/")
     def home():
@@ -93,22 +147,49 @@ def create_app(root: Path, token: str, port: int | None = None) -> Flask:
 
     @app.get("/c/<name>/b/<batch>/")
     def batch(name: str, batch: str):
-        course = course_or_404(name)
-        view = courses.batch_view(course, batch)
-        if view is None:
-            abort(404, "No such batch.")
+        course, view = batch_or_404(name, batch)
         return render_template("batch.html", course=course, batch=view, labels=STATUS_LABELS)
 
     @app.get("/c/<name>/b/<batch>/e/<exercise>/")
     def exercise(name: str, batch: str, exercise: str):
-        course = course_or_404(name)
-        view = courses.batch_view(course, batch)
-        row = next((r for r in view.exercises if r.id == exercise), None) if view else None
-        if row is None:
-            abort(404, "No such exercise.")
+        course, view, row, _ = exercise_or_404(name, batch, exercise)
         text = courses.question(course, batch, exercise)
         return render_template("exercise.html", course=course, batch=view, row=row,
                                question=rendering.question_html(text) if text else None,
                                labels=STATUS_LABELS)
+
+    # --- actions: POST only, each back to its page with a notice ----------------------------
+
+    @app.post("/c/<name>/open-folder")
+    def open_course_folder(name: str):
+        folder = course_or_404(name).workspace.root
+        return act(lambda: launcher.open_folder(folder), url_for("course", name=name))
+
+    @app.post("/c/<name>/b/<batch>/open-folder")
+    def open_batch_folder(name: str, batch: str):
+        course, _ = batch_or_404(name, batch)
+        folder = courses.exercises_dir(course, batch)
+        if folder is None:
+            abort(404, "This batch has no exercises folder.")
+        return act(lambda: launcher.open_folder(folder),
+                   url_for("batch", name=name, batch=batch))
+
+    @app.post("/c/<name>/b/<batch>/e/<exercise>/open-folder")
+    def open_exercise_folder(name: str, batch: str, exercise: str):
+        *_, folder = exercise_or_404(name, batch, exercise)
+        return act(lambda: launcher.open_folder(folder),
+                   url_for("exercise", name=name, batch=batch, exercise=exercise))
+
+    @app.post("/c/<name>/b/<batch>/e/<exercise>/open-ide")
+    def open_exercise_in_ide(name: str, batch: str, exercise: str):
+        course, _, _, folder = exercise_or_404(name, batch, exercise)
+        student = folder / "student.py"
+
+        def ide():
+            launcher.open_in_vscode(course.workspace.root,
+                                    student if student.is_file() else folder)
+
+        return act(ide, url_for("exercise", name=name, batch=batch, exercise=exercise),
+                   done="opened-ide")
 
     return app

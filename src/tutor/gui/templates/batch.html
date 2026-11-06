@@ -1,12 +1,15 @@
 {% extends "base.html" %}
-{% from "_macros.html" import bar, chip %}
+{% from "_macros.html" import action, bar, chip %}
 {% block title %}{{ batch.name }}{% endblock %}
 {% block crumbs %}
 <a href="{{ url_for('course', name=course.folder) }}">{{ course.workspace.course }}</a>
 <span>{{ batch.name }}</span>
 {% endblock %}
 {% block content %}
-<h1>{{ batch.name }}</h1>
+<div class="title-line">
+  <h1>{{ batch.name }}</h1>
+  <div class="actions">{{ action(url_for('open_batch_folder', name=course.folder, batch=batch.name), "Open exercises folder") }}</div>
+</div>
 <p class="muted">Mode: {{ batch.mode }}</p>
 {{ bar(batch.count("passed"), batch.exercises | length) }}
 <table>

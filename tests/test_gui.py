@@ -9,7 +9,10 @@ import pytest
 pytest.importorskip("flask")  # the `gui` extra
 
 from tutor.gui import __main__ as gui_main  # noqa: E402
-from tutor.gui import courses  # noqa: E402
+from tutor.gui import (
+    courses,  # noqa: E402
+    launch,  # noqa: E402
+)
 from tutor.gui.app import COOKIE, create_app  # noqa: E402
 from tutor.gui.rendering import question_html  # noqa: E402
 
@@ -35,6 +38,7 @@ def root(tmp_path):
         "mode": "learn", "exercises": ["ex-one", "ex-two"], "priority": {"skip": ["ex-two"]}}))
     _write(batch / "exercises" / "ex-one" / "question.md",
            "# Count <script>alert(1)</script> words\n\nTask text.\n")
+    _write(batch / "exercises" / "ex-one" / "student.py", "def count(): ...\n")
     _write(batch / "exercises" / "ex-two" / "question.md", "# Second\n")
     _write(batch / "solutions" / "ex-one" / "validation.json", '{"valid": true}')
     _write(batch / "solutions" / "ex-one" / "reference.py", f"# {SECRET}\n")
@@ -268,3 +272,158 @@ def test_a_formula_that_is_not_plain_mathml_is_shown_as_source(latex):
 
     assert "<script" not in html and "href=" not in html
     assert '<code class="math-source">' in html
+
+
+# --- step 2: Open folder and Open in VS Code ---------------------------------------------
+
+
+class FakeLauncher:
+    """Stands in for tutor.gui.launch: records what would be opened, or fails as asked."""
+
+    LaunchError = launch.LaunchError
+
+    def __init__(self, fail: str | None = None):
+        self.calls: list[tuple] = []
+        self.fail = fail
+
+    def _call(self, *args):
+        if self.fail:
+            raise launch.LaunchError(self.fail)
+        self.calls.append(args)
+
+    def open_folder(self, path):
+        self._call("folder", path)
+
+    def open_in_vscode(self, folder, file):
+        self._call("vscode", folder, file)
+
+
+def _browser(root, launcher):
+    client = create_app(root, TOKEN, port=5000, launcher=launcher).test_client()
+    client.get(f"/?token={TOKEN}", base_url=BASE)
+    return client
+
+
+def post(client, path, origin=BASE):
+    headers = {"Origin": origin} if origin else {}
+    return client.post(path, base_url=BASE, headers=headers)
+
+
+def test_each_button_opens_its_own_folder(root):
+    launcher = FakeLauncher()
+    client = _browser(root, launcher)
+    course = (root / "demo-course").resolve()
+    exercises = course / "batches" / BATCH / "exercises"
+
+    assert post(client, "/c/demo-course/open-folder").status_code == 303
+    post(client, f"/c/demo-course/b/{BATCH}/open-folder")
+    post(client, f"/c/demo-course/b/{BATCH}/e/ex-one/open-folder")
+    response = post(client, f"/c/demo-course/b/{BATCH}/e/ex-one/open-ide")
+
+    assert launcher.calls == [
+        ("folder", course),
+        ("folder", exercises),  # the batch's exercises/, not the folder beside solutions/
+        ("folder", exercises / "ex-one"),
+        ("vscode", course, exercises / "ex-one" / "student.py"),  # the course: its venv
+    ]
+    assert response.headers["Location"] == f"/c/demo-course/b/{BATCH}/e/ex-one/?notice=opened-ide"
+
+
+@pytest.mark.parametrize("origin", [None, "null", "http://evil.example", "http://127.0.0.1:5001"])
+def test_an_action_needs_this_servers_origin(root, origin):
+    launcher = FakeLauncher()
+    client = _browser(root, launcher)
+
+    assert post(client, "/c/demo-course/open-folder", origin=origin).status_code == 403
+    assert launcher.calls == []
+
+
+def test_an_action_is_post_only_and_needs_the_cookie(root):
+    launcher = FakeLauncher()
+    client = create_app(root, TOKEN, port=5000, launcher=launcher).test_client()
+
+    assert post(client, "/c/demo-course/open-folder").status_code == 403  # no cookie yet
+    client.get(f"/?token={TOKEN}", base_url=BASE)
+    assert client.get("/c/demo-course/open-folder", base_url=BASE).status_code == 405
+    assert launcher.calls == []
+
+
+@pytest.mark.parametrize("path", [
+    f"/c/demo-course/b/{BATCH}/e/missing/open-ide",
+    f"/c/demo-course/b/{BATCH}/e/..%2F..%2Fsolutions/open-folder",
+    "/c/demo-course/b/.drafts/open-folder",
+    "/c/not-a-course/open-folder",
+])
+def test_an_action_on_an_unknown_name_opens_nothing(root, path):
+    launcher = FakeLauncher()
+
+    assert post(_browser(root, launcher), path).status_code == 404
+    assert launcher.calls == []
+
+
+def test_a_failure_comes_back_as_its_fixed_notice(root):
+    client = _browser(root, FakeLauncher(fail="no-vscode"))
+
+    response = post(client, f"/c/demo-course/b/{BATCH}/e/ex-one/open-ide")
+    page = client.get(response.headers["Location"], base_url=BASE).get_data(as_text=True)
+
+    assert response.headers["Location"].endswith("?notice=no-vscode")
+    assert "VS Code was not found" in page
+
+
+def test_an_unknown_notice_is_not_shown_or_echoed(client):
+    page = get(client, "/?notice=%3Cb%3Eforged%3C/b%3E").get_data(as_text=True)
+
+    assert "forged" not in page and 'class="notice' not in page
+
+
+def test_open_folder_uses_the_platforms_opener(monkeypatch, tmp_path):
+    started = []
+    monkeypatch.setattr(launch.sys, "platform", "darwin")
+
+    launch.open_folder(tmp_path, start=lambda cmd, **kw: started.append((cmd, kw)))
+
+    assert started[0][0] == ["open", str(tmp_path)]
+    assert started[0][1]["start_new_session"] is True  # Ctrl+C on the GUI leaves it open
+
+
+def test_no_opener_or_no_vscode_is_a_notice_not_a_crash(monkeypatch, tmp_path):
+    monkeypatch.setattr(launch.shutil, "which", lambda name: None)
+    monkeypatch.setattr(launch, "MACOS_VSCODE", tmp_path / "missing")
+    monkeypatch.setattr(launch.sys, "platform", "linux")
+
+    with pytest.raises(launch.LaunchError, match="no-file-manager"):
+        launch.open_folder(tmp_path)
+    with pytest.raises(launch.LaunchError, match="no-vscode"):
+        launch.open_in_vscode(tmp_path, None)
+
+
+def test_a_program_that_cannot_start_is_a_notice(monkeypatch, tmp_path):
+    monkeypatch.setattr(launch.sys, "platform", "darwin")
+
+    def broken(cmd, **kwargs):
+        raise FileNotFoundError(cmd[0])
+
+    with pytest.raises(launch.LaunchError, match="failed"):
+        launch.open_folder(tmp_path, start=broken)
+
+
+def test_only_workspace_dir_is_read_from_env_file(tmp_path, monkeypatch):
+    """The rest of .env (API keys) must not enter the GUI's environment, which VS Code and
+    its terminals would inherit."""
+    (tmp_path / "courses" / "one").mkdir(parents=True)
+    (tmp_path / ".env").write_text(
+        f"OPENAI_API_KEY=sk-not-real\n# WORKSPACE_DIR=/elsewhere\n"
+        f"WORKSPACE_DIR='{tmp_path / 'courses' / 'one'}'\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("WORKSPACE_DIR", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    assert gui_main._root(None) == (tmp_path / "courses").resolve()
+    assert "OPENAI_API_KEY" not in gui_main.os.environ
+
+
+def test_the_referrer_policy_lets_our_own_buttons_send_their_origin(client):
+    """Under "no-referrer" a browser sends `Origin: null` on a POST, and every button got 403
+    (found by the owner's first click; Chrome confirmed it)."""
+    assert get(client, "/").headers["Referrer-Policy"] == "same-origin"

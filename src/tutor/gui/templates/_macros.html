@@ -7,6 +7,11 @@
 </div>
 {%- endmacro %}
 
+{# An action button: a POST form, so a link or an image elsewhere cannot trigger it. #}
+{% macro action(url, label, primary=False) -%}
+<form method="post" action="{{ url }}" class="action"><button type="submit"{% if primary %} class="primary"{% endif %}>{{ label }}</button></form>
+{%- endmacro %}
+
 {% macro chip(value, text=None) -%}
 <span class="chip chip-{{ value | replace(',', '') | replace(' ', '-') }}">{{ text or value }}</span>
 {%- endmacro %}

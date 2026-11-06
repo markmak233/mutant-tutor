@@ -2703,7 +2703,7 @@ late; the adaptive review screens can be built with it.
   folder"; (3) long tasks: a CLI command as a child process, its log polled (htmx comes here);
   (4) generation: lectures, preferences, approving the plan in the page (touches
   `graph/__main__.py`, so its design is explained first); (5) uploading lectures and a new
-  course; (6) settings: models and keys; (7) the environment page. Step 1 is built.
+  course; (6) settings: models and keys; (7) the environment page. Steps 1 and 2 are built.
 - Courses (owner, 2026-11-06): every folder under one root that holds a `workspace.toml`, as
   `tutor.workspace init` lays them out; the root is `--root`, else the folder above
   `WORKSPACE_DIR`. Each is checked like any workspace (refused inside a git repository). A
@@ -2715,7 +2715,15 @@ late; the adaptive review screens can be built with it.
   rebinding. Jinja2 escapes every value and the Content-Security-Policy allows scripts from
   the server only, none inline. Names from a URL or a manifest are followed only as plain,
   visible folder names that stay inside their parent once links are resolved. Step 1 has GET
-  routes only; the routes that change files will rely on the SameSite cookie.
+  routes only. From step 2, a route that does something on the machine answers POST only (no
+  link or image can trigger it), and its Origin header must be this server's, besides the
+  SameSite cookie; it redirects back (303) with a fixed notice code, so the page never
+  echoes text from the request. The Referrer-Policy is `same-origin`: under `no-referrer`
+  browsers send `Origin: null` on a POST, and the first real click got 403 (the Flask test
+  client sets headers by hand, so only a click in Chrome showed it; buttons are now checked
+  that way). The GUI reads only `WORKSPACE_DIR` from `.env`, not the
+  whole file: its environment passes to what it starts (VS Code, its terminals, the code
+  run there), and API keys must not.
 - Step 1's pages (owner, 2026-11-06, after the first version looked like a file browser): a
   dashboard per course (progress bar, must exercises passed, the next must exercise not yet
   passed in the newest batch that has one, the last runs with time and result, never a run's
@@ -2756,12 +2764,17 @@ late; the adaptive review screens can be built with it.
   the human-in-the-loop item),
   browse batches with status from `validation.json`, progress from `attempts.jsonl`, mode and
   sources from `manifest.json`, coverage from `coverage.md`.
-- Solving stays in the IDE: an "Open in IDE" button runs `code <exercise dir>` (or a
-  `vscode://file/...` link; JetBrains has its own launcher). The GUI never runs the learner's
-  tests; the IDE's `pytest` and the attempts plugin stay the one record of attempts.
+- Solving stays in the IDE: "Open in VS Code" (step 2) runs `code <course folder> <student.py>`,
+  the course folder and not the exercise's, since the course's `.vscode` settings put its venv
+  in the terminal; VS Code reuses a window that has the folder open. `code` is looked up on
+  PATH, then inside the macOS app (not on PATH here). JetBrains has its own launcher, later.
+  The GUI never runs the learner's tests; the IDE's `pytest` and the attempts plugin stay the
+  one record of attempts.
 - An "Open folder" button next to it (owner, 2026-11-05) on course, batch and exercise pages
   shows the folder in Finder or Explorer. Only paths inside the workspace, and never a way
-  into `solutions/`.
+  into `solutions/`: a batch's button opens its `exercises/`, not the batch folder beside
+  `solutions/`. Both buttons go through `gui/launch.py`, the one place that can say "not
+  available". Only macOS is tested; the Windows and Linux branches are not.
 - Shows only `exercises/`; `solutions/` (reference, pseudocode) at most after the exercise is
   solved and on explicit request, matching the tutoring rule.
 - Files stay the source of truth; no database (SQLite remains deferred).

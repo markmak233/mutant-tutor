@@ -152,16 +152,23 @@ def batch_view(course: Course, name: str) -> BatchView | None:
 def question(course: Course, batch: str, exercise: str) -> str | None:
     """The exercise's question.md as written, or None when it has none. The page shows it as
     text, escaped: it is generated, so it must never become markup."""
-    folder = _exercise_dir(course, batch, exercise)
+    folder = exercise_dir(course, batch, exercise)
     path = folder / "question.md" if folder else None
     if path is None or not path.is_file():
         return None
     return path.read_text(encoding="utf-8", errors="replace")
 
 
-def _exercise_dir(course: Course, batch: str, exercise: str) -> Path | None:
+def exercises_dir(course: Course, batch: str) -> Path | None:
+    """The batch's exercises/ folder: what "Open folder" shows for a batch, rather than the
+    batch folder, where solutions/ sits right beside it."""
     batch_dir = _child(course.workspace.root / "batches", batch)
-    return _child(batch_dir / "exercises", exercise) if batch_dir else None
+    return _child(batch_dir, "exercises") if batch_dir else None
+
+
+def exercise_dir(course: Course, batch: str, exercise: str) -> Path | None:
+    folder = exercises_dir(course, batch)
+    return _child(folder, exercise) if folder else None
 
 
 def _child(parent: Path, name: str) -> Path | None:

@@ -15,15 +15,29 @@ import sys
 import webbrowser
 from pathlib import Path
 
-from tutor.config import WorkspaceError, _private_dir, load_env
+from tutor.config import WorkspaceError, _private_dir
+
+
+def _workspace_dir() -> str | None:
+    """WORKSPACE_DIR from the environment, else from `.env`, read for this one name. Loading
+    all of `.env` would put its API keys into this process's environment, and from there into
+    every program the GUI starts: VS Code, its terminals and the code run in them."""
+    if value := os.environ.get("WORKSPACE_DIR"):
+        return value
+    path = Path(".env")
+    lines = path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
+    for line in lines:
+        key, sep, value = line.strip().partition("=")
+        if sep and key.strip() == "WORKSPACE_DIR":
+            return value.strip().strip("'\"") or None
+    return None
 
 
 def _root(given: str | None) -> Path:
     if given:
         raw = given
     else:
-        load_env()
-        workspace = os.environ.get("WORKSPACE_DIR")
+        workspace = _workspace_dir()
         if not workspace:
             raise WorkspaceError("give --root, the folder holding your course folders, or set "
                                  "WORKSPACE_DIR to one course")
