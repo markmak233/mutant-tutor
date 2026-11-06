@@ -446,7 +446,7 @@ def _task(root, status="done", log="", pid=None, codes=(0,)):
 def test_validate_all_starts_one_validation_per_listed_exercise(root, monkeypatch):
     started = []
 
-    def fake_start(course_root, title, commands, env):
+    def fake_start(course_root, title, commands, env, meta=None):
         started.append((course_root, title, commands, env))
         return tasks.Task("20260102-100000-abcdef", course_root, title, "running", "", None,
                           commands, [], 1)

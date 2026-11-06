@@ -2701,9 +2701,9 @@ late; the adaptive review screens can be built with it.
 - Build order (owner, 2026-11-06), one step at a time, each usable on its own: (1) read-only
   pages: courses, batches, exercises with progress and validation; (2) "Open in IDE" and "Open
   folder"; (3) long tasks: a CLI command as a child process, its log polled (htmx comes here);
-  (4) generation: lectures, preferences, approving the plan in the page (touches
-  `graph/__main__.py`, so its design is explained first); (5) uploading lectures and a new
-  course; (6) settings: models and keys; (7) the environment page. Steps 1 to 3 are built.
+  (4) generation: lectures, preferences, approving the plan in the page (it was expected to
+  touch `graph/__main__.py`; it did not, see below); (5) uploading lectures and a new
+  course; (6) settings: models and keys; (7) the environment page. Steps 1 to 4 are built.
 - Courses (owner, 2026-11-06): every folder under one root that holds a `workspace.toml`, as
   `tutor.workspace init` lays them out; the root is `--root`, else the folder above
   `WORKSPACE_DIR`. Each is checked like any workspace (refused inside a git repository). A
@@ -2745,7 +2745,7 @@ late; the adaptive review screens can be built with it.
   time: validation already runs in parallel, and two at once could push runs past their limits.
   The page polls the end of the log every second with htmx and stops when the task ends.
   The first task is "Validate all" on a batch, which rewrites each `validation.json` as the
-  command line does; building the image and generating come in steps 7 and 4.
+  command line does; generating came in step 4, building the image comes in step 7.
 - Stopping a task: the test runner starts each pytest or `docker run` in a session of its own,
   out of reach of one process group, so the runner lists every process below it (`ps`), sends
   each Ctrl+C (a `docker run` client passes it into its container), and kills what is left
@@ -2754,6 +2754,39 @@ late; the adaptive review screens can be built with it.
   that on, and the first real Stop did nothing until it did. Checked by a click in Chrome on a
   copy of two examples, in containers: stopped in 7 s, no container or process left, and the
   interrupted exercise's `validation.json` not rewritten. Windows: Ctrl+Break, not tested.
+- Generation (step 4, owner, 2026-11-06): no change to `graph/`. Started without a terminal,
+  `python -m tutor.graph plan` already pauses at the plan and exits 0, so the GUI runs the
+  CLI's commands as tasks: the new-batch form starts `plan` (lectures read into the cache,
+  a label, learn or review, an optional count, preferences, and "hand calculation", which is
+  `--set hide_answers=true`); the plan page shows `plan.json` and starts `resume --approve`,
+  `resume --feedback=...` or, for a run that stopped, `resume`. Free text goes in as one
+  argument in `--name=value` form, so text starting with "-" is not taken for an option, and
+  no shell is involved. Editing the plan is "Edit plan.json in VS Code", since approving
+  already uses the owner's edited `plan.json`; no editor in the page (owner). The form names
+  the model of each role from `[llm.roles]` and says it costs money, with no estimate: tokens
+  per exercise vary too much for one to help (owner). Approve and Send back run only on the
+  owner's click; tests and Chrome checks use a stand-in for the command
+  (`tests/fake_graph.py`), never a model or a real course.
+  - Where a batch stands is read from files, since the plan's state proper is in LangGraph's
+    checkpoint, which needs the `gen` extra: a GUI task running for its label; a manifest
+    (written once every item has finished): generated; a draft folder for a plan id or a
+    `generation.jsonl`: stopped midway, Continue; else `plan.json`: waiting for the owner. A
+    plan being made again (feedback) that stopped leaves the old `plan.json`, and approving
+    would finish the new plan and approve it unseen; when the GUI's own last task for the
+    label was a planning one that did not finish, the page offers Continue, not Approve. A
+    batch planned in a terminal has no such history. Assistant mode (exit 3) shows as
+    waiting for the assistant: its requests are answered from a terminal, then Continue.
+  - The new-batch form is the one page that shows what a request sent: a refused form comes
+    back with the values typed, escaped like everything else.
+  - How many exercises (owner, 2026-11-06): "let the plan model decide", with its limit in
+    view (`--max-count`: `[generation] max_count`, else 20, since some lectures hold far
+    more than 6 points; the CLI's default stays 6), or "exactly N" (`--count`).
+    The plan model already counts the knowledge points that deserve an exercise, so no
+    separate call counts them first: it would read the same pages for a second fee, and the
+    two answers could differ. The limit sat out of sight before; a plan that the model
+    stopped at the limit now says so on the plan page, since points may have been merged or
+    left out. The limit is kept in the batch's state when the plan is made, so a plan sent
+    back cannot go past it; more means adding items to `plan.json` or a new batch.
 - htmx 2.0.11, the newest 2.x on npm (2026-09-22, 0BSD), vendored as
   `static/htmx-2.0.11.min.js` after its tarball matched npm's sha512; a test pins the file's
   sha256. Its config turns off eval, script tags in swapped HTML and its inline indicator
@@ -2783,8 +2816,7 @@ late; the adaptive review screens can be built with it.
   pages that do not need a SPA framework. What still needs care: escaping everything not
   written by us (lecture text, LLM hints, learner code) to prevent XSS.
 - Manage, do not edit: drag lectures and lab files into the workspace, pick sources and start
-  generation with the preference chat box (approving the batch plan there if phase 3 adopts
-  the human-in-the-loop item),
+  generation with the preferences box, approving the batch plan there (step 4),
   browse batches with status from `validation.json`, progress from `attempts.jsonl`, mode and
   sources from `manifest.json`, coverage from `coverage.md`.
 - Solving stays in the IDE: "Open in VS Code" (step 2) runs `code <course folder> <student.py>`,

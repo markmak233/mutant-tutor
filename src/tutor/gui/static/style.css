@@ -118,3 +118,39 @@ form.action button.primary { background: var(--accent); border-color: var(--acce
 .chip-running { background: var(--started-bg); color: var(--started); }
 .chip-done { background: var(--passed-bg); color: var(--passed); }
 .chip-stopped, .chip-lost { background: var(--unlogged-bg); color: var(--unlogged); }
+
+/* Generation (step 4): the new-batch form, the plan table and where a plan stands */
+a.button {
+  display: inline-block; font-size: 0.9em; padding: 0.35rem 0.8rem; border-radius: 6px;
+  border: 1px solid var(--line); background: var(--card); color: var(--fg); text-decoration: none;
+}
+a.button:hover { border-color: var(--accent); }
+.form { display: flex; flex-direction: column; gap: 1rem; max-width: 46rem; margin-top: 1rem; }
+.form fieldset { border: 1px solid var(--line); border-radius: 8px; padding: 0.5rem 1rem 0.75rem; margin: 0; background: var(--card); }
+.form legend { font-weight: 600; padding: 0 0.3rem; }
+.form .field { display: flex; flex-direction: column; gap: 0.25rem; font-weight: 600; }
+.form .field .muted { font-weight: 400; }
+.form .check { display: block; padding: 0.15rem 0; }
+.form input[type="text"], .form input[type="number"], .form textarea {
+  font: inherit; font-weight: 400; padding: 0.4rem 0.55rem; border-radius: 6px;
+  border: 1px solid var(--line); background: var(--card); color: var(--fg);
+}
+.form input[type="number"] { max-width: 8rem; }
+.form .check input[type="number"] { width: 5rem; padding: 0.15rem 0.4rem; margin-left: 0.25rem; }
+.form h2 { margin: 0.5rem 0 0; }
+.form button {
+  font: inherit; font-size: 0.9em; padding: 0.4rem 0.9rem; border-radius: 6px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--card); color: var(--fg);
+}
+.form button.primary { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+.form-problems { padding-left: 2rem; }
+table.compact { width: auto; }
+table.compact th { padding-right: 1.5rem; }
+table.plan { margin: 1rem 0; }
+.task-output { margin-top: 1.5rem; }
+.task-output summary { cursor: pointer; }
+.chip-waiting-for-you { background: var(--accent); color: var(--bg); }
+.chip-making-the-plan, .chip-generating, .chip-continuing { background: var(--started-bg); color: var(--started); }
+.chip-stopped-midway, .chip-plan-not-finished, .chip-waiting-for-the-assistant { background: var(--unlogged-bg); color: var(--unlogged); }
+.chip-generated { background: var(--passed-bg); color: var(--passed); }
+.chip-did-not-start { background: var(--bad-bg); color: var(--bad); }

@@ -26,6 +26,11 @@ text from the request.
 Long tasks (step 3) run existing CLI commands in the background (tasks.py, runner.py); their
 page polls the end of the log once a second with htmx, which runs with eval, script tags and
 its inline styles switched off, so the CSP stays as strict.
+
+Generation (step 4) is such a task: the new-batch form starts `python -m tutor.graph plan`,
+and the plan page approves, sends back or continues it with `resume` (generation.py). The
+form is the one page that shows what a request sent: when a value is refused, the form comes
+back with the values typed, escaped like any other.
 """
 
 from __future__ import annotations
@@ -38,7 +43,7 @@ from types import ModuleType
 from flask import Flask, abort, redirect, render_template, request, url_for
 
 from tutor.eval import report
-from tutor.gui import courses, launch, rendering, tasks
+from tutor.gui import courses, generation, launch, rendering, tasks
 
 COOKIE = "tutor_token"
 _HEADERS = {
@@ -68,6 +73,12 @@ NOTICES = {
     "stopping": ("ok", "Stopping: every process of the task got Ctrl+C, and what is still "
                        "running after 10 s is killed."),
     "not-running": ("bad", "This task is not running."),
+    "opened-plan": ("ok", "Opened plan.json in VS Code. Save it there; approving uses the "
+                          "saved file. Reload this page to see your changes."),
+    "feedback-empty": ("bad", "Write what to change first: plain text, 2000 characters at "
+                              "most."),
+    "plan-moved": ("bad", "The batch is no longer at that step; this page shows where it is "
+                          "now."),
 }
 RECENT_TASKS = 5
 
@@ -159,8 +170,10 @@ def create_app(root: Path, token: str, port: int | None = None,
     @app.get("/c/<name>/")
     def course(name: str):
         view = courses.course_view(course_or_404(name))
+        history = tasks.list_tasks(view.course.workspace.root)
         return render_template("course.html", view=view, labels=STATUS_LABELS,
-                               tasks=tasks.list_tasks(view.course.workspace.root)[:RECENT_TASKS])
+                               tasks=history[:RECENT_TASKS],
+                               plans=generation.open_plans(view.course, history))
 
     @app.get("/c/<name>/b/<batch>/")
     def batch(name: str, batch: str):
@@ -218,15 +231,18 @@ def create_app(root: Path, token: str, port: int | None = None,
             abort(404, "No such task.")
         return course, task
 
-    def start_task(course: courses.Course, title: str, commands: list[list[str]]):
+    def start_task(course: courses.Course, title: str, commands: list[list[str]],
+                   meta: dict | None = None, then: str | None = None):
+        """Start the task, then go to `then` (default: the task's page); to the running task
+        instead if the course has one. `meta`: see tasks.Task."""
         env = {"WORKSPACE_DIR": str(course.workspace.root),
                "LECTURE_DIR": str(course.workspace.lecture_dir)}
         try:
-            task = tasks.start(course.workspace.root, title, commands, env)
+            task = tasks.start(course.workspace.root, title, commands, env, meta=meta)
         except tasks.TaskBusy as busy:
             return redirect(url_for("task", name=course.folder, task_id=busy.task.id)
                             + "?notice=busy", code=303)
-        return redirect(url_for("task", name=course.folder, task_id=task.id), code=303)
+        return redirect(then or url_for("task", name=course.folder, task_id=task.id), code=303)
 
     @app.post("/c/<name>/b/<batch>/validate")
     def validate_batch(name: str, batch: str):
@@ -261,7 +277,111 @@ def create_app(root: Path, token: str, port: int | None = None,
     def stop_task(name: str, task_id: str):
         _, task = task_or_404(name, task_id)
         notice = "stopping" if tasks.stop(task) else "not-running"
-        return redirect(url_for("task", name=name, task_id=task_id) + f"?notice={notice}",
-                        code=303)
+        label = task.meta.get("label")  # a generation task: back to its plan's page
+        back = (url_for("plan", name=name, label=label) if isinstance(label, str)
+                else url_for("task", name=name, task_id=task_id))
+        return redirect(f"{back}?notice={notice}", code=303)
+
+    # --- generation (step 4): the CLI's `plan` and `resume`, as tasks ------------------------
+
+    def new_batch_page(course: courses.Course, values: dict, problems: list[str], code: int):
+        ready, unread = generation.lectures(course)
+        shown = {"label": "", "lectures": [], "count": "", "prefs": "",
+                 **generation.defaults(course), **values}
+        return render_template("new_batch.html", course=course, ready=ready, unread=unread,
+                               values=shown, problems=problems,
+                               models=generation.models(course),
+                               running=tasks.running(course.workspace.root)), code
+
+    @app.get("/c/<name>/new-batch")
+    def new_batch(name: str):
+        return new_batch_page(course_or_404(name), {}, [], 200)
+
+    @app.post("/c/<name>/new-batch")
+    def start_plan(name: str):
+        """`plan`: the plan model proposes the batch, and the command pauses for the owner."""
+        course = course_or_404(name)
+        form = request.form
+        values = {"label": form.get("label", ""), "lectures": form.getlist("lecture"),
+                  "mode": form.get("mode", ""), "how": form.get("how", ""),
+                  "count": form.get("count", ""), "max_count": form.get("max_count", ""),
+                  "prefs": form.get("prefs", ""), "hide_answers": form.get("hide_answers") == "on"}
+        batch, problems = generation.check_form(
+            course, values["label"], values["lectures"], values["mode"], values["how"],
+            values["count"], values["max_count"], values["prefs"], values["hide_answers"])
+        if batch is None:
+            return new_batch_page(course, values, problems, 400)
+        # How the number was set, so the plan page can tell a plan stopped at its limit.
+        how_many = {"count": batch.count} if batch.count else {"max_count": batch.max_count}
+        return start_task(course, f"Plan {batch.label}", [generation.plan_command(batch)],
+                          meta={"kind": generation.PLAN, "label": batch.label, **how_many},
+                          then=url_for("plan", name=name, label=batch.label))
+
+    def plan_or_404(name: str, label: str) -> tuple[courses.Course, generation.PlanView]:
+        course = course_or_404(name)
+        view = generation.plan_view(course, label)
+        if view is None:
+            abort(404, "No such plan.")
+        return course, view
+
+    def plan_page(template: str, name: str, label: str):
+        course, view = plan_or_404(name, label)
+        log, cut = tasks.tail(view.task) if view.task else ("", False)
+        return render_template(template, course=course, plan=view, log=log, cut=cut,
+                               models=generation.models(course), explain=generation.EXPLAIN)
+
+    @app.get("/c/<name>/plans/<label>/")
+    def plan(name: str, label: str):
+        return plan_page("plan.html", name, label)
+
+    @app.get("/c/<name>/plans/<label>/live")
+    def plan_live(name: str, label: str):
+        """The part of the plan page that htmx fetches every second while a task runs."""
+        return plan_page("_plan_live.html", name, label)
+
+    def plan_task(name: str, label: str, allowed: bool, title: str, command: list[str],
+                  kind: str, course: courses.Course):
+        """Start a `resume` for the plan if it is at the step the button was for; else back
+        to its page, which shows where it is now (another tab, or a terminal, moved it)."""
+        back = url_for("plan", name=name, label=label)
+        if not allowed:
+            return redirect(f"{back}?notice=plan-moved", code=303)
+        return start_task(course, title, [command], meta={"kind": kind, "label": label},
+                          then=back)
+
+    @app.post("/c/<name>/plans/<label>/approve")
+    def approve_plan(name: str, label: str):
+        """Generate the batch from plan.json as it is now; this is what spends money."""
+        course, view = plan_or_404(name, label)
+        return plan_task(name, label, view.can_approve, f"Generate {label}",
+                         generation.resume_command(label, approve=True), generation.APPROVE,
+                         course)
+
+    @app.post("/c/<name>/plans/<label>/feedback")
+    def send_back_plan(name: str, label: str):
+        course, view = plan_or_404(name, label)
+        feedback = generation.clean_text(request.form.get("feedback", ""))
+        if not feedback:
+            return redirect(url_for("plan", name=name, label=label) + "?notice=feedback-empty",
+                            code=303)
+        return plan_task(name, label, view.can_approve, f"Revise plan {label}",
+                         generation.resume_command(label, feedback=feedback),
+                         generation.FEEDBACK, course)
+
+    @app.post("/c/<name>/plans/<label>/continue")
+    def continue_plan(name: str, label: str):
+        course, view = plan_or_404(name, label)
+        return plan_task(name, label, view.can_continue, f"Continue {label}",
+                         generation.resume_command(label), generation.CONTINUE, course)
+
+    @app.post("/c/<name>/plans/<label>/edit")
+    def edit_plan(name: str, label: str):
+        """plan.json in VS Code: the CLI approves the file as the owner left it."""
+        course, view = plan_or_404(name, label)
+        if view.draft is None or not (view.draft / "plan.json").is_file():
+            abort(404, "This plan has no plan.json yet.")
+        return act(lambda: launcher.open_in_vscode(course.workspace.root,
+                                                   view.draft / "plan.json"),
+                   url_for("plan", name=name, label=label), done="opened-plan")
 
     return app

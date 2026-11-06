@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{# The new-batch form. It starts `python -m tutor.graph plan` (generation.py), which makes the
+   plan and pauses; nothing is generated before the owner approves on the plan page. When the
+   server refuses a value, this page comes back with the values typed, escaped. #}
+{% block title %}New batch{% endblock %}
+{% block crumbs %}
+<a href="{{ url_for('course', name=course.folder) }}">{{ course.workspace.course }}</a>
+<span>New batch</span>
+{% endblock %}
+{% block content %}
+<h1>New batch</h1>
+<p class="muted">The plan model proposes exercises from the lectures you choose, the gaps in
+  <code>coverage.md</code> and your preferences. The plan then waits for you: approve it, edit
+  it, or send it back with what to change.</p>
+{% if running %}
+<p class="notice notice-bad">A task is running in this course:
+  <a href="{{ url_for('task', name=course.folder, task_id=running.id) }}">{{ running.title }}</a>.
+  Start this one when it ends.</p>
+{% endif %}
+{% if problems %}
+<ul class="notice notice-bad form-problems">{% for line in problems %}<li>{{ line }}</li>{% endfor %}</ul>
+{% endif %}
+{% if not ready %}
+<p>No lecture of this course has been read yet. From the course folder, run
+  <code>python -m tutor.materials lectures/NAME.pdf</code>; reading from this page comes in a
+  later step.</p>
+{% else %}
+<form method="post" action="{{ url_for('start_plan', name=course.folder) }}" class="form">
+  <fieldset>
+    <legend>Lectures</legend>
+    {% for name in ready %}
+    <label class="check"><input type="checkbox" name="lecture" value="{{ name }}"{% if name in values.lectures %} checked{% endif %}> {{ name }}</label>
+    {% endfor %}
+    {% if unread %}<p class="muted">Not read yet, so not offered: {{ unread | join(", ") }}. Read them with <code>python -m tutor.materials</code>.</p>{% endif %}
+  </fieldset>
+  <label class="field">Label
+    <span class="muted">lowercase letters, digits and '-', e.g. w9-streams; the batch folder is named DATE_p3-LABEL</span>
+    <input type="text" name="label" value="{{ values.label }}" required maxlength="40" pattern="[a-z0-9][a-z0-9\-]*" autocomplete="off">
+  </label>
+  <fieldset>
+    <legend>Mode</legend>
+    <label class="check"><input type="radio" name="mode" value="learn"{% if values.mode == "learn" %} checked{% endif %}> learn: a question may explain the cause of a bug</label>
+    <label class="check"><input type="radio" name="mode" value="review"{% if values.mode == "review" %} checked{% endif %}> review: only its symptom</label>
+  </fieldset>
+  <fieldset>
+    <legend>How many exercises</legend>
+    <label class="check"><input type="radio" name="how" value="auto"{% if values.how == "auto" %} checked{% endif %}>
+      Let the plan model decide: one per knowledge point it finds in the chosen lectures' gaps, leaving out what existing exercises practise, at most
+      <input type="number" name="max_count" min="1" max="20" value="{{ values.max_count }}" aria-label="At most"></label>
+    <label class="check"><input type="radio" name="how" value="exact"{% if values.how == "exact" %} checked{% endif %}>
+      Exactly <input type="number" name="count" min="1" max="20" value="{{ values.count }}" aria-label="Exactly"></label>
+    <p class="muted">The limit is fixed once the plan is made: sending the plan back cannot go past it.</p>
+  </fieldset>
+  <label class="field">Your preferences
+    <span class="muted">optional, in plain words</span>
+    <textarea name="prefs" rows="4" maxlength="2000">{{ values.prefs }}</textarea>
+  </label>
+  <label class="check"><input type="checkbox" name="hide_answers"{% if values.hide_answers %} checked{% endif %}> Hand-calculation exercises: a test run shows only passed or failed, since a traceback would print the right number</label>
+  <h2>Models</h2>
+  <table class="compact"><tbody>
+    {% for role, text in models %}<tr><th>{{ role }}</th><td>{{ text }}</td></tr>{% endfor %}
+  </tbody></table>
+  <p class="muted">Making the plan calls the plan model, a few times at most. After you approve,
+    generating calls the models for every exercise, often several rounds each, and validates
+    each in a container, so Docker Desktop must be running. With a paid API, both cost money.</p>
+  <div class="actions"><button type="submit" class="primary">Make the plan</button></div>
+</form>
+{% endif %}
+{% endblock %}

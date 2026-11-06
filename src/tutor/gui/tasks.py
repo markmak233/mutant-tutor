@@ -18,13 +18,12 @@ from __future__ import annotations
 import json
 import os
 import re
-import secrets
 import shutil
 import signal
 import subprocess
 import sys
 import threading
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
@@ -61,6 +60,9 @@ class Task:
     commands: list[list[str]]
     exit_codes: list[int | None]  # one per command run so far; None for a stopped one
     pid: int | None
+    # What the task belongs to, for the pages: e.g. {"kind": "plan", "label": "w9-streams"}
+    # for generation (generation.py). The runner ignores it.
+    meta: dict = field(default_factory=dict)
 
     @property
     def active(self) -> bool:
@@ -68,21 +70,25 @@ class Task:
 
 
 def start(course_root: Path, title: str, commands: list[list[str]],
-          env: dict[str, str], grace_s: float = STOP_GRACE_S) -> Task:
+          env: dict[str, str], grace_s: float = STOP_GRACE_S, meta: dict | None = None) -> Task:
     """Write the task and launch its runner. Raises TaskBusy if one is running already.
     `env`: variables these commands need on top of this process's own (the course's
-    WORKSPACE_DIR and LECTURE_DIR)."""
+    WORKSPACE_DIR and LECTURE_DIR). `meta`: see Task."""
     with _start_lock:
         if (busy := running(course_root)) is not None:
             raise TaskBusy(busy)
         base = course_root / TASKS_DIR
         _prune(base)
-        task_id = f"{datetime.now():%Y%m%d-%H%M%S}-{secrets.token_hex(3)}"
+        # Names sort by start time: the second, then its microseconds in six hex digits
+        # (it was random, and two tasks in one second could sort the wrong way round, so a
+        # plan's page took the older task for its newest). Unique, as starts take the lock.
+        now = datetime.now()
+        task_id = f"{now:%Y%m%d-%H%M%S}-{now.microsecond:06x}"
         folder = base / task_id
         folder.mkdir(parents=True)
         _write(folder, {"title": title, "status": RUNNING, "started": _now(), "finished": None,
                         "commands": commands, "env": env, "exit_codes": [], "pid": None,
-                        "grace_s": grace_s})
+                        "grace_s": grace_s, "meta": meta or {}})
         (folder / LOG_FILE).touch()
         # A session of its own: Ctrl+C on the GUI's terminal does not reach it, and stop()
         # can signal it alone. Nothing of it is inherited: no open files, no terminal.
@@ -110,7 +116,8 @@ def get(course_root: Path, task_id: str) -> Task | None:
         status = LOST  # the runner never started, so it would block the course for good
     return Task(task_id, folder, str(data.get("title", task_id)), status,
                 str(data.get("started", "")), data.get("finished"),
-                list(data.get("commands", [])), list(data.get("exit_codes", [])), pid)
+                list(data.get("commands", [])), list(data.get("exit_codes", [])), pid,
+                meta if isinstance(meta := data.get("meta"), dict) else {})
 
 
 def list_tasks(course_root: Path) -> list[Task]:

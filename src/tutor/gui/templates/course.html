@@ -6,7 +6,10 @@
 {% block content %}
 <div class="title-line">
   <h1>{{ course.workspace.course }}</h1>
-  <div class="actions">{{ action(url_for('open_course_folder', name=course.folder), "Open folder") }}</div>
+  <div class="actions">
+    <a class="button" href="{{ url_for('new_batch', name=course.folder) }}">New batch</a>
+    {{ action(url_for('open_course_folder', name=course.folder), "Open folder") }}
+  </div>
 </div>
 {{ bar(view.count("passed"), view.rows | length) }}
 {% set next = view.next %}
@@ -14,6 +17,15 @@
 <p class="next">Next:
   <a href="{{ url_for('exercise', name=course.folder, batch=next[0].name, exercise=next[1].id) }}">{{ next[1].title }}</a>
   <span class="muted">{{ next[0].name }}</span> {{ chip(next[1].status, labels[next[1].status]) }}</p>
+{% endif %}
+{% if plans %}
+<h2>Plans</h2>
+<ul class="runs">
+{% for plan in plans %}
+  <li>{{ chip(plan.state) }} <a href="{{ url_for('plan', name=course.folder, label=plan.label) }}">{{ plan.label }}</a>
+    {% if plan.batch %}<span class="muted">{{ plan.batch }}</span>{% endif %}</li>
+{% endfor %}
+</ul>
 {% endif %}
 <h2>Batches</h2>
 {% if view.batches %}

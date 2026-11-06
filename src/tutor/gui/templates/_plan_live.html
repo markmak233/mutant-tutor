@@ -1,0 +1,78 @@
+{# The part of the plan page that changes. While a task runs for this plan, htmx fetches it
+   again every second; the copy it gets once the task has ended has no trigger, so the
+   polling stops and the plan with its buttons appears. Every value from plan.json and the
+   log is escaped like any other. #}
+{% from "_macros.html" import action, chip, log_box %}
+{% set running = plan.task is not none and plan.task.active %}
+<div id="plan-live"{% if running %} hx-get="{{ url_for('plan_live', name=course.folder, label=plan.label) }}" hx-trigger="every 1s" hx-swap="outerHTML"{% endif %}>
+  <div class="facts-line">
+    {{ chip(plan.state) }}
+    {% if plan.batch %}<span class="muted">{{ plan.batch }}</span>{% endif %}
+    {% if plan.settings.mode %}<span class="muted">mode {{ plan.settings.mode }}{% if plan.settings.hide_answers %}, test runs hide answers{% endif %}</span>{% endif %}
+    {% if plan.how_many.count %}<span class="muted">exactly {{ plan.how_many.count }} asked for</span>
+    {% elif plan.how_many.max_count %}<span class="muted">the model chose how many, at most {{ plan.how_many.max_count }}</span>{% endif %}
+    {% if running %}{{ action(url_for('stop_task', name=course.folder, task_id=plan.task.id), "Stop") }}{% endif %}
+  </div>
+  <p>{{ explain[plan.state] }}</p>
+  {% if plan.generated %}<p><a href="{{ url_for('batch', name=course.folder, batch=plan.batch) }}">Open the batch</a></p>{% endif %}
+  {% if plan.plan_error %}<p class="notice notice-bad">{{ plan.plan_error }}</p>{% endif %}
+
+  {% if plan.shows_plan and plan.items %}
+  {% if plan.edited %}<p class="notice notice-ok">plan.json was edited: it differs from the model's plan, and approving uses it.</p>{% endif %}
+  <table class="plan">
+    <thead><tr><th class="num">#</th><th>Exercise</th><th>Source</th><th>What it practises</th></tr></thead>
+    <tbody>
+    {% for item in plan.items %}
+      <tr>
+        <td class="num">{{ loop.index }}</td>
+        <td><strong>{{ item.id }}</strong>
+          <div class="muted">{{ item.type }} · {{ item.interface }} · {{ item.framework }}</div></td>
+        <td>{{ item.lecture }}<div class="muted">slides {{ item.slides }}</div></td>
+        <td>{{ item.knowledge_point }}
+          {% if item.notes %}<div class="muted">Checks: {{ item.notes }}</div>{% endif %}
+          {% if item.reason %}<div class="muted">Why: {{ item.reason }}</div>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  {% if plan.shows_plan and plan.at_limit %}
+  <p class="notice notice-bad">The model planned as many exercises as the limit ({{ plan.how_many.max_count }}), so some knowledge points may have been merged or left out. The limit is fixed once the plan is made, so sending it back cannot go past it. For more, add items to plan.json, or start a new batch with a higher limit.</p>
+  {% endif %}
+
+  {% if plan.can_approve and plan.problems %}
+  <div class="notice notice-bad">Problems the check found when the plan was shown:
+    <ul>{% for line in plan.problems %}<li>{{ line }}</li>{% endfor %}</ul>
+    Approving refuses a plan with an id used twice or taken, a lecture not chosen, or a slide range that is not one; edit plan.json or send it back.</div>
+  {% endif %}
+
+  {% if not running and plan.can_approve %}
+  <div class="actions">
+    {{ action(url_for('approve_plan', name=course.folder, label=plan.label), "Approve and generate", primary=True) }}
+    {{ action(url_for('edit_plan', name=course.folder, label=plan.label), "Edit plan.json in VS Code") }}
+  </div>
+  <p class="muted">Approving generates every exercise of plan.json as it is saved now, with the
+    models below, and validates each in a container: Docker Desktop must be running.</p>
+  <table class="compact"><tbody>
+    {% for role, text in models if role != "plan" %}<tr><th>{{ role }}</th><td>{{ text }}</td></tr>{% endfor %}
+  </tbody></table>
+  <form method="post" action="{{ url_for('send_back_plan', name=course.folder, label=plan.label) }}" class="form">
+    <label class="field">Send it back
+      <span class="muted">what to change, in plain words; the plan model makes a new plan, which waits for you again</span>
+      <textarea name="feedback" rows="3" maxlength="2000" required></textarea>
+    </label>
+    <div class="actions"><button type="submit">Send back</button></div>
+  </form>
+  {% elif not running and plan.can_continue %}
+  <div class="actions">{{ action(url_for('continue_plan', name=course.folder, label=plan.label), "Continue", primary=True) }}</div>
+  {% endif %}
+
+  {% if plan.task %}
+  <details class="task-output"{% if running or plan.task.status != "done" %} open{% endif %}>
+    <summary>Output of <a href="{{ url_for('task', name=course.folder, task_id=plan.task.id) }}">{{ plan.task.title }}</a>
+      {{ chip(plan.task.status) }} <span class="muted">{{ plan.task.started }}</span></summary>
+    {{ log_box(log, cut) }}
+  </details>
+  {% endif %}
+</div>

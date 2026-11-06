@@ -12,6 +12,13 @@
 <form method="post" action="{{ url }}" class="action"><button type="submit"{% if primary %} class="primary"{% endif %}>{{ label }}</button></form>
 {%- endmacro %}
 
+{# The end of a task's output. column-reverse keeps the box scrolled to the newest line,
+   without a script. #}
+{% macro log_box(log, cut) -%}
+{% if cut %}<p class="muted">Only the end of the output is shown.</p>{% endif %}
+<div class="log"><pre>{{ log }}</pre></div>
+{%- endmacro %}
+
 {% macro chip(value, text=None) -%}
 <span class="chip chip-{{ value | replace(',', '') | replace(' ', '-') }}">{{ text or value }}</span>
 {%- endmacro %}

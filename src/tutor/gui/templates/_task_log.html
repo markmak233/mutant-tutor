@@ -1,7 +1,7 @@
 {# The part of the task page that changes. While the task runs, htmx fetches it again every
    second and swaps it in; the copy it gets once the task has ended has no trigger, so the
    polling stops by itself. Without JavaScript, reloading the page shows the same. #}
-{% from "_macros.html" import action, chip %}
+{% from "_macros.html" import action, chip, log_box %}
 <div id="task-log"{% if task.active %} hx-get="{{ url_for('task_log', name=course.folder, task_id=task.id) }}" hx-trigger="every 1s" hx-swap="outerHTML"{% endif %}>
   <div class="facts-line">
     {{ chip(task.status) }}
@@ -10,7 +10,5 @@
     {% if failed %}<span class="muted">{{ failed | length }} exited with an error</span>{% endif %}
     {% if task.active %}{{ action(url_for('stop_task', name=course.folder, task_id=task.id), "Stop") }}{% endif %}
   </div>
-  {% if cut %}<p class="muted">Only the end of the output is shown.</p>{% endif %}
-  {# column-reverse keeps the box scrolled to the newest line, without a script. #}
-  <div class="log"><pre>{{ log }}</pre></div>
+  {{ log_box(log, cut) }}
 </div>

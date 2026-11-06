@@ -173,6 +173,18 @@ def test_old_tasks_are_pruned_to_the_newest(tmp_path):
     assert "20260101-000000-abcdef" not in names  # the oldest went first
 
 
+def test_tasks_started_in_one_second_list_newest_first(tmp_path):
+    """The ids sort by start time within a second too: a plan's page reads the newest task
+    for its label, and a random part let an older one come first."""
+    started = []
+    for n in range(3):
+        task = tasks.start(tmp_path, str(n), [py("pass")], {})
+        started.append(task.id)
+        wait_end(tmp_path, task)
+
+    assert [t.id for t in tasks.list_tasks(tmp_path)] == started[::-1]
+
+
 def test_only_task_ids_of_the_right_shape_are_read(tmp_path):
     for bad in ["..", "../x", "20260101-000000-ABCDEF", "x"]:
         assert tasks.get(tmp_path, bad) is None
