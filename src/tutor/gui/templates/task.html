@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}{{ task.title }}{% endblock %}
+{% block crumbs %}
+<a href="{{ url_for('course', name=course.folder) }}">{{ course.workspace.course }}</a>
+<span>{{ task.title }}</span>
+{% endblock %}
+{% block content %}
+<h1>{{ task.title }}</h1>
+<p class="muted">Started {{ task.started }}. It goes on if you close this page or the GUI.</p>
+{% include "_task_log.html" %}
+{% endblock %}

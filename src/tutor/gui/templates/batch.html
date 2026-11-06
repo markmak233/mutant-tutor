@@ -8,7 +8,10 @@
 {% block content %}
 <div class="title-line">
   <h1>{{ batch.name }}</h1>
-  <div class="actions">{{ action(url_for('open_batch_folder', name=course.folder, batch=batch.name), "Open exercises folder") }}</div>
+  <div class="actions">
+    {{ action(url_for('validate_batch', name=course.folder, batch=batch.name), "Validate all") }}
+    {{ action(url_for('open_batch_folder', name=course.folder, batch=batch.name), "Open exercises folder") }}
+  </div>
 </div>
 <p class="muted">Mode: {{ batch.mode }}</p>
 {{ bar(batch.count("passed"), batch.exercises | length) }}

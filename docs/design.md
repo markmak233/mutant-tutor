@@ -2703,7 +2703,7 @@ late; the adaptive review screens can be built with it.
   folder"; (3) long tasks: a CLI command as a child process, its log polled (htmx comes here);
   (4) generation: lectures, preferences, approving the plan in the page (touches
   `graph/__main__.py`, so its design is explained first); (5) uploading lectures and a new
-  course; (6) settings: models and keys; (7) the environment page. Steps 1 and 2 are built.
+  course; (6) settings: models and keys; (7) the environment page. Steps 1 to 3 are built.
 - Courses (owner, 2026-11-06): every folder under one root that holds a `workspace.toml`, as
   `tutor.workspace init` lays them out; the root is `--root`, else the folder above
   `WORKSPACE_DIR`. Each is checked like any workspace (refused inside a git repository). A
@@ -2735,6 +2735,29 @@ late; the adaptive review screens can be built with it.
   understand into its output (`\text{<script>}` came out as a script tag), so its output is
   kept only if every element and attribute is plain presentation MathML, else the formula is
   shown as escaped source: over the 60 questions, 1131 formulas, all MathML, 9 ms at most.
+- Long tasks (step 3, owner, 2026-11-06): a task is a list of existing CLI commands, from a
+  table in the code with checked paths, run one after another by `python -m tutor.gui.runner`
+  in a session of its own; each runs to the end even if one before failed (a batch goes on past
+  an INVALID exercise). Its folder in the course's `logs/gui-tasks/` holds `task.json` (the
+  commands, exit codes, state) and `output.log`, so the GUI only reads files and a task goes on
+  when the GUI stops; the newest 20 are kept. The commands run in the repo, so each reads `.env`
+  itself, with the course's `WORKSPACE_DIR` and `LECTURE_DIR` set. One task per course at a
+  time: validation already runs in parallel, and two at once could push runs past their limits.
+  The page polls the end of the log every second with htmx and stops when the task ends.
+  The first task is "Validate all" on a batch, which rewrites each `validation.json` as the
+  command line does; building the image and generating come in steps 7 and 4.
+- Stopping a task: the test runner starts each pytest or `docker run` in a session of its own,
+  out of reach of one process group, so the runner lists every process below it (`ps`), sends
+  each Ctrl+C (a `docker run` client passes it into its container), and kills what is left
+  after 10 s; a container left without its client ends at its own limit. The runner sets its
+  own Ctrl+C handler first: a process started in the background has SIGINT ignored and passes
+  that on, and the first real Stop did nothing until it did. Checked by a click in Chrome on a
+  copy of two examples, in containers: stopped in 7 s, no container or process left, and the
+  interrupted exercise's `validation.json` not rewritten. Windows: Ctrl+Break, not tested.
+- htmx 2.0.11, the newest 2.x on npm (2026-09-22, 0BSD), vendored as
+  `static/htmx-2.0.11.min.js` after its tarball matched npm's sha512; a test pins the file's
+  sha256. Its config turns off eval, script tags in swapped HTML and its inline indicator
+  styles, so the CSP did not change. `selfRequestsOnly` keeps its requests on this server.
 - Dependencies: the `gui` extra, so the rest of the tool does not carry them: Flask and
   waitress (8 packages), markdown-it-py, its dollar-math plugin and latex2mathml (12 in all, all
   pure Python and MIT).

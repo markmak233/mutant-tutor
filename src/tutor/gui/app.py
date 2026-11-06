@@ -22,18 +22,23 @@ POST only, so a link or an image cannot trigger it; the SameSite cookie already 
 sites out, and the Origin header must also be this server's. The action then redirects to its
 page (303) with a fixed notice code, so a reload does not repeat it and the page never echoes
 text from the request.
+
+Long tasks (step 3) run existing CLI commands in the background (tasks.py, runner.py); their
+page polls the end of the log once a second with htmx, which runs with eval, script tags and
+its inline styles switched off, so the CSP stays as strict.
 """
 
 from __future__ import annotations
 
 import hmac
+import sys
 from pathlib import Path
 from types import ModuleType
 
 from flask import Flask, abort, redirect, render_template, request, url_for
 
 from tutor.eval import report
-from tutor.gui import courses, launch, rendering
+from tutor.gui import courses, launch, rendering, tasks
 
 COOKIE = "tutor_token"
 _HEADERS = {
@@ -58,7 +63,13 @@ NOTICES = {
                          "\"Shell Command: Install 'code' command in PATH\"."),
     "no-file-manager": ("bad", "No file manager command (xdg-open) was found."),
     "failed": ("bad", "It could not be started."),
+    "busy": ("bad", "This course already has a task running; it is shown here. Start the "
+                    "next one when it ends."),
+    "stopping": ("ok", "Stopping: every process of the task got Ctrl+C, and what is still "
+                       "running after 10 s is killed."),
+    "not-running": ("bad", "This task is not running."),
 }
+RECENT_TASKS = 5
 
 
 def create_app(root: Path, token: str, port: int | None = None,
@@ -133,6 +144,11 @@ def create_app(root: Path, token: str, port: int | None = None,
             done = str(e)
         return redirect(f"{back}?notice={done}", code=303)
 
+    @app.get("/favicon.ico")
+    def favicon():
+        """Browsers ask for it on their own; no icon, and no 404 in their console."""
+        return "", 204
+
     @app.get("/")
     def home():
         found, problems = courses.find_courses(app.config["ROOT"])
@@ -143,7 +159,8 @@ def create_app(root: Path, token: str, port: int | None = None,
     @app.get("/c/<name>/")
     def course(name: str):
         view = courses.course_view(course_or_404(name))
-        return render_template("course.html", view=view, labels=STATUS_LABELS)
+        return render_template("course.html", view=view, labels=STATUS_LABELS,
+                               tasks=tasks.list_tasks(view.course.workspace.root)[:RECENT_TASKS])
 
     @app.get("/c/<name>/b/<batch>/")
     def batch(name: str, batch: str):
@@ -191,5 +208,60 @@ def create_app(root: Path, token: str, port: int | None = None,
 
         return act(ide, url_for("exercise", name=name, batch=batch, exercise=exercise),
                    done="opened-ide")
+
+    # --- long tasks: CLI commands in the background, one per course at a time --------------
+
+    def task_or_404(name: str, task_id: str) -> tuple[courses.Course, tasks.Task]:
+        course = course_or_404(name)
+        task = tasks.get(course.workspace.root, task_id)
+        if task is None:
+            abort(404, "No such task.")
+        return course, task
+
+    def start_task(course: courses.Course, title: str, commands: list[list[str]]):
+        env = {"WORKSPACE_DIR": str(course.workspace.root),
+               "LECTURE_DIR": str(course.workspace.lecture_dir)}
+        try:
+            task = tasks.start(course.workspace.root, title, commands, env)
+        except tasks.TaskBusy as busy:
+            return redirect(url_for("task", name=course.folder, task_id=busy.task.id)
+                            + "?notice=busy", code=303)
+        return redirect(url_for("task", name=course.folder, task_id=task.id), code=303)
+
+    @app.post("/c/<name>/b/<batch>/validate")
+    def validate_batch(name: str, batch: str):
+        """`python -m tutor.validation` on every exercise the manifest lists, in its order.
+        Each run rewrites that exercise's validation.json, as on the command line."""
+        course, view = batch_or_404(name, batch)
+        commands = []
+        for row in view.exercises:
+            exercise = courses.exercise_dir(course, batch, row.id)
+            solution = courses.solution_dir(course, batch, row.id)
+            if exercise and solution:
+                commands.append([sys.executable, "-m", "tutor.validation", str(exercise),
+                                 str(solution)])
+        if not commands:
+            abort(404, "This batch has no exercise to validate.")
+        return start_task(course, f"Validate {batch}", commands)
+
+    @app.get("/c/<name>/tasks/<task_id>/")
+    def task(name: str, task_id: str):
+        course, task = task_or_404(name, task_id)
+        log, cut = tasks.tail(task)
+        return render_template("task.html", course=course, task=task, log=log, cut=cut)
+
+    @app.get("/c/<name>/tasks/<task_id>/log")
+    def task_log(name: str, task_id: str):
+        """The part of the task page that htmx fetches every second while the task runs."""
+        course, task = task_or_404(name, task_id)
+        log, cut = tasks.tail(task)
+        return render_template("_task_log.html", course=course, task=task, log=log, cut=cut)
+
+    @app.post("/c/<name>/tasks/<task_id>/stop")
+    def stop_task(name: str, task_id: str):
+        _, task = task_or_404(name, task_id)
+        notice = "stopping" if tasks.stop(task) else "not-running"
+        return redirect(url_for("task", name=name, task_id=task_id) + f"?notice={notice}",
+                        code=303)
 
     return app

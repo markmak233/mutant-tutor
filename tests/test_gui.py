@@ -2,6 +2,7 @@
 show the learner's side only, escaped."""
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -9,10 +10,7 @@ import pytest
 pytest.importorskip("flask")  # the `gui` extra
 
 from tutor.gui import __main__ as gui_main  # noqa: E402
-from tutor.gui import (
-    courses,  # noqa: E402
-    launch,  # noqa: E402
-)
+from tutor.gui import courses, launch, tasks  # noqa: E402
 from tutor.gui.app import COOKIE, create_app  # noqa: E402
 from tutor.gui.rendering import question_html  # noqa: E402
 
@@ -427,3 +425,98 @@ def test_the_referrer_policy_lets_our_own_buttons_send_their_origin(client):
     """Under "no-referrer" a browser sends `Origin: null` on a POST, and every button got 403
     (found by the owner's first click; Chrome confirmed it)."""
     assert get(client, "/").headers["Referrer-Policy"] == "same-origin"
+
+
+# --- step 3: long tasks --------------------------------------------------------------------
+
+
+def _task(root, status="done", log="", pid=None, codes=(0,)):
+    """A task folder as the runner leaves it, without running anything."""
+    folder = root / "demo-course" / tasks.TASKS_DIR / "20260102-100000-abcdef"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / tasks.TASK_FILE).write_text(json.dumps({
+        "title": "Validate demo", "status": status, "started": "2026-01-02 10:00:00",
+        "finished": None if status == "running" else "2026-01-02 10:01:00",
+        "commands": [["python", "-m", "tutor.validation"]], "exit_codes": list(codes),
+        "pid": pid}), encoding="utf-8")
+    (folder / tasks.LOG_FILE).write_text(log, encoding="utf-8")
+    return folder.name
+
+
+def test_validate_all_starts_one_validation_per_listed_exercise(root, monkeypatch):
+    started = []
+
+    def fake_start(course_root, title, commands, env):
+        started.append((course_root, title, commands, env))
+        return tasks.Task("20260102-100000-abcdef", course_root, title, "running", "", None,
+                          commands, [], 1)
+
+    monkeypatch.setattr(tasks, "start", fake_start)
+    response = post(_browser(root, FakeLauncher()), f"/c/demo-course/b/{BATCH}/validate")
+
+    course_root, title, commands, env = started[0]
+    batch = (root / "demo-course" / "batches" / BATCH).resolve()
+    assert [c[2:] for c in commands] == [
+        ["tutor.validation", str(batch / "exercises" / e), str(batch / "solutions" / e)]
+        for e in ("ex-one", "ex-two")]
+    assert env["WORKSPACE_DIR"] == str(course_root)  # the course's, not .env's
+    assert response.headers["Location"] == "/c/demo-course/tasks/20260102-100000-abcdef/"
+
+
+def test_a_second_task_goes_to_the_running_one(root, monkeypatch):
+    running = tasks.Task("20260102-100000-abcdef", root, "Validate", "running", "", None, [],
+                         [], 1)
+
+    def busy(*args, **kwargs):
+        raise tasks.TaskBusy(running)
+
+    monkeypatch.setattr(tasks, "start", busy)
+    response = post(_browser(root, FakeLauncher()), f"/c/demo-course/b/{BATCH}/validate")
+
+    assert response.headers["Location"].endswith("/tasks/20260102-100000-abcdef/?notice=busy")
+
+
+def test_a_running_tasks_log_polls_and_a_finished_one_stops(client, root):
+    task_id = _task(root, status="running", pid=os.getpid(), codes=())
+    running = get(client, f"/c/demo-course/tasks/{task_id}/log").get_data(as_text=True)
+    assert 'hx-trigger="every 1s"' in running and "Stop" in running
+
+    _task(root, status="done")
+    done = get(client, f"/c/demo-course/tasks/{task_id}/log").get_data(as_text=True)
+    assert "hx-trigger" not in done and "Stop" not in done
+
+
+def test_a_log_is_shown_escaped(client, root):
+    task_id = _task(root, log="<script>alert(1)</script>\n")
+
+    page = get(client, f"/c/demo-course/tasks/{task_id}/").get_data(as_text=True)
+
+    assert "<script>alert(1)" not in page and "&lt;script&gt;alert(1)" in page
+
+
+def test_stop_is_post_only_and_says_when_nothing_runs(root):
+    task_id = _task(root, status="done")
+    client = _browser(root, FakeLauncher())
+
+    assert client.get(f"/c/demo-course/tasks/{task_id}/stop", base_url=BASE).status_code == 405
+    response = post(client, f"/c/demo-course/tasks/{task_id}/stop")
+    assert response.headers["Location"].endswith("?notice=not-running")
+    assert post(client, "/c/demo-course/tasks/..%2F..%2Fx/stop").status_code == 404
+
+
+def test_the_course_page_lists_its_tasks(client, root):
+    _task(root, status="failed", codes=(0, 1))
+
+    page = get(client, "/c/demo-course/").get_data(as_text=True)
+
+    assert "Validate demo" in page and "chip-failed" in page
+
+
+def test_pages_load_htmx_from_this_server_with_eval_off(client):
+    page = get(client, "/").get_data(as_text=True)
+
+    assert '/static/htmx-2.0.11.min.js' in page and '"allowEval": false' in page
+
+
+def test_the_favicon_request_gets_no_content(client):
+    assert get(client, "/favicon.ico").status_code == 204

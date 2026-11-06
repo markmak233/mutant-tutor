@@ -257,7 +257,8 @@ pyspark = "3.5"
 mrjob = "0.7"
 ```
 
-To browse your courses in the browser (read-only so far: batches, progress, validation):
+To browse your courses in the browser (progress, questions, open an exercise in VS Code,
+validate a batch in the background):
 
 ```bash
 pip install -e ".[gui]"

@@ -108,3 +108,13 @@ form.action button.primary { background: var(--accent); border-color: var(--acce
 .notice { padding: 0.5rem 0.8rem; border-radius: 6px; margin: 0 0 1rem; }
 .notice-ok { background: var(--passed-bg); color: var(--passed); }
 .notice-bad { background: var(--bad-bg); color: var(--bad); }
+
+/* Tasks: the log box stays scrolled to its newest line (column-reverse), no script needed */
+.log {
+  display: flex; flex-direction: column-reverse; max-height: 70vh; overflow: auto;
+  background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px; margin-top: 0.75rem;
+}
+.log pre { margin: 0; padding: 0.75rem 1rem; font-size: 0.85em; white-space: pre-wrap; overflow-wrap: anywhere; }
+.chip-running { background: var(--started-bg); color: var(--started); }
+.chip-done { background: var(--passed-bg); color: var(--passed); }
+.chip-stopped, .chip-lost { background: var(--unlogged-bg); color: var(--unlogged); }

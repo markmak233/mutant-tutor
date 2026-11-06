@@ -171,6 +171,13 @@ def exercise_dir(course: Course, batch: str, exercise: str) -> Path | None:
     return _child(folder, exercise) if folder else None
 
 
+def solution_dir(course: Course, batch: str, exercise: str) -> Path | None:
+    """Only to hand to a command such as the validator; no page reads from it."""
+    batch_dir = _child(course.workspace.root / "batches", batch)
+    solutions = _child(batch_dir, "solutions") if batch_dir else None
+    return _child(solutions, exercise) if solutions else None
+
+
 def _child(parent: Path, name: str) -> Path | None:
     """parent/name if `name` is a plain visible folder name and the folder exists inside
     `parent` once links are followed; None otherwise."""
