@@ -2703,7 +2703,7 @@ late; the adaptive review screens can be built with it.
   folder"; (3) long tasks: a CLI command as a child process, its log polled (htmx comes here);
   (4) generation: lectures, preferences, approving the plan in the page (it was expected to
   touch `graph/__main__.py`; it did not, see below); (5) uploading lectures and a new
-  course; (6) settings: models and keys; (7) the environment page. Steps 1 to 4 are built.
+  course; (6) settings: models and keys; (7) the environment page. Steps 1 to 5 are built.
 - Courses (owner, 2026-11-06): every folder under one root that holds a `workspace.toml`, as
   `tutor.workspace init` lays them out; the root is `--root`, else the folder above
   `WORKSPACE_DIR`. Each is checked like any workspace (refused inside a git repository). A
@@ -2794,6 +2794,30 @@ late; the adaptive review screens can be built with it.
     stopped at the limit now says so on the plan page, since points may have been merged or
     left out. The limit is kept in the batch's state when the plan is made, so a plan sent
     back cannot go past it; more means adding items to `plan.json` or a new batch.
+- Lectures and new courses (step 5, owner, 2026-11-06). A course's Lectures page lists each
+  PDF with what the cache holds (not read, read, image pages waiting). Uploads: PDFs only,
+  checked by their first bytes; 100 MB each and 500 MB a request; the name kept as given
+  (spaces, brackets, any letters) unless it holds a separator or a character Windows or a
+  glob reserves, with ".pdf" in lower case, as the cache and the plan find lectures by that
+  name; never over an existing file, since exercises cite its slides (delete the old one
+  first). A set of files is saved all or none: hidden part files first, then hard links,
+  which fail rather than replace. Each upload starts the text-layer read
+  (`python -m tutor.materials`, free) as a task; the vision model reads the waiting image
+  pages only from its own button, which names the model, as each page is a paid call.
+  - New course (the owner's "one click after uploading the slides", 2026-11-04): a folder
+    name, an optional course id, optional PDFs. The PDFs are saved into the new folder's
+    `lectures/`, then one task runs `python -m tutor.workspace init` and reads them; until
+    init writes `workspace.toml`, only the task's page is shown. Refused inside a git
+    repository, as init refuses it. Its page shows the stages (course files, the venv,
+    installing the tool, reading the PDFs) with a bar, read from the files init has made
+    and the commands that ended, not from the log's words; the install has no measure
+    inside it, so it shows how long it has run (owner, 2026-11-06: it looked stuck, as init
+    printed its steps only at the end; it now prints each as it happens, and a line before
+    the install). Once ready, htmx's poll is answered with `HX-Redirect` to the course page;
+    a failed one stays on its log. A course page lists what still stands between it and
+    generating: lectures not read, no models, where tests run not chosen, no `coverage.md`.
+  - A "discard plan" button stays out for now (owner): it would remove a draft folder, so
+    it gets its own step, hiding the folder rather than deleting it.
 - htmx 2.0.11, the newest 2.x on npm (2026-09-22, 0BSD), vendored as
   `static/htmx-2.0.11.min.js` after its tarball matched npm's sha512; a test pins the file's
   sha256. Its config turns off eval, script tags in swapped HTML and its inline indicator

@@ -225,8 +225,8 @@ def test_stop_works_when_the_gui_was_started_with_ctrl_c_ignored(tmp_path):
 
 def test_the_log_shows_course_paths_relative_to_the_course(tmp_path):
     inside = tmp_path / "batches" / "b1"
-    task = tasks.start(tmp_path, "paths", [py("pass") + [str(inside)]],
+    task = tasks.start(tmp_path, "paths", [py("pass") + [str(inside), str(tmp_path)]],
                        {"WORKSPACE_DIR": str(tmp_path)})
     log = tasks.tail(wait_end(tmp_path, task))[0]
 
-    assert " batches/b1" in log and str(tmp_path) not in log
+    assert " batches/b1 ." in log and str(tmp_path) not in log  # the course itself is "."

@@ -86,12 +86,16 @@ def _make_venv(venv_dir: Path) -> None:
 
 def init(root: Path, course: str | None = None, extras: str = DEFAULT_EXTRAS,
          make_venv: Callable[[Path], None] = _make_venv,
-         run: Callable = subprocess.run) -> list[str]:
+         run: Callable = subprocess.run,
+         say: Callable[[str], None] = lambda line: None) -> list[str]:
     """Create what is missing in `root` and return one line per step.
 
-    `make_venv` and `run` are parameters so tests need no network and no real venv. Raises
-    WorkspaceError, before changing anything, on a bad argument or a folder inside a git
-    repository. A failed install raises too: run the command again after fixing it.
+    `make_venv` and `run` are parameters so tests need no network and no real venv. `say`
+    gets each step's line as it happens, and a line before the install, which takes minutes
+    the first time: the command prints them at once, so its log (the GUI's progress) never
+    looks stuck. Raises WorkspaceError, before changing anything, on a bad argument or a
+    folder inside a git repository. A failed install raises too: run the command again
+    after fixing it.
     """
     root = root.expanduser().resolve()
     course = course or root.name
@@ -107,6 +111,11 @@ def init(root: Path, course: str | None = None, extras: str = DEFAULT_EXTRAS,
         raise WorkspaceError(f"no pyproject.toml in {REPO}: run this from a source checkout")
 
     steps: list[str] = []
+
+    def step(line: str) -> None:
+        steps.append(line)
+        say(line)
+
     (root / "lectures").mkdir(parents=True, exist_ok=True)
     version = f"{sys.version_info.major}.{sys.version_info.minor}"
     files = {
@@ -118,25 +127,27 @@ def init(root: Path, course: str | None = None, extras: str = DEFAULT_EXTRAS,
     for name, text in files.items():
         path = root / name
         if path.exists():
-            steps.append(f"kept    {name}")
+            step(f"kept    {name}")
             continue
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8", newline="\n")
-        steps.append(f"created {name}")
+        step(f"created {name}")
 
     venv_dir = root / ".venv"
     if venv_python(venv_dir).exists():
-        steps.append("kept    .venv")
+        step("kept    .venv")
     else:
+        say("creating .venv ...")
         make_venv(venv_dir)
-        steps.append(f"created .venv (Python {version})")
+        step(f"created .venv (Python {version})")
     # Every time: pip does nothing if all is there, and this finishes an install that failed
     # and adds extras named later.
+    say(f"installing tutor[{extras}] into .venv (a few minutes the first time) ...")
     result = run([str(venv_python(venv_dir)), "-m", "pip", "install", "-q", "-e",
                   f"{REPO}[{extras}]"], capture_output=True, text=True)
     if result.returncode != 0:
         raise WorkspaceError(f"pip install failed, run this again once fixed:\n{result.stderr}")
-    steps.append(f"installed tutor[{extras}] into .venv")
+    step(f"installed tutor[{extras}] into .venv")
     return steps
 
 
@@ -151,11 +162,10 @@ def main(argv: list[str] | None = None) -> int:
                         help=f"this package's extras to install (default: {DEFAULT_EXTRAS})")
     args = parser.parse_args(argv)
     try:
-        steps = init(args.folder, args.course, args.extras)
+        init(args.folder, args.course, args.extras, say=lambda line: print(line, flush=True))
     except WorkspaceError as e:
         print(f"workspace: {e}", file=sys.stderr)
         return 1
-    print(*steps, sep="\n")
     print(f"{args.folder.expanduser().resolve()} is ready. Put the lecture PDFs in lectures/, "
           "open the folder in VS Code, open a new terminal and check `which pytest` points to "
           "its .venv.")

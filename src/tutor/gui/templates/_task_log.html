@@ -10,5 +10,18 @@
     {% if failed %}<span class="muted">{{ failed | length }} exited with an error</span>{% endif %}
     {% if task.active %}{{ action(url_for('stop_task', name=course.folder, task_id=task.id), "Stop") }}{% endif %}
   </div>
+  {% if stages %}
+  {# A new course: its stages, from the files made and the commands ended (lectures.py). #}
+  {% set done = stages | selectattr("state", "equalto", "done") | list | length %}
+  <div class="bar"><progress value="{{ done }}" max="{{ stages | length }}" aria-label="{{ done }} of {{ stages | length }} stages done"></progress>
+    <span class="bar-text">{{ done }} / {{ stages | length }}</span></div>
+  <ol class="stages">
+  {% for stage in stages %}
+    <li class="stage-{{ stage.state }}">{% if stage.state == "running" %}<span class="spinner" aria-hidden="true"></span>{% endif %}{{ stage.label }}
+      {% if stage.state == "running" and elapsed %}<span class="muted">running for {{ elapsed }}</span>{% elif stage.state == "failed" %}<span class="muted">did not finish: see the output below</span>{% endif %}</li>
+  {% endfor %}
+  </ol>
+  {% if task.status == "done" %}<p>The course is ready: <a href="{{ url_for('course', name=course.folder) }}">go to it</a>.</p>{% endif %}
+  {% endif %}
   {{ log_box(log, cut) }}
 </div>

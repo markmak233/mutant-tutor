@@ -1,7 +1,10 @@
 {% extends "base.html" %}
 {% from "_macros.html" import bar, chip %}
 {% block content %}
-<h1>Your courses</h1>
+<div class="title-line">
+  <h1>Your courses</h1>
+  <div class="actions"><a class="button" href="{{ url_for('new_course') }}">New course</a></div>
+</div>
 <div class="cards">
 {% for view in views %}
   {% set course = view.course %}
@@ -34,8 +37,7 @@
     {% endif %}
   </section>
 {% else %}
-  <p>No course folder here yet: a course is a folder with a <code>workspace.toml</code>
-  (<code>python -m tutor.workspace init DIR</code> makes one).</p>
+  <p>No course folder here yet: "New course" makes one, with its lecture PDFs.</p>
 {% endfor %}
 </div>
 <p class="muted">Course folders in <code>{{ root }}</code></p>

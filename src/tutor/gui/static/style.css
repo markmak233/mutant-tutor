@@ -154,3 +154,28 @@ table.plan { margin: 1rem 0; }
 .chip-stopped-midway, .chip-plan-not-finished, .chip-waiting-for-the-assistant { background: var(--unlogged-bg); color: var(--unlogged); }
 .chip-generated { background: var(--passed-bg); color: var(--passed); }
 .chip-did-not-start { background: var(--bad-bg); color: var(--bad); }
+
+/* Lectures and new courses (step 5) */
+.form input[type="file"] { font: inherit; font-weight: 400; }
+.setup { padding-left: 1.25rem; color: var(--muted); }
+.setup li { margin: 0.2rem 0; }
+.chip-read { background: var(--passed-bg); color: var(--passed); }
+.chip-image-pages-waiting { background: var(--started-bg); color: var(--started); }
+.notice form.action { display: inline-block; margin-left: 0.5rem; }
+
+/* A new course's stages; the spinner turns from this stylesheet, so no inline style */
+.stages { list-style: none; padding: 0; margin: 0.75rem 0; }
+.stages li { padding: 0.25rem 0 0.25rem 1.6rem; position: relative; }
+.stages li::before { position: absolute; left: 0.2rem; }
+.stage-done::before { content: "✓"; color: var(--passed); }
+.stage-waiting { color: var(--muted); }
+.stage-waiting::before { content: "○"; color: var(--muted); }
+.stage-failed::before { content: "✗"; color: var(--bad); }
+.stage-running { font-weight: 600; }
+.spinner {
+  position: absolute; left: 0.1rem; top: 0.5rem; width: 0.85rem; height: 0.85rem;
+  border: 2px solid var(--track); border-top-color: var(--accent); border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }

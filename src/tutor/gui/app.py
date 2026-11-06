@@ -31,6 +31,11 @@ Generation (step 4) is such a task: the new-batch form starts `python -m tutor.g
 and the plan page approves, sends back or continues it with `resume` (generation.py). The
 form is the one page that shows what a request sent: when a value is refused, the form comes
 back with the values typed, escaped like any other.
+
+Lectures and new courses (step 5): uploads go into the course's lecture folder and are read
+by `python -m tutor.materials` as a task; a new course is `python -m tutor.workspace init`
+as a task, after its PDFs are saved (lectures.py). Uploads and the other forms refuse with
+the problems listed, each naming the file it is about.
 """
 
 from __future__ import annotations
@@ -40,10 +45,10 @@ import sys
 from pathlib import Path
 from types import ModuleType
 
-from flask import Flask, abort, redirect, render_template, request, url_for
+from flask import Flask, abort, make_response, redirect, render_template, request, url_for
 
 from tutor.eval import report
-from tutor.gui import courses, generation, launch, rendering, tasks
+from tutor.gui import courses, generation, launch, lectures, rendering, tasks
 
 COOKIE = "tutor_token"
 _HEADERS = {
@@ -79,6 +84,9 @@ NOTICES = {
                               "most."),
     "plan-moved": ("bad", "The batch is no longer at that step; this page shows where it is "
                           "now."),
+    "nothing-to-transcribe": ("ok", "No image page is waiting for the vision model."),
+    "no-vision-model": ("bad", "No vision model is set: add `vision = \"<profile>\"` to "
+                               "[llm.roles] in workspace.toml."),
     # Before a task that runs tests: nothing was started (courses.container_problem).
     "docker-missing": ("bad", "Nothing was started: Docker is not installed (no `docker` "
                               "command). This course runs its tests in a container: install "
@@ -91,6 +99,7 @@ NOTICES = {
                              "the course folder, then try again."),
 }
 RECENT_TASKS = 5
+UPLOAD_LIMIT_BYTES = 500 * 1024 * 1024  # one upload request, all its files together
 
 
 def create_app(root: Path, token: str, port: int | None = None,
@@ -99,7 +108,10 @@ def create_app(root: Path, token: str, port: int | None = None,
     for the Host check; set later through app.config["PORT"] when the server picks it.
     `launcher`: what opens folders and VS Code (tests pass a stand-in)."""
     app = Flask(__name__)
-    app.config.update(ROOT=root.resolve(), TOKEN=token, PORT=port)
+    # MAX_CONTENT_LENGTH: a request larger than this gets 413 before it is read; each PDF has
+    # its own limit (lectures.MAX_PDF_BYTES).
+    app.config.update(ROOT=root.resolve(), TOKEN=token, PORT=port,
+                      MAX_CONTENT_LENGTH=UPLOAD_LIMIT_BYTES)
 
     @app.before_request
     def check_request():
@@ -131,6 +143,7 @@ def create_app(root: Path, token: str, port: int | None = None,
     @app.errorhandler(403)
     @app.errorhandler(404)
     @app.errorhandler(405)
+    @app.errorhandler(413)
     def error(e):
         return render_template("error.html", code=e.code, message=e.description), e.code
 
@@ -183,7 +196,9 @@ def create_app(root: Path, token: str, port: int | None = None,
         history = tasks.list_tasks(view.course.workspace.root)
         return render_template("course.html", view=view, labels=STATUS_LABELS,
                                tasks=history[:RECENT_TASKS],
-                               plans=generation.open_plans(view.course, history))
+                               plans=generation.open_plans(view.course, history),
+                               gaps=lectures.setup_gaps(view.course,
+                                                        lectures.lecture_rows(view.course)))
 
     @app.get("/c/<name>/b/<batch>/")
     def batch(name: str, batch: str):
@@ -235,7 +250,11 @@ def create_app(root: Path, token: str, port: int | None = None,
     # --- long tasks: CLI commands in the background, one per course at a time --------------
 
     def task_or_404(name: str, task_id: str) -> tuple[courses.Course, tasks.Task]:
-        course = course_or_404(name)
+        """A course's task, or the task of a course being created (no workspace.toml yet)."""
+        course = (courses.get_course(app.config["ROOT"], name)
+                  or lectures.being_created(app.config["ROOT"], name))
+        if course is None:
+            abort(404, "No such course.")
         task = tasks.get(course.workspace.root, task_id)
         if task is None:
             abort(404, "No such task.")
@@ -273,18 +292,33 @@ def create_app(root: Path, token: str, port: int | None = None,
             abort(404, "This batch has no exercise to validate.")
         return start_task(course, f"Validate {batch}", commands)
 
+    def task_parts(course: courses.Course, task: tasks.Task) -> dict:
+        """What both the task page and its polled part show; a new course's stages too."""
+        log, cut = tasks.tail(task)
+        create = task.meta.get("kind") == "create"
+        return {"course": course, "task": task, "log": log, "cut": cut,
+                "stages": lectures.create_progress(course, task) if create else None,
+                "elapsed": lectures.elapsed(task) if create else ""}
+
     @app.get("/c/<name>/tasks/<task_id>/")
     def task(name: str, task_id: str):
         course, task = task_or_404(name, task_id)
-        log, cut = tasks.tail(task)
-        return render_template("task.html", course=course, task=task, log=log, cut=cut)
+        return render_template("task.html", **task_parts(course, task),
+                               ready=courses.get_course(app.config["ROOT"], name) is not None)
 
     @app.get("/c/<name>/tasks/<task_id>/log")
     def task_log(name: str, task_id: str):
-        """The part of the task page that htmx fetches every second while the task runs."""
+        """The part of the task page that htmx fetches every second while the task runs.
+        A new course that is ready sends htmx on to its page (HX-Redirect, a navigation in
+        the same window, no script of ours), so the owner who watched it finish lands there;
+        one that failed stays on its log."""
         course, task = task_or_404(name, task_id)
-        log, cut = tasks.tail(task)
-        return render_template("_task_log.html", course=course, task=task, log=log, cut=cut)
+        response = make_response(render_template("_task_log.html", **task_parts(course, task)))
+        if (task.meta.get("kind") == "create" and task.status == tasks.DONE
+                and request.headers.get("HX-Request") == "true"
+                and courses.get_course(app.config["ROOT"], name) is not None):
+            response.headers["HX-Redirect"] = url_for("course", name=name)
+        return response
 
     @app.post("/c/<name>/tasks/<task_id>/stop")
     def stop_task(name: str, task_id: str):
@@ -400,5 +434,95 @@ def create_app(root: Path, token: str, port: int | None = None,
         return act(lambda: launcher.open_in_vscode(course.workspace.root,
                                                    view.draft / "plan.json"),
                    url_for("plan", name=name, label=label), done="opened-plan")
+
+    # --- lectures and new courses (step 5) ----------------------------------------------------
+
+    def lectures_page(course: courses.Course, problems: list[str], code: int = 200):
+        rows = lectures.lecture_rows(course)
+        return render_template("lectures.html", course=course, rows=rows, problems=problems,
+                               vision=lectures.vision_model(course),
+                               max_mb=lectures.MAX_PDF_BYTES // (1024 * 1024),
+                               running=tasks.running(course.workspace.root)), code
+
+    @app.get("/c/<name>/lectures/")
+    def lecture_list(name: str):
+        return lectures_page(course_or_404(name), [])
+
+    @app.post("/c/<name>/lectures/upload")
+    def upload_lectures(name: str):
+        """Save the PDFs, all or none, then read their text layer (free) as a task."""
+        course = course_or_404(name)
+        saved, problems = lectures.save_pdfs(course.workspace.lecture_dir,
+                                             request.files.getlist("pdf"))
+        if problems:
+            return lectures_page(course, problems, 400)
+        title = f"Read {saved[0].name}" if len(saved) == 1 else f"Read {len(saved)} lectures"
+        return start_task(course, title, [lectures.read_command(saved)],
+                          meta={"kind": "read"})
+
+    @app.post("/c/<name>/lectures/read")
+    def read_lectures(name: str):
+        """The text layer of every PDF; pages read before and unchanged are skipped."""
+        course = course_or_404(name)
+        rows = lectures.lecture_rows(course)
+        if not rows:
+            abort(404, "This course has no lectures yet.")
+        folder = course.workspace.lecture_dir
+        return start_task(course, "Read the lectures",
+                          [lectures.read_command(folder / r.name for r in rows)],
+                          meta={"kind": "read"})
+
+    @app.post("/c/<name>/lectures/transcribe")
+    def transcribe_lectures(name: str):
+        """The vision model reads the image pages: this costs money, so only on a click."""
+        course = course_or_404(name)
+        back = url_for("lecture_list", name=name)
+        waiting = [r for r in lectures.lecture_rows(course) if r.waiting]
+        if not waiting:
+            return redirect(f"{back}?notice=nothing-to-transcribe", code=303)
+        if lectures.vision_model(course) is None:
+            return redirect(f"{back}?notice=no-vision-model", code=303)
+        folder = course.workspace.lecture_dir
+        pages = sum(r.waiting for r in waiting)
+        return start_task(course, f"Transcribe {pages} image pages",
+                          [lectures.read_command((folder / r.name for r in waiting),
+                                                 vision=True)],
+                          meta={"kind": "vision"})
+
+    def new_course_page(values: dict, problems: list[str], code: int = 200):
+        return render_template("new_course.html", root=app.config["ROOT"], values=values,
+                               problems=problems,
+                               max_mb=lectures.MAX_PDF_BYTES // (1024 * 1024)), code
+
+    @app.get("/new-course")
+    def new_course():
+        return new_course_page({"folder": "", "course": ""}, [])
+
+    @app.post("/new-course")
+    def create_course():
+        """Save the PDFs into the new folder's lectures/, then run `tutor.workspace init`
+        (the course's venv: minutes, and the network) and read the PDFs, as one task."""
+        root = app.config["ROOT"]
+        values = {"folder": request.form.get("folder", ""),
+                  "course": request.form.get("course", "")}
+        folder, course_id, problems = lectures.check_new_course(root, values["folder"],
+                                                                values["course"])
+        if folder is None:
+            return new_course_page(values, problems, 400)
+        files = [f for f in request.files.getlist("pdf") if f.filename]
+        saved: list[Path] = []
+        if files:
+            saved, problems = lectures.save_pdfs(folder / "lectures", files)
+            if problems:
+                lectures.remove_new(folder)
+                return new_course_page(values, problems, 400)
+        (folder / "lectures").mkdir(parents=True, exist_ok=True)
+        commands = [lectures.init_command(folder, course_id)]
+        if saved:
+            commands.append(lectures.read_command(saved))
+        env = {"WORKSPACE_DIR": str(folder), "LECTURE_DIR": str(folder / "lectures")}
+        task = tasks.start(folder, f"Create {folder.name}", commands, env,
+                           meta={"kind": "create"})
+        return redirect(url_for("task", name=folder.name, task_id=task.id), code=303)
 
     return app

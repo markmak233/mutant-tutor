@@ -119,8 +119,12 @@ def _shown(command: list[str], root: str | None) -> list[str]:
     full path, and paths inside the course relative to it."""
     shown = ["python", *command[1:]] if command and command[0] == sys.executable else command
     if root:
-        prefix = root.rstrip("/\\") + os.sep
-        shown = [part[len(prefix):] if part.startswith(prefix) else part for part in shown]
+        top = root.rstrip("/\\")
+        prefix = top + os.sep
+        # The course folder itself is "." (e.g. `tutor.workspace init .`), what is inside it
+        # relative to it.
+        shown = ["." if part == top else part[len(prefix):] if part.startswith(prefix)
+                 else part for part in shown]
     return shown
 
 

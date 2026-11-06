@@ -150,3 +150,20 @@ def test_command_line_reports_a_refusal(tmp_path, capsys):
     assert main(["init", str(tmp_path / "ws")]) == 1
 
     assert "git repository" in capsys.readouterr().err
+
+
+def test_each_step_is_said_as_it_happens_and_the_install_before_it_starts(tmp_path):
+    """The GUI shows the log while init runs: a step said only at the end looked stuck."""
+    said: list[str] = []
+    fake = FakeInstall()
+    at_install: list[str] = []
+
+    def run(command, **kwargs):
+        at_install.extend(said)  # what was said by the time the install started
+        return fake.run(command, **kwargs)
+
+    steps = init(tmp_path / "ws", make_venv=fake.make_venv, run=run, say=said.append)
+
+    assert "created workspace.toml" in at_install and "created .venv (Python" in at_install[-2]
+    assert at_install[-1].startswith("installing tutor[gen,dev]")
+    assert [line for line in said if line in steps] == steps  # every step, in order

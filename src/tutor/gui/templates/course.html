@@ -8,6 +8,7 @@
   <h1>{{ course.workspace.course }}</h1>
   <div class="actions">
     <a class="button" href="{{ url_for('new_batch', name=course.folder) }}">New batch</a>
+    <a class="button" href="{{ url_for('lecture_list', name=course.folder) }}">Lectures</a>
     {{ action(url_for('open_course_folder', name=course.folder), "Open folder") }}
   </div>
 </div>
@@ -17,6 +18,10 @@
 <p class="next">Next:
   <a href="{{ url_for('exercise', name=course.folder, batch=next[0].name, exercise=next[1].id) }}">{{ next[1].title }}</a>
   <span class="muted">{{ next[0].name }}</span> {{ chip(next[1].status, labels[next[1].status]) }}</p>
+{% endif %}
+{% if gaps %}
+<h2>Still to set up</h2>
+<ul class="setup">{% for line in gaps %}<li>{{ line }}</li>{% endfor %}</ul>
 {% endif %}
 {% if plans %}
 <h2>Plans</h2>

@@ -257,9 +257,9 @@ pyspark = "3.5"
 mrjob = "0.7"
 ```
 
-To browse your courses in the browser (progress, questions, open an exercise in VS Code,
-validate a batch in the background, plan a new batch and approve its plan; generating also
-needs the `gen` extra):
+To manage your courses in the browser (progress, questions, open an exercise in VS Code,
+validate a batch in the background, upload and read lectures, create a course, plan a new
+batch and approve its plan; generating also needs the `gen` extra):
 
 ```bash
 pip install -e ".[gui]"
@@ -379,8 +379,8 @@ Phase numbers match `docs/design.md`.
 - **6** Second course: another language or framework, to prove nothing is shaped around one
   course
 - **7** Local GUI, in progress ahead of 6: a web app on the CLI's functions, localhost only;
-  solving stays in the IDE. Done: the pages, Open in VS Code, background tasks, and
-  generation with the plan approved in the page. Next: lecture upload and a new course,
+  solving stays in the IDE. Done: the pages, Open in VS Code, background tasks,
+  generation with the plan approved in the page, lecture upload and a new course. Next:
   settings, the environment page. Then packaging and release: one install line, one click to
   start, CI on macOS and Windows
 

@@ -1,11 +1,15 @@
 {% extends "base.html" %}
 {% block title %}{{ task.title }}{% endblock %}
 {% block crumbs %}
-<a href="{{ url_for('course', name=course.folder) }}">{{ course.workspace.course }}</a>
+{# A course being created has no page until `workspace init` writes its workspace.toml. #}
+{% if ready %}<a href="{{ url_for('course', name=course.folder) }}">{{ course.workspace.course }}</a>{% else %}<span>{{ course.folder }}</span>{% endif %}
 <span>{{ task.title }}</span>
 {% endblock %}
 {% block content %}
 <h1>{{ task.title }}</h1>
-<p class="muted">Started {{ task.started }}. It goes on if you close this page or the GUI.</p>
+<p class="muted">Started {{ task.started }}. It goes on if you close this page or the GUI.
+  {% if task.meta.kind in ("read", "vision") %}<a href="{{ url_for('lecture_list', name=course.folder) }}">Back to the lectures</a>
+  {% elif task.meta.label %}<a href="{{ url_for('plan', name=course.folder, label=task.meta.label) }}">Back to the plan</a>
+  {% elif task.meta.kind == "create" and ready %}<a href="{{ url_for('course', name=course.folder) }}">Go to the course</a>{% endif %}</p>
 {% include "_task_log.html" %}
 {% endblock %}
