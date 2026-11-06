@@ -66,7 +66,7 @@
     {% endfor %}
     </tbody>
   </table>
-  <p class="muted">"Name from the model": the slides show only the module imported, and the pip name is the model's; check it on PyPI before installing, as a made-up name can be one somebody registered. A package that exercises import must also be in <code>[safety] allow_imports</code> in workspace.toml, which stays yours to edit.</p>
+  <p class="muted">"Name from the model": the slides show only the module imported, and the pip name is the model's; check it on PyPI before installing, as a made-up name can be one somebody registered. For exercises to import a package, tick "Exercises may import" for it in the list below once it is added.</p>
   <div class="actions"><button type="submit" class="primary">Add the ticked ones to the list</button></div>
 </form>
 {% elif d.done %}
@@ -88,11 +88,12 @@
 <form method="post" action="{{ url_for('save_requires', name=course.folder) }}" class="form">
   <p class="muted">A version is a prefix: 3.5 means any 3.5.x. <code>python</code>, <code>java</code> and <code>hadoop</code> are checked on this machine; any other name is a pip package. Adding or removing rows changes nothing until you save.</p>
   <table class="requires">
-    <thead><tr><th>Name</th><th>Version</th><th>What it is</th><th></th></tr></thead>
+    <thead><tr><th>Name</th><th>Version</th><th>What it is</th><th>Exercises may import</th><th></th></tr></thead>
     <tbody id="requires-rows">
-    {% for name, version in rows %}{% include "_requires_row.html" %}{% endfor %}
+    {% for row in rows %}{% include "_requires_row.html" %}{% endfor %}
     </tbody>
   </table>
+  <p class="muted">"Exercises may import": the generated exercises may use the package, as the module named in its box ([safety] allow_imports); untick it and they may not. Without a tick they use only Python's core modules. Widening what exercise code may import is your call, package by package.{% if others_allowed %} Also allowed, though not in the list: {{ others_allowed | join(", ") }}.{% endif %}</p>
   <div class="actions">
     <button type="button" class="small" hx-get="{{ url_for('requires_row', name=course.folder) }}" hx-target="#requires-rows" hx-swap="beforeend">+ Add a row</button>
     <button type="submit" class="primary">Save the requirements</button>

@@ -496,6 +496,102 @@ def test_the_models_page_offers_the_setup_role(root, course):
     assert "<strong>setup</strong>" in text and "setup" in llm_settings.ROLES
 
 
+# --- "exercises may import": [safety] allow_imports from the list (owner, 2026-11-06) -------------
+
+
+def _save_list(root, rows, ticked=(), modules=None):
+    """Post the list as the page does: one key per row, ticks and module boxes by key."""
+    keys = [f"r{i}" for i in range(len(rows))]
+    data = {"name": [n for n, _ in rows], "version": [v for _, v in rows], "key": keys,
+            "import": [keys[i] for i in ticked]}
+    for i, module in (modules or {}).items():
+        data[f"module:{keys[i]}"] = module
+    return post(_browser(root), "/c/demo-course/environment/requires", data)
+
+
+def test_a_ticked_package_is_allowed_and_an_unticked_one_no_longer(root, course):
+    rows = [("python", "3.11"), ("java", "17"), ("pyspark", "3.5"), ("scikit-learn", "1.4")]
+    response = _save_list(root, rows, ticked=(2, 3), modules={2: "pyspark", 3: "sklearn"})
+    assert response.status_code == 303
+    data = tomllib.loads(_toml(course))
+    assert data["safety"]["allow_imports"] == ["pyspark", "sklearn"]
+    assert data["requires"]["scikit-learn"] == "1.4"
+    assert "[safety] # modules exercises may import" in _toml(course)
+
+    _save_list(root, rows, ticked=(3,), modules={2: "pyspark", 3: "sklearn"})
+    assert tomllib.loads(_toml(course))["safety"]["allow_imports"] == ["sklearn"]
+
+
+def test_an_allowed_module_no_row_names_stays(root, course):
+    _write(course.workspace.root / "workspace.toml",
+           TOML + '\n[safety]\nallow_imports = ["subprocess", "torch"]\n')
+    _save_list(root, [("python", "3.11"), ("torch", "2")], ticked=())
+    assert tomllib.loads(_toml(course))["safety"]["allow_imports"] == ["subprocess"]
+
+
+def test_a_module_name_that_is_not_one_is_refused_and_nothing_is_written(root, course):
+    response = _save_list(root, [("python", "3.11"), ("opencv-python", "4")], ticked=(1,),
+                          modules={1: "cv2; rm"})
+    text = response.get_data(as_text=True)
+    assert response.status_code == 400 and "is not a module name" in text
+    assert 'name="import" value="r1" checked' in text  # the tick comes back as typed
+    assert _toml(course) == TOML
+
+
+def test_the_page_ticks_what_is_allowed_and_names_modules_the_draft_saw(root, course):
+    _write(course.workspace.root / "workspace.toml",
+           'course = "demo"\n[requires]\npython = "3.11"\nopencv-python = "4"\n'
+           'CamelPkg = "3"\n[safety]\nallow_imports = ["CamelPkg"]\n')
+    path, entries = _lecture(course)
+    _answer(course, path, entries, FOUND)  # the lecture imports cv2 for opencv-python
+
+    text = _browser(root).get("/c/demo-course/environment/", base_url=BASE).get_data(
+        as_text=True)
+
+    assert 'name="module:r1" value="cv2"' in text  # from the draft, not a guess
+    assert 'name="import" value="r1" aria' in text  # not allowed yet: unticked
+    assert 'name="import" value="r2" checked' in text  # CamelPkg, as written (case kept)
+    assert 'name="module:r0"' not in text  # python is not a module
+
+
+def test_adding_draft_entries_leaves_allow_imports_alone(root, course):
+    _write(course.workspace.root / "workspace.toml",
+           TOML + '\n[safety]\nallow_imports = ["torch"]\n')
+    path, entries = _lecture(course)
+    _answer(course, path, entries, FOUND)
+    post(_browser(root), "/c/demo-course/environment/accept",
+         {"accept": ["opencv-python"], "version:opencv-python": "4"})
+    assert tomllib.loads(_toml(course))["safety"] == {"allow_imports": ["torch"]}
+
+
+def test_a_blank_row_comes_with_its_own_key_and_import_box(root):
+    html = _browser(root).get("/c/demo-course/environment/requires-row",
+                              base_url=BASE).get_data(as_text=True)
+    key = html.split('name="key" value="')[1].split('"')[0]
+    assert key.startswith("n") and f'name="import" value="{key}"' in html
+
+
+# --- tasks that run exercise code use the course's own .venv on this machine --------------------
+
+
+def test_on_this_machine_tasks_run_with_the_courses_venv(root, course):
+    """Where the learner's tests run and [requires] is installed (owner, 2026-11-06)."""
+    import sys
+
+    from tutor.gui import generation
+
+    assert courses.task_python(course) == sys.executable  # no .venv yet
+    python = str(_venv(course))
+    assert courses.task_python(course) == python  # host (not chosen) with a .venv
+    batch = generation.NewBatch("w9", ["L1"], "learn", None, 20, "", False)
+    assert generation.plan_command(batch, python)[0] == python
+    assert generation.resume_command("w9", approve=True, python=python)[:3] == [
+        python, "-m", "tutor.graph"]
+
+    environment.save_runner(course, "container", understood=False)
+    assert courses.task_python(courses.get_course(root, "demo-course")) == sys.executable
+
+
 # --- the page as four steps, each saying whether it is done (owner, 2026-11-06) -----------------
 
 

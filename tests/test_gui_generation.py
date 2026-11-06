@@ -513,6 +513,10 @@ def _wait_idle(course_root: Path, count: int, within_s: float = 30) -> tasks.Tas
 
 def test_plan_send_back_and_approve_with_a_stand_in_for_the_graph(root, course, monkeypatch):
     monkeypatch.setattr(generation, "GRAPH", [sys.executable, str(FAKE_GRAPH)])
+    # The stand-in's batch has no exercise files, so the validation chained after approving
+    # is a stand-in too: what is tested is that it runs in the same task, after the graph.
+    monkeypatch.setattr(generation, "validate_command", lambda label, python=None: [
+        sys.executable, "-c", f"print('validated {label}')"])
     client = _browser(root)
     home = course.workspace.root
     plan_page = "/c/demo-course/plans/w9-test/"
@@ -529,7 +533,9 @@ def test_plan_send_back_and_approve_with_a_stand_in_for_the_graph(root, course, 
     assert "w9-test-extra" in get(client, plan_page).get_data(as_text=True)
 
     post(client, f"{plan_page}approve")
-    assert _wait_idle(home, 3).status == tasks.DONE
+    approved = _wait_idle(home, 3)
+    assert approved.status == tasks.DONE and len(approved.commands) == 2
+    assert "validated w9-test" in tasks.tail(approved)[0]
     page = get(client, plan_page).get_data(as_text=True)
     assert "generated" in page and "Approve" not in page
 

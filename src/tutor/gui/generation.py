@@ -269,8 +269,14 @@ def label_taken(course: Course, label: str) -> bool:
                for p in [*_dirs(root), *_dirs(root / ".drafts")])
 
 
-def plan_command(batch: NewBatch) -> list[str]:
-    command = [*GRAPH, "plan", "--lectures", *batch.lectures, f"--batch={batch.label}",
+def _graph(python: str | None) -> list[str]:
+    """`python -m tutor.graph` with the course's interpreter (courses.task_python), whose
+    test runs then use it too; GRAPH's own when none is given."""
+    return [python or GRAPH[0], *GRAPH[1:]]
+
+
+def plan_command(batch: NewBatch, python: str | None = None) -> list[str]:
+    command = [*_graph(python), "plan", "--lectures", *batch.lectures, f"--batch={batch.label}",
                f"--mode={batch.mode}", "--set",
                f"hide_answers={'true' if batch.hide_answers else 'false'}"]
     if batch.count:
@@ -282,8 +288,15 @@ def plan_command(batch: NewBatch) -> list[str]:
     return command
 
 
-def resume_command(label: str, approve: bool = False, feedback: str | None = None) -> list[str]:
-    command = [*GRAPH, "resume", f"--batch={label}"]
+def validate_command(label: str, python: str | None = None) -> list[str]:
+    """Every exercise of the generated batch, right after generating it in the same task, so
+    its page shows the verdicts without a "Validate all" click (owner, 2026-11-06)."""
+    return [python or GRAPH[0], "-m", "tutor.validation.batch", label]
+
+
+def resume_command(label: str, approve: bool = False, feedback: str | None = None,
+                   python: str | None = None) -> list[str]:
+    command = [*_graph(python), "resume", f"--batch={label}"]
     if approve:
         command.append("--approve")
     elif feedback is not None:

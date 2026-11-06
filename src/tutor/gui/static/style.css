@@ -251,3 +251,5 @@ table.coverage { margin: 0.5rem 0; }
 table.coverage td:first-child { white-space: nowrap; }
 .coverage-file { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 0.25rem 1.25rem 1rem; }
 .coverage-file table { margin: 0.5rem 0 1rem; }
+table.requires td.row-import { white-space: nowrap; }
+table.requires td.row-import input[type="text"] { width: 8rem; margin-left: 0.25rem; }

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import inspect
 import re
+from collections.abc import Iterable
 from pathlib import Path
 
 from tutor import testkit
@@ -201,10 +202,15 @@ def example(framework: str, interface: str) -> str:
 
 
 def system_prompt(conventions: str, oracle_interface: bool = False,
-                  concept_lines: int = 50) -> str:
+                  concept_lines: int = 50, extra_imports: Iterable[str] = ()) -> str:
     """`oracle_interface`: another model writes the oracle (the `oracle` role is set).
-    `concept_lines`: the most lines of a learn-mode Concept (a generation setting)."""
-    imports = ", ".join(sorted(m for m in CORE_IMPORTS if not m.startswith("_")))
+    `concept_lines`: the most lines of a learn-mode Concept (a generation setting).
+    `extra_imports`: the course's `[safety] allow_imports`, which the safety check lets
+    through; named here too, or the model is told it may not use them (owner, 2026-11-06).
+    Without any, the text is exactly as before, so a course's prompt, and what the provider
+    has cached of it, do not change. The oracle's own prompt keeps the core modules only."""
+    imports = ", ".join(sorted({m for m in CORE_IMPORTS if not m.startswith("_")}
+                               | set(extra_imports)))
     spec = SPEC.replace("{imports}", imports).replace(
         "{oracle}", ORACLE_INTERFACE if oracle_interface else ORACLE_WHOLE).replace(
         "{concept_lines}", str(concept_lines))

@@ -114,6 +114,7 @@ class Candidate:
     versions: list[str] = field(default_factory=list)
     sources: list[Source] = field(default_factory=list)
     mapped: bool = False
+    modules: list[str] = field(default_factory=list)  # what code imports it as, if shown
 
 
 @dataclass(frozen=True)
@@ -244,6 +245,9 @@ def merge(checked: Iterable[tuple[Found, str]]) -> list[Candidate]:
         key = (found.kind, pip_key(found.name))
         candidate = merged.setdefault(key, Candidate(found.kind, found.name))
         candidate.sources.append(Source(lecture, found.page, found.quote.strip()))
+        module = found.import_name.strip().split(".")[0]
+        if module and module not in candidate.modules:
+            candidate.modules.append(module)
         if found.version:
             counts.setdefault(key, {}).setdefault(found.version, 0)
             counts[key][found.version] += 1

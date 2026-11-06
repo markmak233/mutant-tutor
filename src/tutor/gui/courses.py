@@ -17,11 +17,12 @@ from __future__ import annotations
 import json
 import re
 import shutil
+import sys
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-from tutor import container
+from tutor import container, workspace
 from tutor.config import WORKSPACE_FILE, Workspace, WorkspaceError, load_workspace
 from tutor.eval import report
 
@@ -144,6 +145,25 @@ def _recent(attempts: list[dict], titles: dict[tuple[str, str], str]) -> list[Ru
                 titles.get((line.get("batch"), line.get("exercise")), str(line.get("exercise"))),
                 str(line["result"]), (line.get("batch"), line.get("exercise")) in titles)
             for line in runs[:RECENT_RUNS]]
+
+
+def task_python(course: Course) -> str:
+    """The interpreter a task that runs exercise code starts with (validation, generation).
+    On this machine it is the course's own .venv (owner, 2026-11-06): the learner's tests run
+    there and [requires] is installed there, so a test that imports a course package finds it,
+    as it would not in this tool's venv; `tutor.workspace init` installs this tool into it.
+    The test runs follow it, as they start `sys.executable`. When tests run in a container,
+    the image holds the packages, so this tool's own interpreter; likewise for a course with
+    no .venv yet."""
+    try:
+        with (course.workspace.root / WORKSPACE_FILE).open("rb") as f:
+            runner = tomllib.load(f).get("isolation", {}).get("runner")
+    except (OSError, tomllib.TOMLDecodeError):
+        runner = None
+    python = workspace.venv_python(course.workspace.root / ".venv")
+    if runner == "container" or not python.is_file():
+        return sys.executable
+    return str(python)
 
 
 def container_problem(course: Course) -> str | None:

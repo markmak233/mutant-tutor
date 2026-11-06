@@ -51,7 +51,7 @@ from __future__ import annotations
 
 import hmac
 import os
-import sys
+import secrets
 from pathlib import Path
 from types import ModuleType
 
@@ -340,11 +340,12 @@ def create_app(root: Path, token: str, port: int | None = None,
             return redirect(url_for("batch", name=name, batch=batch) + f"?notice={problem}",
                             code=303)
         commands = []
+        python = courses.task_python(course)  # the course's .venv on this machine
         for row in view.exercises:
             exercise = courses.exercise_dir(course, batch, row.id)
             solution = courses.solution_dir(course, batch, row.id)
             if exercise and solution:
-                commands.append([sys.executable, "-m", "tutor.validation", str(exercise),
+                commands.append([python, "-m", "tutor.validation", str(exercise),
                                  str(solution)])
         if not commands:
             abort(404, "This batch has no exercise to validate.")
@@ -452,7 +453,8 @@ def create_app(root: Path, token: str, port: int | None = None,
             return new_batch_page(course, values, [NOTICES[problem][1]], 409)
         # How the number was set, so the plan page can tell a plan stopped at its limit.
         how_many = {"count": batch.count} if batch.count else {"max_count": batch.max_count}
-        return start_task(course, f"Plan {batch.label}", [generation.plan_command(batch)],
+        command = generation.plan_command(batch, courses.task_python(course))
+        return start_task(course, f"Plan {batch.label}", [command],
                           meta={"kind": generation.PLAN, "label": batch.label, **how_many},
                           then=url_for("plan", name=name, label=batch.label))
 
@@ -479,7 +481,7 @@ def create_app(root: Path, token: str, port: int | None = None,
         return plan_page("_plan_live.html", name, label)
 
     def plan_task(name: str, label: str, allowed: bool, title: str, command: list[str],
-                  kind: str, course: courses.Course):
+                  kind: str, course: courses.Course, validate: bool = False):
         """Start a `resume` for the plan if it is at the step the button was for; else back
         to its page, which shows where it is now (another tab, or a terminal, moved it)."""
         back = url_for("plan", name=name, label=label)
@@ -487,16 +489,20 @@ def create_app(root: Path, token: str, port: int | None = None,
             return redirect(f"{back}?notice=plan-moved", code=303)
         if problem := courses.container_problem(course):
             return redirect(f"{back}?notice={problem}", code=303)
-        return start_task(course, title, [command], meta={"kind": kind, "label": label},
+        commands = [command]
+        if validate:  # a run that generates: then the batch's verdicts, in the same task
+            commands.append(generation.validate_command(label, courses.task_python(course)))
+        return start_task(course, title, commands, meta={"kind": kind, "label": label},
                           then=back)
 
     @app.post("/c/<name>/plans/<label>/approve")
     def approve_plan(name: str, label: str):
         """Generate the batch from plan.json as it is now; this is what spends money."""
         course, view = plan_or_404(name, label)
-        return plan_task(name, label, view.can_approve, f"Generate {label}",
-                         generation.resume_command(label, approve=True), generation.APPROVE,
-                         course)
+        command = generation.resume_command(label, approve=True,
+                                            python=courses.task_python(course))
+        return plan_task(name, label, view.can_approve, f"Generate {label}", command,
+                         generation.APPROVE, course, validate=True)
 
     @app.post("/c/<name>/plans/<label>/feedback")
     def send_back_plan(name: str, label: str):
@@ -506,14 +512,16 @@ def create_app(root: Path, token: str, port: int | None = None,
             return redirect(url_for("plan", name=name, label=label) + "?notice=feedback-empty",
                             code=303)
         return plan_task(name, label, view.can_approve, f"Revise plan {label}",
-                         generation.resume_command(label, feedback=feedback),
+                         generation.resume_command(label, feedback=feedback,
+                                                  python=courses.task_python(course)),
                          generation.FEEDBACK, course)
 
     @app.post("/c/<name>/plans/<label>/continue")
     def continue_plan(name: str, label: str):
         course, view = plan_or_404(name, label)
         return plan_task(name, label, view.can_continue, f"Continue {label}",
-                         generation.resume_command(label), generation.CONTINUE, course)
+                         generation.resume_command(label, python=courses.task_python(course)),
+                         generation.CONTINUE, course, validate=True)
 
     @app.post("/c/<name>/plans/<label>/edit")
     def edit_plan(name: str, label: str):
@@ -736,15 +744,20 @@ def create_app(root: Path, token: str, port: int | None = None,
     # --- environment (step 7a): [requires], where tests run, the venv and the image ----------
 
     def environment_page(course: courses.Course, problems: list[str], code: int = 200,
-                         rows: list[tuple[str, str]] | None = None,
+                         rows: list[environment.ListRow] | None = None,
                          chosen: dict[str, str] | None = None):
         """`rows`: a refused [requires] form's rows, `chosen`: a refused draft form's ticked
         entries and their versions; both shown back as typed."""
+        draft = environment.draft_view(course)
         if rows is None:
-            rows = list(course.workspace.requires.items())
+            rows = environment.list_rows(course, list(course.workspace.requires.items())
+                                         or [("", "")], draft.draft)
+        allowed = environment.allowed(course)
         return render_template("environment.html", course=course, problems=problems,
-                               rows=rows or [("", "")], kind=environment.kind,
-                               draft=environment.draft_view(course), chosen=chosen or {},
+                               rows=rows, kind=environment.kind, draft=draft,
+                               chosen=chosen or {},
+                               others_allowed=[m for m in allowed
+                                               if m not in {r.module for r in rows}],
                                not_pip=environment.NOT_PIP, runner=environment.runner(course),
                                has_venv=environment.venv_python(course).exists(),
                                install=environment.install_shown(course),
@@ -758,8 +771,9 @@ def create_app(root: Path, token: str, port: int | None = None,
     def requires_row(name: str):
         """A blank [requires] row for "+ Add a row"; "−" asks for it too and drops the reply,
         as htmx needs a request before a swap. It reads and writes nothing."""
-        return render_template("_requires_row.html", course=course_or_404(name), name="",
-                               version="", kind=environment.kind, not_pip=environment.NOT_PIP)
+        row = environment.ListRow("", "", f"n{secrets.token_hex(4)}", "", False)
+        return render_template("_requires_row.html", course=course_or_404(name), row=row,
+                               kind=environment.kind, not_pip=environment.NOT_PIP)
 
     @app.get("/c/<name>/environment/check")
     def environment_check(name: str):
@@ -779,13 +793,21 @@ def create_app(root: Path, token: str, port: int | None = None,
     @app.post("/c/<name>/environment/requires")
     def save_requires(name: str):
         course = course_or_404(name)
-        names, versions = request.form.getlist("name"), request.form.getlist("version")
+        form = request.form
+        names, versions, keys = form.getlist("name"), form.getlist("version"), form.getlist("key")
+        keys += [f"x{i}" for i in range(len(keys), len(names))]  # a form sent without keys
+        ticked = set(form.getlist("import"))
+        modules = {k: form.get(f"module:{k}", "") for k in keys}
         table, problems = environment.check_requires(names, versions,
                                                      environment.runner(course))
-        if table is not None:
-            problems = environment.save_requires(course, table)
+        allow, import_problems = environment.check_imports(
+            list(zip(names, keys, strict=False)), ticked, modules, environment.allowed(course))
+        problems += import_problems
+        if table is not None and allow is not None:
+            problems = environment.save_requires(course, table, allow)
         if problems:
-            typed = [(n, v) for n, v in zip(names, versions, strict=False) if n or v]
+            typed = [environment.ListRow(n, v, k, modules.get(k, ""), k in ticked)
+                     for n, v, k in zip(names, versions, keys, strict=False) if n or v]
             return environment_page(course, problems, 400, typed)
         return redirect(url_for("environment_view", name=name) + "?notice=requires-saved",
                         code=303)

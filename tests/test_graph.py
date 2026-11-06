@@ -285,6 +285,26 @@ def test_the_model_gets_the_rules_conventions_pages_and_the_schema(workspace):
     assert (update["round"], update["tokens"], update["failure"]) == (0, 1500, None)
 
 
+def test_the_courses_allowed_modules_are_named_as_importable(workspace):
+    """[safety] allow_imports passes the safety check, so the generating model is told it may
+    use them (owner, 2026-11-06); the oracle's prompt keeps the core modules only."""
+    (workspace / "workspace.toml").write_text(
+        'course = "demo"\n[safety]\nallow_imports = ["nltk"]\n', encoding="utf-8")
+    model = FakeModel(json.dumps(draft()))
+    nodes.generate({"item": ITEM, "context": ""}, deps(workspace, model))
+    system = model.calls[0][1][0]["content"]
+    rule = system[system.index("imports only from"):system.index("the exercise's framework")]
+    assert "nltk" in rule and "collections" in rule
+    assert "nltk" not in prompts.oracle_spec()
+
+
+def test_a_course_with_no_allowed_modules_gets_the_same_prompt_as_before():
+    """So its text, and what a provider has cached of it, do not change."""
+    plain = prompts.system_prompt("rules")
+    assert prompts.system_prompt("rules", extra_imports=()) == plain
+    assert "nltk" not in plain and "nltk" in prompts.system_prompt("rules", extra_imports=["nltk"])
+
+
 def test_a_reply_that_does_not_parse_is_a_format_failure(workspace):
     model = FakeModel('{"metadata": {', finish_reason="length")
     update = nodes.generate({"item": ITEM, "context": ""}, deps(workspace, model))

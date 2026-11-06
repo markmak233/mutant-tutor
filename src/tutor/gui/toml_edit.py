@@ -1,5 +1,5 @@
-"""Writing one table of a course's workspace.toml, safely: [llm] from the Models page (step
-6), [requires] and [isolation] from the Environment page (step 7).
+"""Writing tables of a course's workspace.toml, safely: [llm] from the Models page (step 6),
+[requires], [safety] allow_imports and [isolation] from the Environment page (step 7).
 
 tomlkit keeps the rest of the file as the owner wrote it, comments included (owner,
 2026-11-06); a value changed loses only its own line's comment. Every save is checked
@@ -28,6 +28,12 @@ def edit(root: Path, table: str, change: Callable, expected: dict) -> list[str]:
     """Apply `change` (it gets the parsed tomlkit document) to the course's workspace.toml,
     check that `table` now reads as `expected` and nothing else moved, keep a backup, then
     replace the file in one step. [] when written, else the problem (nothing written)."""
+    return edit_tables(root, change, {table: expected})
+
+
+def edit_tables(root: Path, change: Callable, expected: dict[str, dict]) -> list[str]:
+    """edit() for one save that changes several tables, such as [requires] with
+    [safety] allow_imports: each must read as expected, and every other one unchanged."""
     path = root / WORKSPACE_FILE
     text = path.read_text(encoding="utf-8")
     doc = tomlkit.parse(text)
@@ -37,8 +43,8 @@ def edit(root: Path, table: str, change: Callable, expected: dict) -> list[str]:
         before, after = tomllib.loads(text), tomllib.loads(new)
     except tomllib.TOMLDecodeError:
         return [REFUSED]
-    if _bare(after.get(table, {})) != _bare(expected) or _rest(after, table) != _rest(before,
-                                                                                      table):
+    if any(_bare(after.get(t, {})) != _bare(e) for t, e in expected.items()) or _rest(
+            after, expected) != _rest(before, expected):
         return [REFUSED]
     path.with_name(WORKSPACE_FILE + ".bak").write_text(text, encoding="utf-8")
     tmp = path.with_name(f".{WORKSPACE_FILE}.{secrets.token_hex(4)}.tmp")
@@ -73,5 +79,5 @@ def _bare(section: dict) -> dict:
     return {k: v for k, v in section.items() if v != {}}
 
 
-def _rest(data: dict, table: str) -> dict:
-    return {k: v for k, v in data.items() if k != table}
+def _rest(data: dict, tables) -> dict:
+    return {k: v for k, v in data.items() if k not in tables}

@@ -226,7 +226,10 @@ def _ask(state: ItemState, deps: Deps, user: str, purpose: str, round_: int,
         {"role": "system", "content": prompts.system_prompt(
             conventions.read_text(encoding="utf-8") if conventions.is_file() else "",
             oracle_interface=deps.oracle_config is not None,
-            concept_lines=deps.concept_lines)},
+            concept_lines=deps.concept_lines,
+            # What the course lets exercises import besides the core modules (the owner
+            # ticks them on the Environment page), so the model knows it may.
+            extra_imports=workspace_allow_imports(deps.workspace))},
         {"role": "user", "content": user},
     ]
     # A repair round asks a little warmer each time: at temperature 0 an unchanged prompt

@@ -2770,6 +2770,18 @@ late; the adaptive review screens can be built with it.
   missing, nothing starts and the page says which, with what to do (install Docker Desktop,
   start it, or build the image). A course on the host is not checked. The commands keep
   their own check; this one spares a task that would fail at once.
+- Which Python a task runs exercise code with (owner, 2026-11-06, after a course's tests on
+  this machine ran in this tool's venv, which lacks the course's packages): validation and
+  generation start with the course's own `.venv` when its tests run on this machine, since the
+  learner's tests run there and `[requires]` is installed there, and the test runs follow
+  `sys.executable`; `tutor.workspace init` installs this tool into it. A course whose tests
+  run in a container, or that has no `.venv` yet, uses this tool's interpreter.
+- Validating a generated batch (owner, 2026-11-06: "Validate all" did not start by itself):
+  Approve and Continue run `python -m tutor.validation.batch <label>` after the graph in the
+  same task, which calls the validation command once per exercise the manifest lists, so each
+  `validation.json` is written for the files as saved; the graph itself still writes none
+  (`validate()` has no side effects). A batch with no manifest yet has nothing to validate,
+  and its run's own exit code says how it ended.
 - Stopping a task: the test runner starts each pytest or `docker run` in a session of its own,
   out of reach of one process group, so the runner lists every process below it (`ps`), sends
   each Ctrl+C (a `docker run` client passes it into its container), and kills what is left
@@ -2924,6 +2936,18 @@ late; the adaptive review screens can be built with it.
       It runs from the repository, as tasks do, so it reads `.env` itself (JAVA_HOME,
       HADOOP_HOME) and the GUI still never loads it. 0.2 s warm; the check and the image's
       state load into the page with htmx, since Docker can take seconds while its VM wakes.
+    - "Exercises may import" (owner, 2026-11-06): each pip row of the list has a tick and the
+      module it is imported as; the ticked ones go into `[safety] allow_imports` in the same
+      checked write as `[requires]`, an unticked one comes out, and modules no row names (an
+      OS course's `subprocess`) stay, listed under the table. Unticked by default: widening
+      the static check is the owner's call, package by package. The module box starts with
+      what the lectures' code imports it as when the draft saw it (scikit-learn is sklearn),
+      else the name with `-` as `_`. The generate and repair prompt names them as importable
+      next to the core modules (owner, 2026-11-06), or the model would be told it may not use
+      what the check lets through. A course with none gets the same prompt text as before
+      (checked by its hash), so its prompt cache holds. The oracle's prompt keeps the core
+      modules only, to stay independent of the exercise; an exercise whose answer needs the
+      library itself may then get no oracle, to decide when one does.
     - `[requires]` is a table in the page (owner, 2026-11-06): "+ Add a row" appends a blank
       row fetched by htmx, "−" removes its row with htmx's `delete` swap, so no script of
       ours; nothing is written until Save, and a cleared name is dropped too. The rules

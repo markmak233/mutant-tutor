@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -46,6 +47,7 @@ CHECK_TIMEOUT_S = 60  # java -version, in a venv that may be cold; measured 0.2 
 RUNNERS = ("container", "host")
 # What each special [requires] name stands for; any other name is a pip package.
 KINDS = {"python": "Python version", "java": "JDK (Java)", "hadoop": "Hadoop"}
+MODULE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")  # a top-level module, as allow_imports holds
 HADOOP_DOWNLOAD = "about 730 MB"  # measured 2026-11-05, see container.HADOOP_MIRRORS
 # What an image weighs, for scale: the two built here on 2026-11-06.
 IMAGE_SCALE = "a Python-only image is about 0.2 GB; one with Java, Hadoop and Spark about 1.7 GB"
@@ -202,23 +204,104 @@ def check_requires(names: list[str], versions: list[str], chosen: str | None
     return (None if problems else table), problems
 
 
-def save_requires(course: Course, table: dict[str, str]) -> list[str]:
-    """Write [requires] as `table`: changed values, new names after the last one, removed
-    names gone, comments kept. Versions are written as strings, as they are read."""
-    def change(doc) -> None:
-        if "requires" not in doc:
-            if not table:
-                return
-            doc["requires"] = tomlkit.table()
-        section = doc["requires"]
-        for name in list(section.keys()):
-            if name not in table:
-                del section[name]
-        for name, version in table.items():
-            if section.get(name) != version:
-                put(section, name, version)
+def allowed(course: Course) -> list[str]:
+    """[safety] allow_imports: the modules exercises may import besides the core ones."""
+    names = _data(course).get("safety", {}).get("allow_imports", [])
+    return [n for n in names if isinstance(n, str)] if isinstance(names, list) else []
 
-    return toml_edit.edit(course.workspace.root, "requires", change, table)
+
+@dataclass(frozen=True)
+class ListRow:
+    """A row of step 1's list. `key` ties its "exercises may import" tick and module box to
+    it, as rows are added and removed in the page; `pip`: only a pip package can be ticked."""
+    name: str
+    version: str
+    key: str
+    module: str  # the module exercises would import it as
+    ticked: bool  # in [safety] allow_imports
+
+
+def list_rows(course: Course, rows: list[tuple[str, str]], draft: requires_draft.Draft,
+              typed: dict[str, tuple[str, bool]] | None = None) -> list[ListRow]:
+    """The list's rows with their import ticks: as allow_imports holds them, or as typed
+    (`typed`: key -> (module, ticked)) when a refused form comes back."""
+    now = allowed(course)
+    seen = {requires_draft.pip_key(c.name): c.modules for c in draft.candidates if c.modules}
+    result = []
+    for i, (name, version) in enumerate(rows):
+        key = f"r{i}"
+        if typed is not None and key in typed:
+            module, ticked = typed[key]
+        else:
+            module = module_for(name, seen)
+            ticked = bool(name) and module in now
+        result.append(ListRow(name, version, key, module, ticked))
+    return result
+
+
+def module_for(name: str, seen: dict[str, list[str]]) -> str:
+    """The module a pip package is imported as: what the lectures' code imports it as, when
+    the draft saw it (scikit-learn is sklearn), else its name with - as _ (a guess the owner
+    can correct in the box)."""
+    known = seen.get(requires_draft.pip_key(name)) if name else None
+    return known[0] if known else name.replace("-", "_").replace(".", "_")
+
+
+def check_imports(rows: list[tuple[str, str]], ticked: set[str], modules: dict[str, str],
+                  current: list[str]) -> tuple[list[str] | None, list[str]]:
+    """[safety] allow_imports after the list is saved: each pip row's module added when its
+    box is ticked, removed when not; modules no row names (an OS course's `subprocess`) stay.
+    `rows`: (name, key) as typed. Widening the static check is the owner's tick, per package."""
+    allow, problems = list(current), []
+    for name, key in rows:
+        name = name.strip()
+        if not name or name.lower() in NOT_PIP:
+            continue
+        module = modules.get(key, "").strip() or module_for(name, {})
+        if key in ticked:
+            if not MODULE.match(module):
+                problems.append(f"{name}: {module!r} is not a module name to import, such as "
+                                "sklearn for scikit-learn.")
+            elif module not in allow:
+                allow.append(module)
+        elif module in allow:
+            allow.remove(module)
+    return (None if problems else allow), problems
+
+
+def save_requires(course: Course, table: dict[str, str], allow: list[str] | None = None
+                  ) -> list[str]:
+    """Write [requires] as `table`: changed values, new names after the last one, removed
+    names gone, comments kept. Versions are written as strings, as they are read. With
+    `allow`, [safety] allow_imports too, in the same checked write."""
+    expected: dict[str, dict] = {"requires": table}
+    safety = _data(course).get("safety", {})
+    if allow is not None and allow != safety.get("allow_imports", []):
+        expected["safety"] = {**{k: v for k, v in safety.items() if k != "allow_imports"},
+                              **({"allow_imports": allow} if allow else {})}
+
+    def change(doc) -> None:
+        if "requires" not in doc and table:
+            doc["requires"] = tomlkit.table()
+        if "requires" in doc:
+            section = doc["requires"]
+            for name in list(section.keys()):
+                if name not in table:
+                    del section[name]
+            for name, version in table.items():
+                if section.get(name) != version:
+                    put(section, name, version)
+        if "safety" in expected:
+            if "safety" not in doc:
+                new = tomlkit.table()
+                new.comment("modules exercises may import besides the core ones")
+                doc["safety"] = new
+            if allow:
+                put(doc["safety"], "allow_imports", allow)
+            elif "allow_imports" in doc["safety"]:
+                del doc["safety"]["allow_imports"]
+
+    return toml_edit.edit_tables(course.workspace.root, change, expected)
 
 
 def save_runner(course: Course, chosen: str, understood: bool) -> list[str]:
