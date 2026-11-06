@@ -389,6 +389,28 @@ def test_the_form_starts_plan_as_a_task_and_goes_to_the_plan_page(root, monkeypa
     assert env["WORKSPACE_DIR"] == str((root / "demo-course").resolve())
 
 
+def test_no_plan_starts_without_docker_and_the_form_keeps_its_values(root, monkeypatch):
+    monkeypatch.setattr(courses, "container_problem", lambda course: "docker-missing")
+    monkeypatch.setattr(tasks, "start", lambda *a, **k: pytest.fail("nothing may start"))
+
+    response = post(_browser(root), "/c/demo-course/new-batch", _form(prefs="keep me"))
+    page = response.get_data(as_text=True)
+
+    assert response.status_code == 409 and "install Docker Desktop" in page
+    assert "keep me" in page and 'value="w9-test"' in page
+
+
+@pytest.mark.parametrize("action", ["approve", "feedback", "continue"])
+def test_no_resume_starts_without_docker(root, course, monkeypatch, action):
+    monkeypatch.setattr(courses, "container_problem", lambda course: "docker-stopped")
+    monkeypatch.setattr(tasks, "start", lambda *a, **k: pytest.fail("nothing may start"))
+    _draft(course, plan=action != "continue")  # continue: a plan that did not finish
+
+    response = post(_browser(root), f"/c/demo-course/plans/w9-test/{action}", {"feedback": "x"})
+
+    assert response.headers["Location"].endswith("?notice=docker-stopped")
+
+
 def test_buttons_for_another_step_start_nothing(root, course, monkeypatch):
     monkeypatch.setattr(tasks, "start", lambda *a, **k: pytest.fail("nothing may start"))
     draft = _draft(course)

@@ -520,3 +520,47 @@ def test_pages_load_htmx_from_this_server_with_eval_off(client):
 
 def test_the_favicon_request_gets_no_content(client):
     assert get(client, "/favicon.ico").status_code == 204
+
+
+# --- Docker before a task that runs tests ----------------------------------------------------
+
+
+def _container_course(root):
+    toml = root / "demo-course" / "workspace.toml"
+    toml.write_text('course = "demo"\n\n[isolation]\nrunner = "container"\n', encoding="utf-8")
+    return courses.get_course(root, "demo-course")
+
+
+def test_a_course_on_the_host_is_not_checked(root, monkeypatch):
+    monkeypatch.setattr(courses.container, "image_problem",
+                        lambda image: pytest.fail("no Docker call for a host course"))
+
+    assert courses.container_problem(courses.get_course(root, "demo-course")) is None
+
+
+@pytest.mark.parametrize(("image", "which", "docker", "code"), [
+    (None, "/usr/bin/docker", None, None),  # ready
+    ("missing", None, "not installed", "docker-missing"),
+    ("missing", "/usr/bin/docker", "not running", "docker-stopped"),
+    ("missing", "/usr/bin/docker", None, "image-missing"),
+])
+def test_a_container_course_says_what_stops_its_tests(root, monkeypatch, image, which, docker,
+                                                      code):
+    course = _container_course(root)
+    monkeypatch.setattr(courses.container, "image_problem", lambda name: image)
+    monkeypatch.setattr(courses.shutil, "which", lambda name: which)
+    monkeypatch.setattr(courses.container, "docker_problem", lambda: docker)
+
+    assert courses.container_problem(course) == code
+
+
+def test_validation_does_not_start_without_docker(root, monkeypatch):
+    monkeypatch.setattr(courses, "container_problem", lambda course: "docker-stopped")
+    monkeypatch.setattr(tasks, "start", lambda *a, **k: pytest.fail("nothing may start"))
+    client = _browser(root, FakeLauncher())
+
+    response = post(client, f"/c/demo-course/b/{BATCH}/validate")
+    page = client.get(response.headers["Location"], base_url=BASE).get_data(as_text=True)
+
+    assert response.headers["Location"] == f"/c/demo-course/b/{BATCH}/?notice=docker-stopped"
+    assert "Docker Desktop is not running" in page

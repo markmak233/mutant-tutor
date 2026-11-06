@@ -79,6 +79,16 @@ NOTICES = {
                               "most."),
     "plan-moved": ("bad", "The batch is no longer at that step; this page shows where it is "
                           "now."),
+    # Before a task that runs tests: nothing was started (courses.container_problem).
+    "docker-missing": ("bad", "Nothing was started: Docker is not installed (no `docker` "
+                              "command). This course runs its tests in a container: install "
+                              "Docker Desktop (docker.com), start it, then try again."),
+    "docker-stopped": ("bad", "Nothing was started: Docker Desktop is not running, or not "
+                              "answering. Start it, wait until it says it is running, then try "
+                              "again."),
+    "image-missing": ("bad", "Nothing was started: this course's test image is missing or out "
+                             "of date. Build it with `python -m tutor.container build` from "
+                             "the course folder, then try again."),
 }
 RECENT_TASKS = 5
 
@@ -249,6 +259,9 @@ def create_app(root: Path, token: str, port: int | None = None,
         """`python -m tutor.validation` on every exercise the manifest lists, in its order.
         Each run rewrites that exercise's validation.json, as on the command line."""
         course, view = batch_or_404(name, batch)
+        if problem := courses.container_problem(course):
+            return redirect(url_for("batch", name=name, batch=batch) + f"?notice={problem}",
+                            code=303)
         commands = []
         for row in view.exercises:
             exercise = courses.exercise_dir(course, batch, row.id)
@@ -311,6 +324,8 @@ def create_app(root: Path, token: str, port: int | None = None,
             values["count"], values["max_count"], values["prefs"], values["hide_answers"])
         if batch is None:
             return new_batch_page(course, values, problems, 400)
+        if problem := courses.container_problem(course):  # `plan` would stop at once
+            return new_batch_page(course, values, [NOTICES[problem][1]], 409)
         # How the number was set, so the plan page can tell a plan stopped at its limit.
         how_many = {"count": batch.count} if batch.count else {"max_count": batch.max_count}
         return start_task(course, f"Plan {batch.label}", [generation.plan_command(batch)],
@@ -346,6 +361,8 @@ def create_app(root: Path, token: str, port: int | None = None,
         back = url_for("plan", name=name, label=label)
         if not allowed:
             return redirect(f"{back}?notice=plan-moved", code=303)
+        if problem := courses.container_problem(course):
+            return redirect(f"{back}?notice={problem}", code=303)
         return start_task(course, title, [command], meta={"kind": kind, "label": label},
                           then=back)
 

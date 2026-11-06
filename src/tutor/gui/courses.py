@@ -16,9 +16,12 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
+from tutor import container
 from tutor.config import WORKSPACE_FILE, Workspace, WorkspaceError, load_workspace
 from tutor.eval import report
 
@@ -141,6 +144,26 @@ def _recent(attempts: list[dict], titles: dict[tuple[str, str], str]) -> list[Ru
                 titles.get((line.get("batch"), line.get("exercise")), str(line.get("exercise"))),
                 str(line["result"]), (line.get("batch"), line.get("exercise")) in titles)
             for line in runs[:RECENT_RUNS]]
+
+
+def container_problem(course: Course) -> str | None:
+    """Before a task that runs tests (validation, generation): None when they can run now,
+    else why not, as a notice code: "docker-missing", "docker-stopped" or "image-missing".
+    A course whose tests run on the host is not checked. The commands check again
+    themselves; this only stops a task that would fail at once (owner, 2026-11-06)."""
+    try:
+        with (course.workspace.root / WORKSPACE_FILE).open("rb") as f:
+            runner = tomllib.load(f).get("isolation", {}).get("runner")
+    except (OSError, tomllib.TOMLDecodeError):
+        return None  # the command reports it
+    if runner != "container":
+        return None
+    image = container.image_name(course.workspace.course, course.workspace.requires)
+    if container.image_problem(image) is None:  # waits while a stopped VM wakes
+        return None
+    if shutil.which("docker") is None:
+        return "docker-missing"
+    return "image-missing" if container.docker_problem() is None else "docker-stopped"
 
 
 def batch_view(course: Course, name: str) -> BatchView | None:

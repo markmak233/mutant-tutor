@@ -2746,6 +2746,13 @@ late; the adaptive review screens can be built with it.
   The page polls the end of the log every second with htmx and stops when the task ends.
   The first task is "Validate all" on a batch, which rewrites each `validation.json` as the
   command line does; generating came in step 4, building the image comes in step 7.
+- Docker before a task (owner, 2026-11-06): a task that runs tests or calls a model
+  (validation, plan, approve, send back, continue) starts only if the course's tests can run
+  now. For a course with `[isolation] runner = "container"` the GUI asks Docker first, as the
+  commands do; if `docker` is missing, Docker Desktop is not running, or the image is
+  missing, nothing starts and the page says which, with what to do (install Docker Desktop,
+  start it, or build the image). A course on the host is not checked. The commands keep
+  their own check; this one spares a task that would fail at once.
 - Stopping a task: the test runner starts each pytest or `docker run` in a session of its own,
   out of reach of one process group, so the runner lists every process below it (`ps`), sends
   each Ctrl+C (a `docker run` client passes it into its container), and kills what is left
