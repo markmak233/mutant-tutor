@@ -30,7 +30,9 @@ from tutor.gui.toml_edit import spaced as _spaced
 
 # The roles a page offers, grouped by what they are for, with what each does.
 ROLE_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
-    ("Reading lectures", [("vision", "reads the slides that are pictures")]),
+    ("Reading lectures", [("vision", "reads the slides that are pictures"),
+                          ("setup", "finds the software the lectures use, to draft "
+                                    "[requires] (empty: the plan model, else generate)")]),
     ("Generating exercises", [
         ("plan", "plans a batch (empty: the generate model)"),
         ("generate", "writes each exercise"),

@@ -224,3 +224,12 @@ pre.recipe { margin: 0; padding: 0.6rem 0.8rem; background: var(--code-bg); bord
 .chip-missing, .chip-wrong-version, .chip-docker-missing, .chip-docker-stopped, .chip-cannot-build { background: var(--bad-bg); color: var(--bad); }
 .chip-image-missing, .chip-not-chosen { background: var(--started-bg); color: var(--started); }
 table.requires td.row-remove { width: 1%; white-space: nowrap; }
+/* Step 7b: the model's draft of [requires] */
+.form.wide { max-width: none; }
+table.draft input[type="text"] { width: 7rem; }
+table.draft details summary { cursor: pointer; }
+ul.sources { margin: 0.3rem 0 0; padding-left: 1.1rem; }
+ul.sources li { margin: 0.15rem 0; overflow-wrap: anywhere; }
+.chip-new { background: var(--started-bg); color: var(--started); }
+.chip-listed { background: var(--passed-bg); color: var(--passed); }
+.chip-listed-other-version, .chip-name-from-the-model { background: var(--unlogged-bg); color: var(--unlogged); }

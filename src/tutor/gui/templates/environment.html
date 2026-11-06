@@ -41,6 +41,62 @@
   </div>
 </form>
 
+{# Step 7b: a model's draft from the lectures (environment.draft_view). It costs money, so it
+   runs only from its button; its entries are only candidates until ticked and added. #}
+<h2>Find requirements in the lectures</h2>
+<p class="muted">A model reads each lecture and lists the software its code uses, with the page and the words that show it. Entries whose words are not on that page are dropped, and so is Python's standard library. Nothing is written until you tick entries and add them.</p>
+{% set d = draft.draft %}
+{% if not (d.done or d.todo) %}
+<p>No lecture is read yet: read them on the <a href="{{ url_for('lecture_list', name=course.folder) }}">Lectures</a> page first.</p>
+{% else %}
+{% if d.todo %}
+<div class="notice notice-ok">
+  {{ d.todo | length }} lecture{{ "s" if d.todo | length != 1 }} not looked at yet{% if d.done %}, or changed since{% endif %}.
+  {% if draft.model %}This asks {{ draft.model }}, one request per lecture, {% if draft.tokens_k %}about {{ draft.tokens_k }} thousand{% else %}under a thousand{% endif %} input tokens in all: a paid model charges for them.
+  {{ action(url_for('draft_requires', name=course.folder), "Look at " ~ (d.todo | length) ~ " lecture" ~ ("s" if d.todo | length != 1 else "")) }}
+  {% else %}No model is set for it: choose one for the setup, plan or generate role on the <a href="{{ url_for('models', name=course.folder) }}">Models</a> page.{% endif %}
+</div>
+{% endif %}
+{% if d.done %}<p class="muted">{{ d.done | length }} lecture{{ "s" if d.done | length != 1 }} looked at, by {{ d.models | join(", ") }}.</p>{% endif %}
+{% if draft.rows %}
+<form method="post" action="{{ url_for('accept_requires', name=course.folder) }}" class="form wide">
+  <table class="draft">
+    <thead><tr><th></th><th>Name</th><th>Version</th><th>Now</th><th>Where the slides show it</th></tr></thead>
+    <tbody>
+    {% for row in draft.rows %}
+      {% set c = row.candidate %}
+      <tr>
+        <td><input type="checkbox" name="accept" value="{{ c.name }}" aria-label="Add {{ c.name }}"{% if c.name in chosen %} checked{% endif %}></td>
+        <td>{{ c.name }} <span class="muted">{{ kind(c.name) }}</span>
+          {% if c.kind == "pip" %}<br><a href="https://pypi.org/project/{{ c.name }}/" rel="noreferrer noopener" target="_blank">check it on PyPI</a>{% endif %}
+          {% if c.mapped %}<br>{{ chip("name from the model") }}{% endif %}</td>
+        <td><input type="text" name="version:{{ c.name }}" value="{{ chosen.get(c.name, row.version) }}" aria-label="Version of {{ c.name }}" autocomplete="off" spellcheck="false">
+          {% if not c.versions %}<span class="muted">the slides state none</span>{% elif c.versions | length > 1 or c.versions[0] != row.version %}<span class="muted">the slides say {{ c.versions | join(", ") }}</span>{% endif %}</td>
+        <td>{{ chip(row.status) }}</td>
+        <td><details><summary>{{ c.sources[0].lecture }} p.{{ c.sources[0].page }}{% if c.sources | length > 1 %} and {{ c.sources | length - 1 }} more{% endif %}</summary>
+          <ul class="sources">{% for s in c.sources %}<li>{{ s.lecture }} p.{{ s.page }}: <code>{{ s.quote }}</code></li>{% endfor %}</ul></details></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <p class="muted">"Name from the model": the slides show only the module imported, and the pip name is the model's; check it on PyPI before installing, as a made-up name can be one somebody registered. A package that exercises import must also be in <code>[safety] allow_imports</code> in workspace.toml, which stays yours to edit.</p>
+  <div class="actions"><button type="submit" class="primary">Add the ticked ones to [requires]</button></div>
+</form>
+{% elif d.done %}
+<p>No software found in the lectures looked at.</p>
+{% endif %}
+{% if draft.others %}
+<h3>Also named, not checked here</h3>
+<ul class="sources">{% for c in draft.others %}<li>{{ c.name }}{% if c.versions %} {{ c.versions[0] }}{% endif %} <span class="muted">{{ c.sources[0].lecture }} p.{{ c.sources[0].page }}: <code>{{ c.sources[0].quote }}</code></span></li>{% endfor %}</ul>
+{% endif %}
+{% if d.dropped %}
+<details class="review">
+  <summary>{{ d.dropped | length }} entr{{ "ies" if d.dropped | length != 1 else "y" }} dropped by the checks</summary>
+  <ul class="sources">{% for x in d.dropped %}<li>{{ x.lecture }} p.{{ x.page }} <strong>{{ x.name }}</strong>: {{ x.reason }}</li>{% endfor %}</ul>
+</details>
+{% endif %}
+{% endif %}
+
 <h2>Python packages in <code>.venv</code></h2>
 <details class="review">
   <summary>What "Install into .venv" runs</summary>

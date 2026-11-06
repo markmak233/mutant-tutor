@@ -14,6 +14,9 @@ and the two installs the GUI may start (docs/design.md, "Local GUI", Environment
   Hadoop or another Python the user installs in their own terminal, then checks again.
 - Where tests run: [isolation] runner, written only when the user chooses; "host" only with
   a tick saying that generated code then runs with their rights. Nothing switches by itself.
+- Step 7b: a model's draft of [requires] from the lectures (tutor.materials.requires) is
+  shown as candidates, each with the pages and words that show it; only the entries the
+  owner ticks are added, by the same rules as a typed row.
 """
 
 from __future__ import annotations
@@ -33,10 +36,11 @@ import tomlkit
 
 from tutor import container, workspace
 from tutor.config import WORKSPACE_FILE
-from tutor.envcheck import NOT_PIP, pip_requirements, requires_problems
+from tutor.envcheck import NOT_PIP, pip_requirements, requires_problems, version_matches
 from tutor.gui import tasks, toml_edit
 from tutor.gui.courses import Course
 from tutor.gui.toml_edit import put
+from tutor.materials import requires as requires_draft
 
 CHECK_TIMEOUT_S = 60  # java -version, in a venv that may be cold; measured 0.2 s warm
 RUNNERS = ("container", "host")
@@ -235,6 +239,95 @@ def save_runner(course: Course, chosen: str, understood: bool) -> list[str]:
         put(doc["isolation"], "runner", chosen)
 
     return toml_edit.edit(course.workspace.root, "isolation", change, expected)
+
+
+@dataclass(frozen=True)
+class DraftRow:
+    """A candidate as the page shows it. `status`: "new", "listed", or "listed, other
+    version" (the slides state versions and [requires] holds none of them)."""
+    candidate: requires_draft.Candidate
+    status: str
+    version: str  # what the version box starts with
+
+
+@dataclass(frozen=True)
+class DraftView:
+    draft: requires_draft.Draft
+    rows: list[DraftRow]  # what [requires] can hold: pip packages, python, java, hadoop
+    others: list[requires_draft.Candidate]  # software envcheck cannot check, shown only
+    model: str | None  # the model a run would ask, as the page names it; None: no model
+    tokens_k: int  # about how many thousand input tokens the lectures to do would send
+
+
+def draft_view(course: Course) -> DraftView:
+    """The stored answers, checked and merged, against [requires] as it is."""
+    found = requires_draft.draft(course.workspace.root)
+    current = course.workspace.requires
+    rows, others = [], []
+    for candidate in found.candidates:
+        if candidate.kind == "other":
+            others.append(candidate)
+            continue
+        listed = _listed(current, candidate.name)
+        if listed is None:
+            status = "new"
+        elif candidate.versions and not any(version_matches(v, current[listed])
+                                            for v in candidate.versions):
+            status = "listed, other version"
+        else:
+            status = "listed"
+        version = (prefix(candidate.kind, candidate.versions[0]) if candidate.versions
+                   else current.get(listed, "") if listed else "")
+        rows.append(DraftRow(candidate, status, version))
+    # About 4 characters a token for English slides; the instructions add under a thousand.
+    tokens = sum(chars for _, chars in found.todo) // 4
+    return DraftView(found, rows, others, setup_model(course), round(tokens / 1000))
+
+
+def prefix(kind: str, version: str) -> str:
+    """What the version box starts with: a slide's "3.5.1" as 3.5, any 3.5.x, since pinning
+    the patch release is rarely meant; Java by its major version only. The slide's own
+    version stays in view next to the box."""
+    parts = version.split(".")
+    return ".".join(parts[:1] if kind == "java" else parts[:2])
+
+
+def setup_model(course: Course) -> str | None:
+    """The model a draft would ask (requires_draft.model's choice), as a page names it;
+    None when the course has no models, as the page then cannot tell whether a run
+    could ask any (the LLM_* variables of .env, which the GUI does not read)."""
+    llm = _data(course).get("llm", {})
+    if not llm:
+        return None
+    named = llm.get("roles", {})
+    role = next((r for r in (*requires_draft.ROLES, "generate") if named.get(r)), None)
+    data = llm.get("profiles", {}).get(named[role]) if role else None
+    if not isinstance(data, dict):
+        return None
+    return (f"{named[role]} ({data.get('provider', '?')}: "
+            f"{data.get('model') or data.get('provider')}), the {role} model")
+
+
+def draft_command() -> list[str]:
+    return [sys.executable, "-m", "tutor.materials.requires"]
+
+
+def accept(course: Course, chosen: dict[str, str]) -> list[str]:
+    """Add the ticked candidates ({name: version as typed}) to [requires], or replace the
+    version of one listed already, by the same rules as the table's rows."""
+    if not chosen:
+        return ["Tick the entries to add first."]
+    table = dict(course.workspace.requires)
+    for name, version in chosen.items():
+        table[_listed(table, name) or name] = version
+    checked, problems = check_requires(list(table), list(table.values()), runner(course))
+    return problems or save_requires(course, checked)
+
+
+def _listed(table: dict[str, str], name: str) -> str | None:
+    """The key [requires] holds `name` under (pip ignores case and -_.), or None."""
+    key = requires_draft.pip_key(name)
+    return next((n for n in table if requires_draft.pip_key(n) == key), None)
 
 
 def _run_in_venv(course: Course, python: Path, args: list[str], run: Callable):

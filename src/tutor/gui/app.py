@@ -134,6 +134,8 @@ NOTICES = {
                            "Validation and generation started from now on use it."),
     "no-venv": ("bad", "This course has no .venv yet: install into .venv first."),
     "cannot-build": ("bad", "[requires] has no image recipe: see the test image part below."),
+    "no-setup-model": ("bad", "Nothing was started: this course has no model for it. Choose "
+                              "one for the setup, plan or generate role on the Models page."),
 }
 RECENT_TASKS = 5
 UPLOAD_LIMIT_BYTES = 500 * 1024 * 1024  # one upload request, all its files together
@@ -685,12 +687,15 @@ def create_app(root: Path, token: str, port: int | None = None,
     # --- environment (step 7a): [requires], where tests run, the venv and the image ----------
 
     def environment_page(course: courses.Course, problems: list[str], code: int = 200,
-                         rows: list[tuple[str, str]] | None = None):
-        """`rows`: a refused [requires] form's rows, shown back as typed."""
+                         rows: list[tuple[str, str]] | None = None,
+                         chosen: dict[str, str] | None = None):
+        """`rows`: a refused [requires] form's rows, `chosen`: a refused draft form's ticked
+        entries and their versions; both shown back as typed."""
         if rows is None:
             rows = list(course.workspace.requires.items())
         return render_template("environment.html", course=course, problems=problems,
                                rows=rows or [("", "")], kind=environment.kind,
+                               draft=environment.draft_view(course), chosen=chosen or {},
                                not_pip=environment.NOT_PIP, runner=environment.runner(course),
                                has_venv=environment.venv_python(course).exists(),
                                install=environment.install_shown(course),
@@ -733,6 +738,30 @@ def create_app(root: Path, token: str, port: int | None = None,
         if problems:
             typed = [(n, v) for n, v in zip(names, versions, strict=False) if n or v]
             return environment_page(course, problems, 400, typed)
+        return redirect(url_for("environment_view", name=name) + "?notice=requires-saved",
+                        code=303)
+
+    @app.post("/c/<name>/environment/draft")
+    def draft_requires(name: str):
+        """A model looks for the software in each lecture not asked yet (it may cost money,
+        so only on this click); its answers wait on the page for the owner's ticks."""
+        course = course_or_404(name)
+        if environment.setup_model(course) is None:
+            return redirect(url_for("environment_view", name=name) + "?notice=no-setup-model",
+                            code=303)
+        return start_task(course, "Find requirements in the lectures",
+                          [environment.draft_command()], meta={"kind": "requires-draft"})
+
+    @app.post("/c/<name>/environment/accept")
+    def accept_requires(name: str):
+        """Add the ticked candidates to [requires]; only names the draft holds."""
+        course = course_or_404(name)
+        known = {row.candidate.name for row in environment.draft_view(course).rows}
+        chosen = {n: request.form.get(f"version:{n}", "").strip()
+                  for n in request.form.getlist("accept") if n in known}
+        problems = environment.accept(course, chosen)
+        if problems:
+            return environment_page(course, problems, 400, chosen=chosen)
         return redirect(url_for("environment_view", name=name) + "?notice=requires-saved",
                         code=303)
 

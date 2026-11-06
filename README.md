@@ -259,9 +259,10 @@ mrjob = "0.7"
 
 To manage your courses in the browser (progress, questions, open an exercise in VS Code,
 validate a batch in the background, upload and read lectures, create a course, choose its
-models and keep your API keys, check its environment, edit `[requires]`, choose where tests
-run, install its Python packages and build its test image, plan a new batch and approve its
-plan; generating also needs the `gen` extra):
+models and keep your API keys, check its environment, edit `[requires]` or have a model
+draft it from the lectures (each entry with the slide that shows it, added only when you
+tick it), choose where tests run, install its Python packages and build its test image, plan
+a new batch and approve its plan; generating also needs the `gen` extra):
 
 ```bash
 pip install -e ".[gui]"
@@ -335,7 +336,8 @@ src/tutor/
   llm.py           a small client for OpenAI-compatible APIs (LM Studio, GLM, OpenAI,
                    DeepSeek): roles -> profiles, structured output, streaming, call log
   materials/       course PDFs -> a per-page markdown cache, image slides via a vision model;
-                   `python -m tutor.materials`
+                   `python -m tutor.materials`; `python -m tutor.materials.requires` drafts
+                   [requires] from the cached lectures
   graph/           phase 3 generation with LangGraph: plan -> owner approves -> generate,
                    oracle by a second model, validate, repair, per exercise in parallel;
                    `python -m tutor.graph`

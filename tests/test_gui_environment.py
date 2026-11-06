@@ -13,8 +13,10 @@ import pytest
 pytest.importorskip("flask")  # the `gui` extra
 
 from tutor import workspace  # noqa: E402
-from tutor.gui import courses, environment, tasks  # noqa: E402
+from tutor.gui import courses, environment, llm_settings, tasks  # noqa: E402
 from tutor.gui.app import create_app  # noqa: E402
+from tutor.materials import cache  # noqa: E402
+from tutor.materials import requires as requires_draft  # noqa: E402
 
 TOKEN = "test-token"
 BASE = "http://127.0.0.1:5000"
@@ -366,6 +368,132 @@ def test_build_needs_the_venv_and_docker_then_runs_in_the_venv(root, course, sta
     response = post(client, "/c/demo-course/environment/build")
     assert response.status_code == 303
     assert started[0]["commands"] == [[str(python), "-m", "tutor.container", "build"]]
+
+
+# --- step 7b: the model's draft --------------------------------------------------------------
+
+
+def _lecture(course, name="L1.pdf"):
+    """A cached lecture (made-up text) and the stored answer of a model for it."""
+    entries = [cache.Entry(1, None, "text", "h1", "import cv2\npip install pyspark==3.5.1"),
+               cache.Entry(2, None, "text", "h2", "Install MySQL 8 for the lab.")]
+    path = course.workspace.root / "cache" / "lectures" / f"{name}.md"
+    _write(path, cache.render(name, entries))
+    return path, {e.number: e for e in entries}
+
+
+def _answer(course, path, entries, found):
+    out = requires_draft.result_path(course.workspace.root, path)
+    _write(out, json.dumps({"hash": requires_draft.lecture_hash(entries),
+                            "model": "local: m", "found": found}))
+
+
+FOUND = [
+    {"kind": "pip", "name": "pyspark", "version": "3.5", "page": 1,
+     "quote": "pip install pyspark==3.5.1"},
+    {"kind": "pip", "name": "opencv-python", "import_name": "cv2", "page": 1,
+     "quote": "import cv2"},
+    {"kind": "other", "name": "MySQL", "version": "8", "page": 2,
+     "quote": "Install MySQL 8 for the lab."},
+    {"kind": "pip", "name": "numpy", "page": 2, "quote": "import numpy"},  # made up
+]
+
+
+def test_without_read_lectures_the_draft_points_to_the_lectures_page(root):
+    text = _browser(root).get("/c/demo-course/environment/", base_url=BASE).get_data(
+        as_text=True)
+    assert "No lecture is read yet" in text and "/c/demo-course/lectures/" in text
+
+
+def test_a_lecture_not_asked_yet_offers_the_run_naming_model_and_size(root, course,
+                                                                      started):
+    _write(course.workspace.root / "workspace.toml",
+           'course = "demo"\n[requires]\npython = "3.11"\n'
+           '[llm.profiles.cheap]\nprovider = "glm"\nmodel = "glm-5.3-flash"\n'
+           '[llm.roles]\nplan = "cheap"\n')
+    _lecture(course)
+    client = _browser(root)
+
+    text = client.get("/c/demo-course/environment/", base_url=BASE).get_data(as_text=True)
+    assert "1 lecture not looked at yet" in text
+    assert "cheap (glm: glm-5.3-flash), the plan model" in text
+    assert "/c/demo-course/environment/draft" in text
+
+    response = post(client, "/c/demo-course/environment/draft")
+    assert response.status_code == 303
+    assert started[0]["commands"] == [environment.draft_command()]
+
+
+def test_the_draft_shows_checked_candidates_with_their_sources(root, course):
+    path, entries = _lecture(course)
+    _answer(course, path, entries, FOUND)
+
+    text = _browser(root).get("/c/demo-course/environment/", base_url=BASE).get_data(
+        as_text=True)
+
+    assert 'name="accept" value="pyspark"' in text and 'value="3.5"' in text
+    assert 'name="accept" value="opencv-python"' in text and "chip-name-from-the-model" in text
+    assert "chip-listed" in text  # pyspark is in [requires] already, at 3.5
+    assert "Also named, not checked here" in text and "MySQL" in text
+    assert "1 entry dropped by the checks" in text and "not on page 2" in text
+    assert "pip install pyspark==3.5.1" in text  # the quote, as a source
+
+
+def test_ticked_candidates_are_added_and_a_missing_version_is_asked_for(root, course):
+    path, entries = _lecture(course)
+    _answer(course, path, entries, FOUND)
+    client = _browser(root)
+
+    refused = post(client, "/c/demo-course/environment/accept",
+                   {"accept": ["opencv-python"], "version:opencv-python": ""})
+    text = refused.get_data(as_text=True)
+    assert refused.status_code == 400 and "give a version prefix" in text
+    assert 'value="opencv-python" aria-label="Add opencv-python" checked' in text
+    assert _toml(course) == TOML
+
+    response = post(client, "/c/demo-course/environment/accept",
+                    {"accept": ["opencv-python", "not-in-the-draft"],
+                     "version:opencv-python": "4", "version:not-in-the-draft": "1"})
+    assert response.status_code == 303
+    assert tomllib.loads(_toml(course))["requires"] == {
+        "python": "3.11", "java": "17", "pyspark": "3.5", "opencv-python": "4"}
+
+
+def test_a_course_without_models_gets_no_run_and_says_where_to_choose(root, course, started):
+    """The GUI does not read .env, so it cannot tell whether LLM_* would answer."""
+    _write(course.workspace.root / "workspace.toml", 'course = "demo"\n')
+    _lecture(course)
+    client = _browser(root)
+
+    text = client.get("/c/demo-course/environment/", base_url=BASE).get_data(as_text=True)
+    assert "No model is set for it" in text and "/environment/draft" not in text
+    response = post(client, "/c/demo-course/environment/draft")
+    assert "notice=no-setup-model" in response.location and started == []
+
+
+def test_a_stated_patch_release_starts_the_box_at_major_minor(root, course):
+    path, entries = _lecture(course)
+    _answer(course, path, entries, [{"kind": "pip", "name": "pyspark", "version": "3.5.1",
+                                     "page": 1, "quote": "pip install pyspark==3.5.1"}])
+    text = _browser(root).get("/c/demo-course/environment/", base_url=BASE).get_data(
+        as_text=True)
+    assert 'name="version:pyspark" value="3.5"' in text and "the slides say 3.5.1" in text
+    assert "chip-listed" in text and "chip-listed-other-version" not in text  # 3.5 fits
+    assert environment.prefix("java", "17.0.2") == "17"
+
+
+def test_nothing_ticked_writes_nothing(root, course):
+    path, entries = _lecture(course)
+    _answer(course, path, entries, FOUND)
+    response = post(_browser(root), "/c/demo-course/environment/accept", {})
+    assert response.status_code == 400 and _toml(course) == TOML
+
+
+def test_the_models_page_offers_the_setup_role(root, course):
+    _write(course.workspace.root / "workspace.toml",
+           'course = "demo"\n[llm.profiles.cheap]\nprovider = "glm"\nmodel = "m"\n')
+    text = _browser(root).get("/c/demo-course/models/", base_url=BASE).get_data(as_text=True)
+    assert "<strong>setup</strong>" in text and "setup" in llm_settings.ROLES
 
 
 def test_actions_need_this_servers_origin(root, course):

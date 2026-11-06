@@ -165,7 +165,7 @@ smartCodingReview/                       # public repo (the `tutor/` above), cod
 │   ├── attempts.py                      # P2a pytest plugin: one attempts.jsonl line per exercise run
 │   ├── schema.py                        # P2 Pydantic models of metadata.json / manifest.json (rule 0),
 │   │                                    #   P3 parses LLM output into the same models
-│   ├── materials/                       # P3a course files -> per-file md cache (pypdfium2), vision pages
+│   ├── materials/                       # P3a course files -> per-file md cache (pypdfium2), vision pages; [requires] draft
 │   ├── llm.py                           # P3a thin OpenAI-compatible client, standard library only, no LangChain
 │   ├── graph/                           # P3 langgraph dependency added here
 │   ├── retrieval/                       # P4 the page corpus, labels, scores and each route
@@ -2708,8 +2708,7 @@ late; the adaptive review screens can be built with it.
   (4) generation: lectures, preferences, approving the plan in the page (it was expected to
   touch `graph/__main__.py`; it did not, see below); (5) uploading lectures and a new
   course; (6) settings: models and keys; (7) the environment page, split (owner, 2026-11-06)
-  into 7a, without a model, and 7b, a model drafting `[requires]`. Steps 1 to 6 and 7a are
-  built.
+  into 7a, without a model, and 7b, a model drafting `[requires]`. Steps 1 to 7 are built.
 - Courses (owner, 2026-11-06): every folder under one root that holds a `workspace.toml`, as
   `tutor.workspace init` lays them out; the root is `--root`, else the folder above
   `WORKSPACE_DIR`. Each is checked like any workspace (refused inside a git repository). A
@@ -2934,9 +2933,42 @@ late; the adaptive review screens can be built with it.
     - Checked by a click in Chrome on a scratch course: a row added, host refused without
       the tick, container saved, the install (2 s) and the build (8 s, cached layers, 0.18
       GB) run as tasks, the check then ok; the three real courses only opened.
-  - 7b, next: a model drafts `[requires]` from the lectures, each entry with its source
-    (lecture, page, quoted text); a quote that is not in that page's cached text is dropped,
-    and the rest become rows the owner accepts one by one in 7a's table.
+  - Built in step 7b (owner, 2026-11-06): a model drafts `[requires]` from the lectures
+    (`python -m tutor.materials.requires`, a task from the page's button, which names the
+    model and the input tokens; only on that click, as it may cost money).
+    - The model: the new `setup` role's, else `plan`'s, else `generate`'s, so nothing new has
+      to be set up. One request per cached lecture, the fixed instructions first (for the
+      provider's prompt cache) and the lecture after; thinking off; a JSON schema: kind
+      (pip, python, java, hadoop, other), pip name, module imported, version only if the
+      page states one, page, and the page's own words that show it.
+    - The answer is stored as given, `cache/requires/<lecture>.json`, keyed by the lecture's
+      text and the prompt version: a lecture is asked once, and again only when it changes.
+      The checks run each time the draft is read, so a better check needs no new call:
+      the quote must be on its page (spaces aside) and name the software (the pip name or
+      the module, as a whole word: "six" is not in "sixty"; "other" more loosely, as it is
+      only shown); the standard library goes (`sys.stdlib_module_names`); versions keep
+      their dotted numbers ("3.5.x" is 3.5, Java "1.8" is 8, as envcheck reads it).
+    - A pip name its quotes do not show (`import cv2` for opencv-python) is the model's
+      knowledge, flagged "name from the model", with its PyPI link: a made-up name can be
+      one somebody registered. One piece of software across lectures is one candidate with
+      every source; versions stated differently are all shown.
+    - The page lists candidates with a tick, a version box, what [requires] holds now (new,
+      listed, listed with another version) and the sources; nothing is written until the
+      owner ticks entries and adds them, by 7a's rules (a pyspark without java is refused).
+      The box starts at the stated version's major.minor (3.5.1 as 3.5; Java its major),
+      the slide's own beside it. Software envcheck cannot check (a database, CUDA) is only
+      listed. `[safety] allow_imports` is not drafted: widening the static check is a safety
+      decision, and the page says a package exercises import must be added there by hand.
+    - A course without models gets no button: the GUI does not read `.env`, so it cannot tell
+      whether the LLM_* variables would answer.
+    - Measured on the private deep learning course, with GLM-5.3-Flash (free): 16 lectures,
+      157k tokens in and 715 out, 10 candidates, one dropped (a plural, before "other"
+      matched loosely). It found torch, numpy and scikit-learn with the versions the slides
+      state (scikit-learn from `sklearn`, so flagged), pandas, torchvision and a newer
+      Python than the course's [requires], which held only python; matplotlib, which the
+      course's venv holds, is in no slide. Nothing was added: that is the owner's click. The
+      page was checked by a click in Chrome on a scratch course, its run button with a
+      stand-in command.
   - Infer requirements from course material: an LLM reads lectures and labs for named tools
     and versions and drafts `[requires]`; the owner confirms before `workspace.toml` is
     written.
