@@ -1,10 +1,8 @@
 """A course's models (GUI step 6): the profiles and roles of its workspace.toml's [llm].
 
-The GUI writes workspace.toml here, and only its [llm] section. tomlkit keeps the rest of the
-file as the owner wrote it, comments included (owner, 2026-11-06); a value changed loses only
-its own line's comment. Every save is checked before the file is replaced: the result read
-back with tomllib must have exactly the [llm] intended, worked out from the old data and not
-from tomlkit, and every other table unchanged. The file before is kept as workspace.toml.bak.
+The GUI writes workspace.toml here, and only its [llm] section, through toml_edit: tomlkit
+keeps the rest of the file as the owner wrote it, and every save is checked against the
+[llm] intended, worked out here from the old data, before the file is replaced.
 
 Profiles are checked by llm.py's own rules (no key in the file, known fields, a model, a
 base URL where the provider has none), roles by the rule generation enforces: the oracle
@@ -15,9 +13,7 @@ comes from another provider than the models that write and repair the exercise. 
 from __future__ import annotations
 
 import copy
-import os
 import re
-import secrets
 import sys
 import tomllib
 from collections.abc import Callable
@@ -27,8 +23,10 @@ import tomlkit
 
 from tutor import llm
 from tutor.config import WORKSPACE_FILE
-from tutor.gui import keys
+from tutor.gui import keys, toml_edit
 from tutor.gui.courses import Course
+from tutor.gui.toml_edit import put as _put
+from tutor.gui.toml_edit import spaced as _spaced
 
 # The roles a page offers, grouped by what they are for, with what each does.
 ROLE_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
@@ -270,48 +268,7 @@ def _tables(doc):
     return section["profiles"], section["roles"]
 
 
-def _spaced(table):
-    """A new table ending in a blank line, so the header after it is not run into it."""
-    table.add(tomlkit.nl())
-    return table
-
-
-def _put(table, key: str, value) -> None:
-    """table[key] = value; a new key goes right after the table's last key, not after the
-    comments and blank lines that end the table, which belong to what follows it. That
-    uses tomlkit's Container._insert_after (pinned below 1.0, and a test shows it holds);
-    without it, plain assignment, which is only less tidy."""
-    if key in table:
-        table[key] = value
-        return
-    last = [k for k, _ in table.value.body if k is not None]
-    try:
-        table.value._insert_after(last[-1], key, value)
-    except (AttributeError, IndexError, KeyError):
-        table[key] = value
-
-
-def _bare(llm_section: dict) -> dict:
-    """[llm] without empty tables: an empty [llm.roles] may be written out or not."""
-    return {k: v for k, v in llm_section.items() if v != {}}
-
-
 def _edit(course: Course, change: Callable, expected: dict) -> list[str]:
-    """Apply `change` to the file with tomlkit, check the result, keep a backup, replace."""
-    path = course.workspace.root / WORKSPACE_FILE
-    text = path.read_text(encoding="utf-8")
-    doc = tomlkit.parse(text)
-    change(doc)
-    new = tomlkit.dumps(doc)
-    before, after = tomllib.loads(text), tomllib.loads(new)
-    if _bare(after.get("llm", {})) != _bare(expected) or {
-            k: v for k, v in after.items() if k != "llm"} != {
-            k: v for k, v in before.items() if k != "llm"}:
-        return ["workspace.toml could not be changed safely, so it was left as it was. "
-                "Edit it by hand, or report this."]
-    path.with_name(WORKSPACE_FILE + ".bak").write_text(text, encoding="utf-8")
-    tmp = path.with_name(f".{WORKSPACE_FILE}.{secrets.token_hex(4)}.tmp")
-    tmp.write_text(new, encoding="utf-8", newline="")
-    os.replace(tmp, path)
-    return []
+    """Write [llm] through toml_edit, which checks the result before replacing the file."""
+    return toml_edit.edit(course.workspace.root, "llm", change, expected)
 

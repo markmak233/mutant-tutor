@@ -12,7 +12,7 @@ pytest.importorskip("flask")  # the `gui` extra
 
 import tomlkit  # noqa: E402
 
-from tutor.gui import courses, keys, llm_settings, tasks  # noqa: E402
+from tutor.gui import courses, keys, llm_settings, tasks, toml_edit  # noqa: E402
 from tutor.gui.app import create_app  # noqa: E402
 
 TOKEN = "test-token"
@@ -295,10 +295,10 @@ def test_a_change_that_would_touch_another_table_is_not_written(course, monkeypa
 
 
 def test_a_new_key_goes_after_the_tables_last_key_not_its_trailing_comment():
-    """Pins tomlkit's Container._insert_after, which llm_settings._put relies on."""
+    """Pins tomlkit's Container._insert_after, which toml_edit.put relies on."""
     doc = tomlkit.parse('[llm.roles]\nvision = "a"  # x\n\n# about the next table\n[next]\n')
 
-    llm_settings._put(doc["llm"]["roles"], "oracle", "b")
+    toml_edit.put(doc["llm"]["roles"], "oracle", "b")
 
     assert tomlkit.dumps(doc) == ('[llm.roles]\nvision = "a"  # x\noracle = "b"\n\n'
                                   '# about the next table\n[next]\n')

@@ -40,6 +40,11 @@ the problems listed, each naming the file it is about.
 Settings (step 6): the Keys page writes `.env` (keys.py), and a course's Models page its
 workspace.toml's [llm] (llm_settings.py). A key is never sent back to the browser: a page
 shows its last 4 characters, and a refused key is not put back in the form.
+
+Environment (step 7a): a course's Environment page checks this machine against [requires]
+with the course's venv, edits [requires] and [isolation], and starts the two installs the
+GUI may run, Python packages into the course's .venv and the test image (environment.py).
+The checks that ask a process or Docker load into the page with htmx, so it opens at once.
 """
 
 from __future__ import annotations
@@ -54,7 +59,17 @@ from flask import Flask, abort, make_response, redirect, render_template, reques
 
 from tutor import llm
 from tutor.eval import report
-from tutor.gui import courses, generation, keys, launch, lectures, llm_settings, rendering, tasks
+from tutor.gui import (
+    courses,
+    environment,
+    generation,
+    keys,
+    launch,
+    lectures,
+    llm_settings,
+    rendering,
+    tasks,
+)
 
 COOKIE = "tutor_token"
 _HEADERS = {
@@ -104,14 +119,21 @@ NOTICES = {
                                "[llm.roles] in workspace.toml."),
     # Before a task that runs tests: nothing was started (courses.container_problem).
     "docker-missing": ("bad", "Nothing was started: Docker is not installed (no `docker` "
-                              "command). This course runs its tests in a container: install "
-                              "Docker Desktop (docker.com), start it, then try again."),
+                              "command), and tests in a container need it. Install Docker "
+                              "Desktop (docker.com), start it, then try again."),
     "docker-stopped": ("bad", "Nothing was started: Docker Desktop is not running, or not "
                               "answering. Start it, wait until it says it is running, then try "
                               "again."),
     "image-missing": ("bad", "Nothing was started: this course's test image is missing or out "
-                             "of date. Build it with `python -m tutor.container build` from "
-                             "the course folder, then try again."),
+                             "of date. Build it on the course's Environment page, then try "
+                             "again."),
+    "requires-saved": ("ok", "[requires] saved in workspace.toml (the file before is "
+                             "workspace.toml.bak). Install into .venv, and build the image if "
+                             "tests run in the container, so both match it."),
+    "runner-saved": ("ok", "Saved in workspace.toml (the file before is workspace.toml.bak). "
+                           "Validation and generation started from now on use it."),
+    "no-venv": ("bad", "This course has no .venv yet: install into .venv first."),
+    "cannot-build": ("bad", "[requires] has no image recipe: see the test image part below."),
 }
 RECENT_TASKS = 5
 UPLOAD_LIMIT_BYTES = 500 * 1024 * 1024  # one upload request, all its files together
@@ -659,5 +681,89 @@ def create_app(root: Path, token: str, port: int | None = None,
         title = f"Check {wanted}" if wanted else "Check the models"
         return start_task(course, title, [llm_settings.check_command(names)],
                           meta={"kind": "check"})
+
+    # --- environment (step 7a): [requires], where tests run, the venv and the image ----------
+
+    def environment_page(course: courses.Course, problems: list[str], code: int = 200,
+                         rows: list[tuple[str, str]] | None = None):
+        """`rows`: a refused [requires] form's rows, shown back as typed."""
+        if rows is None:
+            rows = list(course.workspace.requires.items())
+        return render_template("environment.html", course=course, problems=problems,
+                               rows=rows or [("", "")], kind=environment.kind,
+                               not_pip=environment.NOT_PIP, runner=environment.runner(course),
+                               has_venv=environment.venv_python(course).exists(),
+                               install=environment.install_shown(course),
+                               running=tasks.running(course.workspace.root)), code
+
+    @app.get("/c/<name>/environment/")
+    def environment_view(name: str):
+        return environment_page(course_or_404(name), [])
+
+    @app.get("/c/<name>/environment/requires-row")
+    def requires_row(name: str):
+        """A blank [requires] row for "+ Add a row"; "−" asks for it too and drops the reply,
+        as htmx needs a request before a swap. It reads and writes nothing."""
+        return render_template("_requires_row.html", course=course_or_404(name), name="",
+                               version="", kind=environment.kind, not_pip=environment.NOT_PIP)
+
+    @app.get("/c/<name>/environment/check")
+    def environment_check(name: str):
+        """The part htmx loads: envcheck in the course's venv (a process, 0.2 s warm)."""
+        course = course_or_404(name)
+        return render_template("_env_check.html", course=course,
+                               check=environment.check(course), kind=environment.kind)
+
+    @app.get("/c/<name>/environment/docker")
+    def environment_docker(name: str):
+        """The part htmx loads: Docker may take seconds to answer while its VM wakes."""
+        course = course_or_404(name)
+        return render_template("_env_docker.html", course=course,
+                               view=environment.docker_view(course),
+                               scale=environment.IMAGE_SCALE)
+
+    @app.post("/c/<name>/environment/requires")
+    def save_requires(name: str):
+        course = course_or_404(name)
+        names, versions = request.form.getlist("name"), request.form.getlist("version")
+        table, problems = environment.check_requires(names, versions,
+                                                     environment.runner(course))
+        if table is not None:
+            problems = environment.save_requires(course, table)
+        if problems:
+            typed = [(n, v) for n, v in zip(names, versions, strict=False) if n or v]
+            return environment_page(course, problems, 400, typed)
+        return redirect(url_for("environment_view", name=name) + "?notice=requires-saved",
+                        code=303)
+
+    @app.post("/c/<name>/environment/runner")
+    def save_runner(name: str):
+        course = course_or_404(name)
+        problems = environment.save_runner(course, request.form.get("runner", ""),
+                                           request.form.get("understood") == "on")
+        if problems:
+            return environment_page(course, problems, 400)
+        return redirect(url_for("environment_view", name=name) + "?notice=runner-saved",
+                        code=303)
+
+    @app.post("/c/<name>/environment/install")
+    def install_packages(name: str):
+        """`tutor.workspace init` again: the .venv if missing, this package, [requires]."""
+        course = course_or_404(name)
+        return start_task(course, "Install into .venv", [environment.install_command(course)],
+                          meta={"kind": "install"})
+
+    @app.post("/c/<name>/environment/build")
+    def build_image(name: str):
+        """`tutor.container build` with the course's venv; Docker is asked first."""
+        course = course_or_404(name)
+        back = url_for("environment_view", name=name)
+        if not environment.venv_python(course).exists():
+            return redirect(f"{back}?notice=no-venv", code=303)
+        view = environment.docker_view(course)
+        if view.state in ("cannot-build", "docker-missing", "docker-stopped"):
+            return redirect(f"{back}?notice={view.state}", code=303)
+        return start_task(course, "Build the test image", [environment.build_command(course)],
+                          meta={"kind": "build"})
 
     return app

@@ -14,6 +14,7 @@ from tutor.container import (
     docker_problem,
     dockerfile,
     image_name,
+    image_size,
     image_status,
     limits,
     main,
@@ -200,6 +201,37 @@ def test_the_command_reports_a_bad_workspace_and_exits_1(monkeypatch, capsys, tm
     monkeypatch.delenv("WORKSPACE_DIR", raising=False)
     assert main(["status"]) == 1
     assert "WORKSPACE_DIR" in capsys.readouterr().err
+
+
+def test_the_recipe_command_prints_what_a_build_would_send(monkeypatch, capsys, tmp_path):
+    """The GUI shows this before its Build button, run with the course's own venv."""
+    (tmp_path / "workspace.toml").write_text('course = "demo"\n[requires]\npython = "3.11"\n',
+                                             encoding="utf-8")
+    monkeypatch.chdir(tmp_path)  # no .env here
+    monkeypatch.setenv("WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.setattr("tutor.container._installed_version",
+                        {"pytest": "9.1.1"}.get)
+
+    assert main(["recipe"]) == 0
+
+    out = capsys.readouterr().out
+    assert out.startswith(f"# {image_name('demo', PLAIN_COURSE)}\nFROM python:3.11-slim")
+    assert "pytest==9.1.1" in out  # this interpreter's version, as a build pins it
+
+
+def test_image_size_reads_docker_and_says_none_when_missing():
+    class Sized(FakeDocker):
+        def __call__(self, command, **kwargs):
+            done = super().__call__(command, **kwargs)
+            return subprocess.CompletedProcess(command, done.returncode, "1729000000\n", "")
+
+    assert image_size("tutor-run-demo:abc", Sized()) == 1_729_000_000
+    assert image_size("tutor-run-demo:abc", Sized(fail={"image inspect"})) is None
+
+    def missing(*args, **kwargs):
+        raise FileNotFoundError("docker")
+
+    assert image_size("tutor-run-demo:abc", missing) is None
 
 
 def test_the_module_only_mounts_the_package_itself():

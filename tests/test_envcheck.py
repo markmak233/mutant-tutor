@@ -1,3 +1,4 @@
+import json
 import os
 import platform
 from pathlib import Path
@@ -8,8 +9,11 @@ from tutor.config import Workspace
 from tutor.envcheck import (
     check_winutils,
     check_workspace,
+    main,
     parse_hadoop_version,
     parse_java_version,
+    pip_requirements,
+    requires_problems,
     version_matches,
 )
 
@@ -62,11 +66,47 @@ def test_python_requirement_uses_running_interpreter():
 
 def test_missing_package_fails_with_install_hint():
     """Any other name is treated as a pip package. A missing one fails, and the hint names
-    the course's extra to install."""
+    the command that installs [requires] into the course's own venv."""
     [result] = check_workspace(make_ws({"no-such-package-xyz": "1.0"}))
     assert not result.ok
     assert result.found is None
-    assert '".[demo]"' in result.hint
+    assert "python -m tutor.workspace init /ws" in result.hint
+
+
+def test_pip_gets_each_package_as_the_prefix_envcheck_accepts():
+    requires = {"python": "3.11", "java": "17", "hadoop": "3.3", "pyspark": "3.5", "torch": "2"}
+    assert pip_requirements(requires) == ["pyspark==3.5.*", "torch==2.*"]
+
+
+@pytest.mark.parametrize("requires, says", [
+    ({"pyspark": "3.5"}, "needs a JVM"),
+    ({"java": "17; rm -rf /"}, "version prefix"),
+    ({"java": "17", "pyspark": ">=3.5"}, "version prefix"),
+    ({"bad name": "1"}, "not a package name"),
+    ({"-e": "1"}, "not a package name"),  # would be an option to pip
+])
+def test_a_requirement_that_could_change_a_command_is_refused(requires, says):
+    problems = requires_problems(requires)
+    assert len(problems) == 1 and says in problems[0]
+
+
+def test_a_plain_table_has_no_problems():
+    assert requires_problems({"python": "3.11", "java": "17", "pyspark": "3.5"}) == []
+
+
+def test_json_output_gives_each_result_with_ok(tmp_path, monkeypatch, capsys):
+    """The GUI reads this; it runs in the course's venv, so `python` says which one."""
+    (tmp_path / "workspace.toml").write_text(
+        'course = "demo"\n[requires]\nno-such-package-xyz = "1"\n', encoding="utf-8")
+    monkeypatch.chdir(tmp_path)  # no .env here
+    monkeypatch.setenv("WORKSPACE_DIR", str(tmp_path))
+
+    assert main(["--json"]) == 1
+
+    out = json.loads(capsys.readouterr().out)
+    assert out["course"] == "demo" and out["python"]
+    assert out["results"] == [{"name": "no-such-package-xyz", "required": "1", "found": None,
+                               "hint": out["results"][0]["hint"], "ok": False}]
 
 
 def test_java_without_java_home_fails(monkeypatch):

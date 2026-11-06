@@ -1,4 +1,5 @@
-"""The image a course's test runs execute in: `python -m tutor.container build` or `status`.
+"""The image a course's test runs execute in: `python -m tutor.container build`, `status`, or
+`recipe` (the Dockerfile a build would send, which the GUI shows before its Build button).
 
 Isolation layer B (docs/design.md, "Code execution safety"): the host orchestrates and a
 container only executes. This module holds what is specific to Docker: the image, made from
@@ -27,7 +28,7 @@ from importlib import metadata
 from pathlib import Path
 
 from tutor.config import WORKSPACE_FILE, Workspace, WorkspaceError, load_env, load_workspace
-from tutor.envcheck import version_matches
+from tutor.envcheck import NOT_PIP, requires_problems, version_matches
 
 IMAGE_PREFIX = "tutor-run-"
 BUILD_COMMAND = "python -m tutor.container build"
@@ -55,10 +56,6 @@ HADOOP_RELEASES = {
 HADOOP_MIRRORS = ("https://downloads.apache.org/hadoop/common",
                   "https://archive.apache.org/dist/hadoop/common")
 
-_VERSION = re.compile(r"^\d+(\.\d+)*$")
-_PACKAGE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
-_NOT_PIP = ("python", "java", "hadoop")  # the names that are not pip packages, as in envcheck
-_NEEDS_JAVA = ("pyspark", "hadoop")
 # Every image has these: the validator's rules run pytest, and oracle tests use hypothesis.
 _TEST_PACKAGES = ("pytest", "hypothesis")
 
@@ -120,7 +117,7 @@ def dockerfile(requires: Mapping[str, str], uid: int | None = None,
     packages = [_pip_spec(name, None, installed) for name in _TEST_PACKAGES
                 if name not in requires]
     packages += [_pip_spec(name, prefix, installed) for name, prefix in requires.items()
-                 if name not in _NOT_PIP]
+                 if name not in NOT_PIP]
     steps.append("RUN pip install --no-cache-dir " + " ".join(shlex.quote(p) for p in packages))
     # --no-log-init: useradd's log file grows with the uid, and a large one fills the disk.
     steps.append(f"RUN useradd --create-home --no-log-init --uid {_uid(uid)} runner")
@@ -135,24 +132,25 @@ def _uid(uid: int | None) -> int:
 
 def _check_requires(requires: Mapping[str, str]) -> None:
     """Refuse what would fail late, or change the recipe's meaning, inside a build. [requires]
-    is the owner's and generation never writes it, so this catches typing errors."""
-    for name, version in requires.items():
-        if not _PACKAGE.match(name):
-            raise ContainerError(f"[requires] {name!r} is not a package name")
-        if not _VERSION.match(version):
-            raise ContainerError(f"[requires] {name} = {version!r}: use a version prefix such as "
-                                 '"3.5"')
-    for name in _NEEDS_JAVA:
-        if name in requires and "java" not in requires:
-            raise ContainerError(f"[requires] has {name} but no java, and {name} needs a JVM")
+    is the owner's and generation never writes it, so this catches typing errors. The rules
+    are envcheck's, shared with the venv install and the GUI; a build adds a known Hadoop."""
+    if problems := requires_problems(requires):
+        raise ContainerError(problems[0])
+    if "hadoop" in requires:
+        hadoop_release(requires["hadoop"])
 
 
-def _hadoop_step(required: str) -> str:
+def hadoop_release(required: str) -> str:
+    """The newest release in HADOOP_RELEASES that fits, or ContainerError."""
     releases = [r for r in HADOOP_RELEASES if version_matches(r, required)]
     if not releases:
         raise ContainerError(f"[requires] hadoop = {required!r}: no known release. Known: "
                              f"{', '.join(HADOOP_RELEASES)} (container.HADOOP_RELEASES)")
-    release = releases[-1]
+    return releases[-1]
+
+
+def _hadoop_step(required: str) -> str:
+    release = hadoop_release(required)
     urls = " ".join(f"{mirror}/hadoop-{release}/hadoop-{release}.tar.gz"
                     for mirror in HADOOP_MIRRORS)
     # Python downloads, as the slim image has no curl. A failed mirror leaves no file, or a
@@ -318,6 +316,18 @@ def docker_problem(run: Callable = subprocess.run) -> str | None:
     return None
 
 
+def image_size(image: str, run: Callable = subprocess.run) -> int | None:
+    """The image's size in bytes, as Docker reports it; None when it is missing or Docker
+    does not answer. Call docker_problem first to tell those apart."""
+    try:
+        done = run(["docker", "image", "inspect", "--format", "{{.Size}}", image],
+                   capture_output=True, text=True, timeout=WAKE_TIMEOUT_S)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    size = done.stdout.strip()
+    return int(size) if done.returncode == 0 and size.isdigit() else None
+
+
 @dataclass(frozen=True)
 class ImageStatus:
     image: str
@@ -385,13 +395,18 @@ def _remove_older(image: str, run: Callable) -> None:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m tutor.container",
                                      description=__doc__.split("\n")[0])
-    parser.add_argument("command", choices=("build", "status"))
+    parser.add_argument("command", choices=("build", "status", "recipe"))
     args = parser.parse_args(argv)
     load_env()
     try:
         workspace = load_workspace()
         if args.command == "build":
             build(workspace)
+            return 0
+        if args.command == "recipe":
+            # What build would send, with this interpreter's versions; no Docker needed.
+            print(f"# {image_name(workspace.course, workspace.requires)}")
+            print(dockerfile(workspace.requires, installed=_installed_version), end="")
             return 0
         status = image_status(workspace)
     except (WorkspaceError, ContainerError) as e:

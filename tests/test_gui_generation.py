@@ -396,7 +396,7 @@ def test_no_plan_starts_without_docker_and_the_form_keeps_its_values(root, monke
     response = post(_browser(root), "/c/demo-course/new-batch", _form(prefs="keep me"))
     page = response.get_data(as_text=True)
 
-    assert response.status_code == 409 and "install Docker Desktop" in page
+    assert response.status_code == 409 and "Install Docker Desktop" in page
     assert "keep me" in page and 'value="w9-test"' in page
 
 

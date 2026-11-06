@@ -259,8 +259,9 @@ mrjob = "0.7"
 
 To manage your courses in the browser (progress, questions, open an exercise in VS Code,
 validate a batch in the background, upload and read lectures, create a course, choose its
-models and keep your API keys, plan a new batch and approve its plan; generating also needs
-the `gen` extra):
+models and keep your API keys, check its environment, edit `[requires]`, choose where tests
+run, install its Python packages and build its test image, plan a new batch and approve its
+plan; generating also needs the `gen` extra):
 
 ```bash
 pip install -e ".[gui]"
@@ -306,6 +307,10 @@ runner = "container"   # or "host"
   killed afterwards. That keeps runs apart from each other and from the workspace, but it is
   **not a sandbox**: the code runs with your user's permissions and can read or write other
   files and use the network. Use it only for exercises you wrote or reviewed.
+
+The GUI's Environment page sets this for a course, and builds its image after showing the
+recipe and what it downloads. `python -m tutor.workspace init DIR`, run again after changing
+`[requires]`, installs its pip packages into the course's own `.venv`.
 
 A course that has not chosen runs on the host and prints a warning. Your own `pytest` runs
 while solving stay on the host either way. The container is tested on macOS with Docker

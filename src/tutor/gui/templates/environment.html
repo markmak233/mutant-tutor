@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{# A course's environment (environment.py): the check of this machine and the test image
+   load with htmx after the page, since each asks a process or Docker. Every install is
+   shown in full before its button; system installs are the user's, in their terminal. #}
+{% from "_macros.html" import action, chip %}
+{% block title %}Environment · {{ course.workspace.course }}{% endblock %}
+{% block crumbs %}
+<a href="{{ url_for('course', name=course.folder) }}">{{ course.workspace.course }}</a>
+<span>Environment</span>
+{% endblock %}
+{% block content %}
+<h1>Environment</h1>
+<p class="muted">What this course's tests need, and whether this machine has it. This page installs only Python packages into the course's own <code>.venv</code>, and builds the test image. Java, Hadoop or another Python you install in your own terminal, then check again.</p>
+{% if running %}
+<p class="notice notice-bad">A task is running in this course:
+  <a href="{{ url_for('task', name=course.folder, task_id=running.id) }}">{{ running.title }}</a>.
+  Installing or building starts when it ends.</p>
+{% endif %}
+{% if problems %}
+<ul class="notice notice-bad form-problems">{% for line in problems %}<li>{{ line }}</li>{% endfor %}</ul>
+<p class="muted">Nothing was saved.</p>
+{% endif %}
+
+<h2>This machine</h2>
+<div id="env-check" hx-get="{{ url_for('environment_check', name=course.folder) }}" hx-trigger="load" hx-swap="outerHTML">
+  <p class="muted"><span class="spinner-inline" aria-hidden="true"></span>Checking with the course's <code>.venv</code> …</p>
+</div>
+
+<form method="post" action="{{ url_for('save_requires', name=course.folder) }}" class="form">
+  <h2>Requirements</h2>
+  <p class="muted"><code>[requires]</code> in workspace.toml. A version is a prefix: 3.5 means any 3.5.x. <code>python</code>, <code>java</code> and <code>hadoop</code> are checked on this machine; any other name is a pip package. Adding or removing rows changes nothing until you save.</p>
+  <table class="requires">
+    <thead><tr><th>Name</th><th>Version</th><th>What it is</th><th></th></tr></thead>
+    <tbody id="requires-rows">
+    {% for name, version in rows %}{% include "_requires_row.html" %}{% endfor %}
+    </tbody>
+  </table>
+  <div class="actions">
+    <button type="button" class="small" hx-get="{{ url_for('requires_row', name=course.folder) }}" hx-target="#requires-rows" hx-swap="beforeend">+ Add a row</button>
+    <button type="submit" class="primary">Save the requirements</button>
+  </div>
+</form>
+
+<h2>Python packages in <code>.venv</code></h2>
+<details class="review">
+  <summary>What "Install into .venv" runs</summary>
+  <dl>
+    <dt>Command</dt><dd><code>python -m tutor.workspace init {{ course.workspace.root }}</code>, which {% if not has_venv %}first creates <code>.venv</code>, then {% endif %}runs<br><code class="wrap">{{ install }}</code></dd>
+    <dt>What it does</dt><dd>Installs this tool and the pip packages in [requires] into the course's <code>.venv</code>; what is there already is left as it is.</dd>
+    <dt>Where</dt><dd>Only inside <code>{{ course.workspace.root }}/.venv</code>. Nothing outside the course folder changes: no PATH, no shell profile.</dd>
+    <dt>Admin rights</dt><dd>None (no sudo).</dd>
+    <dt>Downloads from</dt><dd>PyPI, through pip.</dd>
+    <dt>To undo</dt><dd><code>.venv/bin/python -m pip uninstall NAME</code> in the course folder, or delete <code>.venv</code> and install again.</dd>
+  </dl>
+</details>
+<div class="actions">{{ action(url_for('install_packages', name=course.folder), "Install into .venv", primary=True) }}</div>
+
+<form method="post" action="{{ url_for('save_runner', name=course.folder) }}" class="form">
+  <h2>Where tests run</h2>
+  <p class="muted">For validation and generation; your own test runs in the IDE stay on this machine. Now: {% if runner %}<strong>{{ runner }}</strong>{% else %}{{ chip("not chosen") }} (they run on this machine, with a warning){% endif %}.</p>
+  <label class="check"><input type="radio" name="runner" value="container"{% if runner == "container" %} checked{% endif %}>
+    <strong>In a container</strong> <span class="muted">every run in a fresh Docker container with no network and no access to your files; needs Docker and the test image below</span></label>
+  <label class="check"><input type="radio" name="runner" value="host"{% if runner == "host" %} checked{% endif %}>
+    <strong>On this machine</strong> <span class="muted">no Docker needed</span></label>
+  <label class="check warn"><input type="checkbox" name="understood">
+    I understand that on this machine, code a model generated runs with my rights: it can read and change my files.</label>
+  <div class="actions"><button type="submit" class="primary">Save</button></div>
+</form>
+
+<h2>Test image</h2>
+<div id="env-docker" hx-get="{{ url_for('environment_docker', name=course.folder) }}" hx-trigger="load" hx-swap="outerHTML">
+  <p class="muted"><span class="spinner-inline" aria-hidden="true"></span>Asking Docker …</p>
+</div>
+{% endblock %}

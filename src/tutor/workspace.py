@@ -6,7 +6,10 @@ with this package, and the VS Code files that activate it in the folder's termin
 
 Running it again fills in only what is missing: an existing file is kept, even a wrong one,
 as the owner may have edited it. Nothing outside the folder changes: no system package, no
-`~/.zshrc`. The only thing installed is Python packages into the folder's own .venv.
+`~/.zshrc`. The only thing installed is Python packages into the folder's own .venv: this
+package, and the pip packages workspace.toml's [requires] names (owner, 2026-11-06), so
+running it again after editing [requires] is how a course's venv catches up; the GUI's
+Environment page runs it for that.
 """
 
 from __future__ import annotations
@@ -15,11 +18,13 @@ import argparse
 import re
 import subprocess
 import sys
+import tomllib
 import venv
 from collections.abc import Callable
 from pathlib import Path
 
 from tutor.config import WORKSPACE_FILE, WorkspaceError, _enclosing_git_repo
+from tutor.envcheck import pip_requirements, requires_problems
 
 DEFAULT_EXTRAS = "gen,dev"  # generating exercises, and pytest + hypothesis to validate them
 REPO = Path(__file__).resolve().parents[2]
@@ -109,6 +114,7 @@ def init(root: Path, course: str | None = None, extras: str = DEFAULT_EXTRAS,
                              "outside it, so course material is never committed")
     if not (REPO / "pyproject.toml").is_file():
         raise WorkspaceError(f"no pyproject.toml in {REPO}: run this from a source checkout")
+    packages = pip_requirements(_requires(root))  # [] for a new course: python only
 
     steps: list[str] = []
 
@@ -141,14 +147,39 @@ def init(root: Path, course: str | None = None, extras: str = DEFAULT_EXTRAS,
         make_venv(venv_dir)
         step(f"created .venv (Python {version})")
     # Every time: pip does nothing if all is there, and this finishes an install that failed
-    # and adds extras named later.
-    say(f"installing tutor[{extras}] into .venv (a few minutes the first time) ...")
-    result = run([str(venv_python(venv_dir)), "-m", "pip", "install", "-q", "-e",
-                  f"{REPO}[{extras}]"], capture_output=True, text=True)
+    # and adds extras and [requires] packages named later. One pip call, so pip resolves this
+    # package's own dependencies and the course's together.
+    what = ", ".join([f"tutor[{extras}]", *packages])
+    say(f"installing {what} into .venv (a few minutes the first time) ...")
+    result = run(install_command(venv_dir, extras, packages), capture_output=True, text=True)
     if result.returncode != 0:
         raise WorkspaceError(f"pip install failed, run this again once fixed:\n{result.stderr}")
-    step(f"installed tutor[{extras}] into .venv")
+    step(f"installed {what} into .venv")
     return steps
+
+
+def install_command(venv_dir: Path, extras: str, packages: list[str]) -> list[str]:
+    """The pip command init runs; the GUI shows it before its Install button."""
+    return [str(venv_python(venv_dir)), "-m", "pip", "install", "-q", "-e", f"{REPO}[{extras}]",
+            *packages]
+
+
+def _requires(root: Path) -> dict[str, str]:
+    """[requires] of the folder's workspace.toml, checked; {} before there is one. Read
+    before anything is created, so a broken table changes nothing."""
+    path = root / WORKSPACE_FILE
+    try:
+        with path.open("rb") as f:
+            data = tomllib.load(f)
+    except FileNotFoundError:
+        return {}
+    except (OSError, tomllib.TOMLDecodeError) as e:
+        raise WorkspaceError(f"{path}: {e}") from e
+    # str(), as load_workspace does: a version written unquoted would load as a number.
+    requires = {name: str(version) for name, version in data.get("requires", {}).items()}
+    if problems := requires_problems(requires):
+        raise WorkspaceError(f"{path}: {problems[0]}; fix it, then run this again")
+    return requires
 
 
 def main(argv: list[str] | None = None) -> int:

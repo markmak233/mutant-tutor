@@ -283,9 +283,7 @@ def setup_gaps(course: Course, rows: list[LectureRow]) -> list[str]:
     runner = data.get("isolation", {}).get("runner")
     if runner is None:
         gaps.append("Where tests run is not chosen, so they run on this machine with a "
-                    "warning. For a container: `python -m tutor.container build`, then "
-                    "[isolation] runner = \"container\" in workspace.toml (README, \"Where "
-                    "exercise code runs\").")
+                    "warning: choose on the Environment page.")
     if not (course.workspace.root / "coverage.md").is_file():
         gaps.append("No coverage.md (optional): plans choose knowledge points from the "
                     "slides' titles alone, without knowing which are covered already.")

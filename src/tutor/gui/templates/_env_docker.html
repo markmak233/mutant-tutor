@@ -1,0 +1,36 @@
+{# The Environment page's test image, loaded by htmx (environment.docker_view). Build shows
+   its recipe and every download first; the recipe is ours, never a model's. #}
+{% from "_macros.html" import action, chip %}
+{% set labels = {"ready": "ready", "image-missing": "image missing or out of date",
+                 "docker-missing": "Docker not installed", "docker-stopped": "Docker not running",
+                 "cannot-build": "cannot be built"} %}
+<div id="env-docker">
+  <p>{{ chip(view.state, labels[view.state]) }}
+    {% if view.image %}<code>{{ view.image }}</code>{% endif %}
+    {% if view.size %}<span class="muted">{{ "%.2f" | format(view.size / 1e9) }} GB</span>{% endif %}</p>
+  {% if view.runner != "container" %}<p class="muted">Used only when tests run in a container (above).</p>{% endif %}
+  {% if view.state == "docker-missing" %}
+  <p class="notice notice-bad">No <code>docker</code> command on this machine. Install Docker Desktop (docker.com) yourself, start it, then check again.</p>
+  {% elif view.state == "docker-stopped" %}
+  <p class="notice notice-bad">{{ view.detail }}</p>
+  {% elif view.state == "cannot-build" %}
+  <p class="notice notice-bad">{{ view.detail }}</p>
+  {% endif %}
+  {% if view.state != "cannot-build" %}
+  <details class="review">
+    <summary>What "Build image" does</summary>
+    <dl>
+      <dt>What it does</dt><dd>Builds this course's image from the recipe below (<code>python -m tutor.container build</code>, with the course's <code>.venv</code>, so the image takes its package versions), checks [requires] inside it, then removes this course's older images.</dd>
+      <dt>Downloads</dt><dd><ul>{% for what, source in view.downloads %}<li>{{ what }} <span class="muted">from {{ source }}</span></li>{% endfor %}</ul></dd>
+      <dt>Size</dt><dd>For scale: {{ scale }}. The first build takes minutes; later ones reuse what has not changed.</dd>
+      <dt>Admin rights</dt><dd>None beyond Docker's own.</dd>
+      <dt>To undo</dt><dd><code>docker image rm {{ view.image }}</code></dd>
+      <dt>Recipe</dt><dd>{% if view.recipe %}<pre class="recipe">{{ view.recipe }}</pre>{% else %}Shown once the course has a <code>.venv</code>.{% endif %}</dd>
+    </dl>
+  </details>
+  {% endif %}
+  <div class="actions">
+    {% if view.recipe and view.state in ("image-missing", "ready") %}{{ action(url_for('build_image', name=course.folder), "Rebuild image" if view.state == "ready" else "Build image", primary=view.state != "ready") }}{% endif %}
+    <button type="button" class="small" hx-get="{{ url_for('environment_docker', name=course.folder) }}" hx-target="#env-docker" hx-swap="outerHTML">Check again</button>
+  </div>
+</div>

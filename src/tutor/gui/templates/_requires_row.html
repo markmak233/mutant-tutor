@@ -1,0 +1,10 @@
+{# One row of the Environment page's [requires] table: the page draws one per entry, and
+   "+ Add a row" fetches a blank one (requires_row) that htmx appends. "−" removes its row
+   with htmx's "delete" swap, which drops the target whatever the reply; nothing is written
+   until the form is saved. No script of ours. #}
+<tr>
+  <td><input type="text" name="name" value="{{ name }}" aria-label="Name" autocomplete="off" spellcheck="false"></td>
+  <td><input type="text" name="version" value="{{ version }}" aria-label="Version" autocomplete="off" spellcheck="false"></td>
+  <td class="muted">{% if name %}{{ kind(name) }}{% if name not in not_pip %} · <a href="https://pypi.org/project/{{ name }}/" rel="noreferrer noopener" target="_blank">check it on PyPI</a>{% endif %}{% endif %}</td>
+  <td class="row-remove"><button type="button" class="small" hx-get="{{ url_for('requires_row', name=course.folder) }}" hx-target="closest tr" hx-swap="delete" aria-label="Remove {{ name or 'this row' }}" title="Remove this row">−</button></td>
+</tr>

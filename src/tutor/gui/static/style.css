@@ -197,3 +197,30 @@ table.plan { margin: 1rem 0; }
 .form details summary { cursor: pointer; font-weight: 600; margin-bottom: 0.5rem; }
 .form details .field { margin-bottom: 0.75rem; }
 .chip-not-set { background: var(--bad-bg); color: var(--bad); }
+
+/* Environment (step 7a): the check, [requires], the installs and the test image */
+button.small {
+  font: inherit; font-size: 0.9em; padding: 0.3rem 0.7rem; border-radius: 6px; cursor: pointer;
+  border: 1px solid var(--line); background: var(--card); color: var(--fg);
+}
+button.small:hover { border-color: var(--accent); }
+.spinner-inline {
+  display: inline-block; width: 0.8rem; height: 0.8rem; margin-right: 0.4rem; vertical-align: -0.1rem;
+  border: 2px solid var(--track); border-top-color: var(--accent); border-radius: 50%;
+  animation: spin 0.9s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) { .spinner-inline { animation: none; } }
+table.requires input[type="text"] { width: 100%; }
+.form .check.warn { color: var(--bad); }
+.review { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 0.5rem 1rem; margin: 0.5rem 0; }
+.review summary { cursor: pointer; font-weight: 600; }
+.review dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.4rem 1rem; margin: 0.75rem 0 0.25rem; }
+.review dt { font-weight: 600; color: var(--muted); }
+.review dd { margin: 0; min-width: 0; }
+.review ul { margin: 0; padding-left: 1.1rem; }
+code.wrap { overflow-wrap: anywhere; }
+pre.recipe { margin: 0; padding: 0.6rem 0.8rem; background: var(--code-bg); border-radius: 6px; font-size: 0.85em; white-space: pre-wrap; overflow-wrap: anywhere; }
+.chip-ok, .chip-ready { background: var(--passed-bg); color: var(--passed); }
+.chip-missing, .chip-wrong-version, .chip-docker-missing, .chip-docker-stopped, .chip-cannot-build { background: var(--bad-bg); color: var(--bad); }
+.chip-image-missing, .chip-not-chosen { background: var(--started-bg); color: var(--started); }
+table.requires td.row-remove { width: 1%; white-space: nowrap; }

@@ -117,6 +117,41 @@ def test_running_again_keeps_the_venv_but_installs_again(tmp_path):
     assert fake.commands[-1][-1] == f"{REPO}[gen,dev,bigdata]"
 
 
+def test_the_requires_packages_go_into_the_venv_in_the_same_pip_call(tmp_path):
+    """Running init again after editing [requires] is how the venv catches up."""
+    root, fake = tmp_path / "ws", FakeInstall()
+    root.mkdir()
+    (root / "workspace.toml").write_text(
+        'course = "demo"\n[requires]\npython = "3.11"\njava = "17"\npyspark = "3.5"\n'
+        "torch = 2\n", encoding="utf-8")
+
+    steps = make(root, fake)
+
+    assert fake.commands[0][6:] == [f"{REPO}[gen,dev]", "pyspark==3.5.*", "torch==2.*"]
+    assert steps[-1] == "installed tutor[gen,dev], pyspark==3.5.*, torch==2.* into .venv"
+
+
+def test_a_new_course_installs_only_this_package(tmp_path):
+    fake = FakeInstall()
+    make(tmp_path / "ws", fake)
+    assert fake.commands[0][6:] == [f"{REPO}[gen,dev]"]
+
+
+@pytest.mark.parametrize("table", ['pyspark = "3.5"', 'pyspark = ">=3.5"', "[[broken"])
+def test_a_requires_table_that_cannot_be_installed_stops_before_anything_changes(tmp_path,
+                                                                                 table):
+    root, fake = tmp_path / "ws", FakeInstall()
+    root.mkdir()
+    (root / "workspace.toml").write_text(f'course = "demo"\n[requires]\n{table}\n',
+                                         encoding="utf-8")
+
+    with pytest.raises(WorkspaceError, match="workspace.toml"):
+        make(root, fake)
+
+    assert sorted(p.name for p in root.iterdir()) == ["workspace.toml"]
+    assert fake.commands == [] and fake.venvs == 0
+
+
 def test_a_failed_install_is_reported(tmp_path):
     with pytest.raises(WorkspaceError, match="no network"):
         make(tmp_path / "ws", FakeInstall(returncode=1))

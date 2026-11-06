@@ -46,7 +46,10 @@ container for isolation is fine; deploying the tool as a service is not.
   init` creates a course's own `.venv` and installs Python packages into it, and changes nothing outside
   the course's folder. The GUI may run that command and `python -m tutor.container build`, whose
   recipe is our code's (owner, 2026-11-06). System software is still only checked.
-- Installation: Python deps as per-course extras, `pip install -e ".[bigdata]"`; system deps (Java,
+- Installation: Python deps were per-course extras, `pip install -e ".[bigdata]"`; since each course
+  has its own venv, `python -m tutor.workspace init` installs `[requires]`'s pip packages into it
+  (`pyspark = "3.5"` as `pyspark==3.5.*`, the prefix envcheck accepts, in the same pip call as this
+  package; owner, 2026-11-06), and envcheck's hint names that command. System deps (Java,
   Hadoop) in a per-course guide `docs/setup/<course>.md`, linked from README (decided 2026-10-25:
   README stays course-agnostic, and each course's system deps and pitfalls differ; the guide
   marks which platforms were actually tested). No install script: setup is one-off, and when it breaks,
@@ -154,7 +157,7 @@ smartCodingReview/                       # public repo (the `tutor/` above), cod
 ├── src/tutor/
 │   ├── __init__.py
 │   ├── config.py                        # P1 reads WORKSPACE_DIR, derives subpaths
-│   ├── envcheck.py                      # P1 checks the workspace's [requires]
+│   ├── envcheck.py                      # P1 checks the workspace's [requires]; owns its rules
 │   ├── workspace.py                     # creates a course workspace: folder, .venv, terminal files
 │   ├── execution.py                     # P1 copy to temp dir -> subprocess pytest -> delete
 │   ├── validation/                      # P1 the checks; P2 rule 0, P3a the safety check (internals designed before coding)
@@ -2704,7 +2707,9 @@ late; the adaptive review screens can be built with it.
   folder"; (3) long tasks: a CLI command as a child process, its log polled (htmx comes here);
   (4) generation: lectures, preferences, approving the plan in the page (it was expected to
   touch `graph/__main__.py`; it did not, see below); (5) uploading lectures and a new
-  course; (6) settings: models and keys; (7) the environment page. Steps 1 to 6 are built.
+  course; (6) settings: models and keys; (7) the environment page, split (owner, 2026-11-06)
+  into 7a, without a model, and 7b, a model drafting `[requires]`. Steps 1 to 6 and 7a are
+  built.
 - Courses (owner, 2026-11-06): every folder under one root that holds a `workspace.toml`, as
   `tutor.workspace init` lays them out; the root is `--root`, else the folder above
   `WORKSPACE_DIR`. Each is checked like any workspace (refused inside a git repository). A
@@ -2887,13 +2892,51 @@ late; the adaptive review screens can be built with it.
     next table (tomlkit's `Container._insert_after`, pinned by a test). Profiles are
     checked by llm.py's own rules; roles by generation's (the oracle from another provider
     than generate and repair); a profile in use cannot be removed, and a renamed one takes
-    its roles along. "Copy from another course" fills a course that has none.
+    its roles along. "Copy from another course" fills a course that has none. The checked
+    write is `gui/toml_edit.py` since step 7a, which writes [requires] and [isolation] the
+    same way.
   - "Check" (owner): `python -m tutor.llm check [PROFILE ...]`, as a task, sends each model
     one tiny request (thinking off, 32 output tokens) and says ok or the provider's reason,
     so a wrong key or model name shows before a run that spends more. An assistant profile
     has nothing to check; a profile only the embedding role uses gets an embedding call.
   - Not in this step: the `[generation]` tunables (their defaults are measured values).
 - Environment page:
+  - Built in step 7a (owner, 2026-11-06), no model involved, one page per course:
+    - The check is `python -m tutor.envcheck --json` run with the course's own `.venv`:
+      envcheck checks the interpreter that runs it, and the learner's tests use that venv.
+      It runs from the repository, as tasks do, so it reads `.env` itself (JAVA_HOME,
+      HADOOP_HOME) and the GUI still never loads it. 0.2 s warm; the check and the image's
+      state load into the page with htmx, since Docker can take seconds while its VM wakes.
+    - `[requires]` is a table in the page (owner, 2026-11-06): "+ Add a row" appends a blank
+      row fetched by htmx, "−" removes its row with htmx's `delete` swap, so no script of
+      ours; nothing is written until Save, and a cleared name is dropped too. The rules
+      are envcheck's (`requires_problems`, now shared by the venv install and the image: a
+      plain package name, a version prefix of dotted numbers, a JVM for pyspark and hadoop),
+      plus a Hadoop release the image can build when tests run in the container. Each pip
+      name links to its PyPI page, for the owner to check a name before installing it.
+    - "Install into .venv" runs `tutor.workspace init` again as a task, which makes the
+      `.venv` if missing and installs this package and `[requires]` (the same command a
+      command-line user runs). The page shows first the pip command, where it installs,
+      that it needs no admin rights and changes nothing outside the course folder, that it
+      downloads from PyPI, and how to undo it.
+    - Where tests run: container or host, written to `[isolation] runner` only when chosen;
+      host only with a tick saying generated code then runs with the user's rights. A new
+      `[isolation]` table goes after init's commented lines, its header saying the page set it.
+    - The test image: Docker missing, not running, image missing or out of date, ready with
+      its size. "Build image" runs `tutor.container build` with the course's venv, so the
+      image takes its package versions; before it, the page shows the recipe
+      (`python -m tutor.container recipe`, in that venv), each download and its source, the
+      sizes measured so far for scale, and how to remove the image.
+    - Not in 7a: the per-platform recipes for system software below (only Java and Hadoop
+      exist so far, both in `docs/setup/bigdata.md`, and each recipe needs checking on each
+      platform, while only macOS is at hand); the page points to `docs/setup/` instead. A
+      broken venv being rebuilt, and a venv on another Python, are not handled either.
+    - Checked by a click in Chrome on a scratch course: a row added, host refused without
+      the tick, container saved, the install (2 s) and the build (8 s, cached layers, 0.18
+      GB) run as tasks, the check then ok; the three real courses only opened.
+  - 7b, next: a model drafts `[requires]` from the lectures, each entry with its source
+    (lecture, page, quoted text); a quote that is not in that page's cached text is dropped,
+    and the rest become rows the owner accepts one by one in 7a's table.
   - Infer requirements from course material: an LLM reads lectures and labs for named tools
     and versions and drafts `[requires]`; the owner confirms before `workspace.toml` is
     written.
