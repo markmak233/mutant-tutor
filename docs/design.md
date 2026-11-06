@@ -2782,6 +2782,19 @@ late; the adaptive review screens can be built with it.
   `validation.json` is written for the files as saved; the graph itself still writes none
   (`validate()` has no side effects). A batch with no manifest yet has nothing to validate,
   and its run's own exit code says how it ended.
+- Each exercise's status on the plan page (owner, 2026-11-06: "题目旁边显示状态", after an
+  exercise of a real batch failed on a provider error and only Claude could tell, or redo
+  it): once a plan is approved, each row says what its exercise came to: valid, invalid or
+  saved and not validated yet (manifest and validation.json), discarded with the check its
+  last round failed and how many repairs it took (not the check's details, which can quote
+  expected values), failed with the error, or not generated yet (generation.jsonl's last
+  line for it, so a later try counts). One discarded or failed has "Try again": the graph's
+  existing `item` command generates it alone, with the plan's item and what the batch was
+  planned with (run.json's models and settings), and adds it to the manifest, which only
+  ever grows; then it is validated. It costs money, as approving does; only while no task of
+  the plan runs, and the page says so while one does (a course runs one task at a time). No
+  change to `graph/`. The batch page, which lists only what the manifest has, names the
+  plan's exercises that did not come out and links to the plan to try them again (owner).
 - Stopping a task: the test runner starts each pytest or `docker run` in a session of its own,
   out of reach of one process group, so the runner lists every process below it (`ps`), sends
   each Ctrl+C (a `docker run` client passes it into its container), and kills what is left

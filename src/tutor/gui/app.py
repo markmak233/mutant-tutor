@@ -261,7 +261,8 @@ def create_app(root: Path, token: str, port: int | None = None,
     @app.get("/c/<name>/b/<batch>/")
     def batch(name: str, batch: str):
         course, view = batch_or_404(name, batch)
-        return render_template("batch.html", course=course, batch=view, labels=STATUS_LABELS)
+        return render_template("batch.html", course=course, batch=view, labels=STATUS_LABELS,
+                               missing=generation.not_succeeded(course, batch))
 
     @app.get("/c/<name>/b/<batch>/e/<exercise>/")
     def exercise(name: str, batch: str, exercise: str):
@@ -469,7 +470,8 @@ def create_app(root: Path, token: str, port: int | None = None,
         course, view = plan_or_404(name, label)
         log, cut = tasks.tail(view.task) if view.task else ("", False)
         return render_template(template, course=course, plan=view, log=log, cut=cut,
-                               models=generation.models(course), explain=generation.EXPLAIN)
+                               models=generation.models(course), explain=generation.EXPLAIN,
+                               statuses=generation.item_statuses(course, view))
 
     @app.get("/c/<name>/plans/<label>/")
     def plan(name: str, label: str):
@@ -522,6 +524,27 @@ def create_app(root: Path, token: str, port: int | None = None,
         return plan_task(name, label, view.can_continue, f"Continue {label}",
                          generation.resume_command(label, python=courses.task_python(course)),
                          generation.CONTINUE, course, validate=True)
+
+    @app.post("/c/<name>/plans/<label>/retry")
+    def retry_item(name: str, label: str):
+        """Generate one exercise that did not succeed again, then validate it (owner,
+        2026-11-06): only one the plan page shows as discarded or failed, and only while no
+        task of this plan runs; it costs money, as approving does."""
+        course, view = plan_or_404(name, label)
+        exercise = request.form.get("item", "")
+        back = url_for("plan", name=name, label=label)
+        status = generation.item_statuses(course, view).get(exercise)
+        running = view.task is not None and view.task.active
+        if status is None or not status.can_retry or running:
+            return redirect(f"{back}?notice=plan-moved", code=303)
+        if problem := courses.container_problem(course):
+            return redirect(f"{back}?notice={problem}", code=303)
+        commands = generation.prepare_retry(course, view, exercise, courses.task_python(course))
+        if commands is None:
+            abort(404, "The plan has no such exercise.")
+        return start_task(course, f"Generate {exercise} again", commands,
+                          meta={"kind": generation.RETRY, "label": label, "item": exercise},
+                          then=back)
 
     @app.post("/c/<name>/plans/<label>/edit")
     def edit_plan(name: str, label: str):

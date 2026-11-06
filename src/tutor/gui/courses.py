@@ -244,6 +244,11 @@ def _title(batch_dir: Path, exercise: str) -> str:
     return match.group(1).strip() if match else exercise
 
 
+def valid_verdict(batch_dir: Path, exercise: str) -> bool | None:
+    """validation.json's verdict for one exercise of a batch; None when there is none."""
+    return _valid(batch_dir, exercise)
+
+
 def _valid(batch_dir: Path, exercise: str) -> bool | None:
     """Only the verdict: the report's details can quote expected values."""
     folder = _child(batch_dir / "solutions", exercise)

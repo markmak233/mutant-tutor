@@ -253,3 +253,9 @@ table.coverage td:first-child { white-space: nowrap; }
 .coverage-file table { margin: 0.5rem 0 1rem; }
 table.requires td.row-import { white-space: nowrap; }
 table.requires td.row-import input[type="text"] { width: 8rem; margin-left: 0.25rem; }
+/* Each exercise's status on the plan page (owner, 2026-11-06) */
+td.item-status { white-space: normal; min-width: 9rem; }
+td.item-status form.action { margin-top: 0.3rem; }
+.chip-valid { background: var(--passed-bg); color: var(--passed); }
+.chip-saved-not-validated, .chip-not-generated-yet { background: var(--track); color: var(--muted); }
+.chip-discarded { background: var(--started-bg); color: var(--started); }

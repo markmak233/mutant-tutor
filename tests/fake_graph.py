@@ -6,7 +6,9 @@ plan printed as the real command prints it (with a "!" line when the preferences
 "problem"), then the pause. resume --feedback: a new plan, then the pause. resume --approve,
 or resume after generation began: each item's draft folder, its exercise in the batch, then
 the manifest. FAKE_GRAPH_SLOW_S makes each item take that long (to try Stop). Every call is
-appended to <course>/fake-graph-calls.jsonl.
+appended to <course>/fake-graph-calls.jsonl. Each item's outcome goes to the batch's
+generation.jsonl, as the real command logs it; FAKE_GRAPH_FAIL names ids (comma-separated)
+that end "discarded" instead of saved. item ITEM_FILE: that one item, added to the batch.
 """
 
 import argparse
@@ -31,7 +33,13 @@ def main() -> int:
     resume = sub.add_parser("resume")
     resume.add_argument("--approve", action="store_true")
     resume.add_argument("--feedback")
-    for p in (plan, resume):
+    item = sub.add_parser("item")
+    item.add_argument("item_file", type=Path)
+    item.add_argument("--set", action="append")
+    for flag in ("--profile", "--oracle-profile", "--repair-profile", "--mode", "--thinking",
+                 "--repair-thinking"):
+        item.add_argument(flag)
+    for p in (plan, resume, item):
         p.add_argument("--batch", required=True)
     args = parser.parse_args()
     root = Path(os.environ["WORKSPACE_DIR"])
@@ -49,6 +57,10 @@ def main() -> int:
         items = [_item(f"{args.batch}-ex{n}", args.lectures[0]) for n in range(args.count or 2)]
         return _pause(draft, items, ["2 items, 3 asked for"] if "problem" in args.prefs else [],
                       args.batch)
+    if args.command == "item":
+        one = json.loads(args.item_file.read_text(encoding="utf-8"))
+        batch = sorted((root / "batches").glob(f"*_p3-{args.batch}"))[-1]
+        return _generate(root, drafts / batch.name, [one], add=True)
     found = sorted(drafts.glob(f"*_p3-{args.batch}/checkpoint.sqlite"))
     if not found:
         print(f"stopped: no planned batch labelled {args.batch}", file=sys.stderr)
@@ -86,21 +98,38 @@ def _pause(draft: Path, items: list[dict], problems: list[str], label: str) -> i
     return 0
 
 
-def _generate(root: Path, draft: Path, items: list[dict]) -> int:
+def _generate(root: Path, draft: Path, items: list[dict], add: bool = False) -> int:
     batch = root / "batches" / draft.name
+    batch.mkdir(parents=True, exist_ok=True)
     print(f"generating {len(items)} items, 1 at a time", flush=True)
+    failing = set(filter(None, os.environ.get("FAKE_GRAPH_FAIL", "").split(",")))
+    saved = []
     for item in items:
         (draft / item["id"] / "round-0").mkdir(parents=True, exist_ok=True)
         time.sleep(float(os.environ.get("FAKE_GRAPH_SLOW_S", "0")))
+        if item["id"] in failing and not add:
+            _log(batch, item["id"], "discarded", [{"failure": "rule 1 (reference passes) FAIL"}])
+            print(f"  [{item['id']}] validate: rule 1 (reference passes) FAIL", flush=True)
+            continue
         exercise = batch / "exercises" / item["id"]
         exercise.mkdir(parents=True, exist_ok=True)
         (exercise / "question.md").write_text(f"# {item['id']}\n", encoding="utf-8")
         (batch / "solutions" / item["id"]).mkdir(parents=True, exist_ok=True)
+        _log(batch, item["id"], "saved", [])
         print(f"  [{item['id']}] validate: VALID", flush=True)
-    (batch / "manifest.json").write_text(json.dumps(
-        {"mode": "learn", "exercises": [i["id"] for i in items]}), encoding="utf-8")
-    print(f"\nbatches/{batch.name}: {len(items)} saved")
+        saved.append(item["id"])
+    manifest = batch / "manifest.json"
+    known = json.loads(manifest.read_text(encoding="utf-8"))["exercises"] if add else []
+    manifest.write_text(json.dumps({"mode": "learn", "exercises": [*known, *saved]}),
+                        encoding="utf-8")
+    print(f"\nbatches/{batch.name}: {len(saved)} saved")
     return 0
+
+
+def _log(batch: Path, exercise: str, outcome: str, attempts: list[dict]) -> None:
+    with (batch / "generation.jsonl").open("a", encoding="utf-8") as f:
+        f.write(json.dumps({"exercise": exercise, "outcome": outcome, "rounds": len(attempts),
+                            "attempts": attempts}) + "\n")
 
 
 if __name__ == "__main__":

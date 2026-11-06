@@ -20,13 +20,20 @@
   {% if plan.shows_plan and plan.items %}
   {% if plan.edited %}<p class="notice notice-ok">plan.json was edited: it differs from the model's plan, and approving uses it.</p>{% endif %}
   <table class="plan">
-    <thead><tr><th class="num">#</th><th>Exercise</th><th>Source</th><th>What it practises</th></tr></thead>
+    <thead><tr><th class="num">#</th><th>Exercise</th>{% if statuses %}<th>Status</th>{% endif %}<th>Source</th><th>What it practises</th></tr></thead>
     <tbody>
     {% for item in plan.items %}
+      {# Once approved, each exercise's status next to it (generation.item_statuses), and a
+         button to generate one that did not succeed again (owner, 2026-11-06). #}
+      {% set status = statuses.get(item.id) %}
       <tr>
         <td class="num">{{ loop.index }}</td>
-        <td><strong>{{ item.id }}</strong>
+        <td><strong>{% if status and status.state in ("valid", "invalid", "saved, not validated") %}<a href="{{ url_for('exercise', name=course.folder, batch=plan.batch, exercise=item.id) }}">{{ item.id }}</a>{% else %}{{ item.id }}{% endif %}</strong>
           <div class="muted">{{ item.type }} · {{ item.interface }} · {{ item.framework }}</div></td>
+        {% if statuses %}<td class="item-status">{% if status %}{{ chip(status.state) }}
+          {% if status.reason %}<div class="muted">{{ status.reason }}</div>{% endif %}
+          {% if status.can_retry and not running %}<form method="post" action="{{ url_for('retry_item', name=course.folder, label=plan.label) }}" class="action"><input type="hidden" name="item" value="{{ item.id }}"><button type="submit">Try again</button></form>
+          {% elif status.can_retry %}<div class="muted">"Try again" comes back when the running task ends: a course runs one task at a time.</div>{% endif %}{% endif %}</td>{% endif %}
         <td>{{ item.lecture }}<div class="muted">slides {{ item.slides }}</div></td>
         <td>{{ item.knowledge_point }}
           {% if item.notes %}<div class="muted">Checks: {{ item.notes }}</div>{% endif %}
@@ -35,6 +42,10 @@
     {% endfor %}
     </tbody>
   </table>
+  {% endif %}
+
+  {% if statuses and not running and (statuses.values() | selectattr("can_retry") | list) %}
+  <p class="muted">"Try again" generates that exercise once more with this batch's models and settings, then validates it; like approving, it costs money.</p>
   {% endif %}
 
   {% if plan.shows_plan and plan.at_limit %}

@@ -39,7 +39,7 @@ from pathlib import Path
 
 from tutor.config import WORKSPACE_FILE
 from tutor.gui import tasks
-from tutor.gui.courses import Course
+from tutor.gui.courses import Course, valid_verdict
 
 # The command, a list so a test can put a stand-in script here.
 GRAPH = [sys.executable, "-m", "tutor.graph"]
@@ -60,7 +60,10 @@ WAITING_FOR_ASSISTANT = 3  # graph/__main__.py's exit code in assistant mode
 
 # Task kinds, kept in task.json's meta with the label.
 PLAN, FEEDBACK, APPROVE, CONTINUE = "plan", "feedback", "approve", "continue"
-KINDS = (PLAN, FEEDBACK, APPROVE, CONTINUE)  # a task of one of these goes back to its plan
+# One exercise of a generated batch, generated again (owner, 2026-11-06: a status next to
+# each exercise, and a button to try one that did not succeed again).
+RETRY = "retry"
+KINDS = (PLAN, FEEDBACK, APPROVE, CONTINUE, RETRY)  # a task of one of these goes back to its plan
 _PLANNING_KINDS = (PLAN, FEEDBACK, CONTINUE)
 
 # Where a batch stands; the words the pages show.
@@ -365,8 +368,124 @@ def open_plans(course: Course, history: list[tasks.Task] | None = None) -> list[
 def _running_state(task: tasks.Task) -> str:
     """What a running task does, by its kind; Continue may finish a plan or a batch."""
     kind = task.meta.get("kind")
-    return GENERATING if kind == APPROVE else MAKING_PLAN if kind in (PLAN, FEEDBACK) \
+    return GENERATING if kind in (APPROVE, RETRY) else MAKING_PLAN if kind in (PLAN, FEEDBACK) \
         else CONTINUING
+
+
+# What each exercise of an approved plan came to, shown next to it on the plan page.
+ITEM_VALID, ITEM_INVALID, ITEM_SAVED = "valid", "invalid", "saved, not validated"
+ITEM_DISCARDED, ITEM_ERROR, ITEM_PENDING = "discarded", "error", "not generated yet"
+_ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,79}$")  # a plan id, safe as a file name
+
+
+@dataclass(frozen=True)
+class ItemStatus:
+    state: str
+    reason: str = ""  # why it did not succeed: the rule that failed, or the error
+
+    @property
+    def can_retry(self) -> bool:
+        return self.state in (ITEM_DISCARDED, ITEM_ERROR)
+
+
+def item_statuses(course: Course, view: PlanView) -> dict[str, ItemStatus]:
+    """id -> what the exercise came to, once the plan is approved: saved (with its
+    validation.json verdict), discarded or failed with an error (generation.jsonl's last line
+    for it, so a later try counts), or not generated yet. {} before approval."""
+    if view.batch is None or view.state not in (GENERATING, CONTINUING, STOPPED, ASSISTANT,
+                                                GENERATED):
+        return {}
+    batch_dir = course.workspace.root / "batches" / view.batch
+    try:
+        saved = set(json.loads((batch_dir / "manifest.json").read_text(encoding="utf-8"))
+                    .get("exercises", []))
+    except (OSError, ValueError, AttributeError):
+        saved = set()
+    outcomes: dict[str, dict] = {}
+    try:
+        for line in (batch_dir / "generation.jsonl").read_text(encoding="utf-8").splitlines():
+            try:
+                data = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(data, dict) and isinstance(data.get("exercise"), str):
+                outcomes[data["exercise"]] = data  # the last line wins
+    except OSError:
+        pass
+    statuses = {}
+    for item in view.items:
+        exercise = item.get("id", "")
+        if exercise in saved:
+            valid = valid_verdict(batch_dir, exercise)
+            statuses[exercise] = ItemStatus(ITEM_SAVED if valid is None
+                                            else ITEM_VALID if valid else ITEM_INVALID)
+        elif exercise in outcomes and outcomes[exercise].get("outcome") == "error":
+            error = str(outcomes[exercise].get("error", ""))
+            statuses[exercise] = ItemStatus(ITEM_ERROR, error[:200])
+        elif exercise in outcomes:
+            statuses[exercise] = ItemStatus(ITEM_DISCARDED, _failure(outcomes[exercise]))
+        else:
+            statuses[exercise] = ItemStatus(ITEM_PENDING)
+    return statuses
+
+
+def _failure(line: dict) -> str:
+    """Which check the last round failed, and after how many rounds; not the check's details,
+    which can quote expected values."""
+    attempts = [a for a in line.get("attempts", []) if isinstance(a, dict)]
+    text = str(attempts[-1].get("failure") or "") if attempts else ""
+    rule = text.split(": ")[0] if text else "it did not pass the checks"
+    if text.startswith("format"):
+        rule = "the reply did not fit the exercise's format"
+    rounds = line.get("rounds", 0)
+    return f"{rule}, after {rounds} repair{'s' if rounds != 1 else ''}"
+
+
+def not_succeeded(course: Course, batch: str) -> tuple[PlanView, list[str]] | None:
+    """For a batch page: the plan it was generated from and its exercises that did not come
+    out (discarded or failed), so the page can point to the plan's "Try again" (owner,
+    2026-11-06); None when every one came out, or the batch was not made from a plan."""
+    label = _label_of(batch)
+    view = plan_view(course, label) if label else None
+    if view is None or view.batch != batch:
+        return None
+    missing = [k for k, v in item_statuses(course, view).items() if v.can_retry]
+    return (view, missing) if missing else None
+
+
+def prepare_retry(course: Course, view: PlanView, exercise: str,
+                  python: str | None = None) -> list[list[str]] | None:
+    """The commands that generate one exercise of the plan again and validate it: the graph's
+    `item` command, which adds a saved exercise to the batch's manifest, run with what the
+    batch was planned with (run.json's models and settings), so it matches the others.
+    Writes the plan's item as the command reads it; None when the plan has no such item."""
+    if view.draft is None or view.batch is None or not _ID.match(exercise):
+        return None
+    try:
+        plan = json.loads((view.draft / "plan.json").read_text(encoding="utf-8"))
+        run = json.loads((view.draft / "run.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    item = next((i for i in plan if isinstance(i, dict) and i.get("id") == exercise), None)
+    if item is None:
+        return None
+    path = view.draft / f"retry-{exercise}.json"
+    path.write_text(json.dumps(item, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
+    flags = [f"--{name.replace('_', '-')}={value}"
+             for name, value in run.get("profiles", {}).items()
+             if name in ("profile", "oracle_profile", "repair_profile") and value]
+    for name, value in run.get("settings", {}).items():
+        if value is not None:
+            flags.append(f"--set={name}={str(value).lower() if isinstance(value, bool) else value}")
+    batch_dir = course.workspace.root / "batches" / view.batch
+    return [[*_graph(python), "item", str(path), f"--batch={view.label}", *flags],
+            validate_one_command(python, batch_dir / "exercises" / exercise,
+                                 batch_dir / "solutions" / exercise)]
+
+
+def validate_one_command(python: str | None, exercise: Path, solution: Path) -> list[str]:
+    """`python -m tutor.validation` on one exercise, which writes its validation.json."""
+    return [python or GRAPH[0], "-m", "tutor.validation", str(exercise), str(solution)]
 
 
 def _draft(course: Course, label: str) -> Path | None:

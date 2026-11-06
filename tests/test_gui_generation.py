@@ -545,3 +545,119 @@ def test_plan_send_back_and_approve_with_a_stand_in_for_the_graph(root, course, 
     assert calls[1][-1] == "--feedback=-add one more" and calls[2][-1] == "--approve"
     course_page = get(client, "/c/demo-course/").get_data(as_text=True)
     assert "_p3-w9-test" in course_page and "waiting for you" not in course_page
+
+
+# --- each exercise's status, and generating one again (owner, 2026-11-06) ---------------------
+
+
+def _generated(course, label="w9-test"):
+    """A batch generated from a 4-item plan: a valid, b saved with no verdict yet, c discarded,
+    d failed with a provider error."""
+    draft = _draft(course, label, ids=("a", "b", "c", "d"))
+    _write(draft / "run.json", json.dumps({
+        "profiles": {"repair_profile": "deepseek-pro", "plan_profile": "glm-flash"},
+        "settings": {"mode": "review", "hide_answers": True, "max_rounds": 3,
+                     "parallel": None}}))
+    batch = course.workspace.root / "batches" / draft.name
+    _write(batch / "manifest.json", json.dumps({"exercises": ["a", "b"]}))
+    _write(batch / "solutions" / "a" / "validation.json", json.dumps({"valid": True}))
+    lines = [{"exercise": "a", "outcome": "saved", "rounds": 0, "attempts": []},
+             {"exercise": "b", "outcome": "saved", "rounds": 1, "attempts": []},
+             {"exercise": "c", "outcome": "discarded", "rounds": 3, "attempts": [
+                 {"failure": "rule 1 (reference passes) FAIL: expected 42, got 41"}]},
+             {"exercise": "d", "outcome": "error", "rounds": 0, "attempts": [],
+              "error": "LLMError: the stream ended after 2 characters"}]
+    _write(batch / "generation.jsonl", "\n".join(json.dumps(line) for line in lines) + "\n")
+    return draft, batch
+
+
+def test_each_exercise_of_a_generated_plan_has_its_status(course):
+    _generated(course)
+    view = generation.plan_view(course, "w9-test", history=[])
+    statuses = generation.item_statuses(course, view)
+
+    assert {k: v.state for k, v in statuses.items()} == {
+        "a": "valid", "b": "saved, not validated", "c": "discarded", "d": "error"}
+    assert statuses["c"].reason == "rule 1 (reference passes) FAIL, after 3 repairs"
+    assert "42" not in statuses["c"].reason  # the check's details can quote expected values
+    assert "stream ended" in statuses["d"].reason
+    assert [k for k, v in statuses.items() if v.can_retry] == ["c", "d"]
+
+
+def test_a_plan_not_approved_yet_shows_no_status(course):
+    _draft(course)
+    view = generation.plan_view(course, "w9-test", history=[])
+    assert generation.item_statuses(course, view) == {}
+
+
+def test_the_plan_page_shows_the_status_and_try_again_only_where_it_failed(root, course):
+    _generated(course)
+    page = get(_browser(root), "/c/demo-course/plans/w9-test/").get_data(as_text=True)
+
+    assert "chip-valid" in page and "chip-discarded" in page and "chip-error" in page
+    assert page.count('name="item" value=') == 2
+    assert 'name="item" value="c"' in page and 'name="item" value="d"' in page
+    assert 'href="/c/demo-course/b/2026-01-02_p3-w9-test/e/a/"' in page  # a saved one links
+
+
+def test_try_again_generates_that_exercise_with_the_batchs_settings_then_validates_it(
+        root, course, monkeypatch):
+    draft, batch = _generated(course)
+    started = []
+    monkeypatch.setattr(tasks, "start", lambda course_root, title, commands, env, meta=None:
+                        started.append((title, commands, meta)) or tasks.Task(
+                            "20260102-100000-abcdef", course_root, title, "running", "", None,
+                            commands, [], 1, meta or {}))
+    monkeypatch.setattr(courses, "container_problem", lambda course: None)
+
+    response = post(_browser(root), "/c/demo-course/plans/w9-test/retry", {"item": "c"})
+
+    assert response.headers["Location"] == "/c/demo-course/plans/w9-test/"
+    title, (graph, validate), meta = started[0]
+    assert graph[2:5] == ["tutor.graph", "item", str(draft / "retry-c.json")]
+    assert "--batch=w9-test" in graph and "--repair-profile=deepseek-pro" in graph
+    assert "--set=mode=review" in graph and "--set=hide_answers=true" in graph
+    assert not any("parallel" in a or "plan-profile" in a for a in graph)
+    assert json.loads((draft / "retry-c.json").read_text(encoding="utf-8"))["id"] == "c"
+    assert validate[2:] == ["tutor.validation", str(batch / "exercises" / "c"),
+                            str(batch / "solutions" / "c")]
+    assert meta == {"kind": "retry", "label": "w9-test", "item": "c"}
+
+
+@pytest.mark.parametrize("exercise", ["a", "zz", "../x"])
+def test_only_an_exercise_that_did_not_succeed_can_be_tried_again(root, course, exercise,
+                                                                  monkeypatch):
+    _generated(course)
+    monkeypatch.setattr(tasks, "start", lambda *a, **k: pytest.fail("nothing may start"))
+    response = post(_browser(root), "/c/demo-course/plans/w9-test/retry", {"item": exercise})
+    assert "notice=plan-moved" in response.headers["Location"]
+
+
+def test_while_a_task_runs_the_page_says_when_try_again_comes_back(root, course, monkeypatch):
+    """The owner saw the button gone during another retry and could not tell why."""
+    _generated(course)
+    running = _task(generation.RETRY, status=tasks.RUNNING, codes=())
+    monkeypatch.setattr(tasks, "list_tasks", lambda course_root: [running])
+    page = get(_browser(root), "/c/demo-course/plans/w9-test/").get_data(as_text=True)
+    assert 'name="item" value=' not in page
+    assert page.count("comes back when the running task ends") == 2
+
+
+def test_the_batch_page_points_to_the_plan_for_exercises_that_did_not_come_out(root, course):
+    _, batch = _generated(course)
+    # The batch page lists only what the manifest has; c and d live on the plan page.
+    page = get(_browser(root), f"/c/demo-course/b/{batch.name}/").get_data(as_text=True)
+    assert "2 exercises of the plan did not come out: c, d." in page
+    assert 'href="/c/demo-course/plans/w9-test/">Open the plan</a>' in page
+
+
+def test_a_batch_whose_exercises_all_came_out_says_nothing_of_it(root, course):
+    _, batch = _generated(course)
+    log = batch / "generation.jsonl"
+    log.write_text(log.read_text(encoding="utf-8") + "\n".join(json.dumps(
+        {"exercise": e, "outcome": "saved", "rounds": 0, "attempts": []}) for e in "cd") + "\n",
+        encoding="utf-8")
+    manifest = batch / "manifest.json"
+    manifest.write_text(json.dumps({"exercises": ["a", "b", "c", "d"]}), encoding="utf-8")
+    page = get(_browser(root), f"/c/demo-course/b/{batch.name}/").get_data(as_text=True)
+    assert "did not come out" not in page
