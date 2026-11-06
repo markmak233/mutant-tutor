@@ -1,0 +1,5 @@
+{# A running task with no new output for a while (tasks.quiet_s): what it waits for, so a long
+   model call does not look stuck (owner, 2026-11-06: a 12-minute plan call printed nothing). #}
+{% if quiet %}
+<p class="notice notice-ok">No new output for {% if quiet >= 120 %}{{ (quiet // 60) | int }} minutes{% else %}{{ quiet | int }} seconds{% endif %}. It is waiting for {{ waiting_for }}; a model's reply is printed only once it is whole, and one plan call took 12 minutes. If it seems stuck, Stop it and start it again.</p>
+{% endif %}

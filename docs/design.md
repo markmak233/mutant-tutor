@@ -2795,6 +2795,18 @@ late; the adaptive review screens can be built with it.
   the plan runs, and the page says so while one does (a course runs one task at a time). No
   change to `graph/`. The batch page, which lists only what the manifest has, names the
   plan's exercises that did not come out and links to the plan to try them again (owner).
+  With two or more, "Try all N again" runs each one's commands one after another in one
+  task.
+- Fixing in the page, not through Claude (owner, 2026-11-06: "这些漏洞下次在网页有补充"):
+  - A task that failed or was stopped has "Run again", when it is safe to run twice (reading
+    lectures, transcribing, Validate all, Check, install, build, the two drafts). It posts to
+    the action that started the task, whose route makes the commands again with its checks;
+    the commands in task.json are never run back, as code run on this machine could change
+    that file. Generating has Continue and "Try again" instead, and a new course its page.
+  - A running task with no new output for 30 s says what it waits for, by its kind (the
+    plan model, the generate model, pip, docker build, the test runs) and for how long: a
+    model's reply is printed only once it is whole, and a plan call took 12 minutes while
+    the page showed nothing new.
 - Stopping a task: the test runner starts each pytest or `docker run` in a session of its own,
   out of reach of one process group, so the runner lists every process below it (`ps`), sends
   each Ctrl+C (a `docker run` client passes it into its container), and kills what is left

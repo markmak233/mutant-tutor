@@ -14,6 +14,7 @@
     {% if running %}{{ action(url_for('stop_task', name=course.folder, task_id=plan.task.id), "Stop") }}{% endif %}
   </div>
   <p>{{ explain[plan.state] }}</p>
+  {% include "_quiet.html" %}
   {% if plan.generated %}<p><a href="{{ url_for('batch', name=course.folder, batch=plan.batch) }}">Open the batch</a></p>{% endif %}
   {% if plan.plan_error %}<p class="notice notice-bad">{{ plan.plan_error }}</p>{% endif %}
 
@@ -44,8 +45,10 @@
   </table>
   {% endif %}
 
-  {% if statuses and not running and (statuses.values() | selectattr("can_retry") | list) %}
-  <p class="muted">"Try again" generates that exercise once more with this batch's models and settings, then validates it; like approving, it costs money.</p>
+  {% set failed = statuses.values() | selectattr("can_retry") | list if statuses else [] %}
+  {% if failed and not running %}
+  {% if failed | length > 1 %}<div class="actions">{{ action(url_for('retry_all', name=course.folder, label=plan.label), "Try all " ~ (failed | length) ~ " again", primary=True) }}</div>{% endif %}
+  <p class="muted">"Try again" generates an exercise once more with this batch's models and settings, then validates it{% if failed | length > 1 %}; "Try all" does so for each that did not come out, one after another{% endif %}. Like approving, it costs money.</p>
   {% endif %}
 
   {% if plan.shows_plan and plan.at_limit %}

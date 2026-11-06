@@ -693,3 +693,57 @@ def test_actions_need_this_servers_origin(root, course):
     response = client.post("/c/demo-course/environment/runner", base_url=BASE,
                            data={"runner": "container"})
     assert response.status_code == 403 and _toml(course) == TOML
+
+
+# --- a silent task says what it waits for; a failed one can run again (owner, 2026-11-06) -------
+
+
+def _running_task(course, meta, quiet_s):
+    """A running task (this process stands in for its runner) whose log has been silent."""
+    import os
+    import time
+
+    folder = course.workspace.root / tasks.TASKS_DIR / "20260102-100000-0abcde"
+    _write(folder / tasks.TASK_FILE, json.dumps({
+        "title": "T", "status": "running", "started": "2026-01-02 10:00:00",
+        "commands": [["python"]], "exit_codes": [], "pid": os.getpid(), "meta": meta}))
+    _write(folder / tasks.LOG_FILE, "$ python -m tutor.graph plan\n")
+    old = time.time() - quiet_s
+    os.utime(folder / tasks.LOG_FILE, (old, old))
+    return f"/c/{course.folder}/tasks/{folder.name}/"
+
+
+def test_a_task_silent_for_minutes_says_what_it_waits_for(root, course):
+    path = _running_task(course, {"kind": "install"}, quiet_s=200)
+    text = _browser(root).get(path + "log", base_url=BASE).get_data(as_text=True)
+    assert "No new output for 3 minutes" in text and "pip, which may be downloading" in text
+
+
+def test_a_task_with_fresh_output_says_nothing_of_it(root, course):
+    path = _running_task(course, {"kind": "install"}, quiet_s=2)
+    text = _browser(root).get(path + "log", base_url=BASE).get_data(as_text=True)
+    assert "No new output" not in text
+
+
+@pytest.mark.parametrize("meta, action", [
+    ({"kind": "install"}, "/c/demo-course/environment/install"),
+    ({"kind": "validate", "batch": "w9"}, "/c/demo-course/b/w9/validate"),
+    ({"kind": "requires-draft"}, "/c/demo-course/environment/draft"),
+    ({"kind": "coverage-draft"}, "/c/demo-course/coverage/draft"),
+    ({"kind": "read"}, "/c/demo-course/lectures/read"),
+])
+def test_a_failed_task_offers_run_again_through_the_action_that_started_it(root, course, meta,
+                                                                          action):
+    path = _task(course, meta, status="failed", codes=(1,))
+    text = _browser(root).get(path, base_url=BASE).get_data(as_text=True)
+    assert f'action="{action}"' in text and "Run again" in text
+
+
+@pytest.mark.parametrize("meta, status", [
+    ({"kind": "install"}, "done"),  # nothing to redo
+    ({"kind": "approve", "label": "w9"}, "failed"),  # generating: Continue / Try again instead
+    ({"kind": "create"}, "failed"),
+])
+def test_run_again_is_only_for_a_failed_task_safe_to_run_twice(root, course, meta, status):
+    path = _task(course, meta, status=status, codes=(0,) if status == "done" else (1,))
+    assert "Run again" not in _browser(root).get(path, base_url=BASE).get_data(as_text=True)

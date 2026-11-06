@@ -377,12 +377,48 @@ def create_app(root: Path, token: str, port: int | None = None,
             return url_for("course", name=name), course.workspace.course, None
         return None
 
+    def waiting_for(course: courses.Course, task: tasks.Task) -> str:
+        """What a silent running task is most likely waiting for, by its kind, as a quiet
+        task's line names it (tasks.quiet_s); models by name, never a key."""
+        kind = task.meta.get("kind")
+        models = dict(generation.models(course))
+        if kind in (generation.PLAN, generation.FEEDBACK):
+            return f"the plan model, {models.get('plan', 'the generate model')}"
+        if kind in (generation.APPROVE, generation.CONTINUE, generation.RETRY):
+            return (f"the models writing and checking exercises (generate: "
+                    f"{models.get('generate', '?')})")
+        if kind in ("requires-draft", "coverage-draft"):
+            return f"the model reading the lectures, {environment.setup_model(course) or '?'}"
+        if kind == "vision":
+            return f"the vision model, {lectures.vision_model(course) or '?'}"
+        return {"check": "the models being checked", "install": "pip, which may be downloading",
+                "create": "pip, which may be downloading", "build": "docker build, which may be "
+                "downloading", "validate": "the exercises' test runs",
+                "read": "the PDFs being read"}.get(kind, "the command")
+
+    def again_url(course: courses.Course, task: tasks.Task) -> str | None:
+        """For a task that failed or was stopped: the action that started it, which its "Run
+        again" button posts to (owner, 2026-11-06). The commands are made again by that
+        route, with its checks, never read back from task.json, which code run on this
+        machine could have changed. Only tasks safe to run twice: generating has Continue
+        and "Try again" on its plan page, and a new course its own page."""
+        kind, name, batch = task.meta.get("kind"), course.folder, task.meta.get("batch")
+        if kind == "validate" and isinstance(batch, str):
+            return url_for("validate_batch", name=name, batch=batch)
+        endpoint = {"read": "read_lectures", "vision": "transcribe_lectures",
+                    "check": "check_models", "install": "install_packages",
+                    "build": "build_image", "requires-draft": "draft_requires",
+                    "coverage-draft": "draft_coverage"}.get(kind)
+        return url_for(endpoint, name=name) if endpoint else None
+
     def task_parts(course: courses.Course, task: tasks.Task) -> dict:
         """What both the task page and its polled part show; a new course's stages too."""
         log, cut = tasks.tail(task)
         create = task.meta.get("kind") == "create"
         return {"course": course, "task": task, "log": log, "cut": cut,
-                "back": return_to(course, task),
+                "back": return_to(course, task), "quiet": tasks.quiet_s(task),
+                "again": again_url(course, task),
+                "waiting_for": waiting_for(course, task),
                 "stages": lectures.create_progress(course, task) if create else None,
                 "elapsed": lectures.elapsed(task) if create else ""}
 
@@ -469,9 +505,11 @@ def create_app(root: Path, token: str, port: int | None = None,
     def plan_page(template: str, name: str, label: str):
         course, view = plan_or_404(name, label)
         log, cut = tasks.tail(view.task) if view.task else ("", False)
+        quiet = tasks.quiet_s(view.task) if view.task else None
         return render_template(template, course=course, plan=view, log=log, cut=cut,
                                models=generation.models(course), explain=generation.EXPLAIN,
-                               statuses=generation.item_statuses(course, view))
+                               statuses=generation.item_statuses(course, view), quiet=quiet,
+                               waiting_for=waiting_for(course, view.task) if quiet else "")
 
     @app.get("/c/<name>/plans/<label>/")
     def plan(name: str, label: str):
@@ -544,6 +582,27 @@ def create_app(root: Path, token: str, port: int | None = None,
             abort(404, "The plan has no such exercise.")
         return start_task(course, f"Generate {exercise} again", commands,
                           meta={"kind": generation.RETRY, "label": label, "item": exercise},
+                          then=back)
+
+    @app.post("/c/<name>/plans/<label>/retry-all")
+    def retry_all(name: str, label: str):
+        """Every exercise of the plan that did not come out, generated again one after
+        another in one task, each then validated (owner, 2026-11-06)."""
+        course, view = plan_or_404(name, label)
+        back = url_for("plan", name=name, label=label)
+        failed = [k for k, v in generation.item_statuses(course, view).items() if v.can_retry]
+        if not failed or (view.task is not None and view.task.active):
+            return redirect(f"{back}?notice=plan-moved", code=303)
+        if problem := courses.container_problem(course):
+            return redirect(f"{back}?notice={problem}", code=303)
+        python = courses.task_python(course)
+        commands = []
+        for exercise in failed:
+            commands += generation.prepare_retry(course, view, exercise, python) or []
+        if not commands:
+            abort(404, "The plan has none of these exercises.")
+        return start_task(course, f"Generate {len(failed)} exercises again", commands,
+                          meta={"kind": generation.RETRY, "label": label, "items": failed},
                           then=back)
 
     @app.post("/c/<name>/plans/<label>/edit")

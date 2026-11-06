@@ -23,6 +23,7 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -155,6 +156,23 @@ def tail(task: Task, limit: int = TAIL_BYTES) -> tuple[str, bool]:
     except OSError:
         return "", False
     return data.decode("utf-8", errors="replace"), size > limit
+
+
+QUIET_S = 30  # a running task silent this long gets a line saying what it waits for
+
+
+def quiet_s(task: Task) -> float | None:
+    """How long a running task's log has had no new output, once that is QUIET_S or more;
+    None otherwise. A step waiting for a model prints nothing until the reply is whole (a
+    plan call once took 12 minutes), and the owner could not tell that from a stuck task
+    (owner, 2026-11-06)."""
+    if not task.active:
+        return None
+    try:
+        since = time.time() - (task.folder / LOG_FILE).stat().st_mtime
+    except OSError:
+        return None
+    return since if since >= QUIET_S else None
 
 
 def _prune(base: Path) -> None:

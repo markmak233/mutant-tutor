@@ -661,3 +661,25 @@ def test_a_batch_whose_exercises_all_came_out_says_nothing_of_it(root, course):
     manifest.write_text(json.dumps({"exercises": ["a", "b", "c", "d"]}), encoding="utf-8")
     page = get(_browser(root), f"/c/demo-course/b/{batch.name}/").get_data(as_text=True)
     assert "did not come out" not in page
+
+
+def test_try_all_generates_every_exercise_that_did_not_come_out_in_one_task(
+        root, course, monkeypatch):
+    draft, batch = _generated(course)
+    started = []
+    monkeypatch.setattr(tasks, "start", lambda course_root, title, commands, env, meta=None:
+                        started.append((title, commands, meta)) or tasks.Task(
+                            "20260102-100000-abcdef", course_root, title, "running", "", None,
+                            commands, [], 1, meta or {}))
+    monkeypatch.setattr(courses, "container_problem", lambda course: None)
+    client = _browser(root)
+    assert "Try all 2 again" in get(client, "/c/demo-course/plans/w9-test/").get_data(
+        as_text=True)
+
+    post(client, "/c/demo-course/plans/w9-test/retry-all")
+
+    title, commands, meta = started[0]
+    assert title == "Generate 2 exercises again" and len(commands) == 4  # each: graph, validate
+    assert [c[4] for c in commands[::2]] == [str(draft / "retry-c.json"),
+                                             str(draft / "retry-d.json")]
+    assert meta == {"kind": "retry", "label": "w9-test", "items": ["c", "d"]}

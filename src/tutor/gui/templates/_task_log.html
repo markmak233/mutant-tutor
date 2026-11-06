@@ -12,7 +12,10 @@
     {# Once it ends: the page it came from (app.return_to). One that succeeded is sent there
        by the poll; one that failed or was stopped stays here, with this link. #}
     {% if not task.active and back and not stages %}<a href="{{ back[0] }}">Back to {{ back[1] }}</a>{% endif %}
+    {# The same action again, for one safe to run twice (app.again_url). #}
+    {% if not task.active and task.status != "done" and again %}{{ action(again, "Run again") }}{% endif %}
   </div>
+  {% include "_quiet.html" %}
   {% if stages %}
   {# A new course: its stages, from the files made and the commands ended (lectures.py). #}
   {% set done = stages | selectattr("state", "equalto", "done") | list | length %}
