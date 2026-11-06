@@ -447,14 +447,15 @@ def test_validate_all_starts_one_validation_per_listed_exercise(root, monkeypatc
     started = []
 
     def fake_start(course_root, title, commands, env, meta=None):
-        started.append((course_root, title, commands, env))
+        started.append((course_root, title, commands, env, meta))
         return tasks.Task("20260102-100000-abcdef", course_root, title, "running", "", None,
                           commands, [], 1)
 
     monkeypatch.setattr(tasks, "start", fake_start)
     response = post(_browser(root, FakeLauncher()), f"/c/demo-course/b/{BATCH}/validate")
 
-    course_root, title, commands, env = started[0]
+    course_root, title, commands, env, meta = started[0]
+    assert meta == {"kind": "validate", "batch": BATCH}  # so its page can go back to the batch
     batch = (root / "demo-course" / "batches" / BATCH).resolve()
     assert [c[2:] for c in commands] == [
         ["tutor.validation", str(batch / "exercises" / e), str(batch / "solutions" / e)]

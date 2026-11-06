@@ -91,7 +91,7 @@ def check(course: Course, run: Callable = subprocess.run) -> Check:
     python = venv_python(course)
     if not python.exists():
         return Check(None, problem="This course has no .venv yet: \"Install into .venv\" "
-                                   "below creates it.")
+                                   "above creates it.")
     try:
         done = _run_in_venv(course, python, ["-m", "tutor.envcheck", "--json"], run)
     except (OSError, subprocess.TimeoutExpired) as e:

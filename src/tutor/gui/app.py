@@ -137,6 +137,17 @@ NOTICES = {
     "no-setup-model": ("bad", "Nothing was started: this course has no model for it. Choose "
                               "one for the setup, plan or generate role on the Models page."),
 }
+# What a task that succeeded reports when it goes back to its page (app.return_to).
+NOTICES.update({
+    "lectures-read": ("ok", "Finished: the table shows what the cache holds now."),
+    "validated": ("ok", "Validation finished: every exercise passed it."),
+    "models-checked": ("ok", "Every model answered the check."),
+    "installed": ("ok", "Installed into .venv: step 2's check below is fresh."),
+    "image-built": ("ok", "The test image is built and checked: step 4 below."),
+    "draft-ready": ("ok", "The lectures were looked at: tick what to add in step 1."),
+})
+ENVIRONMENT_NOTICES = {"install": "installed", "build": "image-built",
+                       "requires-draft": "draft-ready"}
 RECENT_TASKS = 5
 UPLOAD_LIMIT_BYTES = 500 * 1024 * 1024  # one upload request, all its files together
 
@@ -331,13 +342,37 @@ def create_app(root: Path, token: str, port: int | None = None,
                                  str(solution)])
         if not commands:
             abort(404, "This batch has no exercise to validate.")
-        return start_task(course, f"Validate {batch}", commands)
+        return start_task(course, f"Validate {batch}", commands,
+                          meta={"kind": "validate", "batch": batch})
+
+    def return_to(course: courses.Course, task: tasks.Task) -> tuple[str, str, str | None] | None:
+        """Where a task goes back to once it ends (owner, 2026-11-06): (page, its name, the
+        notice for a task that succeeded), from the task's kind and names, through url_for,
+        never a URL kept in task.json, so an edited file cannot send the browser elsewhere.
+        None: the task page is the only place for it."""
+        kind, name = task.meta.get("kind"), course.folder
+        label, batch = task.meta.get("label"), task.meta.get("batch")
+        if kind in ("read", "vision"):
+            return url_for("lecture_list", name=name), "Lectures", "lectures-read"
+        if kind == "validate" and isinstance(batch, str):
+            return url_for("batch", name=name, batch=batch), batch, "validated"
+        if kind == "check":
+            return url_for("models", name=name), "Models", "models-checked"
+        if kind in ENVIRONMENT_NOTICES:
+            return (url_for("environment_view", name=name), "Environment",
+                    ENVIRONMENT_NOTICES[kind])
+        if kind in generation.KINDS and isinstance(label, str):
+            return url_for("plan", name=name, label=label), f"plan {label}", None
+        if kind == "create":
+            return url_for("course", name=name), course.workspace.course, None
+        return None
 
     def task_parts(course: courses.Course, task: tasks.Task) -> dict:
         """What both the task page and its polled part show; a new course's stages too."""
         log, cut = tasks.tail(task)
         create = task.meta.get("kind") == "create"
         return {"course": course, "task": task, "log": log, "cut": cut,
+                "back": return_to(course, task),
                 "stages": lectures.create_progress(course, task) if create else None,
                 "elapsed": lectures.elapsed(task) if create else ""}
 
@@ -350,15 +385,21 @@ def create_app(root: Path, token: str, port: int | None = None,
     @app.get("/c/<name>/tasks/<task_id>/log")
     def task_log(name: str, task_id: str):
         """The part of the task page that htmx fetches every second while the task runs.
-        A new course that is ready sends htmx on to its page (HX-Redirect, a navigation in
-        the same window, no script of ours), so the owner who watched it finish lands there;
-        one that failed stays on its log."""
+        A task that ends with every command done sends htmx back to the page it was started
+        from (HX-Redirect, a navigation in the same window, no script of ours), with a notice
+        saying what finished; one that failed or was stopped stays on its log, where the
+        error is, with a link back. Only the poll redirects: opening an old task's page
+        shows its log. A new course goes on to its page once it is ready."""
         course, task = task_or_404(name, task_id)
-        response = make_response(render_template("_task_log.html", **task_parts(course, task)))
-        if (task.meta.get("kind") == "create" and task.status == tasks.DONE
-                and request.headers.get("HX-Request") == "true"
-                and courses.get_course(app.config["ROOT"], name) is not None):
-            response.headers["HX-Redirect"] = url_for("course", name=name)
+        parts = task_parts(course, task)
+        response = make_response(render_template("_task_log.html", **parts))
+        back = parts["back"]
+        ready = (task.meta.get("kind") != "create"
+                 or courses.get_course(app.config["ROOT"], name) is not None)
+        if (back and ready and task.status == tasks.DONE
+                and request.headers.get("HX-Request") == "true"):
+            response.headers["HX-Redirect"] = back[0] + (f"?notice={back[2]}" if back[2]
+                                                         else "")
         return response
 
     @app.post("/c/<name>/tasks/<task_id>/stop")

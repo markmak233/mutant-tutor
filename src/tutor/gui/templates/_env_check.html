@@ -1,10 +1,12 @@
-{# The Environment page's check of this machine, loaded by htmx (environment.check).
-   "Check again" fetches it anew in place. #}
+{# Step 2's check of this machine, loaded by htmx (environment.check); its first line says
+   whether the step is done. "Check again" fetches it anew in place. #}
 {% from "_macros.html" import chip %}
 <div id="env-check">
   {% if check.problem %}
-  <p class="notice notice-bad">{{ check.problem }}</p>
+  <p class="step-state">{{ chip("to do") }} {{ check.problem }}</p>
   {% else %}
+  {% set missing = check.results | rejectattr("ok") | list %}
+  <p class="step-state">{% if not missing %}{{ chip("done") }} Everything in step 1 is on this machine.{% else %}{{ chip("to do") }} {{ missing | length }} of {{ check.results | length }} not met yet.{% endif %}</p>
   <table>
     <thead><tr><th>Requirement</th><th>Needs</th><th>Found</th><th></th></tr></thead>
     <tbody>
@@ -20,6 +22,6 @@
   </table>
   {% if not check.results %}<p class="muted">[requires] is empty, so there is nothing to check.</p>{% endif %}
   {% endif %}
-  <p class="muted">{% if check.python %}Checked with <code>{{ check.python }}</code>. {% endif %}{% if not check.ok %}Fix what is missing, then check again. Python packages: "Install into .venv" below. Java, Hadoop, Python: install them in your own terminal (the course's setup notes in <code>docs/setup/</code> say how), and set <code>JAVA_HOME</code> or <code>HADOOP_HOME</code> in <code>.env</code>.{% endif %}</p>
+  <p class="muted">{% if check.python %}Checked with <code>{{ check.python }}</code>. {% endif %}{% if not check.ok %}Python packages: "Install into .venv" above. Java, Hadoop, Python: install them in your own terminal (the course's setup notes in <code>docs/setup/</code> say how), set <code>JAVA_HOME</code> or <code>HADOOP_HOME</code> in <code>.env</code>, then check again.{% endif %}</p>
   <button type="button" class="small" hx-get="{{ url_for('environment_check', name=course.folder) }}" hx-target="#env-check" hx-swap="outerHTML">Check again</button>
 </div>

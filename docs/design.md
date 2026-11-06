@@ -2645,6 +2645,10 @@ gaps. Each was decided by the owner; change one only with the owner.
   wrote it and saw it, and a list of allowed file names, also suggested, kept none of the 17 real
   files (all under `sample_input/`). The untrusted input is lecture material, answered by layer A
   and the test-run container (see "Code execution safety").
+- No built-in "standard set" of models for a course with none (proposed 2026-11-06). The
+  first course adds its models with "Add a model"; later ones copy them from another course.
+  A set in the code would need upkeep as providers rename their models, and the owner prefers
+  the user to choose. Decided 2026-11-06.
 
 ## Deferred
 
@@ -2749,6 +2753,14 @@ late; the adaptive review screens can be built with it.
   itself, with the course's `WORKSPACE_DIR` and `LECTURE_DIR` set. One task per course at a
   time: validation already runs in parallel, and two at once could push runs past their limits.
   The page polls the end of the log every second with htmx and stops when the task ends.
+  A task that ends with every command done sends the watching page back to the page it was
+  started from, with a notice saying what finished (owner, 2026-11-06: "跑完跳转" for every
+  task): lectures read to Lectures, Validate all to its batch, Check to Models, install,
+  build and the [requires] draft to Environment, a plan's tasks to its plan, a new course to
+  its page. The target is worked out from the task's kind and names through `url_for`, never
+  a URL kept in `task.json`. One that failed or was stopped stays on its log, where the
+  error is, with a link back; a Validate all with an INVALID exercise is such a one. Only
+  the poll redirects, so opening an old task's page shows its log.
   The first task is "Validate all" on a batch, which rewrites each `validation.json` as the
   command line does; generating came in step 4, building the image comes in step 7.
 - Docker before a task (owner, 2026-11-06): a task that runs tests or calls a model
@@ -2900,6 +2912,11 @@ late; the adaptive review screens can be built with it.
     has nothing to check; a profile only the embedding role uses gets an embedding call.
   - Not in this step: the `[generation]` tunables (their defaults are measured values).
 - Environment page:
+  - The page is four numbered steps in the order they are done (owner, 2026-11-06, after
+    trying it on a new course: by topic it read unclearly): (1) what the course needs, the
+    model's draft then the list; (2) install on this machine, the check below its button;
+    (3) where tests run; (4) the test image, dimmed and "not needed" on the host. Each says
+    whether it is done; steps 2 and 4 say so in their htmx parts.
   - Built in step 7a (owner, 2026-11-06), no model involved, one page per course:
     - The check is `python -m tutor.envcheck --json` run with the course's own `.venv`:
       envcheck checks the interpreter that runs it, and the learner's tests use that venv.

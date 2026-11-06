@@ -496,6 +496,102 @@ def test_the_models_page_offers_the_setup_role(root, course):
     assert "<strong>setup</strong>" in text and "setup" in llm_settings.ROLES
 
 
+# --- the page as four steps, each saying whether it is done (owner, 2026-11-06) -----------------
+
+
+def test_the_steps_come_in_the_order_they_are_done(root):
+    text = _browser(root).get("/c/demo-course/environment/", base_url=BASE).get_data(
+        as_text=True)
+    order = [text.index(f'<span class="step-no">{n}</span>{title}') for n, title in (
+        (1, "What the course needs"), (2, "Install on this machine"), (3, "Where tests run"),
+        (4, "Test image"))]
+    assert order == sorted(order)
+    assert text.index("Find it in the lectures") < text.index("The list")
+    assert 'Where tests run <span class="chip chip-to-do">' in text  # not chosen yet
+
+
+def test_step_two_says_done_only_when_every_requirement_is_met(root, monkeypatch):
+    def check(results):
+        monkeypatch.setattr(environment, "check",
+                            lambda course: environment.Check("/v/python", results))
+        return _browser(root).get("/c/demo-course/environment/check",
+                                  base_url=BASE).get_data(as_text=True)
+
+    ok = {"name": "python", "required": "3.11", "found": "3.11.9", "hint": "", "ok": True}
+    bad = {"name": "java", "required": "17", "found": None, "hint": "set JAVA_HOME", "ok": False}
+    assert "chip-done" in check([ok]) and "chip-to-do" not in check([ok])
+    assert "chip-to-do" in check([ok, bad]) and "1 of 2 not met yet" in check([ok, bad])
+
+
+@pytest.mark.parametrize("runner, state, says", [
+    ("host", "image-missing", "chip-not-needed"),
+    ("container", "ready", "chip-done"),
+    ("container", "image-missing", "chip-to-do"),
+    (None, "image-missing", "Only if tests are to run in a container"),
+])
+def test_step_four_says_done_to_do_or_not_needed(root, monkeypatch, runner, state, says):
+    view = environment.DockerView(runner, "tutor-run-demo:abc", state, size=10**9)
+    monkeypatch.setattr(environment, "docker_view", lambda course: view)
+    text = _browser(root).get("/c/demo-course/environment/docker",
+                              base_url=BASE).get_data(as_text=True)
+    assert says in text
+
+
+# --- every task goes back to its page when it succeeds (owner, 2026-11-06) ----------------------
+
+
+def _task(course, meta, status="done", codes=(0,)):
+    folder = course.workspace.root / tasks.TASKS_DIR / "20260102-100000-0abcde"
+    _write(folder / tasks.TASK_FILE, json.dumps({
+        "title": "T", "status": status, "started": "2026-01-02 10:00:00",
+        "commands": [["python"]] * len(codes), "exit_codes": list(codes), "pid": None,
+        "meta": meta}))
+    _write(folder / tasks.LOG_FILE, "Traceback: the error\n")
+    return f"/c/{course.folder}/tasks/{folder.name}/"
+
+
+@pytest.mark.parametrize("meta, target", [
+    ({"kind": "read"}, "/c/demo-course/lectures/?notice=lectures-read"),
+    ({"kind": "vision"}, "/c/demo-course/lectures/?notice=lectures-read"),
+    ({"kind": "validate", "batch": "w9"}, "/c/demo-course/b/w9/?notice=validated"),
+    ({"kind": "check"}, "/c/demo-course/models/?notice=models-checked"),
+    ({"kind": "install"}, "/c/demo-course/environment/?notice=installed"),
+    ({"kind": "build"}, "/c/demo-course/environment/?notice=image-built"),
+    ({"kind": "requires-draft"}, "/c/demo-course/environment/?notice=draft-ready"),
+    ({"kind": "approve", "label": "w9"}, "/c/demo-course/plans/w9/"),
+])
+def test_a_task_that_succeeded_sends_the_watching_page_back(root, course, meta, target):
+    path = _task(course, meta)
+    client = _browser(root)
+
+    polled = client.get(path + "log", base_url=BASE, headers={"HX-Request": "true"})
+
+    assert polled.headers["HX-Redirect"] == target
+    assert "HX-Redirect" not in client.get(path + "log", base_url=BASE).headers  # not htmx
+
+
+@pytest.mark.parametrize("status, codes", [("failed", (0, 1)), ("stopped", (0,))])
+def test_a_task_that_failed_or_was_stopped_stays_on_its_log_with_a_link_back(
+        root, course, status, codes):
+    path = _task(course, {"kind": "install"}, status, codes)
+
+    polled = _browser(root).get(path + "log", base_url=BASE, headers={"HX-Request": "true"})
+    text = polled.get_data(as_text=True)
+
+    assert "HX-Redirect" not in polled.headers
+    assert "the error" in text and 'href="/c/demo-course/environment/">Back to Environment' in text
+
+
+def test_a_task_of_no_known_kind_stays_and_an_edited_target_stays_on_this_server(root, course):
+    path = _task(course, {"kind": "validate", "batch": "https://elsewhere.example/x"})
+    polled = _browser(root).get(path + "log", base_url=BASE, headers={"HX-Request": "true"})
+    assert polled.headers["HX-Redirect"].startswith("/c/demo-course/b/")
+
+    path = _task(course, {})
+    polled = _browser(root).get(path + "log", base_url=BASE, headers={"HX-Request": "true"})
+    assert "HX-Redirect" not in polled.headers
+
+
 def test_actions_need_this_servers_origin(root, course):
     client = _browser(root)
     response = client.post("/c/demo-course/environment/runner", base_url=BASE,

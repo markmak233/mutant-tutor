@@ -9,6 +9,9 @@
     {% set failed = task.exit_codes | select("number") | reject("equalto", 0) | list %}
     {% if failed %}<span class="muted">{{ failed | length }} exited with an error</span>{% endif %}
     {% if task.active %}{{ action(url_for('stop_task', name=course.folder, task_id=task.id), "Stop") }}{% endif %}
+    {# Once it ends: the page it came from (app.return_to). One that succeeded is sent there
+       by the poll; one that failed or was stopped stays here, with this link. #}
+    {% if not task.active and back and not stages %}<a href="{{ back[0] }}">Back to {{ back[1] }}</a>{% endif %}
   </div>
   {% if stages %}
   {# A new course: its stages, from the files made and the commands ended (lectures.py). #}

@@ -60,6 +60,7 @@ WAITING_FOR_ASSISTANT = 3  # graph/__main__.py's exit code in assistant mode
 
 # Task kinds, kept in task.json's meta with the label.
 PLAN, FEEDBACK, APPROVE, CONTINUE = "plan", "feedback", "approve", "continue"
+KINDS = (PLAN, FEEDBACK, APPROVE, CONTINUE)  # a task of one of these goes back to its plan
 _PLANNING_KINDS = (PLAN, FEEDBACK, CONTINUE)
 
 # Where a batch stands; the words the pages show.
