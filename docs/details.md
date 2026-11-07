@@ -362,8 +362,9 @@ Phase numbers match `docs/design.md`.
   validating C exercises is built (pytest drives the compiled program, with sanitizers, in a
   container; one prompt template filled per language), and so is solving them (the
   exercise page, attempts, the report, hints with C rules from the compiler and the
-  sanitizers, held-out checks of the learner's own code); the first real batch is next; then
-  C++ and Java (the order is in design.md, "Languages in the plan")
+  sanitizers, held-out checks of the learner's own code); the first real batch, 5 exercises,
+  came out 5 of 5 VALID, 4 of them after one repair round; then C++ and Java, each when a
+  course needs it (the order is in design.md, "Languages in the plan")
 - **7** ✅ Local GUI, built ahead of 6: a web app on the CLI's functions, localhost only;
   solving stays in the IDE. The pages, Open in VS Code, background tasks, generation with
   the plan approved in the page, lectures (PDFs, web pages, a whole folder to tick from), a

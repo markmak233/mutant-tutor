@@ -11,8 +11,8 @@ question alone. No LLM judges whether an exercise is correct.
 Everything runs on your machine. A local web GUI takes a course's lectures (PDFs or saved web
 pages), its models and its environment; a LangGraph pipeline plans a batch, which you approve,
 then generates, validates and repairs each exercise; the exercises land as folders you open
-in VS Code. Courses in Python (plain Python, PySpark, MRJob) and, newly, C, its first
-batches still to be measured; C++ and Java are planned.
+in VS Code. Courses in Python (plain Python, PySpark, MRJob) and, newly, C, whose first
+real batch came out 5 of 5 VALID; C++ and Java are planned.
 
 It started as revision for a big data management course (none of its material is included)
 and is built as an AI engineering portfolio project.
@@ -82,10 +82,10 @@ provided as is (see [LICENSE](LICENSE)).
 ## Status and more
 
 Done: validation, generation, held-out checks, hints, the retrieval comparison, the
-evaluation, a container per test run, and the local GUI. In progress: a C course (its
-exercises are generated and validated, with sanitizers, in a container, and solved with the
-same pages, attempts and hints as Python's; the first real batch is next); then packaging and
-release.
+evaluation, a container per test run, and the local GUI. In progress: a second language. C
+works end to end (its exercises are generated and validated, with sanitizers, in a container,
+and solved with the same pages, attempts and hints as Python's), and its first real batch came
+out 5 of 5 VALID; C++ and Java wait for a course that needs them. Then packaging and release.
 
 - [`docs/details.md`](docs/details.md): how validation and generation work, the results, the
   RAG comparison, where exercise code runs, the layout and the roadmap

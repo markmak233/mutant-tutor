@@ -2215,6 +2215,12 @@ themselves, so a cheap layer comes first and a stronger one later.
     - Measured so far with stand-in models only: a C item goes from a reply to a saved exercise
       through the real validator on the host and in the course's container. The C prompts
       are not calibrated: the first batches on the C course measure them.
+    - The first real batch (2026-11-07, learn mode, 5 exercises; deepseek-v4-flash
+      generating, gpt-terra writing the oracle): 5 of 5 VALID, one in round 0 and four after
+      one repair round. Round 0 failed three times on rule 1, the reference and its own tests
+      reading the question differently (what `scanf` returns at the end of input, a computed
+      float, a `printf` format), and once on rule 4, the oracle's test file not loading (a
+      Hypothesis test defined twice). Too few to change the prompts on; more batches first.
   - Step 4, what the learner touches (owner, 2026-11-07), in two parts: 4a the solving itself
     (the exercise page, attempts, the progress report), 4b hints and the held-out check.
     - Which file is the learner's code is told by the file in the exercise folder
