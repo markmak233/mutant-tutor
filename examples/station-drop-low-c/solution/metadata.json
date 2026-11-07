@@ -1,0 +1,16 @@
+{
+  "id": "station-drop-low-c",
+  "title": "Drop the low readings",
+  "topic": "c/pointers-and-arrays-in-place",
+  "type": "implementation",
+  "difficulty": "easy",
+  "language": "c",
+  "framework": "c",
+  "interface": "function",
+  "entry_point": ["drop_below"],
+  "constraints": {
+    "forbidden_calls": ["malloc", "calloc", "realloc"],
+    "required_definitions": ["drop_below"]
+  },
+  "source": "synthetic"
+}

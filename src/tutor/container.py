@@ -75,7 +75,8 @@ def runner_uid() -> int:
 def dockerfile(requires: Mapping[str, str], uid: int | None = None,
                installed: Callable[[str], str | None] = lambda name: None) -> str:
     """The image's recipe, from a course's [requires]: `python` picks the base image, `java`
-    the JDK, `hadoop` Apache's tarball, and any other name is a pip package.
+    the JDK, `gcc` Debian's C compiler (C exercises), `hadoop` Apache's tarball, and any other
+    name is a pip package.
 
     `installed` gives a package's version on this machine, or None. A build passes the real
     one so that the image tests with what the host tests with, as long as it fits [requires].
@@ -111,6 +112,14 @@ def dockerfile(requires: Mapping[str, str], uid: int | None = None,
         steps.append(f'RUN ln -s "/usr/lib/jvm/java-{major}-openjdk-'
                      '$(dpkg --print-architecture)" /opt/java')
         env["JAVA_HOME"] = "/opt/java"
+    if "gcc" in requires:
+        # A step of its own, so the recipes (and image names) of courses without C stay as
+        # they were. Debian's gcc package is the release's one (12 on bookworm); the check
+        # after the build compares it with [requires], so another major is refused there.
+        # libc6-dev: the C library's headers. The sanitizers' libraries come with gcc.
+        steps.append("RUN apt-get update \\\n"
+                     " && apt-get install -y --no-install-recommends gcc libc6-dev \\\n"
+                     " && rm -rf /var/lib/apt/lists/*")
     if hadoop := requires.get("hadoop"):
         steps.append(_hadoop_step(hadoop))
         env["HADOOP_HOME"] = "/opt/hadoop"
@@ -196,7 +205,10 @@ def limits(uid: int | None = None) -> list[str]:
         "--hostname", "localhost",  # with no network Hadoop cannot resolve the default name
         "--network", "none",
         "--read-only",
-        "--tmpfs", "/tmp:rw,size=1g,mode=1777",
+        # exec: a C exercise's tests compile the program into /tmp and run it there. Docker's
+        # tmpfs is noexec by default; the run's own folder, a bind mount, never was, so this
+        # lets nothing run that could not already.
+        "--tmpfs", "/tmp:rw,exec,size=1g,mode=1777",
         "--user", str(_uid(uid)),
         "--cap-drop", "ALL",
         "--security-opt", "no-new-privileges",

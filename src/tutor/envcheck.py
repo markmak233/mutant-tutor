@@ -27,7 +27,7 @@ from pathlib import Path
 from tutor.config import Workspace, WorkspaceError, load_env, load_workspace
 
 # The names checked by their own rule below; any other name is a pip package.
-NOT_PIP = ("python", "java", "hadoop")
+NOT_PIP = ("python", "java", "hadoop", "gcc")
 NEEDS_JAVA = ("pyspark", "hadoop")
 PACKAGE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 VERSION = re.compile(r"^\d+(\.\d+)*$")  # a prefix of dotted numbers: "3.5" means 3.5.x
@@ -145,6 +145,12 @@ def _check(name: str, required: str, ws: Workspace) -> CheckResult:
             name, required, _hadoop_version(),
             f"set HADOOP_HOME in .env to an unpacked Hadoop {required}.x",
         )
+    if name == "gcc":
+        return CheckResult(
+            name, required, _gcc_version(),
+            f"install gcc {required}; C exercises are validated in the course's container, "
+            "where it is, and a learner's own runs here compile with this machine's `cc`",
+        )
     try:
         found = metadata.version(name)
     except metadata.PackageNotFoundError:
@@ -169,6 +175,23 @@ def _java_version() -> str | None:
         return None
     # `java -version` writes to stderr, not stdout.
     return parse_java_version(proc.stderr + proc.stdout)
+
+
+def _gcc_version() -> str | None:
+    """`gcc`'s version, e.g. "12.2.0"; "clang-21.0.0" where `gcc` is clang (macOS), which
+    then does not match a gcc version; None when there is none."""
+    try:
+        first = subprocess.run(["gcc", "--version"], capture_output=True, text=True,
+                               timeout=10).stdout.splitlines()[:1]
+        # -dumpfullversion: gcc 7 and later print the whole version; clang does not know it.
+        flag = "-dumpversion" if first and "clang" in first[0] else "-dumpfullversion"
+        version = subprocess.run(["gcc", flag], capture_output=True, text=True,
+                                 timeout=10).stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if not version:
+        return None
+    return f"clang-{version}" if flag == "-dumpversion" else version
 
 
 def _hadoop_version() -> str | None:

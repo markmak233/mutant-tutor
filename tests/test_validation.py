@@ -13,7 +13,7 @@ import pytest
 
 from tutor.config import load_env
 from tutor.execution import DEFAULT_TIMEOUT_S
-from tutor.schema import Metadata, problems
+from tutor.schema import Metadata, metadata_model, problems
 from tutor.testkit import HADOOP_UNSUPPORTED, hadoop_runner_supported
 from tutor.validation import ExerciseError, Status, checks, heldout, load_exercise, validate
 from tutor.validation.__main__ import format_report, main
@@ -207,7 +207,7 @@ def test_examples_fit_the_batch_format():
     """Fast check without Spark; `pytest -m spark` validates the examples end to end."""
     for metadata in sorted(EXAMPLES.glob("*/solution/metadata.json")):
         data = json.loads(metadata.read_text(encoding="utf-8"))
-        assert problems(Metadata, data) == [], metadata.parent
+        assert problems(metadata_model(data), data) == [], metadata.parent
 
 
 # --- rules 1-3 -------------------------------------------------------------------------
@@ -810,9 +810,11 @@ def test_every_framework_the_format_allows_is_light_or_heavy():
     an unlisted one would silently count as heavy."""
     from typing import get_args
 
+    from tutor.schema import CMetadata
     from tutor.validation.exercise import HEAVY_FRAMEWORKS, LIGHT_FRAMEWORKS
 
-    allowed = set(get_args(Metadata.model_fields["framework"].annotation))
+    allowed = {*get_args(Metadata.model_fields["framework"].annotation),
+               *get_args(CMetadata.model_fields["framework"].annotation)}
     assert allowed == LIGHT_FRAMEWORKS | HEAVY_FRAMEWORKS
     assert not LIGHT_FRAMEWORKS & HEAVY_FRAMEWORKS
 

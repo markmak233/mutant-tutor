@@ -160,8 +160,9 @@ smartCodingReview/                       # public repo (the `tutor/` above), cod
 │   ├── envcheck.py                      # P1 checks the workspace's [requires]; owns its rules
 │   ├── workspace.py                     # creates a course workspace: folder, .venv, terminal files
 │   ├── execution.py                     # P1 copy to temp dir -> subprocess pytest -> delete
-│   ├── validation/                      # P1 the checks; P2 rule 0, P3a the safety check (internals designed before coding)
+│   ├── validation/                      # P1 the checks; P2 rule 0, P3a the safety check (internals designed before coding); C: csource.py
 │   ├── testkit.py                       # P2a run a file-level program, read part-*, compare output
+│   ├── testkit_c.py                     # C exercises' tests: compile once, run, sanitizers
 │   ├── attempts.py                      # P2a pytest plugin: one attempts.jsonl line per exercise run
 │   ├── schema.py                        # P2 Pydantic models of metadata.json / manifest.json (rule 0),
 │   │                                    #   P3 parses LLM output into the same models
@@ -177,7 +178,9 @@ smartCodingReview/                       # public repo (the `tutor/` above), cod
 │   │   └── solution/
 │   ├── station-max-file/                # file-level: CSV input dir with messy lines -> part-* output
 │   ├── station-monthly-df/              # DataFrame: groupBy/agg, orderBy, one CSV file, parameter
-│   └── station-condition-share/         # MRJob on Hadoop: order inversion, --jobconf tau
+│   ├── station-condition-share/         # MRJob on Hadoop: order inversion, --jobconf tau
+│   ├── station-above-average-c/         # C, a whole program: standard input -> output and exit status
+│   └── station-drop-low-c/              # C, a function and a given driver.c: an array changed in place
 └── tests/
     ├── test_env.py                      # P1, runs envcheck for the current workspace
     └── test_validation.py               # P1, runs the validator on examples/
@@ -465,7 +468,7 @@ explained before code since it touches `validation/`):
   function and MRJob entry points have no dots, file-level Spark ones are `Class.run`; in a
   manifest, priority marks name listed exercises, each at most once.
 - The models are also exported as JSON Schema files in `schemas/` (`python -m tutor.schema
-  --export`), so an assistant that is not running Python, and phase 3's structured output,
+  --export`; a C exercise's model as `metadata-c.schema.json`), so an assistant that is not running Python, and phase 3's structured output,
   read the same definition; a test fails if the exported files differ from the models.
   JSON Schema holds the fields only, not the cross-field rules, so `python -m tutor.schema`
   stays the check that counts.
@@ -1971,7 +1974,7 @@ themselves, so a cheap layer comes first and a stronger one later.
   - One fresh `docker run --rm` per test run (owner, 2026-11-05; this replaces the draft's
     long-lived per-course container with `docker exec`):
     `docker run --rm --pull never --init --name tutor-run-<random> --hostname localhost --network
-    none --read-only --tmpfs /tmp:rw,size=1g,mode=1777 --user <runner> --cap-drop ALL
+    none --read-only --tmpfs /tmp:rw,exec,size=1g,mode=1777 --user <runner> --cap-drop ALL
     --security-opt no-new-privileges --pids-limit 1024 --memory 2g --memory-swap 2g --cpus 4
     -v <run dir>:/work -w /work -v <tutor package>:/opt/tutor/tutor:ro -e <this run's variables>
     <image> timeout -s KILL <limit + 5> python -m pytest ...`. The run dir is the same throwaway
@@ -1986,7 +1989,10 @@ themselves, so a cheap layer comes first and a stronger one later.
     the container ends with its main process, so a leftover JVM ends with it. `timeout`: the
     container ends even if the validator is killed, when nothing is left to call `docker kill`.
     `--pull never`: an image that went missing stops the run, and nothing is fetched from a
-    public registry under that name. `--cpus` (4) is capped at the VM's CPUs, as Docker refuses
+    public registry under that name. `exec` on `/tmp` (2026-11-07): Docker's tmpfs is noexec by
+    default, and a C exercise's tests compile into `/tmp` and run the program there (a program
+    built there could not start, exit 126); the run folder, a bind mount, always allowed it,
+    so nothing can run that could not before. `--cpus` (4) is capped at the VM's CPUs, as Docker refuses
     more. The limits come from one Spark hypothesis run, which peaked at 393 processes and
     threads and 486 MB; 512 left too little room, so 1024.
   - Measured 2026-11-05, Docker Desktop on macOS (arm64, a 12-CPU VM with 7.66 GB). Median of
@@ -2029,7 +2035,10 @@ themselves, so a cheap layer comes first and a stronger one later.
     0.07 s and, importantly, waits while a stopped VM wakes (Resource Saver; measured 2.5 s on the
     first call after idling), so those seconds do not count against the code's time limit.
   - Image: `python -m tutor.container build`, one per course, generated from `[requires]`:
-    `python` picks the base image, `java` the JDK, `hadoop` the Apache tarball with its SHA-512
+    `python` picks the base image, `java` the JDK, `gcc` Debian's gcc and libc6-dev (in a
+    step of its own, so the recipes and image names of courses without C stay as they were;
+    the check after a build compares its version with the prefix), `hadoop` the Apache tarball
+    with its SHA-512
     fixed in code (`downloads.apache.org`, about 3.3 MB/s, then the slower archive), and any other
     name a pip package, at the host's exact version if it matches, else the prefix. `pytest`
     and `hypothesis` at the host's versions. A plain Python course 184 MB; with Java and Spark
@@ -2062,13 +2071,83 @@ themselves, so a cheap layer comes first and a stronger one later.
   source (lab, page), and the owner accepts entry by entry, as for the GUI's `[requires]`
   draft. A generated exercise that needs an unlisted module fails `safe` and yields a
   proposal to the owner, never an automatic widening.
-- Other languages (generalization phase, not built): a `language` field in metadata
-  (optional, default `python`); tests stay pytest and run the compiled program as a
+- Other languages (generalization phase; C's validation built, below): a `language` field in
+  metadata (optional, default `python`); tests stay pytest and run the compiled program as a
   subprocess, as file-level exercises already do; one safety checker per language chosen
-  by `check_safety` (tree-sitter for most languages, sqlglot for SQL), with per-language
-  allowlists. A few languages built in, others configured by the owner in `workspace.toml`
-  (extension, compile and run commands, allowlist); those commands run, so generation never
-  writes them. A language without a built-in checker needs the container.
+  by `check_safety` (C: `validation/csource.py`; for later languages tree-sitter, sqlglot for
+  SQL), with per-language allowlists. A few languages built in, others configured by the owner
+  in `workspace.toml` (extension, compile and run commands, allowlist); those commands run, so
+  generation never writes them. A language without a built-in checker needs the container.
+- C (owner, 2026-11-07). Four steps: (1) validation, built; (2) the image and the GUI's
+  Environment page; (3) generation prompts, a `graph/` change explained first; (4) question.md
+  from student.c and hints. The first C course's lectures (C99 with `gcc -Wall -std=c99`,
+  Makefiles, programs on standard input and output, expected-output files, gdb and valgrind,
+  no unit-test framework) show it tests by given input and expected output, so:
+  - pytest drives the compiled program (owner chose the recommended option). The rules,
+    `execution.py`, the JUnit XML counts, hints, held-out checks and attempts stay as they are;
+    only file suffixes, compiling and the static check differ by language. A C unit-test
+    framework (Unity, CMocka) would have to be installed in the image and learnt, though the
+    course never taught one; that stays for a C++ or Java course that already tests with
+    GoogleTest or JUnit.
+  - Format: `schema.CMetadata`, picked by `"language": "c"`, with `framework: "c"`, and not new
+    fields in `Metadata`: Metadata's JSON Schema goes to the generate and repair models inside
+    `ExerciseDraft`, and the calibrated Python prompts keep their exact text
+    (`schemas/metadata.schema.json` is unchanged; `metadata-c.schema.json` is new). Code files
+    are student.c, reference.c, skeleton.c and mutants/*.c; tests and oracle stay Python, so
+    the oracle is written in another language than the reference.
+  - Two shapes (owner): a whole program (`interface: "file"`: student.c has main; tests give
+    standard input, arguments or files and compare output and exit status) and a function
+    (`interface: "function"`: student.c holds functions; a given driver.c and header in the
+    exercise folder have the main, and the header lets the compiler check both sides agree).
+    Not ctypes: a crash in the student's code would take pytest down with it, a failed test
+    would read as an error, and rules 2 and 3 would judge wrongly. Several files with a
+    Makefile: later.
+  - `tutor.testkit_c`. `build(...)` compiles while pytest imports the test file, so a compile
+    error is a collection error and the run an ERROR: a skeleton that does not compile fails
+    rule 2 as an import error does, and such a mutant is "broken", not "killed".
+    `program.run(...)` raises AssertionError on a non-zero exit, a signal, a sanitizer's report
+    or its own time limit (5 s), so each of those fails one test, and a hanging mutant is
+    killed in seconds. It imports only the standard library and `tutor.config`, since it runs
+    in the container.
+  - Sanitizers (owner: ASan and UBSan, not valgrind). Every build adds
+    `-fsanitize=address,undefined`, `-fno-sanitize-recover=all` (UBSan otherwise prints and
+    carries on), `-g`, and `-Werror=implicit-function-declaration` (C99 otherwise links any
+    library function called without its header, which the header check counts on). Why not
+    valgrind: 20 to 30 times slower on every run, Linux only, and blind to overflows of arrays
+    on the stack, the course's usual arrays. It does catch reads of uninitialised memory, which
+    ASan does not; an extra valgrind pass in the container is the way if such mutants are
+    wanted. In the examples, a stack array too small and a loop one past a malloc'd array are
+    killed only through the sanitizer.
+  - Leaks are checked only in a run that asks, `run(..., leaks=True)`. LeakSanitizer's check
+    at exit took 0.72 s per run in Docker Desktop's VM (arm64, linuxkit kernel 6.4), the same
+    with every container limit removed, with seccomp unconfined, with `SYS_PTRACE` and on one
+    CPU, while the run itself took 3 ms; with it always on, rule 4's 100 examples ran past 30 s.
+    Not traced further. On macOS there is no LeakSanitizer, so such a run warns that leaks were
+    not checked there; it works under the container's limits (`pytest -m docker`).
+  - Flags: `workspace.toml` `[languages.c] flags`, which only the owner writes, else
+    `-std=c11 -Wall`. The validator passes them to every run (`TUTOR_C_FLAGS`), as a run in
+    the container cannot see workspace.toml; a learner's run reads the file. The reference must
+    compile without a warning (`TUTOR_C_STRICT`, rule 1 only), as the course asks of its
+    students; a skeleton or mutant may warn (`if (x = 0)` is a real mistake that warns).
+  - Rule `safe` (owner: header allowlist, and container only). C is validated only in a
+    container: `safe` fails while the course's runner is not "container", the repo's examples
+    included, whose end-to-end check is `pytest -m docker` (the fast suite runs the rules on
+    the host with that check patched out). `csource.py` reads every .c and .h a run compiles,
+    on tokens without comments or string contents: `#include <...>` only of the C standard
+    headers and a course's `[safety] allow_headers`, `#include "..."` only of the exercise's own
+    files by plain name, no other include form (a macro, `#embed`, `#import`), no inline
+    assembly or `##`, none of a list of process, shell, network, code-loading and system-call
+    names in any use (C lets code declare a library function itself), no literal path outside
+    the exercise in `fopen` and the like. It exists for the learner's own runs, which compile
+    the generated skeleton and driver on their machine: a filter that stops the obvious, as
+    layer A does for Python.
+  - Rule `api` reads tokens (`forbidden_calls`, `required_definitions`; a definition is a name,
+    its parameters and a body); rule `main` asks a whole program's student.c and reference.c
+    for main and does not apply to a function exercise; rule 5 does not apply.
+  - The learner's own runs stay on their machine for now, and a command that runs them in the
+    container comes later (owner): on macOS `cc` is Apple's clang without LeakSanitizer, and
+    envcheck reports `gcc` there as clang. Measured: both examples VALID in a container with
+    the course's `-Wall -std=c99` in 3 to 6 s each, and with clang on macOS.
 - Languages in the plan (owner, 2026-11-07), in this order: C, C++ and Java first, as the
   owner has courses in them; then SQL, JavaScript and TypeScript, shell, Rust, R, Go, Haskell,
   assembly, and MATLAB (open, below). Each is designed when a real course with lectures needs

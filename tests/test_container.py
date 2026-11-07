@@ -71,6 +71,18 @@ def test_a_course_with_java_and_hadoop_gets_both_and_any_other_name_is_a_pip_pac
     assert "'pyspark==3.5.*'" in recipe and "'mrjob==0.7.*'" in recipe
 
 
+def test_a_c_course_gets_gcc_in_a_step_of_its_own():
+    """A step of its own, so adding C leaves every other course's recipe, and image name, as
+    it was; gcc is not a pip package."""
+    recipe = dockerfile({**PLAIN_COURSE, "gcc": "12"}, uid=501)
+    assert ("RUN apt-get update \\\n && apt-get install -y --no-install-recommends gcc "
+            "libc6-dev \\\n && rm -rf /var/lib/apt/lists/*\n") in recipe
+    assert "pip install --no-cache-dir pytest hypothesis\n" in recipe
+    without = dockerfile(PLAIN_COURSE, uid=501)
+    assert without == recipe.replace(recipe[recipe.index("RUN apt-get"):
+                                            recipe.index("RUN pip")], "")
+
+
 def test_hadoop_is_downloaded_from_every_mirror_and_checked_against_a_fixed_checksum():
     recipe = dockerfile(SPARK_COURSE, uid=501)
     for mirror in HADOOP_MIRRORS:
@@ -124,6 +136,8 @@ def test_limits_keep_the_container_off_the_network_and_out_of_root():
                  ["--hostname", "localhost"], ["--pids-limit", "1024"], ["--memory-swap", "2g"]):
         assert any(flags[i:i + 2] == pair for i in range(len(flags)))
     assert "--read-only" in flags and "--init" in flags
+    # exec: C tests compile into /tmp and run the program there (the run folder allows it too).
+    assert ["--tmpfs", "/tmp:rw,exec,size=1g,mode=1777"] == flags[flags.index("--tmpfs"):][:2]
 
 
 def test_the_runner_is_never_root(monkeypatch):

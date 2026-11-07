@@ -11,8 +11,8 @@ question alone. No LLM judges whether an exercise is correct.
 Everything runs on your machine. A local web GUI takes a course's lectures (PDFs or saved web
 pages), its models and its environment; a LangGraph pipeline plans a batch, which you approve,
 then generates, validates and repairs each exercise; the exercises land as folders you open
-in VS Code. Courses in Python today (plain Python, PySpark, MRJob); C, C++ and Java are
-planned.
+in VS Code. Courses in Python today (plain Python, PySpark, MRJob); C exercises validate
+already, and generating them comes next; C++ and Java are planned.
 
 It started as revision for a big data management course (none of its material is included)
 and is built as an AI engineering portfolio project.
@@ -41,8 +41,8 @@ and is built as an AI engineering portfolio project.
 
 You open `student.py`: the question in its docstring, a skeleton below. You run
 `test_student.py`, and open `hints.md` only when stuck. What the validator needs (reference,
-mutants, oracle) sits in a separate `solution/` folder. Five synthetic examples are in
-[`examples/`](examples/).
+mutants, oracle) sits in a separate `solution/` folder. Seven synthetic examples, two of them
+in C, are in [`examples/`](examples/).
 
 ## Quick start
 
@@ -82,8 +82,9 @@ provided as is (see [LICENSE](LICENSE)).
 ## Status and more
 
 Done: validation, generation, held-out checks, hints, the retrieval comparison, the
-evaluation, a container per test run, and the local GUI. Next: a C course, which needs a
-language adapter for validation; then packaging and release.
+evaluation, a container per test run, and the local GUI. In progress: a C course (its
+exercises validate, with sanitizers, in a container; generation is next); then packaging and
+release.
 
 - [`docs/details.md`](docs/details.md): how validation and generation work, the results, the
   RAG comparison, where exercise code runs, the layout and the roadmap
