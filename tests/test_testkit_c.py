@@ -5,7 +5,6 @@ compiler flags come from. Needs `cc` (gcc or clang); skipped without one.
 
 import importlib.util
 import json
-import shutil
 import sys
 import warnings
 from pathlib import Path
@@ -22,9 +21,10 @@ from tutor.testkit_c import (
     LeaksNotCheckedWarning,
     compile_flags,
     course_flags,
+    host_problem,
 )
 
-pytestmark = pytest.mark.skipif(shutil.which("cc") is None, reason="needs a C compiler (cc)")
+pytestmark = pytest.mark.skipif(host_problem() is not None, reason=str(host_problem()))
 
 HELLO = '#include <stdio.h>\nint main(void) { printf("hello\\n"); return 0; }\n'
 

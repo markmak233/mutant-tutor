@@ -72,7 +72,8 @@ def test_missing_package_fails_with_install_hint():
     [result] = check_workspace(make_ws({"no-such-package-xyz": "1.0"}))
     assert not result.ok
     assert result.found is None
-    assert "python -m tutor.workspace init /ws" in result.hint
+    # The folder as this platform writes it ("\\ws" on Windows), as the user types it there.
+    assert f"python -m tutor.workspace init {Path('/ws')}" in result.hint
 
 
 def test_pip_gets_each_package_as_the_prefix_envcheck_accepts():

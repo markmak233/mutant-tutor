@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from tutor.attempts import exercise_of
+from tutor.testkit_c import host_problem
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 
@@ -107,7 +108,7 @@ def test_a_c_exercise_keeps_its_failing_student_c_as_c(tmp_path):
     assert kept.read_text(encoding="utf-8") == "int add(int a, int b) { return a * b; }\n"
 
 
-@pytest.mark.skipif(shutil.which("cc") is None, reason="needs a C compiler (cc)")
+@pytest.mark.skipif(host_problem() is not None, reason=str(host_problem()))
 def test_a_learners_own_c_run_is_recorded(tmp_path):
     """The learner's own run of a C exercise, on their machine: the C example handed out as
     its skeleton compiles, fails its tests, and is logged with its student.c kept."""

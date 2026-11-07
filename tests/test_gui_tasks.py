@@ -5,6 +5,7 @@ and `docker run`)."""
 import hashlib
 import json
 import os
+import shlex
 import signal
 import sys
 import time
@@ -146,6 +147,18 @@ def test_a_runner_that_died_shows_as_lost_and_frees_the_course(tmp_path):
     assert tasks.running(tmp_path) is None
 
 
+def test_a_runner_that_is_alive_stays_running(tmp_path):
+    # The other half of the check above, on each platform's own way to ask (Windows: an exit
+    # code through ctypes; elsewhere a signal 0): this process is surely alive.
+    folder = tmp_path / tasks.TASKS_DIR / "20260101-000000-abcdef"
+    folder.mkdir(parents=True)
+    (folder / tasks.TASK_FILE).write_text(json.dumps(
+        {"title": "x", "status": "running", "started": "2026-01-01 00:00:00",
+         "pid": os.getpid()}), encoding="utf-8")
+
+    assert tasks.get(tmp_path, folder.name).status == tasks.RUNNING
+
+
 def test_a_runner_that_never_started_is_lost_after_30_s(tmp_path):
     folder = tmp_path / tasks.TASKS_DIR / "20260101-000000-abcdef"
     folder.mkdir(parents=True)
@@ -229,4 +242,7 @@ def test_the_log_shows_course_paths_relative_to_the_course(tmp_path):
                        {"WORKSPACE_DIR": str(tmp_path)})
     log = tasks.tail(wait_end(tmp_path, task))[0]
 
-    assert " batches/b1 ." in log and str(tmp_path) not in log  # the course itself is "."
+    # The course itself is "."; a path inside it keeps the platform's separator (Windows' "\\"
+    # makes shlex quote it).
+    shown = shlex.join([os.path.join("batches", "b1"), "."])
+    assert f" {shown}" in log and str(tmp_path) not in log

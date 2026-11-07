@@ -16,10 +16,11 @@ from tutor.execution import run_pytest
 from tutor.hint import llm_hint, mutants
 from tutor.hint.__main__ import hint_for
 from tutor.hint.rules import first_rule
+from tutor.testkit_c import host_problem
 from tutor.validation.exercise import load_exercise
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
-needs_cc = pytest.mark.skipif(shutil.which("cc") is None, reason="needs a C compiler (cc)")
+needs_cc = pytest.mark.skipif(host_problem() is not None, reason=str(host_problem()))
 
 
 def copy_example(tmp_path: Path, name: str) -> Path:

@@ -6,7 +6,6 @@ synthetic C example. Python's prompts are pinned in tests/test_prompt_pins.py.""
 
 import json
 import re
-import shutil
 from pathlib import Path
 
 import pytest
@@ -17,12 +16,13 @@ from tutor.graph.nodes import Deps, DraftError, apply_mutant, write_draft
 from tutor.graph.state import CExerciseDraft, CPlanItem, MutantDraft
 from tutor.llm import LLMConfig, Reply
 from tutor.materials import cache
+from tutor.testkit_c import host_problem
 from tutor.validation import checks
 
 EXAMPLE = Path(__file__).resolve().parents[1] / "examples" / "station-drop-low-c"
 ITEM = CPlanItem(id="drop-low", knowledge_point="filtering an array in place", lecture="L1",
                  slides="1.3-1.4", type="implementation", interface="function", framework="c")
-needs_cc = pytest.mark.skipif(shutil.which("cc") is None, reason="needs a C compiler (cc)")
+needs_cc = pytest.mark.skipif(host_problem() is not None, reason=str(host_problem()))
 
 
 def _read(*parts: str) -> str:

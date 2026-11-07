@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 from tutor.schema import CMetadata, Metadata, language_of, metadata_model, problems
-from tutor.testkit_c import C_FLAGS_ENV, DEFAULT_FLAGS
+from tutor.testkit_c import C_FLAGS_ENV, DEFAULT_FLAGS, host_problem
 from tutor.validation import ExerciseError, checks, load_exercise, validate
 from tutor.validation.__main__ import format_report
 from tutor.validation.checks import (
@@ -28,7 +28,7 @@ from tutor.validation.checks import (
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 C_EXAMPLES = ["station-above-average-c", "station-drop-low-c"]
-needs_cc = pytest.mark.skipif(shutil.which("cc") is None, reason="needs a C compiler (cc)")
+needs_cc = pytest.mark.skipif(host_problem() is not None, reason=str(host_problem()))
 
 
 @pytest.fixture

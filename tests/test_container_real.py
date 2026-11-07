@@ -97,9 +97,16 @@ def test_the_only_writable_places_are_the_run_folder_and_tmp(course):
 
 def test_this_machines_home_and_environment_are_out_of_reach(course, monkeypatch):
     monkeypatch.setenv("TUTOR_TEST_SECRET", "not-for-the-container")
-    home = str(Path.home())
+    # A file that is surely on this machine: this test file, under the repository (in the
+    # home folder on the owner's Mac and on GitHub's runner).
+    this_file = Path(__file__).resolve().as_posix()
+    home = Path.home().as_posix()
+    # The image's own user is `runner`, with an empty /home/runner of its own; on a machine
+    # whose user is also `runner` (GitHub's), the same name is no sign of the host's home.
+    home_check = "" if home == "/home/runner" else f"assert not os.path.exists({home!r})"
     files = exercise(course, "secrets", f"""\
-        assert not os.path.exists({home!r})
+        assert not os.path.exists({this_file!r})
+        {home_check}
         assert not os.path.exists("/opt/tutor/.env")
         assert not os.path.exists("/opt/.env")
         assert "TUTOR_TEST_SECRET" not in os.environ

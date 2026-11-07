@@ -188,7 +188,11 @@ def _prune(base: Path) -> None:
 
 def _alive(pid: int) -> bool:
     if sys.platform == "win32":
-        return True  # not checked there yet; a lost runner shows as running
+        # A runner that died there showed as running for good, and held the course, which
+        # runs one task at a time (found by Windows CI, 2026-11-08).
+        from tutor import winjob  # ctypes.WinDLL exists only on Windows
+
+        return winjob.process_alive(pid)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
