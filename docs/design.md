@@ -2164,8 +2164,19 @@ themselves, so a cheap layer comes first and a stronger one later.
       lines). The box starts at the course's flags, else these, else `-std=c11 -Wall`.
     - Ticking C writes `[languages.c] flags`, `[safety] allow_headers` (headers beyond the
       standard library's, each a plain `name.h` path) and `gcc = "12"` in [requires] when
-      missing (the image's Debian gcc); unticking removes the first two and leaves
-      [requires]. Checked writes as every other table, the file before kept as `.bak`.
+      missing (the image's Debian gcc). Checked writes as every other table, the file before
+      kept as `.bak`.
+    - The page's step 1, laid out for more languages (owner, 2026-11-07): "Find it in the
+      lectures" first; then one language list, Python first and not removable (the tests are
+      pytest), each row its [requires] toolchain's version (python, gcc), with "Add a
+      language" (C, and the languages not supported yet, greyed) and a line when the
+      lectures compile C; then each language's own settings, Python's packages and tools
+      (the rest of [requires], with "Exercises may import") and C's flags and headers
+      (`_language_c.html`, only once C is in the list). A later language adds a row in
+      `tutor.languages.LANGUAGES` and a `_language_<key>.html`. Removing C now takes gcc out
+      of [requires] too, as it is C's row (it used to stay); accepting gcc from the lectures'
+      candidates adds C, with the version typed (an explicit click, so C is still declared,
+      not inferred). A pure Python course shows no C settings at all.
     - "On this machine" is greyed for a C course and refused by the server: C runs only in
       the container. A `gcc` here of another make or version (macOS's clang) is shown as
       "differs", not as missing: the learner's own runs compile with it, validation with the

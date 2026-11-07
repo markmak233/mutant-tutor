@@ -1,0 +1,20 @@
+{# C's settings on the Environment page, shown once C is in the language list
+   (environment.language_view, owner 2026-11-07): [languages.c] flags and [safety]
+   allow_headers. The flags start as the course's, else as the lectures' gcc lines show them.
+   Saving keeps C (the hidden "c"); removing C is the language list's button. #}
+{% set lv = language %}
+{% set tl = typed_language or {} %}
+<h3>C: compiler settings</h3>
+<form method="post" action="{{ url_for('save_language', name=course.folder) }}" class="form">
+  <input type="hidden" name="c" value="on">
+  <p class="muted">Exercises in C are tested by pytest, compiled with AddressSanitizer and UndefinedBehaviorSanitizer, and validated only in a container (step 3), with gcc in its image.</p>
+  <label class="field">Compiler flags
+    <span class="muted">{% if lv.suggestion %}the lectures compile with <code>{{ lv.suggestion.flags | join(" ") }}</code> ({{ lv.suggestion.count }} of {{ lv.suggestion.lines }} compile line{{ "s" if lv.suggestion.lines != 1 }}; {{ lv.suggestion.lecture }} {{ lv.suggestion.page }}: <code>{{ lv.suggestion.line }}</code>){% else %}no compile line with flags in the lectures; without any, C exercises use <code>-std=c11 -Wall</code>{% endif %}</span>
+    <input type="text" name="flags" value="{{ tl.flags if tl else lv.flags }}" autocomplete="off" spellcheck="false">
+  </label>
+  <label class="field">Other headers exercises may include
+    <span class="muted">besides the C standard library's (stdio.h, stdlib.h, string.h, math.h, ...), separated by spaces; e.g. unistd.h for getopt</span>
+    <input type="text" name="headers" value="{{ tl.headers if tl else lv.headers }}" autocomplete="off" spellcheck="false" placeholder="none">
+  </label>
+  <div class="actions"><button type="submit" class="primary">Save C's settings</button></div>
+</form>

@@ -155,8 +155,13 @@ NOTICES = {
                                         "cStandard to match the flags. A C course's tests need "
                                         "the container and a test image with gcc: steps 3 and "
                                         "4 below."),
-    "language-removed": ("ok", "C is no longer this course's language (the file before is "
-                               "workspace.toml.bak); [requires] is as it was."),
+    "language-removed": ("ok", "C is no longer one of this course's languages, and gcc is no "
+                               "longer in [requires] (the file before is workspace.toml.bak)."),
+    "language-added": ("ok", "C added: [languages.c] with the compiler flags below, gcc in "
+                             "[requires], and VS Code's C settings in "
+                             ".vscode/c_cpp_properties.json (the file before is "
+                             "workspace.toml.bak). Check C's settings below; its tests need the "
+                             "container and a test image with gcc: steps 3 and 4."),
 }
 # What a task that succeeded reports when it goes back to its page (app.return_to).
 NOTICES.update({
@@ -1045,7 +1050,8 @@ def create_app(root: Path, token: str, port: int | None = None,
         shown back as typed."""
         draft = environment.draft_view(course)
         if rows is None:
-            rows = environment.list_rows(course, list(course.workspace.requires.items())
+            # The packages and tools list: [requires] without the language list's rows.
+            rows = environment.list_rows(course, environment.package_rows(course)
                                          or [("", "")], draft.draft)
         allowed = environment.allowed(course)
         return render_template("environment.html", course=course, problems=problems,
@@ -1058,6 +1064,7 @@ def create_app(root: Path, token: str, port: int | None = None,
                                install=environment.install_shown(course),
                                running=tasks.running(course.workspace.root),
                                language=environment.language_view(course),
+                               languages=environment.languages_view(course),
                                typed_language=typed_language), code
 
     @app.get("/c/<name>/environment/")
@@ -1096,12 +1103,15 @@ def create_app(root: Path, token: str, port: int | None = None,
         keys += [f"x{i}" for i in range(len(keys), len(names))]  # a form sent without keys
         ticked = set(form.getlist("import"))
         modules = {k: form.get(f"module:{k}", "") for k in keys}
-        table, problems = environment.check_requires(names, versions,
-                                                     environment.runner(course))
+        # The language list's rows (python, gcc) are not in this form: put back as they are.
+        all_names, all_versions, problems = environment.with_toolchains(course, names, versions)
+        table, more = environment.check_requires(all_names, all_versions,
+                                                 environment.runner(course))
+        problems += more
         allow, import_problems = environment.check_imports(
             list(zip(names, keys, strict=False)), ticked, modules, environment.allowed(course))
         problems += import_problems
-        if table is not None and allow is not None:
+        if not problems and table is not None and allow is not None:
             problems = environment.save_requires(course, table, allow)
         if problems:
             typed = [environment.ListRow(n, v, k, modules.get(k, ""), k in ticked)
@@ -1123,6 +1133,37 @@ def create_app(root: Path, token: str, port: int | None = None,
         return start_task(course, "Find requirements in every lecture again" if again
                           else "Find requirements in the lectures",
                           [environment.draft_command(again)], meta={"kind": "requires-draft"})
+
+    @app.post("/c/<name>/environment/languages")
+    def save_language_versions(name: str):
+        """The language list's versions (Python's, gcc for C) into [requires]."""
+        course = course_or_404(name)
+        versions = {k.removeprefix("version:"): v for k, v in request.form.items()
+                    if k.startswith("version:")}
+        problems = environment.save_language_versions(course, versions)
+        if problems:
+            return environment_page(course, problems, 400)
+        return redirect(url_for("environment_view", name=name) + "?notice=requires-saved",
+                        code=303)
+
+    @app.post("/c/<name>/environment/languages/add")
+    def add_language(name: str):
+        course = course_or_404(name)
+        problems = environment.add_language(course, request.form.get("language", ""))
+        if problems:
+            return environment_page(course, problems, 400)
+        notice = ("language-saved-own-editor" if workspace.c_editor_config_kept(
+            course.workspace.root) else "language-added")
+        return redirect(url_for("environment_view", name=name) + f"?notice={notice}", code=303)
+
+    @app.post("/c/<name>/environment/languages/remove")
+    def remove_language(name: str):
+        course = course_or_404(name)
+        problems = environment.remove_language(course, request.form.get("language", ""))
+        if problems:
+            return environment_page(course, problems, 400)
+        return redirect(url_for("environment_view", name=name) + "?notice=language-removed",
+                        code=303)
 
     @app.post("/c/<name>/environment/language")
     def save_language(name: str):

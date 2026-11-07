@@ -83,11 +83,43 @@ def _page(client, path="/c/cdemo/environment/") -> str:
     return client.get(path, base_url=BASE).get_data(as_text=True)
 
 
-def test_the_page_offers_c_with_the_flags_the_lectures_compile_with(root):
+def test_a_python_course_lists_python_alone_and_offers_c_with_why(root):
+    """No C settings until C is in the list; "Add a language" offers it, saying the lectures
+    compile C, and names the languages not supported yet."""
     text = _page(_browser(root))
-    assert 'name="c"' in text and "checked" not in text.split('name="c"')[1].split(">")[0]
-    assert 'value="-Wall -std=c99"' in text
-    assert "2 of 2 compile lines; lecture02.html p.1: <code>gcc -Wall -std=c99 celsius.c" in text
+
+    assert "<strong>Python</strong>" in text and "<strong>C</strong>" not in text
+    assert "C: compiler settings" not in text and 'name="flags"' not in text
+    assert '<option value="c">C</option>' in text
+    assert "<option disabled>Java (not supported yet)</option>" in text
+    assert ("The lectures compile C: 2 of 2 compile lines, e.g. lecture02.html p.1: "
+            "<code>gcc -Wall -std=c99 celsius.c") in text
+
+
+def test_adding_c_from_the_list_uses_the_lectures_flags_and_shows_its_settings(root, course):
+    client = _browser(root)
+    response = post(client, "/c/cdemo/environment/languages/add", {"language": "c"})
+
+    assert response.status_code == 303 and "notice=language-added" in response.location
+    data = _data(course)
+    assert data["languages"] == {"c": {"flags": ["-Wall", "-std=c99"]}}
+    assert data["requires"]["gcc"] == environment.IMAGE_GCC
+    text = _page(client)
+    assert "<strong>C</strong> <span class=\"muted\">gcc</span>" in text
+    assert 'name="version:gcc" value="12"' in text and ">Remove</button>" in text
+    assert "C: compiler settings" in text and 'value="-Wall -std=c99"' in text
+    assert '<option value="c">' not in text  # added already: no form, the others named
+    assert 'name="language"' not in text.split("C: compiler settings")[0].split(
+        "Save the versions")[1] and "Not supported yet: assembly, C#, C++" in text
+
+
+def test_a_language_that_cannot_be_added_is_refused(root, course):
+    before = (course.workspace.root / "workspace.toml").read_text(encoding="utf-8")
+    response = post(_browser(root), "/c/cdemo/environment/languages/add",
+                    {"language": "java"})
+    assert response.status_code == 400 and "not a language that can be added" in (
+        response.get_data(as_text=True))
+    assert (course.workspace.root / "workspace.toml").read_text(encoding="utf-8") == before
 
 
 def test_ticking_c_writes_its_table_its_headers_and_gcc_keeping_the_rest(root, course):
@@ -108,16 +140,17 @@ def test_ticking_c_writes_its_table_its_headers_and_gcc_keeping_the_rest(root, c
     assert editor["configurations"][0]["cStandard"] == "c99"
 
 
-def test_unticking_c_removes_its_table_and_headers_and_leaves_requires(root, course):
+def test_removing_c_takes_its_table_headers_and_gcc_and_keeps_the_rest(root, course):
+    """gcc is C's row in the language list, so it goes with C (owner, 2026-11-07)."""
     client = _browser(root)
     post(client, "/c/cdemo/environment/language", {"c": "on", "flags": "-Wall", "headers": "x.h"})
 
-    response = post(client, "/c/cdemo/environment/language", {"flags": "-Wall", "headers": ""})
+    response = post(client, "/c/cdemo/environment/languages/remove", {"language": "c"})
 
     assert "notice=language-removed" in response.location
     data = _data(course)
     assert "languages" not in data and "safety" not in data
-    assert data["requires"]["gcc"] == environment.IMAGE_GCC
+    assert data["requires"] == {"python": "3.11"}
     assert not (course.workspace.root / ".vscode" / "c_cpp_properties.json").exists()
 
 
@@ -141,9 +174,11 @@ def test_a_courses_own_vs_code_c_settings_are_left_alone(root, course):
 ])
 def test_a_refused_language_form_writes_nothing_and_comes_back_as_typed(root, course, flags,
                                                                          headers, says):
+    client = _browser(root)
+    post(client, "/c/cdemo/environment/languages/add", {"language": "c"})
     before = (course.workspace.root / "workspace.toml").read_text(encoding="utf-8")
 
-    response = post(_browser(root), "/c/cdemo/environment/language",
+    response = post(client, "/c/cdemo/environment/language",
                     {"c": "on", "flags": flags, "headers": headers})
 
     text = response.get_data(as_text=True)

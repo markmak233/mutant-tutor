@@ -261,8 +261,9 @@ def test_rows_are_added_and_removed_in_the_page_with_htmx(root):
     client = _browser(root)
     text = client.get("/c/demo-course/environment/", base_url=BASE).get_data(as_text=True)
 
-    assert text.count('name="name"') == 3  # one row per entry, no blank ones
-    assert text.count('hx-swap="delete"') == 3 and 'hx-target="closest tr"' in text
+    # One row per entry but python, which the language list holds; no blank ones.
+    assert text.count('name="name"') == 2 and 'name="version:python" value="3.11"' in text
+    assert text.count('hx-swap="delete"') == 2 and 'hx-target="closest tr"' in text
     assert 'hx-target="#requires-rows" hx-swap="beforeend"' in text
 
     row = client.get("/c/demo-course/environment/requires-row", base_url=BASE)
@@ -316,16 +317,36 @@ def test_the_image_part_offers_build_only_when_docker_answers(root, monkeypatch)
 
 def test_saving_the_table_from_the_form(root, course):
     response = post(_browser(root), "/c/demo-course/environment/requires",
-                    {"name": ["python", "java", "pyspark", "", "mrjob"],
-                     "version": ["3.11", "17", "3.5", "", "0.7"]})
+                    {"name": ["java", "pyspark", "", "mrjob"],
+                     "version": ["17", "3.5", "", "0.7"]})
 
     assert response.status_code == 303 and "notice=requires-saved" in response.location
-    assert tomllib.loads(_toml(course))["requires"]["mrjob"] == "0.7"
+    requires = tomllib.loads(_toml(course))["requires"]
+    # python is not in this form (the language list holds it) and is kept as it was.
+    assert requires == {"python": "3.11", "java": "17", "pyspark": "3.5", "mrjob": "0.7"}
+
+
+def test_a_language_typed_into_the_packages_list_is_sent_to_the_language_list(root, course):
+    response = post(_browser(root), "/c/demo-course/environment/requires",
+                    {"name": ["python", "java"], "version": ["3.12", "17"]})
+
+    assert response.status_code == 400
+    assert "python is set in the language list above" in response.get_data(as_text=True)
+    assert _toml(course) == TOML
+
+
+def test_the_language_list_saves_pythons_version(root, course):
+    response = post(_browser(root), "/c/demo-course/environment/languages",
+                    {"version:python": "3.12"})
+
+    assert response.status_code == 303
+    assert tomllib.loads(_toml(course))["requires"] == {"python": "3.12", "java": "17",
+                                                        "pyspark": "3.5"}
 
 
 def test_a_refused_table_comes_back_as_typed_and_escaped(root, course):
     response = post(_browser(root), "/c/demo-course/environment/requires",
-                    {"name": ["python", "<b>x</b>"], "version": ["3.11", "1"]})
+                    {"name": ["<b>x</b>"], "version": ["1"]})
     text = response.get_data(as_text=True)
 
     assert response.status_code == 400 and "Nothing was saved" in text
@@ -510,31 +531,31 @@ def _save_list(root, rows, ticked=(), modules=None):
 
 
 def test_a_ticked_package_is_allowed_and_an_unticked_one_no_longer(root, course):
-    rows = [("python", "3.11"), ("java", "17"), ("pyspark", "3.5"), ("scikit-learn", "1.4")]
-    response = _save_list(root, rows, ticked=(2, 3), modules={2: "pyspark", 3: "sklearn"})
+    rows = [("java", "17"), ("pyspark", "3.5"), ("scikit-learn", "1.4")]
+    response = _save_list(root, rows, ticked=(1, 2), modules={1: "pyspark", 2: "sklearn"})
     assert response.status_code == 303
     data = tomllib.loads(_toml(course))
     assert data["safety"]["allow_imports"] == ["pyspark", "sklearn"]
     assert data["requires"]["scikit-learn"] == "1.4"
     assert "[safety] # modules exercises may import" in _toml(course)
 
-    _save_list(root, rows, ticked=(3,), modules={2: "pyspark", 3: "sklearn"})
+    _save_list(root, rows, ticked=(2,), modules={1: "pyspark", 2: "sklearn"})
     assert tomllib.loads(_toml(course))["safety"]["allow_imports"] == ["sklearn"]
 
 
 def test_an_allowed_module_no_row_names_stays(root, course):
     _write(course.workspace.root / "workspace.toml",
            TOML + '\n[safety]\nallow_imports = ["subprocess", "torch"]\n')
-    _save_list(root, [("python", "3.11"), ("torch", "2")], ticked=())
+    _save_list(root, [("torch", "2")], ticked=())
     assert tomllib.loads(_toml(course))["safety"]["allow_imports"] == ["subprocess"]
 
 
 def test_a_module_name_that_is_not_one_is_refused_and_nothing_is_written(root, course):
-    response = _save_list(root, [("python", "3.11"), ("opencv-python", "4")], ticked=(1,),
-                          modules={1: "cv2; rm"})
+    response = _save_list(root, [("opencv-python", "4")], ticked=(0,),
+                          modules={0: "cv2; rm"})
     text = response.get_data(as_text=True)
     assert response.status_code == 400 and "is not a module name" in text
-    assert 'name="import" value="r1" checked' in text  # the tick comes back as typed
+    assert 'name="import" value="r0" checked' in text  # the tick comes back as typed
     assert _toml(course) == TOML
 
 
@@ -548,10 +569,10 @@ def test_the_page_ticks_what_is_allowed_and_names_modules_the_draft_saw(root, co
     text = _browser(root).get("/c/demo-course/environment/", base_url=BASE).get_data(
         as_text=True)
 
-    assert 'name="module:r1" value="cv2"' in text  # from the draft, not a guess
-    assert 'name="import" value="r1" aria' in text  # not allowed yet: unticked
-    assert 'name="import" value="r2" checked' in text  # CamelPkg, as written (case kept)
-    assert 'name="module:r0"' not in text  # python is not a module
+    # python is in the language list; the packages list starts at opencv-python.
+    assert 'name="module:r0" value="cv2"' in text  # from the draft, not a guess
+    assert 'name="import" value="r0" aria' in text  # not allowed yet: unticked
+    assert 'name="import" value="r1" checked' in text  # CamelPkg, as written (case kept)
 
 
 def test_adding_draft_entries_leaves_allow_imports_alone(root, course):
@@ -602,7 +623,9 @@ def test_the_steps_come_in_the_order_they_are_done(root):
         (1, "What the course needs"), (2, "Install on this machine"), (3, "Where tests run"),
         (4, "Test image"))]
     assert order == sorted(order)
-    assert text.index("Find it in the lectures") < text.index("The list")
+    # Step 1: the lectures first, then the languages, then each language's settings.
+    assert (text.index("Find it in the lectures") < text.index("<h3>Languages</h3>")
+            < text.index("Python: packages and tools"))
     assert 'Where tests run <span class="chip chip-to-do">' in text  # not chosen yet
 
 
@@ -747,3 +770,22 @@ def test_a_failed_task_offers_run_again_through_the_action_that_started_it(root,
 def test_run_again_is_only_for_a_failed_task_safe_to_run_twice(root, course, meta, status):
     path = _task(course, meta, status=status, codes=(0,) if status == "done" else (1,))
     assert "Run again" not in _browser(root).get(path, base_url=BASE).get_data(as_text=True)
+
+
+def test_accepting_gcc_from_the_lectures_adds_c_with_the_version_typed(root, course):
+    """gcc is C's toolchain: adding it from the draft adds C to the course's languages
+    (owner, 2026-11-07), keeping the version the owner typed for it."""
+    entries = [cache.Entry(1, None, "text", "h1", "Compile it with gcc 11:\ngcc -Wall x.c")]
+    path = course.workspace.root / "cache" / "lectures" / "L1.pdf.md"
+    _write(path, cache.render("L1.pdf", entries))
+    _answer(course, path, {e.number: e for e in entries},
+            [{"kind": "gcc", "name": "gcc", "version": "11", "page": 1,
+              "quote": "Compile it with gcc 11"}])
+
+    response = post(_browser(root), "/c/demo-course/environment/accept",
+                    {"accept": ["gcc"], "version:gcc": "11"})
+
+    assert response.status_code == 303, response.get_data(as_text=True)
+    data = tomllib.loads(_toml(course))
+    assert data["requires"]["gcc"] == "11"
+    assert data["languages"] == {"c": {"flags": ["-Wall"]}}

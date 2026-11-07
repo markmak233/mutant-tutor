@@ -26,30 +26,7 @@
 
 <section class="step">
 <h2><span class="step-no">1</span>What the course needs</h2>
-<p class="muted">The software its tests need: <code>[requires]</code> in workspace.toml. Let a model find it in the lectures, or type it in the list; nothing is written until you add or save.</p>
-
-{# The course's language besides Python (environment.language_view, owner 2026-11-07): ticking
-   C writes [languages.c] with its flags, [safety] allow_headers, and gcc in [requires]. The
-   flags start as the course's, else as the lectures' gcc lines show them. #}
-{% set lv = language %}
-{% set tl = typed_language or {} %}
-<h3>Language {{ chip("C") if lv.c else chip("Python") }}</h3>
-{% for line in lv.problems %}<p class="notice notice-bad">{{ line }}</p>{% endfor %}
-<form method="post" action="{{ url_for('save_language', name=course.folder) }}" class="form">
-  <p class="muted">Exercises are in Python unless the course is a C course. Other languages are not supported yet.</p>
-  <label class="check"><input type="checkbox" name="c"{% if (tl.c if tl else lv.c) %} checked{% endif %}>
-    <strong>C</strong> <span class="muted">exercises in C, tested by pytest, compiled with AddressSanitizer and UndefinedBehaviorSanitizer; validated only in a container (step 3), with gcc in its image.</span></label>
-  <label class="field">Compiler flags
-    <span class="muted">{% if lv.suggestion %}the lectures compile with <code>{{ lv.suggestion.flags | join(" ") }}</code> ({{ lv.suggestion.count }} of {{ lv.suggestion.lines }} compile line{{ "s" if lv.suggestion.lines != 1 }}; {{ lv.suggestion.lecture }} {{ lv.suggestion.page }}: <code>{{ lv.suggestion.line }}</code>){% else %}no compile line with flags in the lectures; without any, C exercises use <code>-std=c11 -Wall</code>{% endif %}</span>
-    <input type="text" name="flags" value="{{ tl.flags if tl else lv.flags }}" autocomplete="off" spellcheck="false">
-  </label>
-  <label class="field">Other headers exercises may include
-    <span class="muted">besides the C standard library's (stdio.h, stdlib.h, string.h, math.h, ...), separated by spaces; e.g. unistd.h for getopt</span>
-    <input type="text" name="headers" value="{{ tl.headers if tl else lv.headers }}" autocomplete="off" spellcheck="false" placeholder="none">
-  </label>
-  <p class="muted">Saving with C ticked adds <code>gcc</code> to the list below if it is not there; unticking it leaves the list as it is.</p>
-  <div class="actions"><button type="submit" class="primary">Save the language</button></div>
-</form>
+<p class="muted">The course's languages and the software its tests need: <code>[requires]</code> and <code>[languages]</code> in workspace.toml. Let a model find them in the lectures, or set them in the lists below; nothing is written until you add or save.</p>
 
 {# 7b: a model's draft from the lectures (environment.draft_view). It costs money, so it runs
    only from its button; its entries are only candidates until ticked and added. #}
@@ -92,8 +69,8 @@
     {% endfor %}
     </tbody>
   </table>
-  <p class="muted">"Name from the model": the slides show only the module imported, and the pip name is the model's; check it on PyPI before installing, as a made-up name can be one somebody registered. For exercises to import a package, tick "Exercises may import" for it in the list below once it is added.</p>
-  <div class="actions"><button type="submit" class="primary">Add the ticked ones to the list</button></div>
+  <p class="muted">"Name from the model": the slides show only the module imported, and the pip name is the model's; check it on PyPI before installing, as a made-up name can be one somebody registered. Each entry goes where it belongs below: Python's version and gcc (C) into the language list, the rest into Python's packages and tools. For exercises to import a package, tick "Exercises may import" for it there once it is added.</p>
+  <div class="actions"><button type="submit" class="primary">Add the ticked ones</button></div>
 </form>
 {% elif d.done %}
 <p>No software found in the lectures looked at.</p>
@@ -110,9 +87,47 @@
 {% endif %}
 {% endif %}
 
-<h3>The list</h3>
+{# The course's languages (environment.languages_view, owner 2026-11-07): one list, Python
+   first (the tests are pytest, so it cannot be removed), each row its [requires] version.
+   Adding or removing a language is a button here; each language's own settings follow the
+   list, one part each (Python's packages and tools; _language_<key>.html for the others),
+   so a later language adds a row in tutor.languages and a part, not a new layout. #}
+{% set ls = languages %}
+<h3>Languages</h3>
+{% for line in language.problems %}<p class="notice notice-bad">{{ line }}</p>{% endfor %}
+<form method="post" action="{{ url_for('save_language_versions', name=course.folder) }}" class="form">
+  <table class="requires languages">
+    <thead><tr><th>Language</th><th>Version</th><th>What the course uses it for</th><th></th></tr></thead>
+    <tbody>
+    {% for row in ls.rows %}
+      <tr>
+        <td><strong>{{ row.language.title }}</strong>{% if row.language.toolchain != row.language.key %} <span class="muted">{{ row.language.toolchain }}</span>{% endif %}</td>
+        <td><input type="text" name="version:{{ row.language.toolchain }}" value="{{ row.version }}" aria-label="Version of {{ row.language.title }}" autocomplete="off" spellcheck="false"></td>
+        <td class="muted">{{ row.language.role }}</td>
+        <td>{% if row.removable %}<button type="submit" class="small" formaction="{{ url_for('remove_language', name=course.folder) }}" name="language" value="{{ row.language.key }}">Remove</button>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <div class="actions"><button type="submit" class="primary">Save the versions</button></div>
+</form>
+{% if ls.addable %}
+<form method="post" action="{{ url_for('add_language', name=course.folder) }}" class="inline-form">
+  <label>Add a language
+    <select name="language">
+      {% for lang in ls.addable %}<option value="{{ lang.key }}">{{ lang.title }}</option>{% endfor %}
+      {% for title in ls.not_yet %}<option disabled>{{ title }} (not supported yet)</option>{% endfor %}
+    </select></label>
+  <button type="submit" class="small">Add</button>
+</form>
+{% else %}
+<p class="muted">Not supported yet: {{ ls.not_yet | join(", ") }}.</p>
+{% endif %}
+{% if ls.hint %}<p class="muted">The lectures compile C: {{ ls.hint.count }} of {{ ls.hint.lines }} compile line{{ "s" if ls.hint.lines != 1 }}, e.g. {{ ls.hint.lecture }} {{ ls.hint.page }}: <code>{{ ls.hint.line }}</code>. Add C if the exercises should be in C.</p>{% endif %}
+
+<h3>Python: packages and tools</h3>
 <form method="post" action="{{ url_for('save_requires', name=course.folder) }}" class="form">
-  <p class="muted">A version is a prefix: 3.5 means any 3.5.x. <code>python</code>, <code>java</code> and <code>hadoop</code> are checked on this machine; any other name is a pip package. Adding or removing rows changes nothing until you save.</p>
+  <p class="muted">A version is a prefix: 3.5 means any 3.5.x. <code>java</code> and <code>hadoop</code> are checked on this machine; any other name is a pip package. Python's own version is in the language list. Adding or removing rows changes nothing until you save.</p>
   <table class="requires">
     <thead><tr><th>Name</th><th>Version</th><th>What it is</th><th>Exercises may import</th><th></th></tr></thead>
     <tbody id="requires-rows">
@@ -125,6 +140,9 @@
     <button type="submit" class="primary">Save the requirements</button>
   </div>
 </form>
+
+{# Each added language's own settings, after Python's. #}
+{% for row in ls.rows if row.removable %}{% include "_language_" ~ row.language.key ~ ".html" %}{% endfor %}
 </section>
 
 <section class="step">
@@ -153,8 +171,8 @@
   <p class="muted">For validation and generation; your own test runs in the IDE stay on this machine. Now: {% if runner %}<strong>{{ runner }}</strong>{% else %}not chosen (they run on this machine, with a warning){% endif %}.</p>
   <label class="check"><input type="radio" name="runner" value="container"{% if runner == "container" %} checked{% endif %}>
     <strong>In a container</strong> <span class="muted">every run in a fresh Docker container with no network and no access to your files; needs Docker and the test image of step 4</span></label>
-  <label class="check"><input type="radio" name="runner" value="host"{% if runner == "host" %} checked{% endif %}{% if lv.c %} disabled{% endif %}>
-    <strong>On this machine</strong> <span class="muted">{% if lv.c %}not for a C course: a static check cannot bound what C code does, so its tests run only in a container{% else %}no Docker needed, and step 4 is skipped{% endif %}</span></label>
+  <label class="check"><input type="radio" name="runner" value="host"{% if runner == "host" %} checked{% endif %}{% if language.c %} disabled{% endif %}>
+    <strong>On this machine</strong> <span class="muted">{% if language.c %}not for a C course: a static check cannot bound what C code does, so its tests run only in a container{% else %}no Docker needed, and step 4 is skipped{% endif %}</span></label>
   <label class="check warn"><input type="checkbox" name="understood">
     I understand that on this machine, code a model generated runs with my rights: it can read and change my files.</label>
   <div class="actions"><button type="submit" class="primary">Save</button></div>

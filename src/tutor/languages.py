@@ -57,6 +57,39 @@ def is_c(data: Mapping) -> bool:
     return "c" in declared(data)
 
 
+@dataclass(frozen=True)
+class Language:
+    """A language a course's exercises can be in, as the Environment page lists it. A new
+    language adds one here, its parts in graph/, and a settings part on the page."""
+
+    key: str  # [languages.<key>] declares it; Python needs nothing declared
+    title: str
+    toolchain: str  # the [requires] name that holds its version
+    default_version: str  # what adding the language writes in [requires] when missing
+    role: str  # what the course uses it for
+
+
+PYTHON = Language("python", "Python", "python", "",
+                  "runs the tests (pytest) and the oracle; every course has it")
+# gcc 12: the test image's (Debian bookworm's), where C is validated.
+C = Language("c", "C", "gcc", "12", "the exercises are written in C, compiled by gcc")
+LANGUAGES = {language.key: language for language in (PYTHON, C)}
+
+
+def course_languages(data: Mapping) -> list[Language]:
+    """The course's languages, Python first: Python always (the tests are pytest), then the
+    supported ones workspace.toml declares."""
+    return [PYTHON, *(LANGUAGES[k] for k in SUPPORTED if k in declared(data))]
+
+
+def not_supported_yet() -> list[str]:
+    """Languages named by a toolchain this tool knows of but cannot generate for yet; one
+    named inside another ("MATLAB" in "MATLAB/Octave") once."""
+    names = set(TOOLCHAINS.values())
+    parts = {part for name in names if "/" in name for part in name.split("/")}
+    return sorted(names - parts, key=str.lower)
+
+
 def student_path(exercise_dir: Path) -> Path:
     """The learner's code file in an exercise folder: student.c in a C exercise, else
     student.py (also when neither is there, so a message names the usual file). Told by the
