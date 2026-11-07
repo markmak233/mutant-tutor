@@ -2155,6 +2155,25 @@ themselves, so a cheap layer comes first and a stronger one later.
     container comes later (owner): on macOS `cc` is Apple's clang without LeakSanitizer, and
     envcheck reports `gcc` there as clang. Measured: both examples VALID in a container with
     the course's `-Wall -std=c99` in 3 to 6 s each, and with clang on macOS.
+  - No native Windows for C, WSL instead (owner, 2026-11-07, after Windows CI). MinGW's gcc,
+    the compiler there, has no AddressSanitizer or UBSan (`cannot find -lasan`), so every C
+    test failed to link. The other ways (llvm-mingw, MSVC's ASan without UBSan, Dr. Memory in
+    place of valgrind, which has no Windows version) each need an install of their own, report
+    in their own words, so the hint rules would be written and tested again for each, and
+    differ from the container's gcc that validates. In WSL, `sudo apt install gcc` brings both
+    sanitizers, and Docker Desktop on Windows runs on WSL 2 anyway. `testkit_c.build` says so
+    on native Windows instead of a linker's error, and a compiler elsewhere without the
+    libraries (a minimal Linux install) gets a sentence before the linker's words;
+    `testkit_c.host_problem()` gives the same reasons to a caller (the tests' skips).
+  - Known issue: AddressSanitizer and 32 bits of address randomisation. Kernels from 6.5 may
+    randomise mmap addresses with 32 bits (`vm.mmap_rnd_bits`), and gcc 12's ASan then
+    sometimes never finishes, looping on "DEADLYSIGNAL"; a container shares the host's kernel,
+    so the course's image is affected on such a Linux host. Seen on GitHub's ubuntu-26.04
+    runner (2026-11-07): one C run in each example timed out at 5 s, with no output kept to
+    prove the cause; Docker Desktop's VM on the owner's Mac uses 18 bits, and 32 bits there
+    (arm64) did not reproduce it in 40 runs. CI prints the value and sets 28 (see "CI"); for a
+    user on such a Linux host, `tutor doctor` ("Roadmap" 6) is to check the value and give the
+    `sysctl` command. Confirmed or not by the next CI run.
   - Step 2, a course's language (owner, 2026-11-07; `tutor/languages.py`, the Environment
     page). A course is a C course when workspace.toml has `[languages.c]`, which only the
     owner writes, through the page or by hand; not inferred from `[requires]`, where `java`
@@ -2327,6 +2346,14 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
   tests take about 40 s with the images built; CI builds them first. Docker is not in CI on
   macOS (the runner has none) or Windows (its runner runs only Windows containers): Docker
   Desktop there is checked by hand, on the owner's machines (see "Roadmap" 6, packaging).
+  The job installs the `gui` extra as well: the GUI's test files skip at import without
+  Flask, and the check counts every skip. Before the tests it prints `vm.mmap_rnd_bits` and
+  sets 28 (see "C", the known issue with AddressSanitizer).
+- First run (2026-11-08): macOS green (1267 passed). Windows: 25 failures, 22 of them C with no
+  sanitizer libraries (now "C needs WSL", see "C"), a GUI task whose runner died shown as
+  running for good, since liveness was not checked there (now `winjob.process_alive`), and two
+  tests that expected "/" in paths. Docker: the skips above, a test that took the image's own
+  /home/runner for the host's home (GitHub's user is `runner` too), and the C timeouts.
 - Why more systems pay (2026-11-07): on the second-language pull request, gcc on the Ubuntu
   runner, in a UTF-8 locale, quotes with ‘ ’ where clang and the container's gcc (C locale) print ' ',
   and a C hint test failed. CI is where a toolchain or locale the owner's machines do not have
