@@ -24,6 +24,7 @@ from dataclasses import asdict, dataclass
 from importlib import metadata
 from pathlib import Path
 
+from tutor import languages
 from tutor.config import Workspace, WorkspaceError, load_env, load_workspace
 
 # The names checked by their own rule below; any other name is a pip package.
@@ -59,7 +60,9 @@ def requires_problems(requires: Mapping[str, str]) -> list[str]:
     version goes into a pip command and an image recipe, so only plain ones pass."""
     problems = []
     for name, version in requires.items():
-        if not PACKAGE.match(name):
+        if toolchain := languages.toolchain_problem(name):
+            problems.append(toolchain)  # not a pip package, whatever its name looks like
+        elif not PACKAGE.match(name):
             problems.append(f"[requires] {name!r} is not a package name")
         elif not VERSION.match(version):
             problems.append(f"[requires] {name} = {version!r}: use a version prefix such as "
@@ -101,6 +104,10 @@ def check_workspace(ws: Workspace) -> list[CheckResult]:
     results = [_check(name, required, ws) for name, required in ws.requires.items()]
     if sys.platform == "win32" and ({"pyspark", "hadoop"} & set(ws.requires)):
         results.append(check_winutils(os.environ.get("HADOOP_HOME"), os.environ.get("PATH", "")))
+    # A language not supported yet, or a malformed [languages.c], fails here like a missing
+    # requirement, so the command line and the GUI both say so.
+    results += [CheckResult("languages", "supported", None, problem)
+                for problem in languages.problems({"languages": ws.languages})]
     return results
 
 
@@ -131,6 +138,8 @@ def _check(name: str, required: str, ws: Workspace) -> CheckResult:
     installed into the course's own .venv by `tutor.workspace init`, which installs the
     [requires] packages too.
     """
+    if toolchain := languages.toolchain_problem(name):
+        return CheckResult(name, required, None, toolchain)  # not something pip can install
     if name == "python":
         return CheckResult(
             name, required, platform.python_version(),

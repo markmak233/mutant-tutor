@@ -223,6 +223,8 @@ pre.recipe { margin: 0; padding: 0.6rem 0.8rem; background: var(--code-bg); bord
 .chip-ok, .chip-ready { background: var(--passed-bg); color: var(--passed); }
 .chip-missing, .chip-wrong-version, .chip-docker-missing, .chip-docker-stopped, .chip-cannot-build { background: var(--bad-bg); color: var(--bad); }
 .chip-image-missing, .chip-not-chosen { background: var(--started-bg); color: var(--started); }
+/* A C compiler of another make or version here (macOS's clang): usable, not the image's. */
+.chip-differs { background: var(--unlogged-bg); color: var(--unlogged); }
 table.requires td.row-remove { width: 1%; white-space: nowrap; }
 /* Step 7b: the model's draft of [requires] */
 .form.wide { max-width: none; }

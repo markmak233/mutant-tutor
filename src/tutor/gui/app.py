@@ -143,6 +143,11 @@ NOTICES = {
     "cannot-build": ("bad", "[requires] has no image recipe: see the test image part below."),
     "no-setup-model": ("bad", "Nothing was started: this course has no model for it. Choose "
                               "one for the setup, plan or generate role on the Models page."),
+    "language-saved": ("ok", "Saved in workspace.toml (the file before is workspace.toml.bak). "
+                             "A C course's tests need the container and a test image with gcc: "
+                             "steps 3 and 4 below."),
+    "language-removed": ("ok", "C is no longer this course's language (the file before is "
+                               "workspace.toml.bak); [requires] is as it was."),
 }
 # What a task that succeeded reports when it goes back to its page (app.return_to).
 NOTICES.update({
@@ -161,6 +166,9 @@ NOTICES.update({
 ENVIRONMENT_NOTICES = {"install": "installed", "build": "image-built",
                        "requires-draft": "draft-ready"}
 RECENT_TASKS = 5
+C_NOT_GENERATED = ("Generating C exercises is not built yet, so this course cannot start a "
+                   "batch: the pipeline would write Python exercises about its C lectures. C "
+                   "exercises written by hand validate already (docs/design.md, \"C\").")
 UPLOAD_LIMIT_BYTES = 500 * 1024 * 1024  # one upload request, all its files together
 
 
@@ -487,7 +495,8 @@ def create_app(root: Path, token: str, port: int | None = None,
         return render_template("new_batch.html", course=course, ready=ready, unread=unread,
                                values=shown, problems=problems,
                                models=generation.models(course),
-                               running=tasks.running(course.workspace.root)), code
+                               running=tasks.running(course.workspace.root),
+                               c_course=environment.is_c_course(course)), code
 
     @app.get("/c/<name>/new-batch")
     def new_batch(name: str):
@@ -498,6 +507,10 @@ def create_app(root: Path, token: str, port: int | None = None,
         """`plan`: the plan model proposes the batch, and the command pauses for the owner."""
         course = course_or_404(name)
         form = request.form
+        if environment.is_c_course(course):
+            # The pipeline writes Python exercises only, until C generation is built
+            # (owner, 2026-11-07): a C course's batch would be Python about C lectures.
+            return new_batch_page(course, {}, [C_NOT_GENERATED], 409)
         values = {"label": form.get("label", ""), "lectures": form.getlist("lecture"),
                   "mode": form.get("mode", ""), "how": form.get("how", ""),
                   "count": form.get("count", ""), "max_count": form.get("max_count", ""),
@@ -1012,9 +1025,11 @@ def create_app(root: Path, token: str, port: int | None = None,
 
     def environment_page(course: courses.Course, problems: list[str], code: int = 200,
                          rows: list[environment.ListRow] | None = None,
-                         chosen: dict[str, str] | None = None):
+                         chosen: dict[str, str] | None = None,
+                         typed_language: dict | None = None):
         """`rows`: a refused [requires] form's rows, `chosen`: a refused draft form's ticked
-        entries and their versions; both shown back as typed."""
+        entries and their versions, `typed_language`: a refused language form's values; all
+        shown back as typed."""
         draft = environment.draft_view(course)
         if rows is None:
             rows = environment.list_rows(course, list(course.workspace.requires.items())
@@ -1028,7 +1043,9 @@ def create_app(root: Path, token: str, port: int | None = None,
                                not_pip=environment.NOT_PIP, runner=environment.runner(course),
                                has_venv=environment.venv_python(course).exists(),
                                install=environment.install_shown(course),
-                               running=tasks.running(course.workspace.root)), code
+                               running=tasks.running(course.workspace.root),
+                               language=environment.language_view(course),
+                               typed_language=typed_language), code
 
     @app.get("/c/<name>/environment/")
     def environment_view(name: str):
@@ -1047,7 +1064,8 @@ def create_app(root: Path, token: str, port: int | None = None,
         """The part htmx loads: envcheck in the course's venv (a process, 0.2 s warm)."""
         course = course_or_404(name)
         return render_template("_env_check.html", course=course,
-                               check=environment.check(course), kind=environment.kind)
+                               check=environment.check(course), kind=environment.kind,
+                               differs=environment.differs)
 
     @app.get("/c/<name>/environment/docker")
     def environment_docker(name: str):
@@ -1081,14 +1099,31 @@ def create_app(root: Path, token: str, port: int | None = None,
 
     @app.post("/c/<name>/environment/draft")
     def draft_requires(name: str):
-        """A model looks for the software in each lecture not asked yet (it may cost money,
-        so only on this click); its answers wait on the page for the owner's ticks."""
+        """A model looks for the software in each lecture not asked yet, or with "again" in
+        every lecture (it may cost money, so only on this click); its answers wait on the page
+        for the owner's ticks."""
         course = course_or_404(name)
         if environment.setup_model(course) is None:
             return redirect(url_for("environment_view", name=name) + "?notice=no-setup-model",
                             code=303)
-        return start_task(course, "Find requirements in the lectures",
-                          [environment.draft_command()], meta={"kind": "requires-draft"})
+        again = request.form.get("again") == "1"
+        return start_task(course, "Find requirements in every lecture again" if again
+                          else "Find requirements in the lectures",
+                          [environment.draft_command(again)], meta={"kind": "requires-draft"})
+
+    @app.post("/c/<name>/environment/language")
+    def save_language(name: str):
+        """Tick or untick C, with its compiler flags and extra headers (owner, 2026-11-07)."""
+        course = course_or_404(name)
+        form = request.form
+        typed = {"c": form.get("c") == "on", "flags": form.get("flags", ""),
+                 "headers": form.get("headers", "")}
+        problems = environment.save_language(course, typed["c"], typed["flags"],
+                                             typed["headers"])
+        if problems:
+            return environment_page(course, problems, 400, typed_language=typed)
+        notice = "language-saved" if typed["c"] else "language-removed"
+        return redirect(url_for("environment_view", name=name) + f"?notice={notice}", code=303)
 
     @app.post("/c/<name>/environment/accept")
     def accept_requires(name: str):

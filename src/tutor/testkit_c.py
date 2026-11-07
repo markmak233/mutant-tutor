@@ -205,7 +205,7 @@ def compile_flags(folder: Path) -> list[str]:
     given = os.environ.get(C_FLAGS_ENV)
     if given is not None:
         flags = json.loads(given)
-        _check_flags(flags, C_FLAGS_ENV)
+        check_flags(flags, C_FLAGS_ENV)
         return flags
     found = course_flags(folder)
     return list(DEFAULT_FLAGS) if found is None else found
@@ -222,14 +222,15 @@ def course_flags(start: Path) -> list[str] | None:
                 flags = tomllib.load(f).get("languages", {}).get("c", {}).get("flags")
             if flags is None:
                 return None
-            _check_flags(flags, f"{path}: [languages.c] flags")
+            check_flags(flags, f"{path}: [languages.c] flags")
             return flags
     return None
 
 
-def _check_flags(flags: object, where: str) -> None:
-    # A list of options, each its own string. They go to the compiler as a list, never through
-    # a shell; a file name in it would be compiled into every program.
+def check_flags(flags: object, where: str) -> None:
+    """ValueError unless `flags` is a list of compiler options, each its own string. They go
+    to the compiler as a list, never through a shell; a file name in it would be compiled into
+    every program."""
     if not (isinstance(flags, list)
             and all(isinstance(f, str) and f.startswith("-") and f.strip() == f and f != "-"
                     for f in flags)):

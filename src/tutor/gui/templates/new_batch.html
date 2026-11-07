@@ -20,7 +20,12 @@
 {% if problems %}
 <ul class="notice notice-bad form-problems">{% for line in problems %}<li>{{ line }}</li>{% endfor %}</ul>
 {% endif %}
-{% if not ready %}
+{% if c_course %}
+{# A C course (environment.is_c_course): the pipeline writes Python exercises only, so no batch
+   starts until C generation is built (owner, 2026-11-07); the server refuses one too. #}
+{% if not problems %}<p class="notice notice-bad">Generating C exercises is not built yet, so this course cannot start a batch: the pipeline would write Python exercises about its C lectures. C exercises written by hand validate already.</p>{% endif %}
+<p><a href="{{ url_for('course', name=course.folder) }}">Back to {{ course.workspace.course }}</a></p>
+{% elif not ready %}
 <p>No lecture of this course has been read yet: upload or read them on the
   <a href="{{ url_for('lecture_list', name=course.folder) }}">Lectures</a> page.</p>
 {% else %}

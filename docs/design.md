@@ -163,6 +163,7 @@ smartCodingReview/                       # public repo (the `tutor/` above), cod
 │   ├── validation/                      # P1 the checks; P2 rule 0, P3a the safety check (internals designed before coding); C: csource.py
 │   ├── testkit.py                       # P2a run a file-level program, read part-*, compare output
 │   ├── testkit_c.py                     # C exercises' tests: compile once, run, sanitizers
+│   ├── languages.py                     # a course's languages: [languages.c], not-yet-supported ones, flags in lectures
 │   ├── attempts.py                      # P2a pytest plugin: one attempts.jsonl line per exercise run
 │   ├── schema.py                        # P2 Pydantic models of metadata.json / manifest.json (rule 0),
 │   │                                    #   P3 parses LLM output into the same models
@@ -2148,6 +2149,30 @@ themselves, so a cheap layer comes first and a stronger one later.
     container comes later (owner): on macOS `cc` is Apple's clang without LeakSanitizer, and
     envcheck reports `gcc` there as clang. Measured: both examples VALID in a container with
     the course's `-Wall -std=c99` in 3 to 6 s each, and with clang on macOS.
+  - Step 2, a course's language (owner, 2026-11-07; `tutor/languages.py`, the Environment
+    page). A course is a C course when workspace.toml has `[languages.c]`, which only the
+    owner writes, through the page or by hand; not inferred from `[requires]`, where `java`
+    also serves Spark. Python needs nothing declared. A table for another language, or a
+    `[requires]` entry naming the toolchain of one (javac, rustc, g++, node, ...), is reported
+    as not supported yet, by envcheck and so by the GUI, instead of being taken for a pip
+    package that then fails to install.
+    - Found in the lectures, confirmed by the owner: the [requires] draft's "gcc" kind (prompt
+      version 3), and the compiler flags from the gcc, cc and clang lines the cached lectures
+      show, with no model: the set of `-std=`, `-W`, `-pedantic` and `-ansi` flags the most
+      lines share, shown with its first line (the first C course: `-Wall -std=c99` on all 19
+      lines). The box starts at the course's flags, else these, else `-std=c11 -Wall`.
+    - Ticking C writes `[languages.c] flags`, `[safety] allow_headers` (headers beyond the
+      standard library's, each a plain `name.h` path) and `gcc = "12"` in [requires] when
+      missing (the image's Debian gcc); unticking removes the first two and leaves
+      [requires]. Checked writes as every other table, the file before kept as `.bak`.
+    - "On this machine" is greyed for a C course and refused by the server: C runs only in
+      the container. A `gcc` here of another make or version (macOS's clang) is shown as
+      "differs", not as missing: the learner's own runs compile with it, validation with the
+      image's gcc; only no compiler at all is missing.
+    - New batch is held back for a C course, on the page and by the server (owner): the
+      pipeline writes Python exercises only, so a batch would be Python about C lectures,
+      paid for. The course page says so, and that a C course needs the container. The
+      `tutor.graph` command line is not held back: `graph/` changes come with step 3.
 - Languages in the plan (owner, 2026-11-07), in this order: C, C++ and Java first, as the
   owner has courses in them; then SQL, JavaScript and TypeScript, shell, Rust, R, Go, Haskell,
   assembly, and MATLAB (open, below). Each is designed when a real course with lectures needs
@@ -3295,6 +3320,15 @@ late; the adaptive review screens can be built with it.
       every Unix-like system has (tar, nohup); these are now left out by name. Such
       entries were "other", only listed and never installed, so the change cleans the
       list; the new version asks every lecture again on the next click.
+    - Prompt version 3 (owner, 2026-11-07, with C): a kind of its own, "gcc", for a C
+      compiler (gcc, cc or clang), so the C compiler is a tickable `gcc` row rather than an
+      "other" only listed; its quote must name gcc, cc or clang as a word of its own ("cc" is
+      in "access"), and its box starts at the major version, as Java's. Every course's stored
+      answers are then out of date and the page offers to ask again; [requires] itself is
+      untouched.
+    - Ask again (owner, 2026-11-07): once lectures are looked at, the page still offers
+      "Look at all N lectures again" (`--again`), with the input tokens that sends, after a
+      change of model or to compare; it was offered only for lectures not yet asked.
     - Measured on the private deep learning course, with GLM-5.3-Flash (free): 16 lectures,
       157k tokens in and 715 out, 10 candidates, one dropped (a plural, before "other"
       matched loosely). It found torch, numpy and scikit-learn with the versions the slides

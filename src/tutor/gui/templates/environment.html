@@ -28,6 +28,29 @@
 <h2><span class="step-no">1</span>What the course needs</h2>
 <p class="muted">The software its tests need: <code>[requires]</code> in workspace.toml. Let a model find it in the lectures, or type it in the list; nothing is written until you add or save.</p>
 
+{# The course's language besides Python (environment.language_view, owner 2026-11-07): ticking
+   C writes [languages.c] with its flags, [safety] allow_headers, and gcc in [requires]. The
+   flags start as the course's, else as the lectures' gcc lines show them. #}
+{% set lv = language %}
+{% set tl = typed_language or {} %}
+<h3>Language {{ chip("C") if lv.c else chip("Python") }}</h3>
+{% for line in lv.problems %}<p class="notice notice-bad">{{ line }}</p>{% endfor %}
+<form method="post" action="{{ url_for('save_language', name=course.folder) }}" class="form">
+  <p class="muted">Exercises are in Python unless the course is a C course. Other languages are not supported yet.</p>
+  <label class="check"><input type="checkbox" name="c"{% if (tl.c if tl else lv.c) %} checked{% endif %}>
+    <strong>C</strong> <span class="muted">exercises in C, tested by pytest, compiled with AddressSanitizer and UndefinedBehaviorSanitizer; validated only in a container (step 3), with gcc in its image. Generating them is not built yet.</span></label>
+  <label class="field">Compiler flags
+    <span class="muted">{% if lv.suggestion %}the lectures compile with <code>{{ lv.suggestion.flags | join(" ") }}</code> ({{ lv.suggestion.count }} of {{ lv.suggestion.lines }} compile line{{ "s" if lv.suggestion.lines != 1 }}; {{ lv.suggestion.lecture }} {{ lv.suggestion.page }}: <code>{{ lv.suggestion.line }}</code>){% else %}no compile line with flags in the lectures; without any, C exercises use <code>-std=c11 -Wall</code>{% endif %}</span>
+    <input type="text" name="flags" value="{{ tl.flags if tl else lv.flags }}" autocomplete="off" spellcheck="false">
+  </label>
+  <label class="field">Other headers exercises may include
+    <span class="muted">besides the C standard library's (stdio.h, stdlib.h, string.h, math.h, ...), separated by spaces; e.g. unistd.h for getopt</span>
+    <input type="text" name="headers" value="{{ tl.headers if tl else lv.headers }}" autocomplete="off" spellcheck="false" placeholder="none">
+  </label>
+  <p class="muted">Saving with C ticked adds <code>gcc</code> to the list below if it is not there; unticking it leaves the list as it is.</p>
+  <div class="actions"><button type="submit" class="primary">Save the language</button></div>
+</form>
+
 {# 7b: a model's draft from the lectures (environment.draft_view). It costs money, so it runs
    only from its button; its entries are only candidates until ticked and added. #}
 <h3>Find it in the lectures (optional)</h3>
@@ -44,7 +67,10 @@
   {% else %}No model is set for it: choose one for the setup, plan or generate role on the <a href="{{ url_for('models', name=course.folder) }}">Models</a> page.{% endif %}
 </div>
 {% endif %}
-{% if d.done %}<p class="muted">{{ d.done | length }} lecture{{ "s" if d.done | length != 1 }} looked at, by {{ d.models | join(", ") }}.</p>{% endif %}
+{% if d.done %}<p class="muted">{{ d.done | length }} lecture{{ "s" if d.done | length != 1 }} looked at, by {{ d.models | join(", ") }}.
+  {% if draft.model %}To ask {{ "them all" if not d.todo else "every lecture" }} again (after changing the model, or to compare), this sends {% if draft.all_tokens_k %}about {{ draft.all_tokens_k }} thousand{% else %}under a thousand{% endif %} input tokens to {{ draft.model }}.{% endif %}</p>
+{% if draft.model %}<form method="post" action="{{ url_for('draft_requires', name=course.folder) }}" class="inline-form"><input type="hidden" name="again" value="1">{% set every = (d.done | length) + (d.todo | length) %}<button type="submit" class="small">{{ "Look at the lecture again" if every == 1 else "Look at all " ~ every ~ " lectures again" }}</button></form>{% endif %}
+{% endif %}
 {% if draft.rows %}
 <form method="post" action="{{ url_for('accept_requires', name=course.folder) }}" class="form wide">
   <table class="draft">
@@ -127,8 +153,8 @@
   <p class="muted">For validation and generation; your own test runs in the IDE stay on this machine. Now: {% if runner %}<strong>{{ runner }}</strong>{% else %}not chosen (they run on this machine, with a warning){% endif %}.</p>
   <label class="check"><input type="radio" name="runner" value="container"{% if runner == "container" %} checked{% endif %}>
     <strong>In a container</strong> <span class="muted">every run in a fresh Docker container with no network and no access to your files; needs Docker and the test image of step 4</span></label>
-  <label class="check"><input type="radio" name="runner" value="host"{% if runner == "host" %} checked{% endif %}>
-    <strong>On this machine</strong> <span class="muted">no Docker needed, and step 4 is skipped</span></label>
+  <label class="check"><input type="radio" name="runner" value="host"{% if runner == "host" %} checked{% endif %}{% if lv.c %} disabled{% endif %}>
+    <strong>On this machine</strong> <span class="muted">{% if lv.c %}not for a C course: a static check cannot bound what C code does, so its tests run only in a container{% else %}no Docker needed, and step 4 is skipped{% endif %}</span></label>
   <label class="check warn"><input type="checkbox" name="understood">
     I understand that on this machine, code a model generated runs with my rights: it can read and change my files.</label>
   <div class="actions"><button type="submit" class="primary">Save</button></div>

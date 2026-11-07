@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 import tomllib
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 WORKSPACE_FILE = "workspace.toml"
@@ -27,12 +27,15 @@ class Workspace:
     course:      course id from workspace.toml, e.g. "bigdata"
     requires:    the [requires] table, name -> version prefix, e.g. {"java": "17"}
     lecture_dir: LECTURE_DIR if set, else <root>/lectures
+    languages:   the [languages] table as written, e.g. {"c": {"flags": ["-Wall"]}}, kept as
+                 it is even when malformed: tutor.languages.problems says what is wrong
     """
 
     root: Path
     course: str
     requires: dict[str, str]
     lecture_dir: Path
+    languages: object = field(default_factory=dict)
 
     # Subfolders are only computed here; code that writes into them creates them on demand.
     @property
@@ -99,7 +102,8 @@ def load_workspace(environ: Mapping[str, str] | None = None) -> Workspace:
         lecture_dir = _private_dir(str(root / "lectures"), "the workspace's lectures/")
     else:
         lecture_dir = root / "lectures"  # not created yet: nothing to check
-    return Workspace(root=root, course=data["course"], requires=requires, lecture_dir=lecture_dir)
+    return Workspace(root=root, course=data["course"], requires=requires, lecture_dir=lecture_dir,
+                     languages=data.get("languages", {}))
 
 
 def _private_dir(raw: str, var: str) -> Path:
