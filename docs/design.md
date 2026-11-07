@@ -3193,6 +3193,13 @@ late; the adaptive review screens can be built with it.
       decision, and the page says a package exercises import must be added there by hand.
     - A course without models gets no button: the GUI does not read `.env`, so it cannot tell
       whether the LLM_* variables would answer.
+    - Prompt version 2 (owner, 2026-11-07): only software that builds, runs or tests the
+      course's code on the student's own computer, a compiler, build tool and debugger
+      named among them. A C course's first lecture had brought in what its lab machines
+      are reached with (PuTTY, WinSCP, X2Go, ssh), its editors (vi, emacs) and commands
+      every Unix-like system has (tar, nohup); these are now left out by name. Such
+      entries were "other", only listed and never installed, so the change cleans the
+      list; the new version asks every lecture again on the next click.
     - Measured on the private deep learning course, with GLM-5.3-Flash (free): 16 lectures,
       157k tokens in and 715 out, 10 candidates, one dropped (a plural, before "other"
       matched loosely). It found torch, numpy and scikit-learn with the versions the slides

@@ -158,6 +158,9 @@ def test_the_instructions_come_first_and_alike_for_every_lecture(workspace, monk
     req.main([])
     first, second = (call["messages"] for call in fake.calls)
     assert first[0] == second[0] == {"role": "system", "content": req.PROMPT}
+    # Only what builds, runs or tests the code on the student's machine (owner, 2026-11-07).
+    assert "PuTTY" in req.PROMPT and "editors and IDEs" in req.PROMPT
+    assert req.PROMPT_VERSION == 2  # a changed prompt asks every lecture again
     assert first[1]["content"].startswith("Lecture file: L1.pdf\n\n## p.1\n")
     assert fake.calls[0]["thinking"] is False and fake.calls[0]["response_schema"]
     assert fake.calls[0]["max_tokens"] == req.MAX_TOKENS

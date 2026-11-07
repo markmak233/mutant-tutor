@@ -48,7 +48,10 @@ from tutor.exchange import AwaitingAnswer
 from tutor.llm import LLMConfig, LLMError, chat, config_for, roles
 from tutor.materials import cache
 
-PROMPT_VERSION = 1  # part of a stored answer's key: a new prompt asks again
+# Part of a stored answer's key: a new prompt asks again. 2 (owner, 2026-11-07): only what
+# builds, runs or tests the code on the student's own machine; a C course's first lecture
+# had brought in PuTTY, WinSCP, X2Go, ssh, vi and emacs, the way to its lab machines.
+PROMPT_VERSION = 2
 MAX_TOKENS = 4_000  # a lecture's list is far shorter; a reply cut off here is not stored
 ROLES = ("setup", "plan")  # tried in this order, then generate
 RESULTS_DIR = Path("cache") / "requires"
@@ -60,11 +63,12 @@ _NAMED_BY = {"python": ("python",), "java": ("java", "jdk", "jvm", "jre"),
 _NUMBER = re.compile(r"\d+(?:\.\d+)*")
 
 PROMPT = """\
-You read a lecture's slides to find the software a student must install to run the course's
-code. Each page starts with a "## p.N" line.
+You read a lecture's slides to find the software a student must install on their own
+computer to build, run and test the course's code. Each page starts with a "## p.N" line.
 
-List every library, package, language runtime or tool that the slides' code uses, or that
-the slides tell students to install or run. For each one give:
+List every library, package, language runtime, compiler, build tool or debugger that the
+slides' code uses, or that the slides tell students to install to work on that code. For
+each one give:
 - kind: "python" for the Python language itself; "java" for a JDK or JVM; "hadoop" for
   Apache Hadoop; "pip" for a Python package installed with pip; "other" for anything else,
   such as a database, Node.js, R or a command-line tool.
@@ -78,10 +82,16 @@ the slides tell students to install or run. For each one give:
 - quote: a short piece of that page's text, copied exactly, that shows it: the import line,
   the install command, or the words naming it and its version.
 
-One entry per piece of software. Leave out Python's standard library (os, sys, json, re,
-collections and the like). Leave out software the slides only mention in passing, for
-history or comparison, and not for students to use. If the lecture names none, reply with
-an empty list."""
+One entry per piece of software. Leave out:
+- Python's standard library (os, sys, json, re, collections and the like);
+- software the slides only mention in passing, for history or comparison, and not for
+  students to use;
+- tools for reaching or working on the school's machines rather than running the code:
+  SSH clients (PuTTY, ssh), file transfer (WinSCP, scp), remote desktops (X2Go);
+- editors and IDEs (vi, emacs, VS Code);
+- commands every Unix-like system has (tar, tr, time, nohup, bc, a shell), unless the
+  course's code itself calls them.
+If the lecture names none, reply with an empty list."""
 
 
 class Found(BaseModel):
