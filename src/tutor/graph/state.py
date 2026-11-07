@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from tutor.schema import CMetadata, Metadata
 
 # Fewer planted mistakes make rule 3 a weak check; a draft keeps at least this many after
-# leaving out mutants that cannot be applied (nodes.write_draft).
+# leaving out mutants that cannot be applied (drafts.write_draft).
 MIN_MUTANTS = 3
 
 
@@ -147,7 +147,7 @@ class ItemState(TypedDict, total=False):
     tokens: int  # input + output tokens spent on this item
     usage: dict[str, int]  # the same, split: input, cached (part of input), output
     outcome: Literal["saved", "discarded"]
-    # The independent oracle (nodes.write_oracle): what it was written from (a hash of the
+    # The independent oracle (oracle.write_oracle): what it was written from (a hash of the
     # question, the interface and the sample data), its code, and what the node did.
     oracle_key: str
     oracle_py: str

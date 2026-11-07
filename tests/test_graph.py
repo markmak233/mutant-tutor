@@ -7,8 +7,10 @@ import sys
 
 import pytest
 
-from tutor.graph import nodes, prompts
-from tutor.graph.nodes import Deps, DraftError, apply_mutant, write_draft, write_manifest
+from tutor.graph import batch, drafts, nodes, oracle, prompts
+from tutor.graph.batch import write_manifest
+from tutor.graph.drafts import DraftError, apply_mutant, write_draft
+from tutor.graph.nodes import Deps
 from tutor.graph.state import ExerciseDraft, MutantDraft, PlanItem
 from tutor.llm import LLMConfig, Reply
 from tutor.materials import cache
@@ -150,7 +152,7 @@ def test_a_saved_exercise_names_its_exact_lecture_file_not_the_models_words(work
     reply = ExerciseDraft.model_validate(worded)
     d = deps(workspace, None, checks=[report()])
 
-    nodes.validate_draft({"item": ITEM, "draft": reply}, d)
+    drafts.validate_draft({"item": ITEM, "draft": reply}, d)
 
     saved = d.drafts / ITEM.id / "round-0" / "solutions" / ITEM.id / "metadata.json"
     source = json.loads(saved.read_text(encoding="utf-8"))["source"]
@@ -206,15 +208,15 @@ def test_the_batch_mode_sets_how_much_one_planned_exercise_combines():
 
 
 def test_the_plan_model_sees_what_each_existing_exercise_does(tmp_path):
-    batch = tmp_path / "batches" / "b1"
+    batch_dir = tmp_path / "batches" / "b1"
     for exercise_id in ("word-count", "bare"):
-        (batch / "exercises" / exercise_id).mkdir(parents=True)
-    (batch / "solutions" / "word-count").mkdir(parents=True)
-    (batch / "solutions" / "word-count" / "metadata.json").write_text(
+        (batch_dir / "exercises" / exercise_id).mkdir(parents=True)
+    (batch_dir / "solutions" / "word-count").mkdir(parents=True)
+    (batch_dir / "solutions" / "word-count" / "metadata.json").write_text(
         json.dumps({"title": "Word count with MRJob", "topic": "mrjob/word-count"}),
         encoding="utf-8")
     # an exercise without readable metadata still keeps its id from being reused
-    assert nodes.existing_exercises(tmp_path) == [
+    assert batch.existing_exercises(tmp_path) == [
         "bare", "word-count: Word count with MRJob [mrjob/word-count]"]
 
 
@@ -401,7 +403,7 @@ class BatchModel:
 def test_plan_problems_are_found_by_code():
     items = [PlanItem.model_validate(i) for i in json.loads(
         plan_json("a", "a", "old-one", lecture="L9"))["items"]]
-    found = nodes.plan_problems(items, ["L1"], 2, ["old-one"])
+    found = batch.plan_problems(items, ["L1"], 2, ["old-one"])
     assert "3 items, 2 asked for" in found
     assert "id 'a' is used twice" in found
     assert "id 'old-one' already exists in another batch" in found
@@ -410,7 +412,7 @@ def test_plan_problems_are_found_by_code():
 
 def test_a_plan_breaking_the_rules_is_asked_for_again_with_the_problems(workspace):
     model = BatchModel(plan_json("a", lecture="L9"), plan_json("a"))
-    update = nodes.plan_batch({"lectures": ["L1"], "count": 1}, deps(workspace, model))
+    update = batch.plan_batch({"lectures": ["L1"], "count": 1}, deps(workspace, model))
     assert model.thinking is True  # planning reasons first, unlike generating
     assert model.purposes == ["plan", "plan"]
     assert "lecture 'L9' is not one of ['L1']" in model.last_plan_request
@@ -421,7 +423,7 @@ def test_page_titles_skip_the_footer_line(workspace):
     entries = [cache.Entry(13, "6.7", "text", "h", "6.7\nA Made-Up Title\n❖ A topic")]
     cache.save(cache.cache_path(workspace, workspace / "lectures" / "L4.pdf"),
                cache.render("L4.pdf", entries))
-    assert nodes.page_titles(workspace, "L4").splitlines()[1] == (
+    assert batch.page_titles(workspace, "L4").splitlines()[1] == (
         "  p.13 · slide 6.7: A Made-Up Title")
 
 
@@ -429,9 +431,9 @@ def test_the_owner_may_edit_the_plan_before_approving():
     plan = json.loads(plan_json("a"))["items"]
     state = {"plan": plan, "lectures": ["L1"]}
     edited = [{**plan[0], "id": "a-better-name"}]
-    assert nodes.apply_decision(state, {"action": "approve", "plan": edited}, []) == {
+    assert batch.apply_decision(state, {"action": "approve", "plan": edited}, []) == {
         "plan": edited, "approved": True}
-    assert nodes.apply_decision(state, {"action": "revise", "feedback": "harder"}, []) == {
+    assert batch.apply_decision(state, {"action": "revise", "feedback": "harder"}, []) == {
         "feedback": "harder", "approved": False}
 
 
@@ -439,13 +441,13 @@ def test_a_plan_with_a_repeated_or_taken_id_is_never_approved():
     """Two items with one id would share a drafts folder, each clearing it first."""
     plan = json.loads(plan_json("a", "a"))["items"]
     with pytest.raises(ValueError, match="id 'a' is used twice"):
-        nodes.apply_decision({"plan": plan, "lectures": ["L1"]}, {"action": "approve"}, [])
+        batch.apply_decision({"plan": plan, "lectures": ["L1"]}, {"action": "approve"}, [])
     with pytest.raises(ValueError, match="already exists in another batch"):
-        nodes.apply_decision({"plan": plan[:1], "lectures": ["L1"]}, {"action": "approve"},
+        batch.apply_decision({"plan": plan[:1], "lectures": ["L1"]}, {"action": "approve"},
                              ["a"])
     # A count other than the one asked for is the owner's choice, not a blocking problem.
     items = [PlanItem.model_validate(i) for i in plan[:1]]
-    assert nodes.blocking_problems(items, ["L1"], []) == []
+    assert batch.blocking_problems(items, ["L1"], []) == []
 
 
 def test_a_resume_keeps_the_owners_edits_to_the_plan_until_the_model_plans_again(tmp_path):
@@ -611,8 +613,8 @@ def test_listing_saved_items_again_leaves_the_manifest_unchanged(tmp_path):
 def test_without_a_count_the_plan_chooses_up_to_the_maximum():
     items = [PlanItem.model_validate(i) for i in json.loads(
         plan_json("a", "b", "c"))["items"]]
-    assert nodes.plan_problems(items, ["L1"], None, [], max_count=3) == []
-    assert nodes.plan_problems(items, ["L1"], None, [], max_count=2) == [
+    assert batch.plan_problems(items, ["L1"], None, [], max_count=3) == []
+    assert batch.plan_problems(items, ["L1"], None, [], max_count=2) == [
         "3 items, at most 2: merge or drop the least important"]
     assert "at most 4" in prompts.plan_prompt(["L1"], "", "", [], "", None, max_count=4)
 
@@ -755,7 +757,7 @@ def with_interface(**changes) -> str:
 
 def test_without_an_oracle_role_the_generating_model_writes_the_whole_oracle(workspace):
     model = FakeModel()
-    assert nodes.write_oracle({"draft": ExerciseDraft.model_validate(draft())},
+    assert oracle.write_oracle({"draft": ExerciseDraft.model_validate(draft())},
                               deps(workspace, model)) == {}
     assert "only the interface" not in prompts.system_prompt("")
     assert "only the interface" in prompts.system_prompt("", oracle_interface=True)
@@ -852,10 +854,10 @@ def test_an_oracle_left_unwritten_is_a_failure_of_the_round(workspace):
     unwritten = json.dumps({"oracle_py": INTERFACE})
     d = deps(workspace, FakeModel(unwritten, unwritten), oracle_config=ORACLE)
     state = {"item": ITEM, "draft": ExerciseDraft.model_validate_json(with_interface())}
-    update = nodes.write_oracle(state, d)
+    update = oracle.write_oracle(state, d)
     assert update["oracle_status"] == "failed" and update["format_error"] is True
     assert "it left total unwritten" in update["failure"]
-    assert nodes.after_oracle({**state, **update, "round": 0}, d) == "repair"
+    assert oracle.after_oracle({**state, **update, "round": 0}, d) == "repair"
 
 
 def test_an_oracle_from_the_writers_provider_runs_with_a_note(workspace, capsys):
@@ -933,7 +935,7 @@ def test_usage_counts_the_cached_input_of_every_call_of_an_item(workspace, capsy
     from tutor.graph.__main__ import _summary, _usage_text
 
     state = {"usage": {"input": 1000, "cached": 0, "output": 500}}
-    spent = nodes._spent(state, Reply("{}", 2000, 300, 0.1, "stop", cached_tokens=1500))
+    spent = nodes.tokens_spent(state, Reply("{}", 2000, 300, 0.1, "stop", cached_tokens=1500))
     assert spent == {"tokens": 3800, "usage": {"input": 3000, "cached": 1500, "output": 800}}
     assert _usage_text(spent["usage"]) == (
         "input 3,000 tokens (1,500 from the provider's cache, 50%), output 800")
@@ -1035,7 +1037,7 @@ def test_the_oracle_model_fixes_its_own_unsafe_import(workspace):
     model = FakeModel(unsafe, json.dumps({"oracle_py": FILLED}))
     d = deps(workspace, model, oracle_config=ORACLE)
     state = {"item": ITEM, "draft": ExerciseDraft.model_validate_json(with_interface())}
-    update = nodes.write_oracle(state, d)
+    update = oracle.write_oracle(state, d)
 
     assert update["oracle_status"] == "written" and update["oracle_py"] == FILLED
     retry = model.calls[1][1]
@@ -1053,8 +1055,8 @@ def test_a_differential_test_that_cannot_run_is_not_called_a_disagreement(worksp
     d = deps(workspace, FakeModel(json.dumps({"oracle_py": FILLED})), checks=[cannot_run],
              oracle_config=ORACLE)
     state = {"item": ITEM, "draft": ExerciseDraft.model_validate_json(with_interface())}
-    state.update(nodes.write_oracle(state, d))
-    failure = nodes.validate_draft(state, d)["failure"]
+    state.update(oracle.write_oracle(state, d))
+    failure = drafts.validate_draft(state, d)["failure"]
     assert "cannot run" in failure and "it never saw your reference" not in failure
 
 
@@ -1099,7 +1101,7 @@ def test_an_assistant_batch_pauses_for_answers_and_replays_to_the_end(workspace)
 
     assert answer_waiting(queue, {"generate": json.dumps(draft())}) == ["generate"]
     final = app.invoke(Command(resume={"answered": True}), config)
-    assert [r["outcome"] for r in nodes.latest_results(final["results"])] == ["saved"]
+    assert [r["outcome"] for r in batch.latest_results(final["results"])] == ["saved"]
     assert (d.batch_dir / "exercises" / "sum-list" / "student.py").is_file()
     assert len(checks) == 1
     # Who wrote it is on record: the manifest and the log name the assistant as such.

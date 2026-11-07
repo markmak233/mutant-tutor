@@ -896,8 +896,9 @@ plan -> [interrupt: owner approves / edits, adds preferences] -> for each plan i
 ```
 
 Design approved 2026-10-28 (owner):
-- Pluggable: nodes are plain functions (state in, partial state out) in `graph/nodes.py`,
-  calling `tutor.llm`; only `graph/build.py` imports `langgraph` (optional dependency group
+- Pluggable: nodes are plain functions (state in, partial state out), calling `tutor.llm`:
+  an item's in `graph/nodes.py`, the oracle's in `oracle.py`, a round's draft and its
+  validation in `drafts.py`, the batch's in `batch.py` (one file until 2026-11-08); only `graph/build.py` imports `langgraph` (optional dependency group
   `gen`), and nothing outside `graph/` depends on it. No LangChain. LangGraph is used for
   what is tedious by hand: interrupt and resume with a SQLite checkpointer in the workspace
   (approve the plan tomorrow), conditional edges, and state history for debugging.

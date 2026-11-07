@@ -10,7 +10,7 @@ the hash and say so in design.md.
 import hashlib
 import json
 
-from tutor.graph import nodes, prompts
+from tutor.graph import nodes, oracle, prompts
 from tutor.graph.state import PlanItem
 
 CONTEXT = "## p.3 · slide 1.3\nMade-up page text.\n\n## p.4 · slide 1.4\nMore made-up text."
@@ -29,7 +29,7 @@ def outputs() -> dict[str, str]:
     found = {
         "draft_schema": json.dumps(nodes.DRAFT_SCHEMA, sort_keys=True),
         "plan_schema": json.dumps(nodes.PLAN_SCHEMA, sort_keys=True),
-        "oracle_schema": json.dumps(nodes.ORACLE_SCHEMA, sort_keys=True),
+        "oracle_schema": json.dumps(oracle.ORACLE_SCHEMA, sort_keys=True),
         "plan_spec": prompts.PLAN_SPEC,
         "oracle_spec": prompts.oracle_spec(),
         "oracle_prompt": prompts.oracle_prompt("The question.", "def f(x):\n    ...\n",

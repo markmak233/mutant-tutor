@@ -40,16 +40,9 @@ from pydantic import ValidationError
 from tutor.config import WORKSPACE_FILE, WorkspaceError, load_env, load_workspace
 from tutor.container import ContainerError, check_course
 from tutor.exchange import AwaitingAnswer
+from tutor.graph.batch import blocking_problems, existing_ids, latest_results, write_manifest
 from tutor.graph.languages import course_language, profile_of
-from tutor.graph.nodes import (
-    Deps,
-    blocking_problems,
-    check_round,
-    existing_ids,
-    latest_results,
-    reusing_reports,
-    write_manifest,
-)
+from tutor.graph.nodes import Deps, check_round, reusing_reports
 from tutor.graph.settings import (
     DEFAULTS,
     DEPS_FIELDS,
