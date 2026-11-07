@@ -2313,6 +2313,24 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
   `setuptools` to the `bigdata` extras and 3.12 to the matrix.
   No JDK: run in a clean clone with a fake `java` that logs every call, the fast suite
   started no JVM (2026-10-26).
+- `other-os` (owner, 2026-11-08, "Roadmap" 6.1): the same fast suite on `macos-latest` and
+  `windows-latest`, Python 3.11. A job of its own and not a second matrix axis of `test`, so the
+  `test (3.11)` check main's ruleset requires keeps its name (a renamed check never reports and
+  blocks every pull request). The macOS runner has clang as `cc`, so the C hint tests run there
+  as on the owner's Mac; Windows has no `cc`, and they skip.
+- `docker` (owner, 2026-11-08): `pytest -m docker` on `ubuntu-latest`, whose runner has Docker
+  with Linux containers: the isolation tests, the examples (C included) validated in the
+  course's image, and a generated C item end to end (hence the `gen` extra). It also runs on
+  native Linux, where the image's `runner` uid must match the host's (1001 on the runner), which
+  had not been tested. These tests skip when Docker cannot run, which would pass quietly in CI,
+  so a step reads the JUnit report and fails the job on any skip or on no tests. Locally the 19
+  tests take about 40 s with the images built; CI builds them first. Docker is not in CI on
+  macOS (the runner has none) or Windows (its runner runs only Windows containers): Docker
+  Desktop there is checked by hand, on the owner's machines (see "Roadmap" 6, packaging).
+- Why more systems pay (2026-11-07): on the second-language pull request, gcc on the Ubuntu
+  runner, in a UTF-8 locale, quotes with ‘ ’ where clang and the container's gcc (C locale) print ' ',
+  and a C hint test failed. CI is where a toolchain or locale the owner's machines do not have
+  shows up first.
 - `secrets`: gitleaks 8.30.1 (the local version) over the whole history with `.gitleaks.toml`,
   because GitHub's own secret scanning is not available while the repo is private, and a
   local pre-commit hook can be skipped.
@@ -2789,7 +2807,8 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
    setup, one execution environment for validation and the learner, and measured trust). In
    order, each its own step:
    1. CI: a `docker` job (`pytest -m docker`; GitHub's Ubuntu runners have Docker) and the
-      fast suite on macOS and Windows as well. Done when all three are green.
+      fast suite on macOS and Windows as well. Done when all three are green;
+      the jobs written 2026-11-08 (see "CI").
    2. A little refactoring of the files over 500 lines (`gui/app.py`, `graph/nodes.py`,
       `graph/prompts.py`, ...), planned and explained first; the prompt pins must still pass.
    3. `tutor test`: the learner's tests in the course's image, as validation runs them, from
