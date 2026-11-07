@@ -24,7 +24,7 @@
 {% endif %}
 {% if gaps %}
 <h2>Still to set up</h2>
-{# Each line links to the page that fixes it (lectures.setup_gaps), when there is one. #}
+{# Each line links to the page that fixes it (course_setup.setup_gaps), when there is one. #}
 <ul class="setup">{% for text, page, label in gaps %}<li>{{ text }}{% if page %} <a href="{{ url_for(page, name=course.folder) }}">{{ label }} →</a>{% endif %}</li>{% endfor %}</ul>
 {% endif %}
 {% if plans %}

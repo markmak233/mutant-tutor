@@ -14,7 +14,7 @@ import pytest
 
 pytest.importorskip("flask")  # the `gui` extra
 
-from tutor.gui import courses, lectures, tasks  # noqa: E402
+from tutor.gui import course_setup, courses, lectures, tasks  # noqa: E402
 from tutor.gui.app import create_app  # noqa: E402
 
 TOKEN = "test-token"
@@ -501,7 +501,7 @@ def test_a_refused_new_course_creates_nothing(root, started, folder, course_id, 
 def test_no_new_course_inside_a_git_repository(tmp_path):
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
 
-    folder, _, problems = lectures.check_new_course(tmp_path, "comp1234", "")
+    folder, _, problems = course_setup.check_new_course(tmp_path, "comp1234", "")
 
     assert folder is None and "git repository" in problems[0]
 
@@ -519,7 +519,7 @@ def test_a_course_being_created_shows_only_its_task(root, started):
 
     assert page.status_code == 200 and "Create comp1234" in page.get_data(as_text=True)
     assert client.get("/c/comp1234/", base_url=BASE).status_code == 404  # not a course yet
-    assert lectures.being_created(root, "demo-course") is None  # it has a workspace.toml
+    assert course_setup.being_created(root, "demo-course") is None  # it has a workspace.toml
 
 
 def test_a_new_course_page_lists_what_is_still_to_set_up(root):
@@ -539,7 +539,7 @@ def test_a_course_with_everything_set_lists_only_what_is_missing(course):
     _write(course.workspace.root / "coverage.md", "| lecture |\n")
     rows = lectures.lecture_rows(course)
 
-    assert lectures.setup_gaps(course, rows) == [
+    assert course_setup.setup_gaps(course, rows) == [
         ("1 lecture not read yet.", "lecture_list", "Lectures")]
 
 
@@ -569,8 +569,8 @@ def _create_task(root, status="running", codes=(), commands=2):
 
 
 def _states(root, task):
-    course = lectures.being_created(root, "comp1234") or courses.get_course(root, "comp1234")
-    return [s.state for s in lectures.create_progress(course, task)]
+    course = course_setup.being_created(root, "comp1234") or courses.get_course(root, "comp1234")
+    return [s.state for s in course_setup.create_progress(course, task)]
 
 
 def test_the_stages_follow_the_files_init_makes(root):
@@ -628,4 +628,4 @@ def test_elapsed_reads_as_minutes_and_seconds(monkeypatch, seconds, text):
     monkeypatch.setattr(tasks, "_age_s", lambda started: seconds)
     task = tasks.Task("x", Path("."), "t", tasks.RUNNING, "2026-01-02 10:00:00", None, [], [], 1)
 
-    assert lectures.elapsed(task) == text
+    assert course_setup.elapsed(task) == text

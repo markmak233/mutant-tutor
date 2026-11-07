@@ -16,14 +16,14 @@ from flask import (
     url_for,
 )
 
-from tutor.gui import courses, generation, lectures, tasks
+from tutor.gui import course_setup, courses, generation, tasks
 from tutor.gui.routes.common import ENVIRONMENT_NOTICES, waiting_for
 
 
 def task_or_404(name: str, task_id: str) -> tuple[courses.Course, tasks.Task]:
     """A course's task, or the task of a course being created (no workspace.toml yet)."""
     course = (courses.get_course(current_app.config["ROOT"], name)
-              or lectures.being_created(current_app.config["ROOT"], name))
+              or course_setup.being_created(current_app.config["ROOT"], name))
     if course is None:
         abort(404, "No such course.")
     task = tasks.get(course.workspace.root, task_id)
@@ -81,8 +81,8 @@ def task_parts(course: courses.Course, task: tasks.Task) -> dict:
             "back": return_to(course, task), "quiet": tasks.quiet_s(task),
             "again": again_url(course, task),
             "waiting_for": waiting_for(course, task),
-            "stages": lectures.create_progress(course, task) if create else None,
-            "elapsed": lectures.elapsed(task) if create else ""}
+            "stages": course_setup.create_progress(course, task) if create else None,
+            "elapsed": course_setup.elapsed(task) if create else ""}
 
 
 def register(app: Flask) -> None:

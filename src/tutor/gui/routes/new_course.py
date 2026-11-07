@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from flask import Flask, current_app, redirect, render_template, request, url_for
 
-from tutor.gui import lectures, tasks
+from tutor.gui import course_setup, tasks
 
 
 def new_course_page(values: dict, problems: list[str], code: int = 200):
@@ -29,13 +29,13 @@ def register(app: Flask) -> None:
         root = app.config["ROOT"]
         values = {"folder": request.form.get("folder", ""),
                   "course": request.form.get("course", "")}
-        folder, course_id, problems = lectures.check_new_course(root, values["folder"],
+        folder, course_id, problems = course_setup.check_new_course(root, values["folder"],
                                                                 values["course"])
         if folder is None:
             return new_course_page(values, problems, 400)
         (folder / "lectures").mkdir(parents=True)  # the folder is new: check_new_course
         env = {"WORKSPACE_DIR": str(folder), "LECTURE_DIR": str(folder / "lectures")}
         task = tasks.start(folder, f"Create {folder.name}",
-                           [lectures.init_command(folder, course_id)], env,
+                           [course_setup.init_command(folder, course_id)], env,
                            meta={"kind": "create"})
         return redirect(url_for("task", name=folder.name, task_id=task.id), code=303)

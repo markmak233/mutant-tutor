@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from flask import Flask, abort, redirect, render_template, url_for
 
-from tutor.gui import courses, generation, lectures, plan_items, rendering, tasks
+from tutor.gui import course_setup, courses, generation, lectures, plan_items, rendering, tasks
 from tutor.gui.routes.common import (
     RECENT_TASKS,
     STATUS_LABELS,
@@ -43,7 +43,7 @@ def register(app: Flask) -> None:
         return render_template("course.html", view=view, labels=STATUS_LABELS,
                                tasks=history[:RECENT_TASKS],
                                plans=generation.open_plans(view.course, history),
-                               gaps=lectures.setup_gaps(view.course,
+                               gaps=course_setup.setup_gaps(view.course,
                                                         lectures.lecture_rows(view.course)))
 
     @app.get("/c/<name>/b/<batch>/")
