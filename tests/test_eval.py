@@ -41,10 +41,12 @@ def write_json(path: Path, data: dict) -> None:
     path.write_text(json.dumps(data), encoding="utf-8")
 
 
-def add_exercise(root: Path, batch: str, exercise: str, changed: bool = False) -> None:
-    """An exercise whose student.py is what was handed out, or has been edited."""
-    student = root / "batches" / batch / "exercises" / exercise / "student.py"
-    skeleton = root / "batches" / batch / "solutions" / exercise / "skeleton.py"
+def add_exercise(root: Path, batch: str, exercise: str, changed: bool = False,
+                 suffix: str = ".py") -> None:
+    """An exercise whose student file (student.py, or student.c with suffix ".c") is what was
+    handed out, or has been edited."""
+    student = root / "batches" / batch / "exercises" / exercise / f"student{suffix}"
+    skeleton = root / "batches" / batch / "solutions" / exercise / f"skeleton{suffix}"
     student.parent.mkdir(parents=True)
     skeleton.parent.mkdir(parents=True)
     skeleton.write_text("VALUE = None\n", encoding="utf-8")
@@ -297,3 +299,19 @@ def test_the_command_refuses_a_folder_that_is_not_a_workspace(tmp_path, capsys):
     assert main(["report", str(tmp_path)]) == 2
     assert "eval:" in capsys.readouterr().err
     assert not (tmp_path / "reports").exists()
+
+
+def test_a_c_exercise_counts_as_edited_by_its_student_c(workspace):
+    """A C exercise is compared as student.c against skeleton.c, not student.py."""
+    add_exercise(workspace, GENERATED, "c-edited", changed=True, suffix=".c")
+    add_exercise(workspace, GENERATED, "c-untouched", suffix=".c")
+    manifest = workspace / "batches" / GENERATED / "manifest.json"
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["exercises"] += ["c-edited", "c-untouched"]
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+
+    progress = exercise_progress(batch_of(workspace, GENERATED), {}, set())
+    by_name = {p.exercise: p.status for p in progress}
+
+    assert by_name["c-edited"] == UNLOGGED
+    assert by_name["c-untouched"] == NOT_STARTED

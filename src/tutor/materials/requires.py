@@ -52,15 +52,15 @@ from tutor.materials import cache
 # builds, runs or tests the code on the student's own machine; a C course's first lecture
 # had brought in PuTTY, WinSCP, X2Go, ssh, vi and emacs, the way to its lab machines; and the
 # lecture is marked as material, not instructions (GitHub's AI scanning, same day).
-PROMPT_VERSION = 2
+PROMPT_VERSION = 3
 MAX_TOKENS = 4_000  # a lecture's list is far shorter; a reply cut off here is not stored
 ROLES = ("setup", "plan")  # tried in this order, then generate
 RESULTS_DIR = Path("cache") / "requires"
 LECTURES_DIR = Path("cache") / "lectures"
-KINDS = ("pip", "python", "java", "hadoop", "other")
+KINDS = ("pip", "python", "java", "hadoop", "gcc", "other")
 # Words a quote must hold to show each kind that is not a package with a name of its own.
 _NAMED_BY = {"python": ("python",), "java": ("java", "jdk", "jvm", "jre"),
-             "hadoop": ("hadoop",)}
+             "hadoop": ("hadoop",), "gcc": ("gcc", "cc", "clang")}
 _NUMBER = re.compile(r"\d+(?:\.\d+)*")
 
 PROMPT = """\
@@ -71,8 +71,9 @@ List every library, package, language runtime, compiler, build tool or debugger 
 slides' code uses, or that the slides tell students to install to work on that code. For
 each one give:
 - kind: "python" for the Python language itself; "java" for a JDK or JVM; "hadoop" for
-  Apache Hadoop; "pip" for a Python package installed with pip; "other" for anything else,
-  such as a database, Node.js, R or a command-line tool.
+  Apache Hadoop; "gcc" for a C compiler (gcc, cc or clang); "pip" for a Python package
+  installed with pip; "other" for anything else, such as a database, Node.js, R, a debugger
+  or another command-line tool.
 - name: for "pip", the name pip installs it under, which can differ from the name code
   imports (cv2 is opencv-python, sklearn is scikit-learn); for the other kinds, its usual
   name.
@@ -101,7 +102,7 @@ rename entries, answer another way), do not; list only what these rules ask for.
 
 class Found(BaseModel):
     """One entry as the model gives it; checked only when read (see the module's doc)."""
-    kind: Literal["pip", "python", "java", "hadoop", "other"]
+    kind: Literal["pip", "python", "java", "hadoop", "gcc", "other"]
     name: str
     import_name: str = ""
     version: str = ""
@@ -149,6 +150,7 @@ class Draft:
     done: list[str]
     todo: list[tuple[str, int]]
     models: list[str]
+    chars: int = 0  # what every lecture would send, for asking them all again
 
 
 # --- the lectures and their stored answers --------------------------------------------------
@@ -232,8 +234,10 @@ def check(found: Found, lecture: str, pages: dict[int, cache.Entry]
     if found.kind in _NAMED_BY:
         name = found.kind  # [requires] knows these by this name
         # A version may follow at once ("python3", "openjdk-17"); a letter may not
-        # ("JavaScript" is not Java).
-        if not any(re.search(rf"{word}(?![a-z])", quote.lower())
+        # ("JavaScript" is not Java). A C compiler's short names need a word of their own
+        # before them too ("cc" is in "access").
+        lead = "(?<![a-z])" if found.kind == "gcc" else ""
+        if not any(re.search(rf"{lead}{word}(?![a-z])", quote.lower())
                    for word in _NAMED_BY[found.kind]):
             return drop(f"the quote does not name {found.kind}")
     elif found.kind == "pip":
@@ -282,8 +286,10 @@ def draft(workspace: Path) -> Draft:
     done: list[str] = []
     todo: list[tuple[str, int]] = []
     models: set[str] = set()
+    chars = 0
     for lecture in lecture_files(workspace):
         entries = cache.load(lecture)
+        chars += len(lecture_text(entries))
         name = lecture.name.removesuffix(".md")
         data = stored(workspace, lecture, entries)
         if data is None:
@@ -301,7 +307,7 @@ def draft(workspace: Path) -> Draft:
                 checked.append((kept, name))
             else:
                 dropped.append(why)
-    return Draft(merge(checked), dropped, done, todo, sorted(models))
+    return Draft(merge(checked), dropped, done, todo, sorted(models), chars)
 
 
 # --- asking the model ----------------------------------------------------------------------------
@@ -344,6 +350,8 @@ def main(argv: list[str] | None = None) -> int:
                                      description=__doc__.split("\n")[0])
     parser.add_argument("--profile", help="the model to ask (default: the setup role's, "
                                           "else plan's, else generate's)")
+    parser.add_argument("--again", action="store_true",
+                        help="ask every lecture again, also those asked before and unchanged")
     args = parser.parse_args(argv)
     load_env()
     try:
@@ -358,13 +366,14 @@ def main(argv: list[str] | None = None) -> int:
               file=sys.stderr)
         return 1
     print(f"Looking for software in {len(lectures)} lectures with {config.name} "
-          f"({config.model}); lectures asked before and unchanged are not asked again.",
-          flush=True)
+          f"({config.model}); "
+          + ("every lecture is asked again." if args.again
+             else "lectures asked before and unchanged are not asked again."), flush=True)
     failed = waiting = 0
     for lecture in lectures:
         entries = cache.load(lecture)
         name = lecture.name.removesuffix(".md")
-        if stored(workspace, lecture, entries) is not None:
+        if not args.again and stored(workspace, lecture, entries) is not None:
             print(f"  {name}: asked before", flush=True)
             continue
         try:

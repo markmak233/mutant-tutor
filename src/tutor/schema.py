@@ -122,6 +122,63 @@ class Metadata(_Strict):
         return self
 
 
+# --- C exercises (docs/design.md, "Other languages") ---------------------------------------
+# A model of their own rather than new fields in Metadata: Metadata's JSON Schema goes to the
+# generate and repair models inside ExerciseDraft, and the Python prompts were calibrated
+# with exactly that text. A C metadata.json says "language": "c", which picks this model.
+
+LANGUAGES = ("python", "c")
+CIdentifier = Annotated[str, Field(pattern=r"^[A-Za-z_]\w*$")]
+
+
+class CConstraints(_Strict):
+    """Static API constraints of a C exercise, checked on its tokens by validation/csource.py
+    (comments and string literals left out)."""
+
+    forbidden_calls: list[Name] = Field(default=[], description=(
+        'Functions or macros that must not be used, e.g. "qsort" when the exercise is to '
+        "write the sort."))
+    required_definitions: list[Name] = Field(default=[], description=(
+        'Functions the code must define, e.g. "swap".'))
+
+
+class CMetadata(_Strict):
+    """solutions/<id>/metadata.json of a C exercise. Its code is student.c, reference.c,
+    skeleton.c and mutants/*.c; the tests stay pytest (test_student.py, test_oracle.py, and
+    the oracle in Python) and run the compiled program through tutor.testkit_c."""
+
+    schema_version: int = SCHEMA_VERSION
+    id: Annotated[str, Field(pattern=r"^[a-z0-9]+(-[a-z0-9]+)*$")]
+    title: Name
+    topic: Name
+    type: Literal["implementation", "completion", "debugging"]
+    # "file": student.c is a whole program with main, run the way the course runs one
+    # (standard input, arguments, files). "function": student.c holds functions only, and a
+    # driver.c in the exercise folder has the main that calls them.
+    interface: Literal["function", "file"]
+    difficulty: Literal["easy", "medium", "hard"]
+    language: Literal["c"]
+    # The same as language for now; kept so that every reader of `framework` (the executor's
+    # caps, reports, the GUI) has one.
+    framework: Literal["c"]
+    # The functions the tests reach through the program; "main" for a whole program.
+    entry_point: Annotated[list[CIdentifier], Field(min_length=1)]
+    constraints: CConstraints = CConstraints()
+    timeout_s: Annotated[float, Field(gt=0)] | None = None
+    source: Literal["synthetic"] | Source
+
+
+def metadata_model(data: object) -> type[BaseModel]:
+    """The model a metadata.json is checked against: CMetadata when it says "language": "c",
+    else Metadata (where a `language` field is then reported as unknown)."""
+    return CMetadata if isinstance(data, dict) and data.get("language") == "c" else Metadata
+
+
+def language_of(metadata: object) -> str:
+    """"c" or "python" (no `language`, an exercise from before C, or not a C one)."""
+    return "c" if metadata_model(metadata) is CMetadata else "python"
+
+
 class SourceRef(_Strict):
     """One material a batch was generated from, relative to the workspace."""
 
@@ -211,7 +268,7 @@ def check_batch(batch_dir: Path) -> list[str]:
         metadata = _load_json(batch_dir / rel, rel, found)
         if metadata is _UNREADABLE:
             continue
-        found += [f"{rel}: {p}" for p in problems(Metadata, metadata)]
+        found += [f"{rel}: {p}" for p in problems(metadata_model(metadata), metadata)]
         if isinstance(metadata, dict) and metadata.get("id") != exercise_id:
             found.append(f"{rel}: id {metadata.get('id')!r} differs from its folder name")
     return found
@@ -245,6 +302,7 @@ def json_schemas() -> dict[str, dict]:
 
     return {
         "metadata.schema.json": Metadata.model_json_schema(),
+        "metadata-c.schema.json": CMetadata.model_json_schema(),
         "manifest.schema.json": Manifest.model_json_schema(),
         "generation-settings.schema.json": settings_schema(),
     }

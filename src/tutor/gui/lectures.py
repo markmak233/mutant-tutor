@@ -48,6 +48,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import BinaryIO, Protocol
 
+from tutor import languages
 from tutor.config import WORKSPACE_FILE, Workspace, _enclosing_git_repo
 from tutor.gui import tasks
 from tutor.gui.courses import Course, _child
@@ -532,9 +533,16 @@ def setup_gaps(course: Course, rows: list[LectureRow]) -> list[tuple[str, str | 
         gaps.append(("No model writes exercises yet: choose one for the generate role, or "
                      "copy another course's models.", "models", "Models"))
     runner = data.get("isolation", {}).get("runner")
-    if runner is None:
+    if languages.is_c(data):
+        # C exercises are validated only in a container (docs/design.md, "C").
+        if runner != "container":
+            gaps.append(("A C course's tests run only in a container: choose it, and build "
+                         "the test image.", "environment_view", "Environment"))
+    elif runner is None:
         gaps.append(("Where tests run is not chosen, so they run on this machine with a "
                      "warning.", "environment_view", "Environment"))
+    gaps += [(f"{problem}.", "environment_view", "Environment")
+             for problem in languages.problems(data)]
     if not (course.workspace.root / "coverage.md").is_file():
         gaps.append(("No coverage.md (optional): plans choose knowledge points from the "
                      "slides' titles alone, without knowing which are covered already.",

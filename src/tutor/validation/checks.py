@@ -21,6 +21,13 @@ exercise is function-level or file-level: that lives in the exercise's test file
 Rules 1, 4 and 5 take an optional `candidate` (the reference unless given), and rule 3's
 verdict on one file is `mutant_verdict`: the held-out check (heldout.py) runs the same
 rules on the owner's own solutions and mistakes.
+
+A C exercise (metadata "language": "c") goes through the same rules: its tests are pytest
+files that compile student.c with tutor.testkit_c, so a mutant that does not compile is an
+error ("broken") and one that crashes or trips a sanitizer fails its tests ("killed"). What
+differs: rule `safe` reads the C files with csource.py and refuses unless the course runs its
+tests in a container; rule 1 compiles the reference with warnings as errors; rule `api` reads
+tokens; rule `main` asks a whole program for its main; rule 5 does not apply.
 """
 
 from __future__ import annotations
@@ -32,8 +39,9 @@ from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 
+from tutor.container import image_for
 from tutor.execution import Outcome, RunResult, copied_files, links, run_pytest, run_script
-from tutor.schema import Metadata, problems
+from tutor.schema import metadata_model, problems
 from tutor.testkit import (
     COMBINER_ENV,
     DEFAULT_PARTITIONS,
@@ -42,12 +50,15 @@ from tutor.testkit import (
     VALUE_ORDER_ENV,
     hadoop_runner_supported,
 )
+from tutor.testkit_c import C_STRICT_ENV
+from tutor.validation import csource
 from tutor.validation.api import count_uses, find_violations, is_main_block
-from tutor.validation.exercise import STUDENT_FILE, ExerciseFiles
+from tutor.validation.exercise import ExerciseFiles
 from tutor.validation.safety import (
     allowed_imports,
     config_files,
     find_hazards,
+    workspace_allow_headers,
     workspace_allow_imports,
 )
 
@@ -196,7 +207,7 @@ def _skipped_test_rules(reason: str) -> list[RuleResult]:
 
 def check_format(ex: ExerciseFiles) -> RuleResult:
     """Rule 0: metadata.json against the batch format's schema (schema.py)."""
-    found = problems(Metadata, ex.metadata)
+    found = problems(metadata_model(ex.metadata), ex.metadata)
     if found:
         return RuleResult("0", "format", Status.FAIL, "metadata.json: " + "; ".join(found), 0.0)
     return RuleResult("0", "format", Status.OK, "metadata.json fits the batch format", 0.0)
@@ -205,45 +216,69 @@ def check_format(ex: ExerciseFiles) -> RuleResult:
 def check_safety(ex: ExerciseFiles) -> RuleResult:
     """Every .py file a run copies in, subfolders included, since pytest collects tests and
     conftest.py files recursively (student.py is the owner's and is replaced in every
-    run), and every solution file that validation runs."""
+    run), and every solution file that validation runs. For a C exercise also every .c and
+    .h file a run compiles (csource.py), and the course must run its tests in a container."""
+    c = ex.language == "c"
     try:
         # The imports this framework may use, plus any the workspace allows.
         allowed = allowed_imports(ex.metadata["framework"],
                                   workspace_allow_imports(ex.exercise_dir))
+        headers = (csource.C_HEADERS | workspace_allow_headers(ex.exercise_dir)) if c else None
+        _ = ex.run_env  # reads the course's C flags, which must be well formed
     except ValueError as e:
         return RuleResult("safe", "static safety", Status.FAIL, str(e), 0.0)
-    linked = links({n: p for n, p in ex.run_files(ex.skeleton).items() if n != STUDENT_FILE})
+    linked = links({n: p for n, p in ex.run_files(ex.skeleton).items() if n != ex.student_file})
     if linked:  # checked first: a link may point outside the exercise, or into a loop
         return RuleResult("safe", "static safety", Status.FAIL, "; ".join(
             f"{name} is a link, not allowed in an exercise" for name in linked), 0.0)
     copied = _copied(ex)
-    # Every Python file a run would execute: the copied ones, then the solution files
-    # under "<folder>/<name>" so a report tells reference.py from a mutant.
+    # Every file a run would execute, by language: the copied ones, then the solution files
+    # under "<folder>/<name>" so a report tells reference.py from a mutant. (A C exercise's
+    # oracle and tests are Python.)
     files = {name: path for name, path in copied.items() if name.endswith(".py")}
+    c_files = {name: path for name, path in copied.items()
+               if c and name.endswith((".c", ".h"))}
     solution_files = [ex.reference, ex.skeleton, *ex.mutants, ex.oracle, ex.oracle_test]
     for path in filter(None, solution_files):
-        files[f"{path.parent.name}/{path.name}"] = path
+        (c_files if path.suffix == ".c" else files)[f"{path.parent.name}/{path.name}"] = path
     # conftest.py, pytest.ini and the like run code or change settings before any test.
     found = [f"{name} is not allowed in an exercise (pytest runs it on its own)"
              for name in config_files(copied)]
     for name, path in files.items():
         found += [f"{name} {hazard}"
                   for hazard in find_hazards(path.read_text(encoding="utf-8"), allowed)]
+    if c:
+        # An `#include "..."` may name a file the run puts beside the code: the exercise's own
+        # top-level files and student.c.
+        local = {name for name in copied if "/" not in name} | {ex.student_file}
+        for name, path in c_files.items():
+            found += [f"{name} {hazard}" for hazard in csource.find_hazards(
+                path.read_text(encoding="utf-8"), headers, local)]
+        if image_for(ex.run_files(ex.skeleton).values()) is None:
+            # A static check cannot bound what C does, so its runs need the container
+            # (docs/design.md). Not a fault of the exercise, but nothing may run.
+            found.append("C code runs only in a container: set [isolation] runner = "
+                         '"container" in the course\'s workspace.toml and build the image '
+                         "(python -m tutor.container build)")
     if found:
         return RuleResult("safe", "static safety", Status.FAIL, "; ".join(found), 0.0)
-    return RuleResult("safe", "static safety", Status.OK, f"{len(files)} files checked", 0.0)
+    return RuleResult("safe", "static safety", Status.OK,
+                      f"{len(files) + len(c_files)} files checked", 0.0)
 
 
 def _copied(ex: ExerciseFiles) -> dict[str, Path]:
-    """The files a run copies into its directory, by their path there, without student.py."""
+    """The files a run copies into its directory, by their path there, without the code
+    under test (student.py or student.c)."""
     return copied_files({name: path for name, path in ex.run_files(ex.skeleton).items()
-                         if name != STUDENT_FILE})
+                         if name != ex.student_file})
 
 
 def check_main(ex: ExerciseFiles, timeout_s: float) -> RuleResult:
     """Rule main: what a student types first, `python student.py`, does something.
     Static for both interfaces; a function exercise's reference is also run (no arguments,
     in a temp copy), since its main block calls the student's function on the example."""
+    if ex.language == "c":
+        return _check_main_c(ex)
     standalone = ex.metadata.get("standalone")
     if standalone is None:  # an exercise written before the rule (2026-10-29)
         return RuleResult("main", "runs on its own", Status.NOT_APPLICABLE,
@@ -264,13 +299,30 @@ def check_main(ex: ExerciseFiles, timeout_s: float) -> RuleResult:
         # A program taking its paths from sys.argv (the slides' form); the tests run it.
         return RuleResult("main", "runs on its own", Status.OK,
                           "a program run as `python student.py <input> <output>`", 0.0)
-    r = run_script(ex.run_files(ex.reference), STUDENT_FILE, timeout_s, heavy=ex.heavy)
+    r = run_script(ex.run_files(ex.reference), ex.student_file, timeout_s, heavy=ex.heavy)
     if r.outcome is Outcome.PASSED:
         return RuleResult("main", "runs on its own", Status.OK,
                           "`python student.py` ran the example (reference)", r.duration_s)
     return RuleResult("main", "runs on its own", Status.FAIL,
                       f"`python student.py` with the reference: {r.outcome.value}, exit code "
                       f"{r.returncode}", r.duration_s, r.output[-1500:])
+
+
+def _check_main_c(ex: ExerciseFiles) -> RuleResult:
+    """Rule main for C: a whole program's student.c and reference.c define main, so the
+    learner compiles and runs it as the course does. A function exercise's main is the given
+    driver.c, and a second one would not link, which rule 1 shows."""
+    if ex.metadata.get("interface") != "file":
+        return RuleResult("main", "runs on its own", Status.NOT_APPLICABLE,
+                          "a function exercise: driver.c holds main", 0.0)
+    missing = [name for name, path in (("student.c", ex.skeleton), ("reference.c", ex.reference))
+               if "main" not in csource.defines(path.read_text(encoding="utf-8"))]
+    if missing:
+        return RuleResult("main", "runs on its own", Status.FAIL,
+                          f"{' and '.join(missing)} define no main: a whole program needs one",
+                          0.0)
+    return RuleResult("main", "runs on its own", Status.OK,
+                      "a program with main, compiled and run as the course runs one", 0.0)
 
 
 def has_main_block(source: str) -> bool:
@@ -286,7 +338,10 @@ def check_reference_passes(ex: ExerciseFiles, timeout_s: float,
                            label: str = "reference") -> RuleResult:
     """Rule 1: the reference (or `candidate`, named `label` in the detail) passes every
     test at the default partition count, the one a student's own run uses."""
-    r = _run(ex, candidate or ex.reference, timeout_s, DEFAULT_PARTITIONS)
+    # C: the reference itself must compile without a warning under the course's flags, as
+    # the course asks of its students; an owner's own solution (held-out) need not.
+    strict = {C_STRICT_ENV: "1"} if ex.language == "c" and candidate is None else None
+    r = _run(ex, candidate or ex.reference, timeout_s, DEFAULT_PARTITIONS, strict)
     if r.outcome is Outcome.PASSED:
         return RuleResult("1", "reference passes", Status.OK, _summary(r), r.duration_s)
     detail = f"{label} {r.outcome.value}: {_summary(r)}"
@@ -304,7 +359,9 @@ def check_skeleton_fails(ex: ExerciseFiles, timeout_s: float) -> RuleResult:
     if r.outcome is Outcome.PASSED:
         detail = "skeleton passes: the tests do not check anything the student must write"
     elif r.outcome is Outcome.ERROR:
-        detail = f"skeleton errors before any test runs (import/syntax?): {_summary(r)}"
+        detail = (f"skeleton errors before any test runs ("
+                  f"{'does it compile?' if ex.language == 'c' else 'import/syntax?'}): "
+                  f"{_summary(r)}")
     else:
         detail = "skeleton timed out"
     excerpt = failure_excerpt(r.output) if r.outcome is Outcome.ERROR else ""
@@ -371,7 +428,7 @@ def check_matches_oracle(ex: ExerciseFiles, timeout_s: float,
             f"no oracle.py / test_oracle.py: nothing compares the {label} with an "
             "independent specification", 0.0,
         )
-    r = run_pytest(ex.differential_files(candidate), timeout_s, heavy=ex.heavy)
+    r = run_pytest(ex.differential_files(candidate), timeout_s, ex.run_env, heavy=ex.heavy)
     if r.outcome is Outcome.PASSED:
         return RuleResult("4", "matches oracle", Status.OK, _summary(r), r.duration_s)
     # FAILED: hypothesis found an input where the two disagree; it reports the smallest.
@@ -396,6 +453,9 @@ def check_distribution(ex: ExerciseFiles, timeout_s: float,
       since Hadoop may run a combiner zero, one or many times;
     - every MRJob exercise on the inline runner: it passes with each key's values in
       reverse order, since Hadoop gives a reducer its values in no promised order."""
+    if ex.language == "c":
+        return RuleResult("5", "distribution", Status.NOT_APPLICABLE,
+                          "C: nothing is distributed", 0.0)
     partition_check = ex.metadata.get("partition_check", False)
     combiner_check = ex.metadata.get("combiner_check", False)
     value_order = (ex.metadata.get("framework") == "mrjob"
@@ -443,6 +503,15 @@ def check_api_constraints(ex: ExerciseFiles) -> RuleResult:
         return RuleResult("api", "api constraints", Status.NOT_APPLICABLE,
                           "no constraints in metadata", 0.0)
     source = ex.reference.read_text(encoding="utf-8")
+    if ex.language == "c":
+        violations = csource.find_violations(source, constraints)
+        if violations:
+            return RuleResult("api", "api constraints", Status.FAIL,
+                              "reference breaks its own constraints: " + "; ".join(violations),
+                              0.0)
+        rules = ", ".join(f"{key}={values}" for key, values in constraints.items())
+        return RuleResult("api", "api constraints", Status.OK,
+                          f"reference respects {rules or 'all constraints'}", 0.0)
     violations = find_violations(source, constraints)
     if violations:
         detail = "reference breaks its own constraints: " + "; ".join(violations)
@@ -465,7 +534,7 @@ def _run(
     """One pytest run of the exercise's tests with `candidate` as student.py, at a
     partition count (the tests read it from PARTITIONS_ENV) and any extra switches
     (combiner off, values reversed)."""
-    env = {PARTITIONS_ENV: str(partitions), **(extra_env or {})}
+    env = {PARTITIONS_ENV: str(partitions), **ex.run_env, **(extra_env or {})}
     return run_pytest(ex.run_files(candidate), timeout_s, env, heavy=ex.heavy)
 
 

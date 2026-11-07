@@ -1,10 +1,10 @@
 """Layer 3 of the hint command: a model's hint, when neither a rule nor a known mistake fits.
 
-The model sees what the student sees (student.py with the question, hints.md, the
-constraints) and their first real error, never the reference, the mutants or the oracle.
-It replies with a diagnosis, which only the code reads, and a hint, which the student
-reads. Asking again with the same code makes the hint more specific (levels 1-3); a
-review batch never gets code at any level.
+The model sees what the student sees (student.py with the question, or student.c with it
+in its opening comment; hints.md; the constraints) and their first real error, never the
+reference, the mutants or the oracle. It replies with a diagnosis, which only the code
+reads, and a hint, which the student reads. Asking again with the same code makes the hint
+more specific (levels 1-3); a review batch never gets code at any level.
 
 The prompt lists what gives the exercise away, and a deterministic check rejects a hint
 that does it anyway: a code block (one or two lines only at level 3 of a learn batch), a
@@ -25,6 +25,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from tutor import llm
 from tutor.hint.rules import Hint
+from tutor.validation import csource
 from tutor.validation.checks import failure_excerpt
 
 MAX_LEVEL = 3  # level 3 is the most specific hint; later requests stay at 3
@@ -135,11 +136,20 @@ def system_prompt(mode: str, level: int) -> str:
     return SPEC.format(rules=RULES.format(blocks=blocks), level=level_text)
 
 
-def user_prompt(student: str, hints: str, constraints: dict, error: str) -> str:
+# The heading over the student's file, by language. Python's is the text the hint prompt
+# has always had.
+STUDENT_HEADING = {
+    "python": "## student.py (the question is its docstring; the rest is the student's code)",
+    "c": "## student.c (the question is its opening comment; the rest is the student's code)",
+}
+
+
+def user_prompt(student: str, hints: str, constraints: dict, error: str,
+                language: str = "python") -> str:
     """The material, all of it what the student can see too: no reference, no mutants."""
     banned = {k: v for k, v in constraints.items() if v}  # only the constraints in use
     return "\n\n".join([
-        "## student.py (the question is its docstring; the rest is the student's code)",
+        STUDENT_HEADING[language],
         student,
         "## Constraints from the exercise's metadata",
         str(banned) if banned else "(none)",
@@ -159,7 +169,8 @@ def first_error(output: str) -> str:
 
 # --- the leak guard --------------------------------------------------------------------
 
-def leak(hint: str, reference: str, visible: str, allowed: int) -> str | None:
+def leak(hint: str, reference: str, visible: str, allowed: int,
+         language: str = "python") -> str | None:
     """Why `hint` gives code away, or None. `visible`: what the student already has
     (student.py, tests, hints.md), whose lines may be quoted freely."""
     # Check 1: code blocks longer than this level allows (0 lines except learn level 3).
@@ -174,12 +185,12 @@ def leak(hint: str, reference: str, visible: str, allowed: int) -> str | None:
     # hide a copy. Lines the student already has (e.g. the skeleton's def) do not count.
     seen = _squash(visible)
     shown = _squash(hint)
-    for line in _code_lines(reference):
+    for line in _code_lines(reference, language):
         if len(line) >= MIN_LINE and line not in seen and line in shown:
             return "it repeats a line of the solution; describe what the line does in words"
     # Check 3: code that is not a copy but reads like one (other variable names, small
     # edits): each code block and inline span against runs of reference lines.
-    reference_lines = _code_lines(reference)
+    reference_lines = _code_lines(reference, language)
     for span in [*blocks, *_INLINE_CODE.findall(hint)]:
         squashed = _squash(span)
         if len(squashed) >= MIN_LINE and squashed not in seen and _close(squashed,
@@ -193,8 +204,12 @@ def _squash(text: str) -> str:
     return "".join(text.split())
 
 
-def _code_lines(source: str) -> list[str]:
+def _code_lines(source: str, language: str = "python") -> list[str]:
     """The reference's lines without comments or blank lines, spaces removed."""
+    if language == "c":
+        # C comments (// and /* */, the question among them) are blanked, lines kept.
+        return [_squash(line) for line in csource.without_comments(source).splitlines()
+                if line.strip()]
     lines = []
     for line in source.splitlines():
         code = re.sub(r"\s+#.*$", "", line).strip()  # drop a trailing comment
@@ -221,14 +236,15 @@ def _close(span: str, reference_lines: list[str]) -> bool:
 # --- asking the model -------------------------------------------------------------------
 
 def model_hint(model: HintModel, *, student: str, hints: str, constraints: dict,
-               output: str, reference: str, visible: str, mode: str, level: int) -> Hint:
+               output: str, reference: str, visible: str, mode: str, level: int,
+               language: str = "python") -> Hint:
     """The model's hint at `level`, or HintRefused. `reference` is only read by leak();
     it is never put into a message."""
     level = min(level, MAX_LEVEL)
     allowed = allowed_lines(mode, level)
     messages = [{"role": "system", "content": system_prompt(mode, level)},
                 {"role": "user", "content": user_prompt(student, hints, constraints,
-                                                        first_error(output))}]
+                                                        first_error(output), language)}]
     reason = ""
     for _ in range(2):  # the first try, and one more after a rejection
         try:
@@ -242,7 +258,7 @@ def model_hint(model: HintModel, *, student: str, hints: str, constraints: dict,
             reason = "the reply was not the JSON asked for"
             hint = ""
         else:
-            reason = leak(hint, reference, visible, allowed) or ""
+            reason = leak(hint, reference, visible, allowed, language) or ""
         if not reason:
             return Hint("llm", f"level-{level}", hint)
         # Rejected: the model sees its own reply and why, and writes the hint again.

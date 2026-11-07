@@ -202,3 +202,36 @@ def test_each_step_is_said_as_it_happens_and_the_install_before_it_starts(tmp_pa
     assert "created workspace.toml" in at_install and "created .venv (Python" in at_install[-2]
     assert at_install[-1].startswith("installing tutor[gen,dev]")
     assert [line for line in said if line in steps] == steps  # every step, in order
+
+
+@pytest.mark.parametrize(("flags", "standard"), [
+    (["-Wall", "-std=c99"], "c99"),
+    (["-std=gnu11"], "gnu11"),
+    (["-std=c18"], "c17"),
+    (["-ansi"], "c89"),
+    (["-std=c99", "-std=c11"], "c11"),  # the last one wins, as in gcc
+    (["-Wall"], "${default}"),
+    (["-std=c2y"], "${default}"),  # a name VS Code does not have
+])
+def test_vs_code_is_told_the_courses_c_standard(flags, standard):
+    from tutor.workspace import c_standard
+
+    assert c_standard(flags) == standard
+
+
+def test_vs_codes_c_settings_are_written_and_removed_only_when_ours(tmp_path):
+    from tutor.workspace import C_EDITOR_FILE, c_editor_config_kept, write_c_editor_config
+
+    assert write_c_editor_config(tmp_path, ["-Wall", "-std=c99"])
+    data = json.loads((tmp_path / C_EDITOR_FILE).read_text(encoding="utf-8"))
+    [config] = data["configurations"]
+    assert (config["cStandard"], config["compilerArgs"]) == ("c99", ["-Wall", "-std=c99"])
+    assert write_c_editor_config(tmp_path, None)
+    assert not (tmp_path / C_EDITOR_FILE).exists()
+
+    own = '{"configurations": [{"name": "Mac", "cStandard": "c17"}], "version": 4}\n'
+    (tmp_path / C_EDITOR_FILE).write_text(own, encoding="utf-8")
+    assert c_editor_config_kept(tmp_path)
+    assert not write_c_editor_config(tmp_path, ["-std=c99"])
+    assert not write_c_editor_config(tmp_path, None)
+    assert (tmp_path / C_EDITOR_FILE).read_text(encoding="utf-8") == own

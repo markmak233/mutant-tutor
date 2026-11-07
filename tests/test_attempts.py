@@ -1,10 +1,15 @@
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from tutor.attempts import exercise_of
+
+EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
 
 TESTS = (
     "def test_ok():\n    assert True\n\n"
@@ -87,6 +92,36 @@ def test_a_failing_run_keeps_its_student_py_once_and_a_passing_run_none(tmp_path
     assert kept.read_text(encoding="utf-8") == "def add(a, b):\n    return a * b\n"
     assert len(list(kept.parent.iterdir())) == 1
     assert "code" not in passing
+
+
+def test_a_c_exercise_keeps_its_failing_student_c_as_c(tmp_path):
+    """The snapshot is the file the learner writes in, with its suffix, so the held-out
+    check can run it as C again."""
+    exercise = make_workspace(tmp_path)
+    (exercise / "student.c").write_text("int add(int a, int b) { return a * b; }\n")
+    run_pytest_in(exercise, tmp_path / "ws")
+
+    [line] = attempts(tmp_path / "ws")
+    assert line["code"].endswith(".c")
+    kept = tmp_path / "ws" / "attempts" / line["code"]
+    assert kept.read_text(encoding="utf-8") == "int add(int a, int b) { return a * b; }\n"
+
+
+@pytest.mark.skipif(shutil.which("cc") is None, reason="needs a C compiler (cc)")
+def test_a_learners_own_c_run_is_recorded(tmp_path):
+    """The learner's own run of a C exercise, on their machine: the C example handed out as
+    its skeleton compiles, fails its tests, and is logged with its student.c kept."""
+    exercise = make_workspace(tmp_path)
+    example = EXAMPLES / "station-drop-low-c"
+    shutil.copytree(example / "exercise", exercise, dirs_exist_ok=True)
+    shutil.copy(example / "solution" / "skeleton.c", exercise / "student.c")
+    run_pytest_in(exercise, tmp_path / "ws")
+
+    [line] = attempts(tmp_path / "ws")
+    assert (line["result"], line["errors"]) == ("failed", 0) and line["failed"] > 0
+    kept = tmp_path / "ws" / "attempts" / line["code"]
+    assert kept.suffix == ".c"
+    assert kept.read_bytes() == (example / "solution" / "skeleton.c").read_bytes()
 
 
 def test_every_run_appends_a_line(tmp_path):

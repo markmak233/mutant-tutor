@@ -1,0 +1,195 @@
+{
+  "$defs": {
+    "CConstraints": {
+      "additionalProperties": false,
+      "description": "Static API constraints of a C exercise, checked on its tokens by validation/csource.py\n(comments and string literals left out).",
+      "properties": {
+        "forbidden_calls": {
+          "default": [],
+          "description": "Functions or macros that must not be used, e.g. \"qsort\" when the exercise is to write the sort.",
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Forbidden Calls",
+          "type": "array"
+        },
+        "required_definitions": {
+          "default": [],
+          "description": "Functions the code must define, e.g. \"swap\".",
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": "Required Definitions",
+          "type": "array"
+        }
+      },
+      "title": "CConstraints",
+      "type": "object"
+    },
+    "Source": {
+      "additionalProperties": false,
+      "description": "Where a workspace exercise comes from: slide footers and PDF pages, both, since\nthey differ (docs/design.md, batch-1 review).",
+      "properties": {
+        "lecture": {
+          "minLength": 1,
+          "title": "Lecture",
+          "type": "string"
+        },
+        "slides": {
+          "minLength": 1,
+          "title": "Slides",
+          "type": "string"
+        },
+        "pdf_pages": {
+          "minLength": 1,
+          "title": "Pdf Pages",
+          "type": "string"
+        },
+        "lab": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lab"
+        },
+        "assumptions": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Assumptions",
+          "type": "array"
+        }
+      },
+      "required": [
+        "lecture",
+        "slides",
+        "pdf_pages"
+      ],
+      "title": "Source",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "solutions/<id>/metadata.json of a C exercise. Its code is student.c, reference.c,\nskeleton.c and mutants/*.c; the tests stay pytest (test_student.py, test_oracle.py, and\nthe oracle in Python) and run the compiled program through tutor.testkit_c.",
+  "properties": {
+    "schema_version": {
+      "default": 1,
+      "title": "Schema Version",
+      "type": "integer"
+    },
+    "id": {
+      "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$",
+      "title": "Id",
+      "type": "string"
+    },
+    "title": {
+      "minLength": 1,
+      "title": "Title",
+      "type": "string"
+    },
+    "topic": {
+      "minLength": 1,
+      "title": "Topic",
+      "type": "string"
+    },
+    "type": {
+      "enum": [
+        "implementation",
+        "completion",
+        "debugging"
+      ],
+      "title": "Type",
+      "type": "string"
+    },
+    "interface": {
+      "enum": [
+        "function",
+        "file"
+      ],
+      "title": "Interface",
+      "type": "string"
+    },
+    "difficulty": {
+      "enum": [
+        "easy",
+        "medium",
+        "hard"
+      ],
+      "title": "Difficulty",
+      "type": "string"
+    },
+    "language": {
+      "const": "c",
+      "title": "Language",
+      "type": "string"
+    },
+    "framework": {
+      "const": "c",
+      "title": "Framework",
+      "type": "string"
+    },
+    "entry_point": {
+      "items": {
+        "pattern": "^[A-Za-z_]\\w*$",
+        "type": "string"
+      },
+      "minItems": 1,
+      "title": "Entry Point",
+      "type": "array"
+    },
+    "constraints": {
+      "$ref": "#/$defs/CConstraints",
+      "default": {
+        "forbidden_calls": [],
+        "required_definitions": []
+      }
+    },
+    "timeout_s": {
+      "anyOf": [
+        {
+          "exclusiveMinimum": 0,
+          "type": "number"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Timeout S"
+    },
+    "source": {
+      "anyOf": [
+        {
+          "const": "synthetic",
+          "type": "string"
+        },
+        {
+          "$ref": "#/$defs/Source"
+        }
+      ],
+      "title": "Source"
+    }
+  },
+  "required": [
+    "id",
+    "title",
+    "topic",
+    "type",
+    "interface",
+    "difficulty",
+    "language",
+    "framework",
+    "entry_point",
+    "source"
+  ],
+  "title": "CMetadata",
+  "type": "object"
+}

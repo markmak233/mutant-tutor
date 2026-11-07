@@ -83,6 +83,20 @@ def test_special_kinds_take_the_name_requires_knows_and_java_reads_as_envcheck_d
     assert python.name == "python" and python.version == ""
 
 
+def test_a_c_compiler_is_listed_as_gcc_and_its_short_names_need_a_word_of_their_own():
+    c_pages = {e.number: e for e in entries({
+        1: "Compile with gcc -Wall -std=c99 celsius.c -o f2c",
+        2: "Or with clang on a Mac: cc hello.c",
+        3: "File access rights; an acc register"})}
+    gcc, _ = req.check(found(kind="gcc", name="GCC", version="gcc 9.3",
+                             quote="gcc -Wall -std=c99 celsius.c"), "L1", c_pages)
+    cc, _ = req.check(found(kind="gcc", name="cc", page=2, quote="cc hello.c"), "L1", c_pages)
+    kept, dropped = req.check(found(kind="gcc", name="cc", page=3, quote="File access rights"),
+                              "L1", c_pages)
+    assert (gcc.name, gcc.version) == ("gcc", "9.3") and cc.name == "gcc"
+    assert kept is None and dropped.reason == "the quote does not name gcc"
+
+
 def test_a_pip_name_the_quotes_do_not_show_is_flagged_as_the_models_mapping():
     """`import cv2` shows the module; that pip calls it opencv-python is the model's word."""
     cv, _ = req.check(found(name="opencv-python", import_name="cv2", page=2,
@@ -149,6 +163,8 @@ def test_each_lecture_is_asked_once_and_the_answer_stored_as_given(workspace, mo
     assert stored["found"] == ANSWER["found"] and stored["model"] == "local: m"
 
     assert req.main([]) == 0 and len(fake.calls) == 2  # nothing changed: nobody asked
+    # Asked for, every lecture is asked again (the Environment page's "again" button).
+    assert req.main(["--again"]) == 0 and len(fake.calls) == 4
 
 
 def test_the_instructions_come_first_and_alike_for_every_lecture(workspace, monkeypatch):
@@ -160,7 +176,8 @@ def test_the_instructions_come_first_and_alike_for_every_lecture(workspace, monk
     assert first[0] == second[0] == {"role": "system", "content": req.PROMPT}
     # Only what builds, runs or tests the code on the student's machine (owner, 2026-11-07).
     assert "PuTTY" in req.PROMPT and "editors and IDEs" in req.PROMPT
-    assert req.PROMPT_VERSION == 2  # a changed prompt asks every lecture again
+    # A changed prompt asks every lecture again; 3 added the C compiler (owner, 2026-11-07).
+    assert req.PROMPT_VERSION == 3 and '"gcc" for a C compiler' in req.PROMPT
     # The lecture between markers, as material and not instructions (owner, 2026-11-07).
     assert first[1]["content"].startswith("Lecture file: L1.pdf\n\n<lecture>\n## p.1\n")
     assert first[1]["content"].endswith("\n</lecture>")

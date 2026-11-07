@@ -6,6 +6,10 @@ reference.py, mutants/, oracle.py, test_oracle.py). In examples/ they are exerci
 solution/; in a workspace batch they are exercises/<id>/ and solutions/<id>/, so both paths
 are passed in.
 
+A C exercise (metadata "language": "c") has the same layout with .c code: student.c,
+skeleton.c, reference.c, mutants/*.c, and for a function exercise a driver.c (and any .h) in
+the student-facing folder. Its tests and oracle stay Python.
+
 Every check works the same way: copy the exercise's test files into a temp dir with one
 candidate as student.py (the reference, the skeleton, a mutant, or for the held-out check
 the owner's own code) and run pytest there. `ExerciseFiles` answers "which files does
@@ -19,6 +23,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from tutor.execution import DEFAULT_TIMEOUT_S
+from tutor.languages import CODE_SUFFIX
+from tutor.schema import language_of
+from tutor.testkit_c import C_FLAGS_ENV, DEFAULT_FLAGS, course_flags
 
 # The file names the format fixes. Tests always import the code under test as `student`.
 STUDENT_FILE = "student.py"
@@ -36,7 +43,8 @@ _NOT_COPIED = {STUDENT_FILE, "hints.md", "question.md", "sample_output", "__pyca
 # Hadoop runner is heavy too. A framework in neither set counts as heavy, so a new one is
 # slow rather than wrong until it is measured; tests check every framework the format
 # allows is listed here.
-LIGHT_FRAMEWORKS = frozenset({"python", "mrjob"})
+# C is light: a compile and small programs, no JVM (measured with the examples, 2026-11-07).
+LIGHT_FRAMEWORKS = frozenset({"python", "mrjob", "c"})
 HEAVY_FRAMEWORKS = frozenset({"pyspark-rdd", "pyspark-df"})
 
 
@@ -66,6 +74,26 @@ class ExerciseFiles:
         return DEFAULT_TIMEOUT_S if value is None else float(value)
 
     @property
+    def language(self) -> str:
+        """"python" or "c" (schema.language_of)."""
+        return language_of(self.metadata)
+
+    @property
+    def student_file(self) -> str:
+        """What the tests compile or import as the code under test: student.py or student.c."""
+        return "student" + CODE_SUFFIX[self.language]
+
+    @property
+    def run_env(self) -> dict[str, str]:
+        """Variables every test run of this exercise needs: for C, the course's compiler
+        flags, since a run in a container cannot read workspace.toml. Empty for Python.
+        ValueError when the course's flags are malformed."""
+        if self.language != "c":
+            return {}
+        flags = course_flags(self.exercise_dir)
+        return {C_FLAGS_ENV: json.dumps(list(DEFAULT_FLAGS) if flags is None else flags)}
+
+    @property
     def heavy(self) -> bool:
         """Its test runs start a JVM (Spark, or the Hadoop runner), or its framework is
         unknown: they run under the executor's lower cap."""
@@ -83,7 +111,7 @@ class ExerciseFiles:
             for path in sorted(self.exercise_dir.iterdir())
             if path.name not in _NOT_COPIED and not path.name.startswith(".")
         }
-        files[STUDENT_FILE] = candidate
+        files[self.student_file] = candidate
         return files
 
     def differential_files(self, candidate: Path | None = None) -> dict[str, Path]:
@@ -102,34 +130,37 @@ class ExerciseFiles:
 def load_exercise(exercise_dir: Path, solution_dir: Path) -> ExerciseFiles:
     """Find an exercise's files; raise ExerciseError naming the first one missing, or a
     metadata.json without an `id`. Whether metadata fits the format is rule 0's job, so a
-    bad field still loads and is reported there."""
-    required = [
-        exercise_dir / TEST_FILE,
-        solution_dir / "metadata.json",
-        solution_dir / "reference.py",
-        solution_dir / "skeleton.py",
-    ]
-    for path in required:
+    bad field still loads and is reported there; only its language must be known, since it
+    names the code files."""
+    for path in (exercise_dir / TEST_FILE, solution_dir / "metadata.json"):
         if not path.is_file():
             raise ExerciseError(f"missing {path}")
 
     try:
         metadata = json.loads((solution_dir / "metadata.json").read_text(encoding="utf-8"))
         exercise_id = metadata["id"]
-    except (json.JSONDecodeError, KeyError) as e:
+    except (json.JSONDecodeError, KeyError, TypeError) as e:
         raise ExerciseError(f"{solution_dir / 'metadata.json'} needs an `id`: {e}") from e
+    language = metadata.get("language", "python")
+    if language not in CODE_SUFFIX:
+        raise ExerciseError(f"{solution_dir / 'metadata.json'}: language {language!r} is not "
+                            f"one of {', '.join(CODE_SUFFIX)}")
+    suffix = CODE_SUFFIX[language_of(metadata)]
+    for path in (solution_dir / f"reference{suffix}", solution_dir / f"skeleton{suffix}"):
+        if not path.is_file():
+            raise ExerciseError(f"missing {path}")
 
     # No mutants/ folder loads as no mutants; rule 3 then fails with a clear reason.
     mutants_dir = solution_dir / "mutants"
-    mutants = tuple(sorted(mutants_dir.glob("*.py"))) if mutants_dir.is_dir() else ()
+    mutants = tuple(sorted(mutants_dir.glob(f"*{suffix}"))) if mutants_dir.is_dir() else ()
     # Optional here; rule 4 reports their absence instead of loading failing.
     oracle = solution_dir / ORACLE_FILE
     oracle_test = solution_dir / ORACLE_TEST_FILE
     return ExerciseFiles(
         exercise_id=exercise_id,
         exercise_dir=exercise_dir,
-        reference=solution_dir / "reference.py",
-        skeleton=solution_dir / "skeleton.py",
+        reference=solution_dir / f"reference{suffix}",
+        skeleton=solution_dir / f"skeleton{suffix}",
         mutants=mutants,
         metadata=metadata,
         oracle=oracle if oracle.is_file() else None,

@@ -1,10 +1,12 @@
 import json
 import os
 import platform
+import subprocess
 from pathlib import Path
 
 import pytest
 
+from tutor import envcheck
 from tutor.config import Workspace
 from tutor.envcheck import (
     check_winutils,
@@ -74,8 +76,46 @@ def test_missing_package_fails_with_install_hint():
 
 
 def test_pip_gets_each_package_as_the_prefix_envcheck_accepts():
-    requires = {"python": "3.11", "java": "17", "hadoop": "3.3", "pyspark": "3.5", "torch": "2"}
+    requires = {"python": "3.11", "java": "17", "hadoop": "3.3", "pyspark": "3.5", "torch": "2",
+                "gcc": "12"}
     assert pip_requirements(requires) == ["pyspark==3.5.*", "torch==2.*"]
+
+
+def _fake_gcc(monkeypatch, version_line: str, dumped: str) -> list[list[str]]:
+    """`gcc` answering as gcc or as macOS's clang does; returns the commands it was given."""
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        out = version_line if command[1] == "--version" else dumped
+        return subprocess.CompletedProcess(command, 0, stdout=out + "\n", stderr="")
+
+    monkeypatch.setattr(envcheck.subprocess, "run", run)
+    return calls
+
+
+def test_gcc_is_checked_by_its_full_version(monkeypatch):
+    calls = _fake_gcc(monkeypatch, "gcc (Debian 12.2.0-14+deb12u1) 12.2.0", "12.2.0")
+    [result] = check_workspace(make_ws({"gcc": "12"}))
+    assert (result.found, result.ok) == ("12.2.0", True)
+    assert calls[1] == ["gcc", "-dumpfullversion"]
+
+
+def test_clang_answering_as_gcc_does_not_pass_for_gcc(monkeypatch):
+    """On macOS `gcc` is Apple's clang: the learner's runs use it, and validation uses the
+    container's gcc, so the hint says so instead of asking for an install only."""
+    _fake_gcc(monkeypatch, "Apple clang version 21.0.0 (clang-2100.4.1.1)", "21.0.0")
+    [result] = check_workspace(make_ws({"gcc": "12"}))
+    assert (result.found, result.ok) == ("clang-21.0.0", False)
+    assert "validated in the course's container" in result.hint
+
+
+def test_no_gcc_is_not_found(monkeypatch):
+    def missing(command, **kwargs):
+        raise FileNotFoundError(command[0])
+
+    monkeypatch.setattr(envcheck.subprocess, "run", missing)
+    assert check_workspace(make_ws({"gcc": "12"}))[0].found is None
 
 
 @pytest.mark.parametrize("requires, says", [

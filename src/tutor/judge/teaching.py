@@ -39,6 +39,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from tutor import llm
 from tutor.materials.slides import lecture_context, lectures_taught
+from tutor.schema import language_of
 
 # Bump when the prompt changes: it is part of the inputs' hash, so every verdict is redone.
 PROMPT_VERSION = 4
@@ -124,6 +125,10 @@ def gather(batch_dir: Path, exercise_id: str, workspace: Path,
     solution = batch_dir / "solutions" / exercise_id
     exercise = batch_dir / "exercises" / exercise_id
     metadata = json.loads((solution / "metadata.json").read_text(encoding="utf-8"))
+    if language_of(metadata) != "python":
+        # Its prompt and calibration are Python's (docs/design.md, "C", step 4b).
+        raise JudgeError(f"a {language_of(metadata)} exercise: the judge supports Python "
+                         "exercises only so far")
     # The original skeleton: exercises/<id>/student.py may hold the owner's answer.
     skeleton = (solution / "skeleton.py").read_text(encoding="utf-8")
     if question is None:

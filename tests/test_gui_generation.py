@@ -591,6 +591,20 @@ def test_each_exercise_of_a_generated_plan_has_its_status(course):
     assert [k for k, v in statuses.items() if v.can_retry] == ["c", "d"]
 
 
+def test_an_exercise_saved_before_the_manifest_exists_is_saved_not_discarded(course):
+    # The manifest is written once every item has finished, so while a batch runs, or after
+    # it stopped midway, a saved exercise is only in generation.jsonl.
+    _, batch = _generated(course)
+    (batch / "manifest.json").unlink()
+    view = generation.plan_view(course, "w9-test", history=[])
+    statuses = generation.item_statuses(course, view)
+
+    assert {k: v.state for k, v in statuses.items()} == {
+        "a": "saved, not validated", "b": "saved, not validated", "c": "discarded",
+        "d": "error"}
+    assert [k for k, v in statuses.items() if v.can_retry] == ["c", "d"]
+
+
 def test_a_plan_not_approved_yet_shows_no_status(course):
     _draft(course)
     view = generation.plan_view(course, "w9-test", history=[])

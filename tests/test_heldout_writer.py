@@ -361,3 +361,15 @@ def test_the_same_mistake_again_is_sent_back(tmp_path):
     assert write(batch, "demo", workspace, writer(model)) == "written: correct, slides, 3 wrong"
     retry = [messages for kind, messages in model.calls if kind == "wrong"][2]
     assert "the same mistake as one already written" in retry[-1]["content"]
+
+
+def test_a_c_exercise_is_refused_by_name(tmp_path):
+    """The writer's prompt and checks are Python's (step 4b): a C exercise is refused with
+    that reason, not with a missing skeleton.py."""
+    solution = tmp_path / "b" / "solutions" / "demo"
+    solution.mkdir(parents=True)
+    (tmp_path / "b" / "exercises" / "demo").mkdir(parents=True)
+    (solution / "metadata.json").write_text('{"language": "c"}', encoding="utf-8")
+
+    with pytest.raises(HeldOutWriteError, match="Python exercises only"):
+        gather(tmp_path / "b", "demo", tmp_path)

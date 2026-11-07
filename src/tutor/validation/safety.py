@@ -77,13 +77,24 @@ def workspace_allow_imports(start: Path) -> frozenset[str]:
     above `start`. Empty outside a workspace (the repo's examples). Only the owner edits
     workspace.toml; generation never writes it, so generated code cannot widen its own
     allowlist."""
+    return _workspace_names(start, "allow_imports", "module names")
+
+
+def workspace_allow_headers(start: Path) -> frozenset[str]:
+    """The course's extra C headers, e.g. "unistd.h": `[safety] allow_headers`, found and
+    owned as allow_imports is (csource.find_hazards)."""
+    return _workspace_names(start, "allow_headers", "header names")
+
+
+def _workspace_names(start: Path, key: str, what: str) -> frozenset[str]:
+    """A list of names under [safety] in the nearest workspace.toml above `start`."""
     for folder in [start, *start.parents]:
         path = folder / WORKSPACE_FILE
         if path.is_file():
             with path.open("rb") as f:
-                names = tomllib.load(f).get("safety", {}).get("allow_imports", [])
+                names = tomllib.load(f).get("safety", {}).get(key, [])
             if not (isinstance(names, list) and all(isinstance(n, str) and n for n in names)):
-                raise ValueError(f"{path}: [safety] allow_imports must be a list of module names")
+                raise ValueError(f"{path}: [safety] {key} must be a list of {what}")
             return frozenset(names)
     return frozenset()
 

@@ -1,8 +1,9 @@
 """Layer 2 of the hint command: does the student's code fail the way a known mistake does?
 
 Every mutant of an exercise is one planted mistake with its bug written in its docstring
-("<the bug>, <what goes wrong>"). A run's signature is which tests fail and with which
-assertion lines; a student whose signature equals a mutant's most likely made that mistake.
+("<the bug>, <what goes wrong>"), or in a C mutant its opening `/* Mutant: ... */` line.
+A run's signature is which tests fail and with which assertion lines; a student whose
+signature equals a mutant's most likely made that mistake.
 Mutant signatures are computed once per exercise and kept in solutions/<id>/.hints/, keyed
 by a hash of everything the run copies in (tests, data, helpers, the mutant) and the run's
 settings, so a change to any of them runs the mutant again. The student sees the
@@ -29,6 +30,11 @@ Signature = dict[str, list[str]]  # failing test -> its assertion lines, normali
 _ADDRESS = re.compile(r"0x[0-9a-f]+")
 _DURATION = re.compile(r"\d+\.\d+s\b")
 _LINK = re.compile(r"^(?:so|and so|which means|meaning)\s+")
+# C runs: a sanitizer's process id ("==1234==") and the folders before a C file's name
+# ("/tmp/tutor-run-x/student.c:14") differ between two runs of the same mistake.
+_PROCESS_ID = re.compile(r"==\d+==")
+_C_FOLDERS = re.compile(r"(?<![\w.])/[^\s:'\"]*/(?=[\w.-]+\.[ch]:\d)")
+_C_MUTANT = re.compile(r"/\*\s*Mutant:\s*(.*?)\s*\*/", re.S)
 
 
 def signature(output: str) -> Signature:
@@ -40,6 +46,7 @@ def signature(output: str) -> Signature:
 
 def _normal(line: str) -> str:
     text = " ".join(line.removeprefix("E").split())
+    text = _C_FOLDERS.sub("", _PROCESS_ID.sub("==<pid>==", text))
     return _DURATION.sub("<s>", _ADDRESS.sub("<addr>", text))
 
 
@@ -108,11 +115,17 @@ def indistinguishable(mutants: dict[str, Signature]) -> list[tuple[str, str]]:
 
 
 def bug_of(mutant: Path) -> tuple[str, str]:
-    """(the bug, what goes wrong) from the mutant's docstring "Mutant: <bug>, <effect>."."""
-    try:
-        doc = ast.get_docstring(ast.parse(mutant.read_text(encoding="utf-8"))) or ""
-    except SyntaxError:
-        doc = ""
+    """(the bug, what goes wrong) from the mutant's docstring "Mutant: <bug>, <effect>.",
+    or a C mutant's comment "/* Mutant: <bug>, <effect>. */"."""
+    source = mutant.read_text(encoding="utf-8")
+    if mutant.suffix == ".c":
+        found = _C_MUTANT.search(source)
+        doc = " ".join(found[1].split()) if found else ""
+    else:
+        try:
+            doc = ast.get_docstring(ast.parse(source)) or ""
+        except SyntaxError:
+            doc = ""
     text = doc.removeprefix("Mutant:").strip().rstrip(".")
     bug, _, effect = text.partition(", ")
     # "..., so the first value is lost": the caller adds its own "so".

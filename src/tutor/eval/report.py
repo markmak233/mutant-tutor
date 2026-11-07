@@ -5,7 +5,7 @@ pipeline and the owner's test runs already left behind:
 
     batches/<batch>/manifest.json                     the exercises and their priority marks
     batches/<batch>/generation.jsonl                  one line per generation run
-    batches/<batch>/exercises/<id>/student.py         compared with skeleton.py, never shown
+    batches/<batch>/exercises/<id>/student.py (.c)    compared with skeleton.py (.c), never shown
     batches/<batch>/solutions/<id>/quality.json       the judge's verdict
     batches/<batch>/solutions/<id>/heldout.json       the held-out checks
     batches/.drafts/<batch>/<id>/round-0/report.txt   how a first draft validated
@@ -32,16 +32,17 @@ from datetime import datetime
 from pathlib import Path
 
 from tutor.attempts import ATTEMPTS_FILE
+from tutor.languages import student_path
 
 REPORT_DIR = "reports"
 REPORT_FILE = "report.md"
 RATING_POINTS = ("clear", "fits", "taught", "targets")  # the owner's four questions
 
-# An exercise's state, from its test runs and from whether student.py was changed.
+# An exercise's state, from its test runs and from whether its student file was changed.
 PASSED = "passed"  # a logged run passed
 STARTED = "started"  # logged runs, none passed yet
 UNLOGGED = "changed, no run logged"  # edited, but no run reached the attempt log
-NOT_STARTED = "not started"  # no logged run and student.py as it was handed out
+NOT_STARTED = "not started"  # no logged run and the student file as it was handed out
 
 # The start of a failed attempt's text: "rule 1 (reference passes) FAIL: <detail>". Only the
 # rule's name is kept, as the detail can quote expected values.
@@ -170,14 +171,15 @@ def _priority(batch: Batch, exercise: str) -> str:
 
 
 def _changed(batch: Batch, exercise: str) -> bool:
-    """Whether student.py differs from what the batch handed out. Bytes, not file times, as a
-    copy or a rename changes a time; only the comparison's result leaves this function. The
-    pipeline hands out the skeleton as it is, but a batch written by hand has a student.py of
-    its own that differs from the start, so there an edit cannot be seen."""
+    """Whether the student file (student.py, or student.c in a C exercise) differs from the
+    skeleton the batch handed out. Bytes, not file times, as a copy or a rename changes a
+    time; only the comparison's result leaves this function. The pipeline hands out the
+    skeleton as it is, but a batch written by hand has a student.py of its own that differs
+    from the start, so there an edit cannot be seen."""
     if not batch.runs:
         return False
-    student = batch.folder / "exercises" / exercise / "student.py"
-    skeleton = batch.folder / "solutions" / exercise / "skeleton.py"
+    student = student_path(batch.folder / "exercises" / exercise)
+    skeleton = batch.folder / "solutions" / exercise / f"skeleton{student.suffix}"
     if not (student.is_file() and skeleton.is_file()):
         return False
     return student.read_bytes() != skeleton.read_bytes()

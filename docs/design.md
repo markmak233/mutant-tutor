@@ -53,7 +53,11 @@ container for isolation is fine; deploying the tool as a service is not.
   Hadoop) in a per-course guide `docs/setup/<course>.md`, linked from README (decided 2026-10-25:
   README stays course-agnostic, and each course's system deps and pitfalls differ; the guide
   marks which platforms were actually tested). No install script: setup is one-off, and when it breaks,
-  asking an AI is faster than maintaining a cross-platform script.
+  asking an AI is faster than maintaining a cross-platform script. Relaxed for the release
+  (owner, 2026-11-07): one `uv` line installs the tool, and `tutor doctor` checks and says what
+  to do next, never installing system software (Docker, Java, a compiler), which needs
+  administrator rights or virtualisation settings and differs by platform and, as languages
+  are added, by language (see "Roadmap", 6).
 - Big data course (`bigdata`): Python 3.11, Java 17 (`JAVA_HOME`), PySpark 3.5.x (decided 2026-10-24: the course
   material names more than one Spark version, and the version is pinned per workspace in
   `workspace.toml` anyway, so another course's materials can choose differently). Spark 4.x enables ANSI SQL mode by default,
@@ -160,14 +164,16 @@ smartCodingReview/                       # public repo (the `tutor/` above), cod
 │   ├── envcheck.py                      # P1 checks the workspace's [requires]; owns its rules
 │   ├── workspace.py                     # creates a course workspace: folder, .venv, terminal files
 │   ├── execution.py                     # P1 copy to temp dir -> subprocess pytest -> delete
-│   ├── validation/                      # P1 the checks; P2 rule 0, P3a the safety check (internals designed before coding)
+│   ├── validation/                      # P1 the checks; P2 rule 0, P3a the safety check (internals designed before coding); C: csource.py
 │   ├── testkit.py                       # P2a run a file-level program, read part-*, compare output
+│   ├── testkit_c.py                     # C exercises' tests: compile once, run, sanitizers
+│   ├── languages.py                     # a course's languages: [languages.c], not-yet-supported ones, flags in lectures
 │   ├── attempts.py                      # P2a pytest plugin: one attempts.jsonl line per exercise run
 │   ├── schema.py                        # P2 Pydantic models of metadata.json / manifest.json (rule 0),
 │   │                                    #   P3 parses LLM output into the same models
 │   ├── materials/                       # P3a course files -> per-file md cache (pypdfium2), vision pages; [requires] draft
 │   ├── llm.py                           # P3a thin OpenAI-compatible client, standard library only, no LangChain
-│   ├── graph/                           # P3 langgraph dependency added here
+│   ├── graph/                           # P3 langgraph dependency added here; languages.py: per-language profiles
 │   ├── retrieval/                       # P4 the page corpus, labels, scores and each route
 │   └── eval/                            # P5 a report from the pipeline's own records, no model calls
 ├── examples/                            # P1 synthetic only, same shape as a real exercise
@@ -177,7 +183,9 @@ smartCodingReview/                       # public repo (the `tutor/` above), cod
 │   │   └── solution/
 │   ├── station-max-file/                # file-level: CSV input dir with messy lines -> part-* output
 │   ├── station-monthly-df/              # DataFrame: groupBy/agg, orderBy, one CSV file, parameter
-│   └── station-condition-share/         # MRJob on Hadoop: order inversion, --jobconf tau
+│   ├── station-condition-share/         # MRJob on Hadoop: order inversion, --jobconf tau
+│   ├── station-above-average-c/         # C, a whole program: standard input -> output and exit status
+│   └── station-drop-low-c/              # C, a function and a given driver.c: an array changed in place
 └── tests/
     ├── test_env.py                      # P1, runs envcheck for the current workspace
     └── test_validation.py               # P1, runs the validator on examples/
@@ -465,7 +473,7 @@ explained before code since it touches `validation/`):
   function and MRJob entry points have no dots, file-level Spark ones are `Class.run`; in a
   manifest, priority marks name listed exercises, each at most once.
 - The models are also exported as JSON Schema files in `schemas/` (`python -m tutor.schema
-  --export`), so an assistant that is not running Python, and phase 3's structured output,
+  --export`; a C exercise's model as `metadata-c.schema.json`), so an assistant that is not running Python, and phase 3's structured output,
   read the same definition; a test fails if the exported files differ from the models.
   JSON Schema holds the fields only, not the cross-field rules, so `python -m tutor.schema`
   stays the check that counts.
@@ -1971,7 +1979,7 @@ themselves, so a cheap layer comes first and a stronger one later.
   - One fresh `docker run --rm` per test run (owner, 2026-11-05; this replaces the draft's
     long-lived per-course container with `docker exec`):
     `docker run --rm --pull never --init --name tutor-run-<random> --hostname localhost --network
-    none --read-only --tmpfs /tmp:rw,size=1g,mode=1777 --user <runner> --cap-drop ALL
+    none --read-only --tmpfs /tmp:rw,exec,size=1g,mode=1777 --user <runner> --cap-drop ALL
     --security-opt no-new-privileges --pids-limit 1024 --memory 2g --memory-swap 2g --cpus 4
     -v <run dir>:/work -w /work -v <tutor package>:/opt/tutor/tutor:ro -e <this run's variables>
     <image> timeout -s KILL <limit + 5> python -m pytest ...`. The run dir is the same throwaway
@@ -1986,7 +1994,10 @@ themselves, so a cheap layer comes first and a stronger one later.
     the container ends with its main process, so a leftover JVM ends with it. `timeout`: the
     container ends even if the validator is killed, when nothing is left to call `docker kill`.
     `--pull never`: an image that went missing stops the run, and nothing is fetched from a
-    public registry under that name. `--cpus` (4) is capped at the VM's CPUs, as Docker refuses
+    public registry under that name. `exec` on `/tmp` (2026-11-07): Docker's tmpfs is noexec by
+    default, and a C exercise's tests compile into `/tmp` and run the program there (a program
+    built there could not start, exit 126); the run folder, a bind mount, always allowed it,
+    so nothing can run that could not before. `--cpus` (4) is capped at the VM's CPUs, as Docker refuses
     more. The limits come from one Spark hypothesis run, which peaked at 393 processes and
     threads and 486 MB; 512 left too little room, so 1024.
   - Measured 2026-11-05, Docker Desktop on macOS (arm64, a 12-CPU VM with 7.66 GB). Median of
@@ -2029,7 +2040,10 @@ themselves, so a cheap layer comes first and a stronger one later.
     0.07 s and, importantly, waits while a stopped VM wakes (Resource Saver; measured 2.5 s on the
     first call after idling), so those seconds do not count against the code's time limit.
   - Image: `python -m tutor.container build`, one per course, generated from `[requires]`:
-    `python` picks the base image, `java` the JDK, `hadoop` the Apache tarball with its SHA-512
+    `python` picks the base image, `java` the JDK, `gcc` Debian's gcc and libc6-dev (in a
+    step of its own, so the recipes and image names of courses without C stay as they were;
+    the check after a build compares its version with the prefix), `hadoop` the Apache tarball
+    with its SHA-512
     fixed in code (`downloads.apache.org`, about 3.3 MB/s, then the slower archive), and any other
     name a pip package, at the host's exact version if it matches, else the prefix. `pytest`
     and `hypothesis` at the host's versions. A plain Python course 184 MB; with Java and Spark
@@ -2050,7 +2064,8 @@ themselves, so a cheap layer comes first and a stronger one later.
     needs Java and Hadoop there too, and generated tests that passed in the container can still
     behave differently on the host, since code can tell where it runs; only layer A covers that. The
     command that runs a learner's tests in the container, with attempts written on the host from its
-    result, and the risk tiers below come when a course needs them. A container has no Mac GPU, so
+    result, is scheduled (`tutor test`, "Roadmap", 6, owner, 2026-11-07); the risk tiers below come
+    when a course needs them. A container has no Mac GPU, so
     torch exercises run on the CPU. The Docker VM takes memory next to a local LLM. Windows and
     native Linux are not tested, and Windows stays on the host until they are. Podman is not tried.
 - Risk tiers for a course's modules (design for the generalization phase): pure
@@ -2062,13 +2077,200 @@ themselves, so a cheap layer comes first and a stronger one later.
   source (lab, page), and the owner accepts entry by entry, as for the GUI's `[requires]`
   draft. A generated exercise that needs an unlisted module fails `safe` and yields a
   proposal to the owner, never an automatic widening.
-- Other languages (generalization phase, not built): a `language` field in metadata
-  (optional, default `python`); tests stay pytest and run the compiled program as a
+- Other languages (generalization phase; C's validation built, below): a `language` field in
+  metadata (optional, default `python`); tests stay pytest and run the compiled program as a
   subprocess, as file-level exercises already do; one safety checker per language chosen
-  by `check_safety` (tree-sitter for most languages, sqlglot for SQL), with per-language
-  allowlists. A few languages built in, others configured by the owner in `workspace.toml`
-  (extension, compile and run commands, allowlist); those commands run, so generation never
-  writes them. A language without a built-in checker needs the container.
+  by `check_safety` (C: `validation/csource.py`; for later languages tree-sitter, sqlglot for
+  SQL), with per-language allowlists. A few languages built in, others configured by the owner
+  in `workspace.toml` (extension, compile and run commands, allowlist); those commands run, so
+  generation never writes them. A language without a built-in checker needs the container.
+- C (owner, 2026-11-07). Four steps: (1) validation, built; (2) the image and the GUI's
+  Environment page, built; (3) generation, built (question.md from student.c came forward
+  into it); (4) what the learner touches: the GUI's exercise page and Open in IDE, attempts'
+  snapshots and the progress report (4a), hints and the held-out check (4b), built. The first C course's lectures (C99 with `gcc -Wall -std=c99`,
+  Makefiles, programs on standard input and output, expected-output files, gdb and valgrind,
+  no unit-test framework) show it tests by given input and expected output, so:
+  - pytest drives the compiled program (owner chose the recommended option). The rules,
+    `execution.py`, the JUnit XML counts, hints, held-out checks and attempts stay as they are;
+    only file suffixes, compiling and the static check differ by language. A C unit-test
+    framework (Unity, CMocka) would have to be installed in the image and learnt, though the
+    course never taught one; that stays for a C++ or Java course that already tests with
+    GoogleTest or JUnit.
+  - Format: `schema.CMetadata`, picked by `"language": "c"`, with `framework: "c"`, and not new
+    fields in `Metadata`: Metadata's JSON Schema goes to the generate and repair models inside
+    `ExerciseDraft`, and the calibrated Python prompts keep their exact text
+    (`schemas/metadata.schema.json` is unchanged; `metadata-c.schema.json` is new). Code files
+    are student.c, reference.c, skeleton.c and mutants/*.c; tests and oracle stay Python, so
+    the oracle is written in another language than the reference.
+  - Two shapes (owner): a whole program (`interface: "file"`: student.c has main; tests give
+    standard input, arguments or files and compare output and exit status) and a function
+    (`interface: "function"`: student.c holds functions; a given driver.c and header in the
+    exercise folder have the main, and the header lets the compiler check both sides agree).
+    Not ctypes: a crash in the student's code would take pytest down with it, a failed test
+    would read as an error, and rules 2 and 3 would judge wrongly. Several files with a
+    Makefile: later.
+  - `tutor.testkit_c`. `build(...)` compiles while pytest imports the test file, so a compile
+    error is a collection error and the run an ERROR: a skeleton that does not compile fails
+    rule 2 as an import error does, and such a mutant is "broken", not "killed".
+    `program.run(...)` raises AssertionError on a non-zero exit, a signal, a sanitizer's report
+    or its own time limit (5 s), so each of those fails one test, and a hanging mutant is
+    killed in seconds. It imports only the standard library and `tutor.config`, since it runs
+    in the container.
+  - Sanitizers (owner: ASan and UBSan, not valgrind). Every build adds
+    `-fsanitize=address,undefined`, `-fno-sanitize-recover=all` (UBSan otherwise prints and
+    carries on), `-g`, and `-Werror=implicit-function-declaration` (C99 otherwise links any
+    library function called without its header, which the header check counts on). Why not
+    valgrind: 20 to 30 times slower on every run, Linux only, and blind to overflows of arrays
+    on the stack, the course's usual arrays. It does catch reads of uninitialised memory, which
+    ASan does not; an extra valgrind pass in the container is the way if such mutants are
+    wanted. In the examples, a stack array too small and a loop one past a malloc'd array are
+    killed only through the sanitizer.
+  - Leaks are checked only in a run that asks, `run(..., leaks=True)`. LeakSanitizer's check
+    at exit took 0.72 s per run in Docker Desktop's VM (arm64, linuxkit kernel 6.4), the same
+    with every container limit removed, with seccomp unconfined, with `SYS_PTRACE` and on one
+    CPU, while the run itself took 3 ms; with it always on, rule 4's 100 examples ran past 30 s.
+    Not traced further. On macOS there is no LeakSanitizer, so such a run warns that leaks were
+    not checked there; it works under the container's limits (`pytest -m docker`).
+  - Flags: `workspace.toml` `[languages.c] flags`, which only the owner writes, else
+    `-std=c11 -Wall`. The validator passes them to every run (`TUTOR_C_FLAGS`), as a run in
+    the container cannot see workspace.toml; a learner's run reads the file. The reference must
+    compile without a warning (`TUTOR_C_STRICT`, rule 1 only), as the course asks of its
+    students; a skeleton or mutant may warn (`if (x = 0)` is a real mistake that warns).
+  - Rule `safe` (owner: header allowlist, and container only). C is validated only in a
+    container: `safe` fails while the course's runner is not "container", the repo's examples
+    included, whose end-to-end check is `pytest -m docker` (the fast suite runs the rules on
+    the host with that check patched out). `csource.py` reads every .c and .h a run compiles,
+    on tokens without comments or string contents: `#include <...>` only of the C standard
+    headers and a course's `[safety] allow_headers`, `#include "..."` only of the exercise's own
+    files by plain name, no other include form (a macro, `#embed`, `#import`), no inline
+    assembly or `##`, none of a list of process, shell, network, code-loading and system-call
+    names in any use (C lets code declare a library function itself), no literal path outside
+    the exercise in `fopen` and the like. It exists for the learner's own runs, which compile
+    the generated skeleton and driver on their machine: a filter that stops the obvious, as
+    layer A does for Python.
+  - Rule `api` reads tokens (`forbidden_calls`, `required_definitions`; a definition is a name,
+    its parameters and a body); rule `main` asks a whole program's student.c and reference.c
+    for main and does not apply to a function exercise; rule 5 does not apply.
+  - The learner's own runs stay on their machine for now, and a command that runs them in the
+    container comes later (owner): on macOS `cc` is Apple's clang without LeakSanitizer, and
+    envcheck reports `gcc` there as clang. Measured: both examples VALID in a container with
+    the course's `-Wall -std=c99` in 3 to 6 s each, and with clang on macOS.
+  - Step 2, a course's language (owner, 2026-11-07; `tutor/languages.py`, the Environment
+    page). A course is a C course when workspace.toml has `[languages.c]`, which only the
+    owner writes, through the page or by hand; not inferred from `[requires]`, where `java`
+    also serves Spark. Python needs nothing declared. A table for another language, or a
+    `[requires]` entry naming the toolchain of one (javac, rustc, g++, node, ...), is reported
+    as not supported yet, by envcheck and so by the GUI, instead of being taken for a pip
+    package that then fails to install.
+    - Found in the lectures, confirmed by the owner: the [requires] draft's "gcc" kind (prompt
+      version 3), and the compiler flags from the gcc, cc and clang lines the cached lectures
+      show, with no model: the set of `-std=`, `-W`, `-pedantic` and `-ansi` flags the most
+      lines share, shown with its first line (the first C course: `-Wall -std=c99` on all 19
+      lines). The box starts at the course's flags, else these, else `-std=c11 -Wall`.
+    - Ticking C writes `[languages.c] flags`, `[safety] allow_headers` (headers beyond the
+      standard library's, each a plain `name.h` path) and `gcc = "12"` in [requires] when
+      missing (the image's Debian gcc). Checked writes as every other table, the file before
+      kept as `.bak`.
+    - The page's step 1, laid out for more languages (owner, 2026-11-07): "Find it in the
+      lectures" first; then one language list, Python first and not removable (the tests are
+      pytest), each row its [requires] toolchain's version (python, gcc), with "Add a
+      language" (C, and the languages not supported yet, greyed) and a line when the
+      lectures compile C; then each language's own settings, Python's packages and tools
+      (the rest of [requires], with "Exercises may import") and C's flags and headers
+      (`_language_c.html`, only once C is in the list). A later language adds a row in
+      `tutor.languages.LANGUAGES` and a `_language_<key>.html`. Removing C now takes gcc out
+      of [requires] too, as it is C's row (it used to stay); accepting gcc from the lectures'
+      candidates adds C, with the version typed (an explicit click, so C is still declared,
+      not inferred). A pure Python course shows no C settings at all.
+    - "On this machine" is greyed for a C course and refused by the server: C runs only in
+      the container. A `gcc` here of another make or version (macOS's clang) is shown as
+      "differs", not as missing: the learner's own runs compile with it, validation with the
+      image's gcc; only no compiler at all is missing.
+    - New batch was held back for every C course until step 3 (owner), as the pipeline wrote
+      Python exercises only. Since step 3 it is held back only while the course's tests would
+      not run in a container, on the page and by the server, and `tutor.graph` stops there
+      too, before its first model call: every draft would fail rule `safe`.
+  - Step 3, generation (owner, 2026-11-07; `graph/`, its design explained and approved first).
+    - One prompt template for every language, not a copy per language (owner: otherwise a new
+      version per language). `prompts.SPEC`, `PLAN_TEMPLATE` and `ORACLE_TEMPLATE` hold
+      `{slots}` where a language differs (the rules, where the question goes, the tests, the
+      reference, the main rule, the misconception shown, test data, how to test the "how",
+      the code rules); `PYTHON_PARTS` and `C_PARTS` fill them, and a new language adds its
+      parts, a profile (`graph/languages.py`: its plan and draft models, their schemas, where
+      the question is) and a synthetic example. This keeps the decision that calibrated
+      prompts stay as they are: Python's parts are its old text cut out of it by a script, not
+      retyped, and before the change 35 outputs (system prompts with every option, item, repair
+      and retry prompts per framework and mode, plan and oracle prompts, the three JSON
+      Schemas) were pinned by hash (`tests/test_prompt_pins.py`); they still match, so
+      Python's calibration and what providers have cached of it stand.
+    - Models of its own for C (`CPlanItem` with framework `c`, `CExerciseDraft` with
+      student_c, reference_c, and for a function exercise student_h and driver_c), so the
+      Python schemas the models receive keep their text. A C course's batch is all C (owner).
+      Both shapes are generated (owner): the model writes a function exercise's driver and
+      header, which the student gets as they are.
+    - What the C prompts add: the rules as the validator applies them to C (compile without a
+      warning under the course's flags, which the prompt names; a skeleton that compiles and
+      fails; a mutant that does not compile is broken); the question in student.c's opening
+      `/* */` comment, Markdown as is and no `*/` inside; tests through `testkit_c`, whose API
+      is read from the module; C misconceptions as mutants, a leak only with a `leaks=True`
+      test, never a fault in reading uninitialised memory or unspecified behaviour (no test
+      catches those every time); the C code rules, with the course's extra headers.
+    - A C mutant names its bug in a `/* Mutant: ... */` line (a docstring would not compile),
+      in place of the reference's opening one-line comment, so a diff shows only the bug.
+    - Measured so far with stand-in models only: a C item goes from a reply to a saved exercise
+      through the real validator on the host and in the course's container. The C prompts
+      are not calibrated: the first batches on the C course measure them.
+    - The first real batch (2026-11-07, learn mode, 5 exercises; deepseek-v4-flash
+      generating, gpt-terra writing the oracle): 5 of 5 VALID, one in round 0 and four after
+      one repair round. Round 0 failed three times on rule 1, the reference and its own tests
+      reading the question differently (what `scanf` returns at the end of input, a computed
+      float, a `printf` format), and once on rule 4, the oracle's test file not loading (a
+      Hypothesis test defined twice). Too few to change the prompts on; more batches first.
+  - Step 4, what the learner touches (owner, 2026-11-07), in two parts: 4a the solving itself
+    (the exercise page, attempts, the progress report), 4b hints and the held-out check.
+    - Which file is the learner's code is told by the file in the exercise folder
+      (`tutor.languages.student_path`: student.c if there, else student.py), not by
+      metadata.json (owner chose the recommended option): metadata sits in `solutions/`, and
+      the learner's side (the GUI's pages, the attempts plugin, which loads in every pytest
+      run and so imports only light modules) reads the exercise folder alone. Commands that
+      load the whole exercise (hints, held-out) use its metadata's language as before.
+    - 4a: the exercise page names student.c and says the question is its opening comment when
+      there is no question.md; Open in VS Code opens student.c; attempts keeps a failing
+      run's student.c as `<hash>.c`, so the held-out check can run it as C; the progress
+      report compares student.c with skeleton.c to tell an edited exercise from an untouched
+      one.
+    - 4b, hints. Layer 1 has C rules of its own (`hint/rules.py` C_RULES), read from what the
+      compiler and the sanitizers print as testkit_c passes it on, written from real runs of
+      both compilers (clang on the learner's Mac, gcc in the container, `pytest -m docker`):
+      a full-width character in the code (not in a comment or string); a library function
+      without its header (the #include the compiler's note names) or a function called
+      before its prototype; a function not defined (the linker); the compiler's first error;
+      a forbidden function (`csource`'s tokens); a program that never finishes; and by the
+      sanitizer's report an index outside an array, memory used after free, a double or bad
+      free, a NULL or invalid pointer, a stack overflow, a leak, signed overflow, division
+      by zero, a bad shift, other undefined behaviour. The place is the first frame in the
+      student's own file, so a fault inside scanf names the student's line. Review mode
+      names the kind only, as for Python. Python's rules and their order are unchanged.
+    - Layer 2 reads a C mutant's bug from its `/* Mutant: ... */` line; signatures leave
+      out a sanitizer's process id and the folders before a C file's name, which differ
+      between two runs of one mistake. testkit_c now starts a sanitizer's excerpt at its
+      line, so UBSan's names the file ("student.c:4:20: runtime error"), without ASan's
+      process id.
+    - Layer 3 names student.c and its opening comment to the model (Python's text is
+      unchanged), and the leak check blanks C comments, so the question's text in the
+      reference is not taken for code.
+    - Held-out checks the learner's own C code (the passing student.c, the `.c` copies of
+      failing runs). A model's held-out solutions and the teaching judge stay Python-only
+      (their prompts and calibration are Python's): both refuse a C exercise by name, and a
+      model's file in a C exercise would be skipped, never run unchecked. To be designed
+      with the first real C batches.
+    - With no "## Run" section, a C question's "How to run" compiles with the course's own
+      flags, and a function exercise's driver.c (`question.c_run_command`).
+    - VS Code: ticking C on the Environment page also writes `.vscode/c_cpp_properties.json`
+      with the flags' C standard (`-std=c99` -> cStandard c99) and the flags, so completion
+      and red underlines follow the course and not the compiler's default (owner's
+      question, 2026-11-07); unticking removes it. A file the course already had is left
+      alone, and the page says so. It is read by Microsoft's C/C++ extension.
 - Languages in the plan (owner, 2026-11-07), in this order: C, C++ and Java first, as the
   owner has courses in them; then SQL, JavaScript and TypeScript, shell, Rust, R, Go, Haskell,
   assembly, and MATLAB (open, below). Each is designed when a real course with lectures needs
@@ -2583,6 +2785,40 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
 5. **Done 2026-11-05, light version (owner):** `tutor.eval` reports from the existing records, with
    no model calls, and the README's results; the [5] items of "LLM engineering candidates" are
    reviewed there. The full model comparison was not run.
+6. Next, agreed 2026-11-07 (owner, after an outside review of this file asked for easier
+   setup, one execution environment for validation and the learner, and measured trust). In
+   order, each its own step:
+   1. CI: a `docker` job (`pytest -m docker`; GitHub's Ubuntu runners have Docker) and the
+      fast suite on macOS and Windows as well. Done when all three are green.
+   2. A little refactoring of the files over 500 lines (`gui/app.py`, `graph/nodes.py`,
+      `graph/prompts.py`, ...), planned and explained first; the prompt pins must still pass.
+   3. `tutor test`: the learner's tests in the course's image, as validation runs them, from
+      the IDE's terminal: live output, attempts and snapshots written on the host from the
+      result, and a time limit (an exception to "No timeout on the learner's own `pytest`
+      runs", set when built). It reuses `execution.run_pytest`'s container path; the part of
+      `attempts.py` that writes a line is shared by both ways. The host's `pytest` stays, for
+      debugging in the IDE; which way is the default is decided when built. With it, a
+      container course needs on the host only Docker, the tool and an IDE: the image already
+      holds Java, Hadoop and gcc. Done when a C and a Spark exercise give the same outcomes
+      both ways and their attempts lines match.
+      - Optional, after it: a page for a learner who wants to run tests on the host anyway,
+        saying how to install that course's toolchain (Java, Hadoop, a C compiler) on their
+        platform, automated where a language allows it safely. Toolchains differ by language,
+        so the page grows language by language.
+   4. A record of each image build: the pip packages' versions, Java's and gcc's, and the base
+      image's digest, shown on the Environment page with the `[requires]` packages whose
+      versions differ between the course's `.venv` and the image. Recorded, not pinned: a
+      pinned base image misses security updates; pin it once drift is seen.
+   Then packaging and release (see "Deferred", "Packaging and release"), with `tutor doctor`
+   (checks the tool, that Docker runs, the course's image, then validates one example in the
+   course's runner as a smoke test, and says what to do next for each failure) and a fresh
+   install timed on macOS, Windows and Linux; Docker on Windows is first tested there.
+   Later, each when its trigger comes: a JDK instead of a JRE in the image (a course that
+   compiles Java in it); a separate execution backend (a third runner such as Podman; until
+   then the host or container switch in `execution.py` is enough); VS Code Dev Containers on
+   the course's image (debugging inside it); for C, a fixed regression set of plan items rerun
+   when its prompts change, and held-out solutions written by a model (after a second C batch
+   and the owner's own C solving).
 
 ## Backlog (decided, not scheduled)
 
@@ -2718,6 +2954,19 @@ gaps. Each was decided by the owner; change one only with the owner.
   nothing: layer A, the container and the owner's review still answer what a lecture can
   make a model write. Coverage's prompt is version 2 (asked again on the next click);
   `[requires]` folded it into its version 2, not used yet.
+  New prompts mark what they send from outside (owner, 2026-11-07: keep GitHub's
+  prompt-injection scanning as quiet as can be, and record it here). Every prompt written from
+  now on, beginning with C's (`graph/prompts.py`, `material()`), sends text it did not write
+  itself between tags, a closing tag inside broken up, and its system prompt names the tags as
+  material to read, not instructions: the lecture pages (`<lecture>`); in a repair, the
+  previous answer and the validator's report, which quotes what generated code printed
+  (`<previous_answer>`, `<validator_report>`); for the oracle, the question, the interface and
+  the samples another model wrote (`<question>`, `<interface>`, `<samples>`); for the plan,
+  the coverage table, the page list, the existing exercises and the previous plan. The owner's
+  own preferences and feedback are instructions and stay unmarked. Python's generate, plan and
+  oracle prompts stay unmarked as calibrated (pinned, see "C", step 3), as this entry's
+  decision says; markers there wait for a measured change. The marks guide a model; layer A,
+  the container and the owner's review are still what bound the result.
 - No built-in "standard set" of models for a course with none (proposed 2026-11-06). The
   first course adds its models with "Add a model"; later ones copy them from another course.
   A set in the code would need upkeep as providers rename their models, and the owner prefers
@@ -2725,6 +2974,9 @@ gaps. Each was decided by the owner; change one only with the owner.
   2026-11-07, under the Models page): nothing comes with the code, the list is downloaded
   on the owner's click, and it only fills the New model form; the course gets nothing until
   the owner saves.
+- No courses whose work is built and run in a device emulator or an IDE of its own (Android
+  Studio and the like; owner, 2026-11-07). Their builds, emulators and UI tests are outside
+  what a test run in a container can check, so they are outside this project.
 
 ## Deferred
 
@@ -2786,7 +3038,8 @@ mode is not done (see "Decisions not to do").
   - What a user still installs: that one line, for all; an IDE to solve in; an API key or a
     local model to generate; Java and Hadoop for such courses, since the learner's runs stay
     on the host (the page gives the commands); Docker Desktop to choose the container. A plain
-    Python course needs only the line and a key.
+    Python course needs only the line and a key. Once `tutor test` is built ("Roadmap", 6), a
+    container course needs that toolchain only to run tests on the host, e.g. to debug.
 
 Local GUI (phase 7, started 2026-11-06 ahead of the rest of phase 6, see above; discussed
 2026-10-26). It sits on top of the files and functions the earlier phases build, so it comes
@@ -3216,6 +3469,15 @@ late; the adaptive review screens can be built with it.
       every Unix-like system has (tar, nohup); these are now left out by name. Such
       entries were "other", only listed and never installed, so the change cleans the
       list; the new version asks every lecture again on the next click.
+    - Prompt version 3 (owner, 2026-11-07, with C): a kind of its own, "gcc", for a C
+      compiler (gcc, cc or clang), so the C compiler is a tickable `gcc` row rather than an
+      "other" only listed; its quote must name gcc, cc or clang as a word of its own ("cc" is
+      in "access"), and its box starts at the major version, as Java's. Every course's stored
+      answers are then out of date and the page offers to ask again; [requires] itself is
+      untouched.
+    - Ask again (owner, 2026-11-07): once lectures are looked at, the page still offers
+      "Look at all N lectures again" (`--again`), with the input tokens that sends, after a
+      change of model or to compare; it was offered only for lectures not yet asked.
     - Measured on the private deep learning course, with GLM-5.3-Flash (free): 16 lectures,
       157k tokens in and 715 out, 10 candidates, one dropped (a plural, before "other"
       matched loosely). It found torch, numpy and scikit-learn with the versions the slides

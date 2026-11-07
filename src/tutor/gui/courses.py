@@ -7,7 +7,7 @@ workspace (config.load_workspace: not inside a git repository, names a course).
 Only the learner's side is read: `exercises/`, the manifest and the attempt log (each run's
 time, exercise and result, never its `first_error`). Of
 `solutions/`, only the yes or no in validation.json and, through the progress code shared with
-the report, whether student.py still equals the skeleton; never the reference, tests, hints or
+the report, whether the student file still equals the skeleton; never the reference, tests, hints or
 mutants, which matches the tutoring rule. Every name that comes from a URL goes through
 `_child`, so a request cannot reach a folder outside its course or any hidden one.
 """

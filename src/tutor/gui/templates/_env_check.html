@@ -5,7 +5,7 @@
   {% if check.problem %}
   <p class="step-state">{{ chip("to do") }} {{ check.problem }}</p>
   {% else %}
-  {% set missing = check.results | rejectattr("ok") | list %}
+  {% set missing = check.missing %}
   <p class="step-state">{% if not missing %}{{ chip("done") }} Everything in step 1 is on this machine.{% else %}{{ chip("to do") }} {{ missing | length }} of {{ check.results | length }} not met yet.{% endif %}</p>
   <table>
     <thead><tr><th>Requirement</th><th>Needs</th><th>Found</th><th></th></tr></thead>
@@ -15,7 +15,7 @@
         <td>{{ r.name }} <span class="muted">{{ kind(r.name) }}</span></td>
         <td>{{ r.required }}</td>
         <td>{{ r.found or "—" }}</td>
-        <td>{% if r.ok %}{{ chip("ok") }}{% else %}{{ chip("missing" if not r.found else "wrong version") }} <span class="muted">{{ r.hint }}</span>{% endif %}</td>
+        <td>{% if r.ok %}{{ chip("ok") }}{% elif differs(r) %}{{ chip("differs") }} <span class="muted">your own runs here compile with this; validation uses gcc {{ r.required }} in the container</span>{% else %}{{ chip("missing" if not r.found else "wrong version") }} <span class="muted">{{ r.hint }}</span>{% endif %}</td>
       </tr>
     {% endfor %}
     </tbody>

@@ -57,7 +57,7 @@ from types import ModuleType
 
 from flask import Flask, abort, make_response, redirect, render_template, request, url_for
 
-from tutor import llm
+from tutor import llm, workspace
 from tutor.eval import report
 from tutor.gui import (
     catalog,
@@ -72,6 +72,7 @@ from tutor.gui import (
     rendering,
     tasks,
 )
+from tutor.languages import student_path
 
 COOKIE = "tutor_token"
 _HEADERS = {
@@ -91,7 +92,8 @@ STATUS_LABELS = {report.PASSED: "passed", report.STARTED: "started",
 # What an action can report back, by code; nothing else is ever shown. (kind, text)
 NOTICES = {
     "opened-folder": ("ok", "Opened in the file manager."),
-    "opened-ide": ("ok", "Opened in VS Code: the course folder, with this exercise's student.py."),
+    "opened-ide": ("ok", "Opened in VS Code: the course folder, with this exercise's student "
+                          "file."),
     "no-vscode": ("bad", "VS Code was not found. Install it, or in VS Code run "
                          "\"Shell Command: Install 'code' command in PATH\"."),
     "no-file-manager": ("bad", "No file manager command (xdg-open) was found."),
@@ -143,6 +145,23 @@ NOTICES = {
     "cannot-build": ("bad", "[requires] has no image recipe: see the test image part below."),
     "no-setup-model": ("bad", "Nothing was started: this course has no model for it. Choose "
                               "one for the setup, plan or generate role on the Models page."),
+    "language-saved": ("ok", "Saved in workspace.toml (the file before is workspace.toml.bak), "
+                             "and VS Code's C settings in .vscode/c_cpp_properties.json. A C "
+                             "course's tests need the container and a test image with gcc: "
+                             "steps 3 and 4 below."),
+    "language-saved-own-editor": ("ok", "Saved in workspace.toml (the file before is "
+                                        "workspace.toml.bak). .vscode/c_cpp_properties.json is "
+                                        "this course's own, so it was left as it is: set its "
+                                        "cStandard to match the flags. A C course's tests need "
+                                        "the container and a test image with gcc: steps 3 and "
+                                        "4 below."),
+    "language-removed": ("ok", "C is no longer one of this course's languages, and gcc is no "
+                               "longer in [requires] (the file before is workspace.toml.bak)."),
+    "language-added": ("ok", "C added: [languages.c] with the compiler flags below, gcc in "
+                             "[requires], and VS Code's C settings in "
+                             ".vscode/c_cpp_properties.json (the file before is "
+                             "workspace.toml.bak). Check C's settings below; its tests need the "
+                             "container and a test image with gcc: steps 3 and 4."),
 }
 # What a task that succeeded reports when it goes back to its page (app.return_to).
 NOTICES.update({
@@ -161,6 +180,9 @@ NOTICES.update({
 ENVIRONMENT_NOTICES = {"install": "installed", "build": "image-built",
                        "requires-draft": "draft-ready"}
 RECENT_TASKS = 5
+C_NEEDS_CONTAINER = ("A C course's exercises are validated only in a container, so a batch "
+                     "starts once the course runs its tests in one: choose it on the "
+                     "Environment page (step 3) and build the test image (step 4).")
 UPLOAD_LIMIT_BYTES = 500 * 1024 * 1024  # one upload request, all its files together
 
 
@@ -287,11 +309,15 @@ def create_app(root: Path, token: str, port: int | None = None,
 
     @app.get("/c/<name>/b/<batch>/e/<exercise>/")
     def exercise(name: str, batch: str, exercise: str):
-        course, view, row, _ = exercise_or_404(name, batch, exercise)
+        course, view, row, folder = exercise_or_404(name, batch, exercise)
         text = courses.question(course, batch, exercise)
+        # The file the learner writes in: student.py, or student.c in a C exercise.
+        student = student_path(folder).name
         return render_template("exercise.html", course=course, batch=view, row=row,
                                question=rendering.question_html(text) if text else None,
-                               labels=STATUS_LABELS)
+                               labels=STATUS_LABELS, student=student,
+                               question_in=("the opening comment" if student.endswith(".c")
+                                            else "the docstring"))
 
     # --- actions: POST only, each back to its page with a notice ----------------------------
 
@@ -318,7 +344,7 @@ def create_app(root: Path, token: str, port: int | None = None,
     @app.post("/c/<name>/b/<batch>/e/<exercise>/open-ide")
     def open_exercise_in_ide(name: str, batch: str, exercise: str):
         course, _, _, folder = exercise_or_404(name, batch, exercise)
-        student = folder / "student.py"
+        student = student_path(folder)  # student.py, or student.c in a C exercise
 
         def ide():
             launcher.open_in_vscode(course.workspace.root,
@@ -487,7 +513,8 @@ def create_app(root: Path, token: str, port: int | None = None,
         return render_template("new_batch.html", course=course, ready=ready, unread=unread,
                                values=shown, problems=problems,
                                models=generation.models(course),
-                               running=tasks.running(course.workspace.root)), code
+                               running=tasks.running(course.workspace.root),
+                               c_blocked=environment.c_without_container(course)), code
 
     @app.get("/c/<name>/new-batch")
     def new_batch(name: str):
@@ -498,6 +525,10 @@ def create_app(root: Path, token: str, port: int | None = None,
         """`plan`: the plan model proposes the batch, and the command pauses for the owner."""
         course = course_or_404(name)
         form = request.form
+        if environment.c_without_container(course):
+            # Every draft would fail rule `safe` (C runs only in a container), so nothing
+            # starts; `tutor.graph` stops there too, before any model is asked.
+            return new_batch_page(course, {}, [C_NEEDS_CONTAINER], 409)
         values = {"label": form.get("label", ""), "lectures": form.getlist("lecture"),
                   "mode": form.get("mode", ""), "how": form.get("how", ""),
                   "count": form.get("count", ""), "max_count": form.get("max_count", ""),
@@ -1012,12 +1043,15 @@ def create_app(root: Path, token: str, port: int | None = None,
 
     def environment_page(course: courses.Course, problems: list[str], code: int = 200,
                          rows: list[environment.ListRow] | None = None,
-                         chosen: dict[str, str] | None = None):
+                         chosen: dict[str, str] | None = None,
+                         typed_language: dict | None = None):
         """`rows`: a refused [requires] form's rows, `chosen`: a refused draft form's ticked
-        entries and their versions; both shown back as typed."""
+        entries and their versions, `typed_language`: a refused language form's values; all
+        shown back as typed."""
         draft = environment.draft_view(course)
         if rows is None:
-            rows = environment.list_rows(course, list(course.workspace.requires.items())
+            # The packages and tools list: [requires] without the language list's rows.
+            rows = environment.list_rows(course, environment.package_rows(course)
                                          or [("", "")], draft.draft)
         allowed = environment.allowed(course)
         return render_template("environment.html", course=course, problems=problems,
@@ -1028,7 +1062,10 @@ def create_app(root: Path, token: str, port: int | None = None,
                                not_pip=environment.NOT_PIP, runner=environment.runner(course),
                                has_venv=environment.venv_python(course).exists(),
                                install=environment.install_shown(course),
-                               running=tasks.running(course.workspace.root)), code
+                               running=tasks.running(course.workspace.root),
+                               language=environment.language_view(course),
+                               languages=environment.languages_view(course),
+                               typed_language=typed_language), code
 
     @app.get("/c/<name>/environment/")
     def environment_view(name: str):
@@ -1047,7 +1084,8 @@ def create_app(root: Path, token: str, port: int | None = None,
         """The part htmx loads: envcheck in the course's venv (a process, 0.2 s warm)."""
         course = course_or_404(name)
         return render_template("_env_check.html", course=course,
-                               check=environment.check(course), kind=environment.kind)
+                               check=environment.check(course), kind=environment.kind,
+                               differs=environment.differs)
 
     @app.get("/c/<name>/environment/docker")
     def environment_docker(name: str):
@@ -1065,12 +1103,15 @@ def create_app(root: Path, token: str, port: int | None = None,
         keys += [f"x{i}" for i in range(len(keys), len(names))]  # a form sent without keys
         ticked = set(form.getlist("import"))
         modules = {k: form.get(f"module:{k}", "") for k in keys}
-        table, problems = environment.check_requires(names, versions,
-                                                     environment.runner(course))
+        # The language list's rows (python, gcc) are not in this form: put back as they are.
+        all_names, all_versions, problems = environment.with_toolchains(course, names, versions)
+        table, more = environment.check_requires(all_names, all_versions,
+                                                 environment.runner(course))
+        problems += more
         allow, import_problems = environment.check_imports(
             list(zip(names, keys, strict=False)), ticked, modules, environment.allowed(course))
         problems += import_problems
-        if table is not None and allow is not None:
+        if not problems and table is not None and allow is not None:
             problems = environment.save_requires(course, table, allow)
         if problems:
             typed = [environment.ListRow(n, v, k, modules.get(k, ""), k in ticked)
@@ -1081,14 +1122,63 @@ def create_app(root: Path, token: str, port: int | None = None,
 
     @app.post("/c/<name>/environment/draft")
     def draft_requires(name: str):
-        """A model looks for the software in each lecture not asked yet (it may cost money,
-        so only on this click); its answers wait on the page for the owner's ticks."""
+        """A model looks for the software in each lecture not asked yet, or with "again" in
+        every lecture (it may cost money, so only on this click); its answers wait on the page
+        for the owner's ticks."""
         course = course_or_404(name)
         if environment.setup_model(course) is None:
             return redirect(url_for("environment_view", name=name) + "?notice=no-setup-model",
                             code=303)
-        return start_task(course, "Find requirements in the lectures",
-                          [environment.draft_command()], meta={"kind": "requires-draft"})
+        again = request.form.get("again") == "1"
+        return start_task(course, "Find requirements in every lecture again" if again
+                          else "Find requirements in the lectures",
+                          [environment.draft_command(again)], meta={"kind": "requires-draft"})
+
+    @app.post("/c/<name>/environment/languages")
+    def save_language_versions(name: str):
+        """The language list's versions (Python's, gcc for C) into [requires]."""
+        course = course_or_404(name)
+        versions = {k.removeprefix("version:"): v for k, v in request.form.items()
+                    if k.startswith("version:")}
+        problems = environment.save_language_versions(course, versions)
+        if problems:
+            return environment_page(course, problems, 400)
+        return redirect(url_for("environment_view", name=name) + "?notice=requires-saved",
+                        code=303)
+
+    @app.post("/c/<name>/environment/languages/add")
+    def add_language(name: str):
+        course = course_or_404(name)
+        problems = environment.add_language(course, request.form.get("language", ""))
+        if problems:
+            return environment_page(course, problems, 400)
+        notice = ("language-saved-own-editor" if workspace.c_editor_config_kept(
+            course.workspace.root) else "language-added")
+        return redirect(url_for("environment_view", name=name) + f"?notice={notice}", code=303)
+
+    @app.post("/c/<name>/environment/languages/remove")
+    def remove_language(name: str):
+        course = course_or_404(name)
+        problems = environment.remove_language(course, request.form.get("language", ""))
+        if problems:
+            return environment_page(course, problems, 400)
+        return redirect(url_for("environment_view", name=name) + "?notice=language-removed",
+                        code=303)
+
+    @app.post("/c/<name>/environment/language")
+    def save_language(name: str):
+        """Tick or untick C, with its compiler flags and extra headers (owner, 2026-11-07)."""
+        course = course_or_404(name)
+        form = request.form
+        typed = {"c": form.get("c") == "on", "flags": form.get("flags", ""),
+                 "headers": form.get("headers", "")}
+        problems = environment.save_language(course, typed["c"], typed["flags"],
+                                             typed["headers"])
+        if problems:
+            return environment_page(course, problems, 400, typed_language=typed)
+        notice = ("language-removed" if not typed["c"] else "language-saved-own-editor"
+                  if workspace.c_editor_config_kept(course.workspace.root) else "language-saved")
+        return redirect(url_for("environment_view", name=name) + f"?notice={notice}", code=303)
 
     @app.post("/c/<name>/environment/accept")
     def accept_requires(name: str):

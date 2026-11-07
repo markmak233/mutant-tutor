@@ -58,11 +58,17 @@ Two interfaces, mixed in every batch:
 - **File-level**: write a program in the shape course assignments use (`run(inputPath, outputPath)`),
   read messy input files, write `part-*` output in an exact format. Ships a `sample_input/`.
 
-Five synthetic examples live in [`examples/`](../examples/): `station-longest-rise` (plain Python,
+Seven synthetic examples live in [`examples/`](../examples/): `station-longest-rise` (plain Python,
 no framework), `station-average-rdd` (function-level), `station-max-file` (file-level Spark RDD),
-`station-monthly-df` (DataFrame, one ordered output file, a command-line parameter) and
+`station-monthly-df` (DataFrame, one ordered output file, a command-line parameter),
 `station-condition-share` (MRJob on a local Hadoop: order inversion, where a mutant that forgets
-the partitioner passes with one reducer and is caught with two).
+the partitioner passes with one reducer and is caught with two), and two in C:
+`station-above-average-c` (a whole program on standard input) and `station-drop-low-c` (a
+function called by a given `driver.c`). C tests stay pytest: they compile the code with
+AddressSanitizer and UndefinedBehaviorSanitizer and run the program, so a mutant whose array
+is too small, or whose loop reads one past the end, is caught by the sanitizer even when its
+output happens to be right. C is validated only in a container (`pytest -m docker` runs these
+two).
 
 ## How exercises are generated
 
@@ -352,8 +358,13 @@ Phase numbers match `docs/design.md`.
 - ✅ After 5: [a container for every test run](#where-exercise-code-runs), one fresh Docker
   container per run, chosen per course; every saved exercise validated in it as on the host
 - **6** Second course: another language or framework, to prove nothing is shaped around one
-  course. Next: a C course (its lectures already read as web pages), which needs a language
-  adapter for validation; then C++ and Java (the order is in design.md, "Languages in the plan")
+  course. In progress: a C course (its lectures already read as web pages); generating and
+  validating C exercises is built (pytest drives the compiled program, with sanitizers, in a
+  container; one prompt template filled per language), and so is solving them (the
+  exercise page, attempts, the report, hints with C rules from the compiler and the
+  sanitizers, held-out checks of the learner's own code); the first real batch, 5 exercises,
+  came out 5 of 5 VALID, 4 of them after one repair round; then C++ and Java, each when a
+  course needs it (the order is in design.md, "Languages in the plan")
 - **7** ✅ Local GUI, built ahead of 6: a web app on the CLI's functions, localhost only;
   solving stays in the IDE. The pages, Open in VS Code, background tasks, generation with
   the plan approved in the page, lectures (PDFs, web pages, a whole folder to tick from), a

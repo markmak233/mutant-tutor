@@ -24,10 +24,11 @@ from dataclasses import asdict, dataclass
 from importlib import metadata
 from pathlib import Path
 
+from tutor import languages
 from tutor.config import Workspace, WorkspaceError, load_env, load_workspace
 
 # The names checked by their own rule below; any other name is a pip package.
-NOT_PIP = ("python", "java", "hadoop")
+NOT_PIP = ("python", "java", "hadoop", "gcc")
 NEEDS_JAVA = ("pyspark", "hadoop")
 PACKAGE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 VERSION = re.compile(r"^\d+(\.\d+)*$")  # a prefix of dotted numbers: "3.5" means 3.5.x
@@ -59,7 +60,9 @@ def requires_problems(requires: Mapping[str, str]) -> list[str]:
     version goes into a pip command and an image recipe, so only plain ones pass."""
     problems = []
     for name, version in requires.items():
-        if not PACKAGE.match(name):
+        if toolchain := languages.toolchain_problem(name):
+            problems.append(toolchain)  # not a pip package, whatever its name looks like
+        elif not PACKAGE.match(name):
             problems.append(f"[requires] {name!r} is not a package name")
         elif not VERSION.match(version):
             problems.append(f"[requires] {name} = {version!r}: use a version prefix such as "
@@ -101,6 +104,10 @@ def check_workspace(ws: Workspace) -> list[CheckResult]:
     results = [_check(name, required, ws) for name, required in ws.requires.items()]
     if sys.platform == "win32" and ({"pyspark", "hadoop"} & set(ws.requires)):
         results.append(check_winutils(os.environ.get("HADOOP_HOME"), os.environ.get("PATH", "")))
+    # A language not supported yet, or a malformed [languages.c], fails here like a missing
+    # requirement, so the command line and the GUI both say so.
+    results += [CheckResult("languages", "supported", None, problem)
+                for problem in languages.problems({"languages": ws.languages})]
     return results
 
 
@@ -131,6 +138,8 @@ def _check(name: str, required: str, ws: Workspace) -> CheckResult:
     installed into the course's own .venv by `tutor.workspace init`, which installs the
     [requires] packages too.
     """
+    if toolchain := languages.toolchain_problem(name):
+        return CheckResult(name, required, None, toolchain)  # not something pip can install
     if name == "python":
         return CheckResult(
             name, required, platform.python_version(),
@@ -144,6 +153,12 @@ def _check(name: str, required: str, ws: Workspace) -> CheckResult:
         return CheckResult(
             name, required, _hadoop_version(),
             f"set HADOOP_HOME in .env to an unpacked Hadoop {required}.x",
+        )
+    if name == "gcc":
+        return CheckResult(
+            name, required, _gcc_version(),
+            f"install gcc {required}; C exercises are validated in the course's container, "
+            "where it is, and a learner's own runs here compile with this machine's `cc`",
         )
     try:
         found = metadata.version(name)
@@ -169,6 +184,23 @@ def _java_version() -> str | None:
         return None
     # `java -version` writes to stderr, not stdout.
     return parse_java_version(proc.stderr + proc.stdout)
+
+
+def _gcc_version() -> str | None:
+    """`gcc`'s version, e.g. "12.2.0"; "clang-21.0.0" where `gcc` is clang (macOS), which
+    then does not match a gcc version; None when there is none."""
+    try:
+        first = subprocess.run(["gcc", "--version"], capture_output=True, text=True,
+                               timeout=10).stdout.splitlines()[:1]
+        # -dumpfullversion: gcc 7 and later print the whole version; clang does not know it.
+        flag = "-dumpversion" if first and "clang" in first[0] else "-dumpfullversion"
+        version = subprocess.run(["gcc", flag], capture_output=True, text=True,
+                                 timeout=10).stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if not version:
+        return None
+    return f"clang-{version}" if flag == "-dumpversion" else version
 
 
 def _hadoop_version() -> str | None:

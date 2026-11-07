@@ -176,7 +176,7 @@ def test_a_generated_exercise_is_always_under_rule_main(tmp_path):
                                  tmp_path / "r2")
     metadata = json.loads((solution / "metadata.json").read_text(encoding="utf-8"))
     assert metadata["standalone"] is False
-    assert 'if __name__ == "__main__":' in prompts.SPEC
+    assert 'if __name__ == "__main__":' in prompts.system_prompt("")
 
 
 def test_a_generated_exercise_must_cite_its_course_pages(tmp_path):
@@ -1155,5 +1155,6 @@ def test_a_docstring_with_backslashes_must_be_raw(tmp_path):
 
 def test_the_prompt_holds_no_mangled_escape():
     """SPEC is a plain string: a "\r" there would be a carriage return in every prompt."""
-    assert "\r" not in prompts.SPEC and "\\lbrace and \\rbrace" in prompts.SPEC
-    assert 'r"""...""", so LaTeX' in prompts.SPEC
+    spec = prompts.system_prompt("")  # SPEC filled with Python's parts
+    assert "\r" not in spec and "\\lbrace and \\rbrace" in spec
+    assert 'r"""...""", so LaTeX' in spec

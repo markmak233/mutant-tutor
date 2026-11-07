@@ -1,0 +1,12 @@
+{
+  "id": "station-above-average-c",
+  "title": "Readings above the average",
+  "topic": "c/arrays-and-standard-input",
+  "type": "implementation",
+  "difficulty": "easy",
+  "language": "c",
+  "framework": "c",
+  "interface": "file",
+  "entry_point": ["main"],
+  "source": "synthetic"
+}

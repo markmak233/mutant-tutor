@@ -20,7 +20,12 @@
 {% if problems %}
 <ul class="notice notice-bad form-problems">{% for line in problems %}<li>{{ line }}</li>{% endfor %}</ul>
 {% endif %}
-{% if not ready %}
+{% if c_blocked %}
+{# A C course whose tests would not run in a container (environment.c_without_container):
+   every draft would fail rule `safe`, so no batch starts; the server refuses one too. #}
+{% if not problems %}<p class="notice notice-bad">A C course's exercises are validated only in a container, so a batch starts once the course runs its tests in one: choose it on the <a href="{{ url_for('environment_view', name=course.folder) }}">Environment</a> page (step 3) and build the test image (step 4).</p>{% endif %}
+<p><a href="{{ url_for('course', name=course.folder) }}">Back to {{ course.workspace.course }}</a></p>
+{% elif not ready %}
 <p>No lecture of this course has been read yet: upload or read them on the
   <a href="{{ url_for('lecture_list', name=course.folder) }}">Lectures</a> page.</p>
 {% else %}
