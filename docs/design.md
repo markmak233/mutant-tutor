@@ -53,7 +53,11 @@ container for isolation is fine; deploying the tool as a service is not.
   Hadoop) in a per-course guide `docs/setup/<course>.md`, linked from README (decided 2026-10-25:
   README stays course-agnostic, and each course's system deps and pitfalls differ; the guide
   marks which platforms were actually tested). No install script: setup is one-off, and when it breaks,
-  asking an AI is faster than maintaining a cross-platform script.
+  asking an AI is faster than maintaining a cross-platform script. Relaxed for the release
+  (owner, 2026-11-07): one `uv` line installs the tool, and `tutor doctor` checks and says what
+  to do next, never installing system software (Docker, Java, a compiler), which needs
+  administrator rights or virtualisation settings and differs by platform and, as languages
+  are added, by language (see "Roadmap", 6).
 - Big data course (`bigdata`): Python 3.11, Java 17 (`JAVA_HOME`), PySpark 3.5.x (decided 2026-10-24: the course
   material names more than one Spark version, and the version is pinned per workspace in
   `workspace.toml` anyway, so another course's materials can choose differently). Spark 4.x enables ANSI SQL mode by default,
@@ -2060,7 +2064,8 @@ themselves, so a cheap layer comes first and a stronger one later.
     needs Java and Hadoop there too, and generated tests that passed in the container can still
     behave differently on the host, since code can tell where it runs; only layer A covers that. The
     command that runs a learner's tests in the container, with attempts written on the host from its
-    result, and the risk tiers below come when a course needs them. A container has no Mac GPU, so
+    result, is scheduled (`tutor test`, "Roadmap", 6, owner, 2026-11-07); the risk tiers below come
+    when a course needs them. A container has no Mac GPU, so
     torch exercises run on the CPU. The Docker VM takes memory next to a local LLM. Windows and
     native Linux are not tested, and Windows stays on the host until they are. Podman is not tried.
 - Risk tiers for a course's modules (design for the generalization phase): pure
@@ -2780,6 +2785,40 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
 5. **Done 2026-11-05, light version (owner):** `tutor.eval` reports from the existing records, with
    no model calls, and the README's results; the [5] items of "LLM engineering candidates" are
    reviewed there. The full model comparison was not run.
+6. Next, agreed 2026-11-07 (owner, after an outside review of this file asked for easier
+   setup, one execution environment for validation and the learner, and measured trust). In
+   order, each its own step:
+   1. CI: a `docker` job (`pytest -m docker`; GitHub's Ubuntu runners have Docker) and the
+      fast suite on macOS and Windows as well. Done when all three are green.
+   2. A little refactoring of the files over 500 lines (`gui/app.py`, `graph/nodes.py`,
+      `graph/prompts.py`, ...), planned and explained first; the prompt pins must still pass.
+   3. `tutor test`: the learner's tests in the course's image, as validation runs them, from
+      the IDE's terminal: live output, attempts and snapshots written on the host from the
+      result, and a time limit (an exception to "No timeout on the learner's own `pytest`
+      runs", set when built). It reuses `execution.run_pytest`'s container path; the part of
+      `attempts.py` that writes a line is shared by both ways. The host's `pytest` stays, for
+      debugging in the IDE; which way is the default is decided when built. With it, a
+      container course needs on the host only Docker, the tool and an IDE: the image already
+      holds Java, Hadoop and gcc. Done when a C and a Spark exercise give the same outcomes
+      both ways and their attempts lines match.
+      - Optional, after it: a page for a learner who wants to run tests on the host anyway,
+        saying how to install that course's toolchain (Java, Hadoop, a C compiler) on their
+        platform, automated where a language allows it safely. Toolchains differ by language,
+        so the page grows language by language.
+   4. A record of each image build: the pip packages' versions, Java's and gcc's, and the base
+      image's digest, shown on the Environment page with the `[requires]` packages whose
+      versions differ between the course's `.venv` and the image. Recorded, not pinned: a
+      pinned base image misses security updates; pin it once drift is seen.
+   Then packaging and release (see "Deferred", "Packaging and release"), with `tutor doctor`
+   (checks the tool, that Docker runs, the course's image, then validates one example in the
+   course's runner as a smoke test, and says what to do next for each failure) and a fresh
+   install timed on macOS, Windows and Linux; Docker on Windows is first tested there.
+   Later, each when its trigger comes: a JDK instead of a JRE in the image (a course that
+   compiles Java in it); a separate execution backend (a third runner such as Podman; until
+   then the host or container switch in `execution.py` is enough); VS Code Dev Containers on
+   the course's image (debugging inside it); for C, a fixed regression set of plan items rerun
+   when its prompts change, and held-out solutions written by a model (after a second C batch
+   and the owner's own C solving).
 
 ## Backlog (decided, not scheduled)
 
@@ -2935,6 +2974,9 @@ gaps. Each was decided by the owner; change one only with the owner.
   2026-11-07, under the Models page): nothing comes with the code, the list is downloaded
   on the owner's click, and it only fills the New model form; the course gets nothing until
   the owner saves.
+- No courses whose work is built and run in a device emulator or an IDE of its own (Android
+  Studio and the like; owner, 2026-11-07). Their builds, emulators and UI tests are outside
+  what a test run in a container can check, so they are outside this project.
 
 ## Deferred
 
@@ -2996,7 +3038,8 @@ mode is not done (see "Decisions not to do").
   - What a user still installs: that one line, for all; an IDE to solve in; an API key or a
     local model to generate; Java and Hadoop for such courses, since the learner's runs stay
     on the host (the page gives the commands); Docker Desktop to choose the container. A plain
-    Python course needs only the line and a key.
+    Python course needs only the line and a key. Once `tutor test` is built ("Roadmap", 6), a
+    container course needs that toolchain only to run tests on the host, e.g. to debug.
 
 Local GUI (phase 7, started 2026-11-06 ahead of the rest of phase 6, see above; discussed
 2026-10-26). It sits on top of the files and functions the earlier phases build, so it comes
