@@ -1580,9 +1580,10 @@ is set per run, as a code batch of the same course needs its tracebacks, and not
 an exercise as hand calculation. The answers are still in `test_student.py`, and in `first_error` in the
 attempt log. Multiple choice and short answer are outside this: the validator cannot check them.
 
-## Evaluation metrics (README results table)
+## Evaluation metrics (the results table)
 
-Decided 2026-11-05 (owner), for phase 5's light version. The numbers are in the README, "Results".
+Decided 2026-11-05 (owner), for phase 5's light version. The numbers are in `docs/details.md`,
+"Results" (in the README until 2026-11-07; the README links to them).
 
 - First-pass validity rate; validity after repair loop.
 - What stopped the first draft, by rule. This replaces the mutant kill rate, which is 100% on saved
@@ -1605,7 +1606,7 @@ on 49 exercises, and a failure there is only a warning. It overwrites one file, 
 copy per test run would pile up. In a generated batch, an exercise whose `student.py` differs from its skeleton
 with no logged run is listed, which shows runs lost outside the course venv; a batch written by hand has a
 `student.py` that differs from the start, so there it cannot be seen. No `first_error`, failure detail or rating remark
-is copied, as any of them can hold an answer. The README's table is public, so it changes only on request.
+is copied, as any of them can hold an answer. The results table is public, so it changes only on request.
 
 ## Prompt layout for caching
 
@@ -1901,8 +1902,9 @@ program. Accepted for now (raised in the same review); `pytest-timeout` is the f
 become a problem.
 
 The README states this boundary too ("Running exercise code is not sandboxed", 2026-10-26;
-"Where exercise code runs" since the container shipped, 2026-11-06), since anyone who clones
-the repo validates code on their own machine.
+"Where exercise code runs" since the container shipped, 2026-11-06, in `docs/details.md` since
+2026-11-07 with a line and a link in the README), since anyone who clones the repo validates
+code on their own machine.
 
 Where isolation goes (decided 2026-10-28; built with the [3] isolation item): whatever
 phase 3 adds (a container, a static check against network, subprocesses and files outside
@@ -2658,6 +2660,11 @@ gaps. Each was decided by the owner; change one only with the owner.
   handled by describing the intended use positively (README "Intended use", no
   prohibitions), by MIT's as-is clause, and by protecting users (phase 3 note on malicious
   material).
+- A short README (owner, 2026-11-07: it had grown to 415 lines). The README says what the
+  repository is, what it does, how to start and its intended use, in about 100 lines; how
+  validation and generation work, the results, the RAG comparison, where exercise code
+  runs, the layout and the roadmap moved word for word to `docs/details.md`, which it links,
+  with design.md behind both.
 - No CONTRIBUTING.md or SECURITY.md (decided 2026-10-26, before going public; a Codex review
   suggested both without knowing the repo's intent). This is a personal portfolio and
   revision tool, not a project seeking contributors: setup and checks are in README and
