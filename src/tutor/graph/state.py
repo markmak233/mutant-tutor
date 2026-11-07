@@ -29,7 +29,7 @@ class PlanItem(_Strict):
 
     id: Annotated[str, Field(pattern=r"^[a-z0-9]+(-[a-z0-9]+)*$")]
     knowledge_point: str
-    lecture: str  # the lecture's file name without .pdf, as in lectures/
+    lecture: str  # the lecture's file name without .pdf (or .html), as in lectures/
     slides: str  # slide footers, e.g. "4.15-4.24"
     type: Literal["implementation", "completion", "debugging"]
     interface: Literal["function", "file"]
@@ -120,7 +120,7 @@ class BatchState(TypedDict, total=False):
     """State of a whole batch: plan -> approve -> items in parallel -> collect. It is saved
     by the checkpointer, so it holds plain data (dicts), not models."""
 
-    lectures: list[str]  # lecture file names without .pdf
+    lectures: list[str]  # lecture file names without .pdf (or .html)
     preferences: str
     count: int | None  # None: the plan chooses, up to max_count
     max_count: int

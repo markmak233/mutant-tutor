@@ -759,7 +759,9 @@ def write_manifest(deps: Deps, items: list[PlanItem], notes: str | None = None,
     path.parent.mkdir(parents=True, exist_ok=True)
     sources = list(known.sources) if known else []
     for item in items:
-        source = SourceRef(path=f"lectures/{item.lecture}.pdf", slides=item.slides)
+        # The lecture's own file, as its cache names it: L4.pdf, or notes saved as L4.html.
+        read_from = cache.lecture_cache(deps.workspace, item.lecture).name.removesuffix(".md")
+        source = SourceRef(path=f"lectures/{read_from}", slides=item.slides)
         if source not in sources:
             sources.append(source)
     if known:

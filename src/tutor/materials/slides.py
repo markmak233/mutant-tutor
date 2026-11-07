@@ -1,7 +1,8 @@
 """An exercise's lecture pages, from the lecture cache, for a model that reads them.
 
 Exercises name their lecture and pages in metadata `source`. The pipeline writes the exact
-name of the cache file (cache/lectures/<name>.pdf.md), so a course may name its files anything.
+name of the cache file (cache/lectures/<name>.pdf.md, or .html.md for notes saved as a web page),
+so a course may name its files anything.
 Earlier batches hold what a model wrote ("L2.2", "Lecture 5: Topic C"; pages "12-15, 20",
 "p.8-p.10", "L1.1 3-8; L1.2 5-9"): there only the number after the word for lecture is
 reliable, and the cache file is found by it (Lecture_<number>-....pdf.md).
@@ -108,17 +109,16 @@ def page_groups(pdf_pages: str, lectures: list[str]) -> list[tuple[str, set[int]
 
 
 def lecture_file(workspace: Path, number: str) -> Path | None:
-    """cache/lectures/Lecture_<number>-....pdf.md. The character after the number must be
-    "-" or "_", so lecture 5 does not match Lecture_5.2-...."""
+    """cache/lectures/Lecture_<number>-....pdf.md (or .html.md). The character after the
+    number must be "-" or "_", so lecture 5 does not match Lecture_5.2-...."""
     pattern = re.compile(rf"^Lecture_{re.escape(number)}[-_]")
-    found = sorted(p for p in (workspace / "cache" / "lectures").glob("*.pdf.md")
-                   if pattern.match(p.name))
+    found = sorted(p for p in cache.lecture_caches(workspace) if pattern.match(p.name))
     return found[0] if found else None
 
 
 def _lecture_name(path: Path) -> str:
     """A cache file's lecture: Lecture_5-Topic_C.pdf.md -> "Lecture_5-Topic_C"."""
-    return path.name.removesuffix(".pdf.md")
+    return cache.lecture_name(path) or path.name
 
 
 def _named_file(workspace: Path, source: dict) -> Path | None:
@@ -127,7 +127,7 @@ def _named_file(workspace: Path, source: dict) -> Path | None:
     lecture = source.get("lecture") or ""
     if not lecture or Path(lecture).name != lecture:
         return None
-    path = workspace / "cache" / "lectures" / f"{lecture}.pdf.md"
+    path = cache.lecture_cache(workspace, lecture)
     return path if path.is_file() else None
 
 
@@ -142,8 +142,7 @@ def lectures_taught(workspace: Path, source) -> list[str]:
     by name ("Lecture_5-Topic_C"): what a student has been taught when solving it.
     [] when the source names no lecture."""
     if isinstance(source, dict) and (named := _named_file(workspace, source)) is not None:
-        names = sorted((_lecture_name(path)
-                        for path in (workspace / "cache" / "lectures").glob("*.pdf.md")),
+        names = sorted((_lecture_name(path) for path in cache.lecture_caches(workspace)),
                        key=_file_order)
         if unordered := [name for name in names if not re.search(r"\d", name)]:
             # No guessing: alphabetical order is not the course's.
@@ -162,7 +161,7 @@ def lectures_taught(workspace: Path, source) -> list[str]:
 def cached_lectures(workspace: Path) -> list[tuple[str, Path]]:
     """(lecture number, cache file) of every cached lecture, in course order."""
     found = []
-    for path in (workspace / "cache" / "lectures").glob("*.pdf.md"):
+    for path in cache.lecture_caches(workspace):
         if named := _CACHE_NAME.match(path.name):
             found.append((named.group(1), path))
     return sorted(found, key=lambda item: _order(item[0]))

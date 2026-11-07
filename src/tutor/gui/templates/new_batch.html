@@ -21,9 +21,8 @@
 <ul class="notice notice-bad form-problems">{% for line in problems %}<li>{{ line }}</li>{% endfor %}</ul>
 {% endif %}
 {% if not ready %}
-<p>No lecture of this course has been read yet. From the course folder, run
-  <code>python -m tutor.materials lectures/NAME.pdf</code>; reading from this page comes in a
-  later step.</p>
+<p>No lecture of this course has been read yet: upload or read them on the
+  <a href="{{ url_for('lecture_list', name=course.folder) }}">Lectures</a> page.</p>
 {% else %}
 <form method="post" action="{{ url_for('start_plan', name=course.folder) }}" class="form">
   <fieldset>

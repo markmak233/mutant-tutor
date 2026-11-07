@@ -1,34 +1,50 @@
 """Lectures and new courses (GUI step 5): what is read, uploads, and the commands that read.
 
-A lecture is a PDF in the course's lecture folder; reading it fills the cache
+A lecture is a PDF, or notes saved as a web page (.html, .htm; owner 2026-11-07), in the
+course's lecture folder; reading it fills the cache
 (`python -m tutor.materials`, the existing command, run as a GUI task). Reading the text
-layer costs nothing and starts after every upload; the image pages it cannot read wait for
+layer (or a web page's text) costs nothing and starts after every upload; the image pages
+it cannot read wait for
 the vision model, which runs only on the owner's click, as it costs money (owner,
 2026-11-06).
 
-Uploads (owner, 2026-11-06): PDFs only, checked by their first bytes and not only by name;
-at most MAX_PDF_BYTES each; the name kept as given (any letters, spaces, brackets) unless it
-holds a character no file name should, with ".pdf" in lower case, as the cache and the
-plan look lectures up by that name; never over an existing file, since exercises cite its
-slides. A batch of files is saved all or nothing: each is written to a hidden part file
-first, and only when all are complete are they linked into place (a link fails rather than
-replace a file).
+Uploads (owner, 2026-11-06): PDFs and web pages only, checked by their first bytes and not
+only by name; at most MAX_LECTURE_BYTES each; the name kept as given (any letters, spaces,
+brackets) unless it holds a character no file name should, with the extension in lower case,
+as the cache and the plan look lectures up by that name; never over an existing file, since
+exercises cite its slides, nor beside one of the same name and another extension (L4.pdf and
+L4.html would be one lecture). A batch of files is saved all or nothing: each is written to a
+hidden part file first, and only when all are complete are they linked into place (a link
+fails rather than replace a file).
 
-A new course is `python -m tutor.workspace init` run as a task, after its PDFs are saved
-into its lectures/; until init writes workspace.toml, the folder is "being created", and
-only its task page is shown.
+A whole folder (owner, 2026-11-07): the browser sends every file in it, so only its PDFs and
+web pages are kept, outside what a browser saves beside a page (`Name_files/`) and hidden
+files. They wait in the course's STAGING_DIR, not yet lectures, while the owner unticks what
+is none (exams, solutions): a lecture cannot be deleted from the GUI, and exercises cite it.
+A file with no number in its name takes the one its subfolder starts with ("10 Matrices/
+Quiz.htm" -> "10 Quiz.htm"), so its sections are numbered like its topic. The ticked files
+then go through save_lectures like any upload. One folder waits at a time: choosing another
+drops the one before.
+
+A new course is `python -m tutor.workspace init` run as a task, with no lectures (owner,
+2026-11-07: the Lectures page adds them, files or a folder); until init writes
+workspace.toml, the folder is "being created", and only its task page is shown.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import secrets
+import shutil
 import sys
 import tomllib
 import unicodedata
+from collections import Counter
 from collections.abc import Iterable
-from dataclasses import dataclass
+from contextlib import ExitStack
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import BinaryIO, Protocol
 
@@ -36,9 +52,10 @@ from tutor.config import WORKSPACE_FILE, Workspace, _enclosing_git_repo
 from tutor.gui import tasks
 from tutor.gui.courses import Course, _child
 from tutor.materials import cache
+from tutor.materials.html import lecture_number, looks_like_html
 from tutor.workspace import venv_python
 
-MAX_PDF_BYTES = 100 * 1024 * 1024
+MAX_LECTURE_BYTES = 100 * 1024 * 1024
 MAX_NAME = 120  # characters of a lecture's file name
 _BAD_CHARS = set('/\\:*?"<>|[]')  # separators, Windows' reserved ones, and glob's
 FOLDER = re.compile(r"^[a-z0-9][a-z0-9_-]{0,39}$")  # a new course's folder
@@ -55,24 +72,29 @@ class Upload(Protocol):
 
 @dataclass(frozen=True)
 class LectureRow:
-    name: str  # the PDF's file name, e.g. "L4.pdf"
-    pages: int  # pages in the cache; 0: not read yet
+    name: str  # the lecture's file name, e.g. "L4.pdf" or "notes 4.html"
+    pages: int  # pages in the cache (a web page's sections); 0: not read yet
     waiting: int  # image pages waiting for the vision model
 
     @property
     def read(self) -> bool:
         return self.pages > 0
 
+    @property
+    def web_page(self) -> bool:
+        """Notes saved as a web page: cut into sections, not pages, and no image read."""
+        return not self.name.lower().endswith(".pdf")
+
 
 def lecture_rows(course: Course) -> list[LectureRow]:
-    """Every PDF in the lecture folder, with what the cache holds of it."""
+    """Every lecture in the lecture folder, with what the cache holds of it."""
     folder = course.workspace.lecture_dir
-    pdfs = sorted(p for p in folder.iterdir() if p.is_file() and p.suffix.lower() == ".pdf"
-                  and not p.name.startswith(".")) if folder.is_dir() else []
+    files = sorted(p for p in folder.iterdir() if p.is_file() and cache.is_lecture(p)) \
+        if folder.is_dir() else []
     rows = []
-    for pdf in pdfs:
-        entries = cache.load(cache.cache_path(course.workspace.root, pdf, folder)).values()
-        rows.append(LectureRow(pdf.name, len(entries),
+    for path in files:
+        entries = cache.load(cache.cache_path(course.workspace.root, path, folder)).values()
+        rows.append(LectureRow(path.name, len(entries),
                                sum(e.read in ("pending", "partial") for e in entries)))
     return rows
 
@@ -89,28 +111,27 @@ def vision_model(course: Course) -> str | None:
     return f"{name} ({data.get('provider', '?')}: {data.get('model') or data.get('provider')})"
 
 
-def read_command(pdfs: Iterable[Path], vision: bool = False) -> list[str]:
-    """`python -m tutor.materials` on these PDFs: the text layer, or with `vision` the image
+def read_command(files: Iterable[Path], vision: bool = False) -> list[str]:
+    """`python -m tutor.materials` on these lectures: the text, or with `vision` the image
     pages too. Absolute paths, so none can pass for the command's own options."""
     return [sys.executable, "-m", "tutor.materials", *(["--vision"] if vision else []),
-            *(str(p.resolve()) for p in pdfs)]
+            *(str(p.resolve()) for p in files)]
 
 
-def save_pdfs(folder: Path, files: Iterable[Upload]) -> tuple[list[Path], list[str]]:
-    """Save the uploaded PDFs into `folder`, all or none. Returns the saved paths, or the
-    problems (each naming its file) when none was saved."""
+def save_lectures(folder: Path, files: Iterable[Upload]) -> tuple[list[Path], list[str]]:
+    """Save the uploaded lectures (PDFs, web pages) into `folder`, all or none. Returns the
+    saved paths, or the problems (each naming its file) when none was saved."""
     chosen = [(f, _name(f.filename or "")) for f in files if f.filename]
     if not chosen:
-        return [], ["Choose at least one PDF."]
+        return [], ["Choose at least one lecture file."]
+    taken = _lecture_stems(folder)
     problems, names = [], []
     for upload, name in chosen:
-        problem = _name_problem(upload.filename or "", name)
-        if problem is None and ((folder / name).exists()
-                                or name.casefold() in (n.casefold() for n in names)):
-            problem = (f"{name}: a lecture with this name exists. To replace it, delete the "
-                       "old file first; exercises may cite its slides.")
-        if problem:
+        if problem := (_name_problem(upload.filename or "", name)
+                       or _clash(folder, name, taken)):
             problems.append(problem)
+        else:
+            taken[Path(name).stem.casefold()] = "another file of this upload"
         names.append(name)
     if problems:
         return [], problems
@@ -143,15 +164,37 @@ def save_pdfs(folder: Path, files: Iterable[Upload]) -> tuple[list[Path], list[s
 
 def _name(given: str) -> str:
     """The name to save under: the last part of what the browser sent (some send a path),
-    in one Unicode form (macOS file names can arrive decomposed), ".pdf" in lower case."""
+    in one Unicode form (macOS file names can arrive decomposed), a lecture's extension in
+    lower case (".pdf", ".html", ".htm")."""
     name = unicodedata.normalize("NFC", given.replace("\\", "/").rsplit("/", 1)[-1]).strip()
     stem, dot, extension = name.rpartition(".")
-    return f"{stem}.pdf" if dot and extension.lower() == "pdf" else name
+    lower = f".{extension.lower()}"
+    return f"{stem}{lower}" if dot and lower in cache.LECTURE_SUFFIXES else name
+
+
+def _lecture_stems(folder: Path) -> dict[str, str]:
+    """The lectures in `folder` by their name before the extension, folded: a lecture is
+    named by that, so L4.pdf and L4.html would be one lecture."""
+    return {p.stem.casefold(): p.name for p in folder.iterdir() if cache.is_lecture(p)} \
+        if folder.is_dir() else {}
+
+
+def _clash(folder: Path, name: str, taken: dict[str, str]) -> str | None:
+    """Why `name` cannot be saved beside the lectures in `folder`: one of that name exists,
+    or `taken` (_lecture_stems, plus what this upload saves before it) has its stem."""
+    if (folder / name).exists():
+        return (f"{name}: a lecture with this name exists. To replace it, delete the old "
+                "file first; exercises may cite its slides.")
+    if other := taken.get(Path(name).stem.casefold()):
+        return (f"{name}: {other} has the same name before its extension, and a lecture is "
+                "named by that: rename one of them.")
+    return None
 
 
 def _name_problem(given: str, name: str) -> str | None:
-    if not name.endswith(".pdf"):
-        return f"{name or given}: only PDF files are read for now."
+    if not name.endswith(cache.LECTURE_SUFFIXES):
+        return (f"{name or given}: only PDF files and web pages saved from a browser (.html, "
+                ".htm) are read.")
     if name.startswith((".", "-")) or len(name) > MAX_NAME or any(
             c in _BAD_CHARS or ord(c) < 32 for c in name):
         return (f"{name}: rename it first: at most {MAX_NAME} characters, not starting with "
@@ -160,21 +203,232 @@ def _name_problem(given: str, name: str) -> str | None:
 
 
 def _write(stream: BinaryIO, part: Path, name: str) -> str | None:
-    """Copy one upload to `part`; a problem if it is too large or not a PDF."""
+    """Copy one upload to `part`; a problem if it is too large, or its content is not what
+    its name says (a PDF, or an HTML page)."""
     size = 0
     head = b""
     with part.open("wb") as out:
         while chunk := stream.read(_CHUNK):
-            if len(head) < 1024:
-                head += chunk[:1024]
+            if len(head) < 4096:
+                head += chunk[:4096]
             size += len(chunk)
-            if size > MAX_PDF_BYTES:
-                return f"{name}: larger than {MAX_PDF_BYTES // (1024 * 1024)} MB."
+            if size > MAX_LECTURE_BYTES:
+                return f"{name}: larger than {MAX_LECTURE_BYTES // (1024 * 1024)} MB."
             out.write(chunk)
+    if not name.endswith(".pdf"):
+        if not looks_like_html(head):
+            return f"{name}: not a web page (its content does not start like one)."
+        return None
     # A PDF starts with "%PDF-", which the format lets sit anywhere in the first 1024 bytes.
     if b"%PDF-" not in head[:1024]:
         return f"{name}: not a PDF file (its content does not start like one)."
     return None
+
+
+# --- a whole folder (owner, 2026-11-07) ---------------------------------------------------------
+
+STAGING_DIR = ".lecture-uploads"  # in the course folder; a chosen folder's lectures wait here
+MAX_FOLDER_FILES = 5000  # files one folder upload may send, lectures or not
+_TOKEN = re.compile(r"^[0-9a-f]{16}$")  # a staging folder's name, so no path can pass for one
+_LEADING_NUMBER = re.compile(r"^\d+(?:\.\d+)*(?=\D|$)")  # "10 Matrices" -> "10"
+
+
+@dataclass(frozen=True)
+class FolderFile:
+    """One PDF or web page of a chosen folder: staged as <index>.part, not yet a lecture."""
+
+    index: int
+    folder: str  # the subfolders it was in, "a/b"; "" at the top of the chosen folder
+    given: str  # its name there
+    name: str  # the lecture's name it is saved under (_numbered)
+    size: int  # bytes staged; 0 when it was not (it has a problem)
+    problem: str | None  # why it cannot be saved, without its name; None: it can
+
+    @property
+    def size_text(self) -> str:
+        if not self.size:
+            return ""
+        if self.size < 1024 * 1024:
+            return f"{max(1, round(self.size / 1024))} KB"
+        return f"{self.size / (1024 * 1024):.1f} MB"
+
+
+@dataclass(frozen=True)
+class StagedFolder:
+    token: str  # the staging folder's name
+    folder: str  # the chosen folder's name, "" if the browser sent none
+    files: list[FolderFile]
+    skipped: dict[str, int]  # the files left out, by why: "hidden", "in _files folders", ".mp4"
+
+    @property
+    def groups(self) -> list[tuple[str, list[FolderFile]]]:
+        """The files by subfolder, in order: stage_folder sorts them by subfolder first, so
+        each subfolder's files come together."""
+        groups: list[tuple[str, list[FolderFile]]] = []
+        for file in self.files:
+            if not groups or groups[-1][0] != file.folder:
+                groups.append((file.folder, []))
+            groups[-1][1].append(file)
+        return groups
+
+
+@dataclass(frozen=True)
+class _Staged:
+    """A staged file handed to save_lectures as if uploaded under its lecture name."""
+
+    filename: str
+    stream: BinaryIO
+
+
+def stage_folder(course_root: Path, lecture_dir: Path,
+                 uploads: Iterable[Upload]) -> tuple[str | None, list[str]]:
+    """Copy the PDFs and web pages of a chosen folder (each upload named by its path in it,
+    "chosen/sub/file.pdf", as browsers send a folder) into a new staging folder, with what
+    stops each one being saved. Returns its token, or the problems when it holds none."""
+    staging = course_root / STAGING_DIR
+    _discard_all(staging)  # one folder waits at a time; one never confirmed goes now
+    found: list[tuple[list[str], str, Upload]] = []
+    skipped: Counter[str] = Counter()
+    top = ""
+    for upload in uploads:
+        parts = [unicodedata.normalize("NFC", p)
+                 for p in (upload.filename or "").replace("\\", "/").split("/") if p]
+        if not parts:
+            continue
+        if len(parts) > 1:
+            top, parts = parts[0], parts[1:]
+        if why := _left_out(parts):
+            skipped[why] += 1
+        else:
+            found.append((parts[:-1], parts[-1], upload))
+    if not found:
+        where = top or "the chosen folder"
+        return None, [f"No PDF or web page (.pdf, .html, .htm) was found in {where} or its "
+                      f"subfolders ({sum(skipped.values())} other files were left out)."
+                      if skipped else "Choose a folder."]
+    token = secrets.token_hex(8)
+    target = staging / token
+    target.mkdir(parents=True)
+    # By subfolder, then name: the top of the folder first, "2 Dot" before "10 Matrices".
+    found.sort(key=lambda f: (_natural("/".join(f[0])), _natural(f[1])))
+    taken = _lecture_stems(lecture_dir)
+    files = []
+    for index, (folders, given, upload) in enumerate(found):
+        name = _numbered(folders, _name(given))
+        problem = _name_problem(given, name) or _clash(lecture_dir, name, taken)
+        part = target / f"{index}.part"
+        if problem is None and (problem := _write(upload.stream, part, name)):
+            part.unlink(missing_ok=True)
+        if problem is None:
+            where = "/".join([*folders, given])
+            taken[Path(name).stem.casefold()] = f"{where}, listed above,"
+        size = part.stat().st_size if problem is None else 0
+        files.append(FolderFile(index, "/".join(folders), given, name, size,
+                                problem and problem.removeprefix(f"{name}: ")))
+    data = {"folder": top, "files": [asdict(f) for f in files],
+            "skipped": dict(skipped.most_common())}
+    (target / "staged.json").write_text(json.dumps(data, ensure_ascii=False, indent=1),
+                                        encoding="utf-8")
+    return token, []
+
+
+def staged_folder(course_root: Path, token: str) -> StagedFolder | None:
+    """The folder staged under `token`; None if there is none (saved, or another chosen)."""
+    if not _TOKEN.match(token):
+        return None
+    try:
+        data = json.loads((course_root / STAGING_DIR / token / "staged.json")
+                          .read_text(encoding="utf-8"))
+        return StagedFolder(token, data["folder"], [FolderFile(**f) for f in data["files"]],
+                            data["skipped"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def ticks(staged: StagedFolder, picks: Iterable[str], change: str) -> set[int]:
+    """The ticks after one of the page's tick buttons (owner, 2026-11-07). The GUI has no
+    script of its own, so a button sends the ticks as they are (`picks`, the form's indexes)
+    and the page comes back with `change` made: "all", "none", "invert", or "on:<subfolder>"
+    / "off:<subfolder>" for the files directly in it. Only files that can be saved are ever
+    ticked."""
+    can = {f.index for f in staged.files if f.problem is None}
+    now = {int(p) for p in picks if p.isascii() and p.isdigit()} & can
+    if change == "all":
+        return can
+    if change == "none":
+        return set()
+    if change == "invert":
+        return can - now
+    action, _, folder = change.partition(":")
+    group = {f.index for f in staged.files if f.folder == folder} & can
+    if action == "on":
+        return now | group
+    if action == "off":
+        return now - group
+    return now
+
+
+def save_staged(course_root: Path, lecture_dir: Path, staged: StagedFolder,
+                picks: Iterable[str]) -> tuple[list[Path], list[str]]:
+    """Save the ticked files (`picks`: their indexes, as the form sends them) as lectures,
+    all or none, through save_lectures, which checks them again, as a lecture may have
+    appeared since. The staging folder goes once they are saved, and stays otherwise, so the
+    owner can untick what was refused."""
+    ticked = set(picks)
+    chosen = [f for f in staged.files if str(f.index) in ticked and f.problem is None]
+    if not chosen:
+        return [], ["Tick at least one lecture to save."]
+    folder = course_root / STAGING_DIR / staged.token
+    with ExitStack() as stack:
+        try:
+            uploads = [_Staged(f.name, stack.enter_context((folder / f"{f.index}.part")
+                                                            .open("rb"))) for f in chosen]
+        except OSError:
+            return [], ["The folder's files are no longer kept: choose the folder again."]
+        saved, problems = save_lectures(lecture_dir, uploads)
+    if not problems:
+        discard_staged(course_root, staged.token)
+    return saved, problems
+
+
+def discard_staged(course_root: Path, token: str) -> None:
+    if _TOKEN.match(token):
+        shutil.rmtree(course_root / STAGING_DIR / token, ignore_errors=True)
+
+
+def _discard_all(staging: Path) -> None:
+    for child in staging.iterdir() if staging.is_dir() else []:
+        if _TOKEN.match(child.name):
+            shutil.rmtree(child, ignore_errors=True)
+
+
+def _left_out(parts: list[str]) -> str | None:
+    """Why a file of a chosen folder (its path in it, split) is not offered as a lecture,
+    as the page counts it; None if it is offered."""
+    if any(p.startswith(".") for p in parts):  # .DS_Store, .vscode/ (and never "..")
+        return "hidden"
+    if any(p.lower().endswith("_files") for p in parts[:-1]):  # a saved page's images, styles
+        return "in _files folders"
+    return None if cache.is_lecture(Path(parts[-1])) else (
+        Path(parts[-1]).suffix.lower() or "with no extension")
+
+
+def _numbered(folders: list[str], name: str) -> str:
+    """A lecture name with no number takes the number its nearest subfolder starts with:
+    "10 Matrices/Quiz review.htm" -> "10 Quiz review.htm", so its sections are numbered 10.N
+    and it sorts with its topic. A name with a number keeps it as it is."""
+    if lecture_number(Path(name)) is not None:
+        return name
+    for folder in reversed(folders):
+        if found := _LEADING_NUMBER.match(folder):
+            return f"{found.group(0)} {name}"
+    return name
+
+
+def _natural(text: str) -> list[str | int]:
+    """A sort key putting "2 Dot product" before "10 Matrices": re.split with a group gives
+    text at even places and digits at odd ones, so like is always compared with like."""
+    return [int(t) if i % 2 else t.casefold() for i, t in enumerate(re.split(r"(\d+)", text))]
 
 
 # --- a new course -----------------------------------------------------------------------------
@@ -233,8 +487,8 @@ def create_progress(course: Course, task: tasks.Task) -> list[Stage]:
     labels = ["Course files: workspace.toml and VS Code's settings",
               "Python environment (.venv)",
               "Installing this tool into it (a few minutes the first time)"]
-    if len(task.commands) > 1:
-        labels.append("Reading the lecture PDFs (the text, free)")
+    if len(task.commands) > 1:  # a course created before 2026-11-07 read its lectures too
+        labels.append("Reading the lectures (the text, free)")
         finished.append(len(codes) >= 2 and codes[1] == 0)
     stages, current = [], True
     for label, done in zip(labels, finished, strict=True):
@@ -256,16 +510,6 @@ def elapsed(task: tasks.Task) -> str:
     return f"{seconds // 60} min {seconds % 60:02d} s" if seconds >= 60 else f"{seconds} s"
 
 
-def remove_new(folder: Path) -> None:
-    """Undo a new course folder this request made, when its PDFs could not be saved: it
-    holds only lectures/, empty, as save_pdfs leaves nothing behind."""
-    lectures = folder / "lectures"
-    if lectures.is_dir() and not any(lectures.iterdir()):
-        lectures.rmdir()
-    if folder.is_dir() and not any(folder.iterdir()):
-        folder.rmdir()
-
-
 # --- what a course still lacks ------------------------------------------------------------------
 
 
@@ -276,7 +520,8 @@ def setup_gaps(course: Course, rows: list[LectureRow]) -> list[tuple[str, str | 
     data = _toml(course.workspace.root)
     gaps: list[tuple[str, str | None, str]] = []
     if not rows:
-        gaps.append(("No lectures yet: upload the lecture PDFs.", "lecture_list",
+        gaps.append(("No lectures yet: upload the lecture PDFs or web pages, or a whole folder "
+                     "of them, and tick which to keep.", "lecture_list",
                      "Lectures"))
     elif unread := [r for r in rows if not r.read]:
         gaps.append((f"{len(unread)} lecture{'s' if len(unread) > 1 else ''} not read yet.",

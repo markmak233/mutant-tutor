@@ -34,8 +34,8 @@ back with the values typed, escaped like any other.
 
 Lectures and new courses (step 5): uploads go into the course's lecture folder and are read
 by `python -m tutor.materials` as a task; a new course is `python -m tutor.workspace init`
-as a task, after its PDFs are saved (lectures.py). Uploads and the other forms refuse with
-the problems listed, each naming the file it is about.
+as a task, with no lectures: they are added on its Lectures page after (lectures.py). Uploads
+and the other forms refuse with the problems listed, each naming the file it is about.
 
 Settings (step 6): the Keys page writes `.env` (keys.py), and a course's Models page its
 workspace.toml's [llm] (llm_settings.py). A key is never sent back to the browser: a page
@@ -108,6 +108,8 @@ NOTICES = {
                           "now."),
     "note-bad": ("bad", "The note was not used: write plain text, 2000 characters at most, "
                         "or leave it empty to try again without one."),
+    "folder-cancelled": ("ok", "Nothing was saved from the folder, and its files are no "
+                               "longer kept."),
     "key-saved": ("ok", "Saved in .env. Commands started from now on use it."),
     "key-deleted": ("ok", "Removed from .env."),
     "model-saved": ("ok", "Saved in workspace.toml (the file before is workspace.toml.bak)."),
@@ -167,8 +169,8 @@ def create_app(root: Path, token: str, port: int | None = None,
     `launcher`: what opens folders and VS Code (tests pass a stand-in). `env_file`: where
     the Keys page keeps keys, by default the repository's .env, which the commands read."""
     app = Flask(__name__)
-    # MAX_CONTENT_LENGTH: a request larger than this gets 413 before it is read; each PDF has
-    # its own limit (lectures.MAX_PDF_BYTES).
+    # MAX_CONTENT_LENGTH: a request larger than this gets 413 before it is read; each lecture
+    # file has its own limit (lectures.MAX_LECTURE_BYTES).
     app.config.update(ROOT=root.resolve(), TOKEN=token, PORT=port,
                       MAX_CONTENT_LENGTH=UPLOAD_LIMIT_BYTES,
                       ENV_FILE=env_file or tasks.REPO / ".env")
@@ -203,9 +205,24 @@ def create_app(root: Path, token: str, port: int | None = None,
     @app.errorhandler(403)
     @app.errorhandler(404)
     @app.errorhandler(405)
-    @app.errorhandler(413)
     def error(e):
         return render_template("error.html", code=e.code, message=e.description), e.code
+
+    @app.errorhandler(413)
+    def too_large(e):
+        """An upload over UPLOAD_LIMIT_BYTES, or a folder of more than MAX_FOLDER_FILES
+        files: said in words, with the way back to the form."""
+        limit = f"{UPLOAD_LIMIT_BYTES // (1024 * 1024)} MB"
+        name = (request.view_args or {}).get("name")
+        if request.endpoint == "stage_lecture_folder":
+            message = (f"The folder was not taken: the browser sends all of it, videos and "
+                       f"images too, and it is over {limit} or "
+                       f"{lectures.MAX_FOLDER_FILES} files. Choose one of its subfolders, or "
+                       f"pick the lecture files themselves under Add lectures.")
+        else:
+            message = f"The upload is over {limit} in all: upload fewer files at a time."
+        back = url_for("lecture_list", name=name) if name else None
+        return render_template("error.html", code=413, message=message, back=back), 413
 
     def course_or_404(name: str) -> courses.Course:
         course = courses.get_course(app.config["ROOT"], name)
@@ -396,7 +413,7 @@ def create_app(root: Path, token: str, port: int | None = None,
         return {"check": "the models being checked", "install": "pip, which may be downloading",
                 "create": "pip, which may be downloading", "build": "docker build, which may be "
                 "downloading", "validate": "the exercises' test runs",
-                "read": "the PDFs being read"}.get(kind, "the command")
+                "read": "the lectures being read"}.get(kind, "the command")
 
     def again_url(course: courses.Course, task: tasks.Task) -> str | None:
         """For a task that failed or was stopped: the action that started it, which its "Run
@@ -630,8 +647,15 @@ def create_app(root: Path, token: str, port: int | None = None,
         rows = lectures.lecture_rows(course)
         return render_template("lectures.html", course=course, rows=rows, problems=problems,
                                vision=lectures.vision_model(course),
-                               max_mb=lectures.MAX_PDF_BYTES // (1024 * 1024),
+                               max_mb=lectures.MAX_LECTURE_BYTES // (1024 * 1024),
+                               limit_mb=UPLOAD_LIMIT_BYTES // (1024 * 1024),
                                running=tasks.running(course.workspace.root)), code
+
+    def read_saved(course: courses.Course, saved: list[Path]):
+        """Read the text of the lectures just saved (free), as a task."""
+        title = f"Read {saved[0].name}" if len(saved) == 1 else f"Read {len(saved)} lectures"
+        return start_task(course, title, [lectures.read_command(saved)],
+                          meta={"kind": "read"})
 
     @app.get("/c/<name>/lectures/")
     def lecture_list(name: str):
@@ -639,19 +663,81 @@ def create_app(root: Path, token: str, port: int | None = None,
 
     @app.post("/c/<name>/lectures/upload")
     def upload_lectures(name: str):
-        """Save the PDFs, all or none, then read their text layer (free) as a task."""
+        """Save the lecture files, all or none, then read their text (free) as a task."""
         course = course_or_404(name)
-        saved, problems = lectures.save_pdfs(course.workspace.lecture_dir,
-                                             request.files.getlist("pdf"))
+        saved, problems = lectures.save_lectures(course.workspace.lecture_dir,
+                                                 request.files.getlist("lectures"))
         if problems:
             return lectures_page(course, problems, 400)
-        title = f"Read {saved[0].name}" if len(saved) == 1 else f"Read {len(saved)} lectures"
-        return start_task(course, title, [lectures.read_command(saved)],
-                          meta={"kind": "read"})
+        return read_saved(course, saved)
+
+    @app.post("/c/<name>/lectures/folder")
+    def stage_lecture_folder(name: str):
+        """Keep a chosen folder's PDFs and web pages aside, then show them to tick: a folder
+        holds what is no lecture too (exams, solutions), and a lecture is not deleted here."""
+        course = course_or_404(name)
+        request.max_form_parts = lectures.MAX_FOLDER_FILES  # a folder sends every file in it
+        token, problems = lectures.stage_folder(course.workspace.root,
+                                                course.workspace.lecture_dir,
+                                                request.files.getlist("folder"))
+        if token is None:
+            return lectures_page(course, problems, 400)
+        return redirect(url_for("lecture_folder", name=name, token=token), code=303)
+
+    def staged_or_404(course: courses.Course, token: str) -> lectures.StagedFolder:
+        staged = lectures.staged_folder(course.workspace.root, token)
+        if staged is None:
+            abort(404, "This folder's files are no longer kept: they were saved, or another "
+                       "folder was chosen since. Choose it again on the Lectures page.")
+        return staged
+
+    def folder_page(course: courses.Course, staged: lectures.StagedFolder, picked: set[int],
+                    problems: list[str], code: int = 200):
+        return render_template("lecture_folder.html", course=course, staged=staged,
+                               picked=picked, problems=problems), code
+
+    @app.get("/c/<name>/lectures/folder/<token>/")
+    def lecture_folder(name: str, token: str):
+        """The staged folder's lectures, each ticked unless it cannot be saved."""
+        course = course_or_404(name)
+        staged = staged_or_404(course, token)
+        return folder_page(course, staged,
+                           {f.index for f in staged.files if f.problem is None}, [])
+
+    @app.post("/c/<name>/lectures/folder/<token>/tick")
+    def tick_lecture_folder(name: str, token: str):
+        """Tick all, none, the others, or one subfolder's files: the same page with the ticks
+        the form sent, changed (lectures.ticks). Nothing is saved."""
+        course = course_or_404(name)
+        staged = staged_or_404(course, token)
+        picked = lectures.ticks(staged, request.form.getlist("pick"),
+                                request.form.get("tick", ""))
+        return folder_page(course, staged, picked, [])
+
+    @app.post("/c/<name>/lectures/folder/<token>/save")
+    def save_lecture_folder(name: str, token: str):
+        """Save the ticked files as lectures, all or none, then read them as an upload is."""
+        course = course_or_404(name)
+        staged = staged_or_404(course, token)
+        picks = request.form.getlist("pick")
+        saved, problems = lectures.save_staged(course.workspace.root,
+                                               course.workspace.lecture_dir, staged, picks)
+        if problems:
+            return folder_page(course, staged,
+                               {f.index for f in staged.files if str(f.index) in picks},
+                               problems, 400)
+        return read_saved(course, saved)
+
+    @app.post("/c/<name>/lectures/folder/<token>/cancel")
+    def cancel_lecture_folder(name: str, token: str):
+        course = course_or_404(name)
+        lectures.discard_staged(course.workspace.root, token)
+        return redirect(url_for("lecture_list", name=name) + "?notice=folder-cancelled",
+                        code=303)
 
     @app.post("/c/<name>/lectures/read")
     def read_lectures(name: str):
-        """The text layer of every PDF; pages read before and unchanged are skipped."""
+        """The text of every lecture; pages read before and unchanged are skipped."""
         course = course_or_404(name)
         rows = lectures.lecture_rows(course)
         if not rows:
@@ -680,8 +766,7 @@ def create_app(root: Path, token: str, port: int | None = None,
 
     def new_course_page(values: dict, problems: list[str], code: int = 200):
         return render_template("new_course.html", root=app.config["ROOT"], values=values,
-                               problems=problems,
-                               max_mb=lectures.MAX_PDF_BYTES // (1024 * 1024)), code
+                               problems=problems), code
 
     @app.get("/new-course")
     def new_course():
@@ -689,8 +774,9 @@ def create_app(root: Path, token: str, port: int | None = None,
 
     @app.post("/new-course")
     def create_course():
-        """Save the PDFs into the new folder's lectures/, then run `tutor.workspace init`
-        (the course's venv: minutes, and the network) and read the PDFs, as one task."""
+        """Run `tutor.workspace init` (the course's venv: minutes, and the network) on a new
+        folder, as a task. No lectures here (owner, 2026-11-07): the Lectures page adds them,
+        as files or a whole folder to tick, once the course exists."""
         root = app.config["ROOT"]
         values = {"folder": request.form.get("folder", ""),
                   "course": request.form.get("course", "")}
@@ -698,19 +784,10 @@ def create_app(root: Path, token: str, port: int | None = None,
                                                                 values["course"])
         if folder is None:
             return new_course_page(values, problems, 400)
-        files = [f for f in request.files.getlist("pdf") if f.filename]
-        saved: list[Path] = []
-        if files:
-            saved, problems = lectures.save_pdfs(folder / "lectures", files)
-            if problems:
-                lectures.remove_new(folder)
-                return new_course_page(values, problems, 400)
-        (folder / "lectures").mkdir(parents=True, exist_ok=True)
-        commands = [lectures.init_command(folder, course_id)]
-        if saved:
-            commands.append(lectures.read_command(saved))
+        (folder / "lectures").mkdir(parents=True)  # the folder is new: check_new_course
         env = {"WORKSPACE_DIR": str(folder), "LECTURE_DIR": str(folder / "lectures")}
-        task = tasks.start(folder, f"Create {folder.name}", commands, env,
+        task = tasks.start(folder, f"Create {folder.name}",
+                           [lectures.init_command(folder, course_id)], env,
                            meta={"kind": "create"})
         return redirect(url_for("task", name=folder.name, task_id=task.id), code=303)
 

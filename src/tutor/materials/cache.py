@@ -73,9 +73,43 @@ def cache_path(workspace: Path, source: Path, lecture_dir: Path | None = None) -
     return workspace / "cache" / relative.with_name(relative.name + ".md")
 
 
+# What a lecture can be, by its extension in lower case: slides as a PDF, or notes saved as a
+# web page (materials/html.py, owner 2026-11-07). A lecture is named by its file name without
+# the extension, so a course should not hold "L4.pdf" and "L4.html" both (the PDF wins).
+LECTURE_SUFFIXES = (".pdf", ".html", ".htm")
+
+
+def is_lecture(path: Path) -> bool:
+    """A file of the lecture folder that `python -m tutor.materials` reads."""
+    return path.suffix.lower() in LECTURE_SUFFIXES and not path.name.startswith(".")
+
+
 def lecture_cache(workspace: Path, lecture: str) -> Path:
-    """The cache of lecture `lecture` (e.g. "L4"), read from <lecture folder>/L4.pdf."""
-    return workspace / "cache" / "lectures" / f"{lecture}.pdf.md"
+    """The cache of lecture `lecture` (e.g. "L4"), read from <lecture folder>/L4.pdf or
+    L4.html; the PDF's when none is cached yet, so a message names the usual file."""
+    folder = workspace / "cache" / "lectures"
+    for suffix in LECTURE_SUFFIXES:
+        if (path := folder / f"{lecture}{suffix}.md").is_file():
+            return path
+    return folder / f"{lecture}.pdf.md"
+
+
+def lecture_name(path: Path) -> str | None:
+    """A cache file's lecture: "L4.pdf.md" -> "L4", "notes 2.html.md" -> "notes 2"; None for
+    a file that is no lecture's cache."""
+    name = path.name.removesuffix(".md")
+    if name == path.name:
+        return None
+    for suffix in LECTURE_SUFFIXES:
+        if name.endswith(suffix):
+            return name.removesuffix(suffix)
+    return None
+
+
+def lecture_caches(workspace: Path) -> list[Path]:
+    """Every cached lecture: cache/lectures/<name>.<pdf, html or htm>.md."""
+    folder = workspace / "cache" / "lectures"
+    return sorted(p for p in folder.glob("*.md") if lecture_name(p)) if folder.is_dir() else []
 
 
 def update(pages: list[Page], old: dict[int, Entry], transcribe: Transcriber | None = None,

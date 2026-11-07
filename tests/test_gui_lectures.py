@@ -136,7 +136,7 @@ def test_read_commands_name_each_pdf_by_its_full_path(course):
 
 def test_uploads_are_saved_with_their_names(tmp_path):
     decomposed = unicodedata.normalize("NFD", "Vorlesung Übung (2).PDF")
-    saved, problems = lectures.save_pdfs(tmp_path, [File("L4 Streams.pdf"), File(decomposed),
+    saved, problems = lectures.save_lectures(tmp_path, [File("L4 Streams.pdf"), File(decomposed),
                                                     File("C:\\Users\\x\\L5.pdf")])
 
     assert problems == []
@@ -158,7 +158,7 @@ def test_uploads_are_saved_with_their_names(tmp_path):
 def test_one_bad_file_saves_none(tmp_path, name, data, problem):
     (tmp_path / "L1.pdf").write_bytes(b"%PDF- the old one")
 
-    saved, problems = lectures.save_pdfs(tmp_path, [File("good.pdf"), File(name, data)])
+    saved, problems = lectures.save_lectures(tmp_path, [File("good.pdf"), File(name, data)])
 
     assert saved == [] and problem in " ".join(problems)
     assert sorted(p.name for p in tmp_path.iterdir()) == ["L1.pdf"]  # no part file left
@@ -166,22 +166,225 @@ def test_one_bad_file_saves_none(tmp_path, name, data, problem):
 
 
 def test_a_file_over_the_limit_saves_none(tmp_path, monkeypatch):
-    monkeypatch.setattr(lectures, "MAX_PDF_BYTES", 100)
+    monkeypatch.setattr(lectures, "MAX_LECTURE_BYTES", 100)
     monkeypatch.setattr(lectures, "_CHUNK", 16)
 
-    saved, problems = lectures.save_pdfs(tmp_path, [File("big.pdf", PDF + b"x" * 200)])
+    saved, problems = lectures.save_lectures(tmp_path, [File("big.pdf", PDF + b"x" * 200)])
 
     assert saved == [] and "larger than" in problems[0] and list(tmp_path.iterdir()) == []
 
 
 def test_the_same_name_twice_in_one_upload_saves_none(tmp_path):
-    saved, problems = lectures.save_pdfs(tmp_path, [File("a.pdf"), File("A.pdf")])
+    saved, problems = lectures.save_lectures(tmp_path, [File("a.pdf"), File("A.pdf")])
 
-    assert saved == [] and "exists" in problems[0]
+    assert saved == [] and "another file of this upload has the same name" in problems[0]
 
 
 def test_an_empty_choice_is_a_problem(tmp_path):
-    assert lectures.save_pdfs(tmp_path, [File("")])[1] == ["Choose at least one PDF."]
+    assert lectures.save_lectures(tmp_path, [File("")])[1] == ["Choose at least one lecture file."]
+
+
+# --- notes saved as web pages (owner, 2026-11-07) ----------------------------------------------
+
+HTML = b"<!DOCTYPE html>\n<html><body><h2>Notes</h2><p>made up</p></body></html>"
+
+
+def test_web_pages_are_saved_with_their_extension_in_lower_case(tmp_path):
+    saved, problems = lectures.save_lectures(tmp_path, [File("lecture07.HTML", HTML),
+                                                        File("Quiz review.htm", HTML)])
+    assert problems == [] and [p.name for p in saved] == ["lecture07.html", "Quiz review.htm"]
+
+
+@pytest.mark.parametrize(("files", "problem"), [
+    ([("notes.html", PDF)], "not a web page"),  # checked by its content, not its name
+    ([("L1.html", HTML)], "L1.pdf has the same name"),  # L1.pdf and L1.html: one lecture
+    ([("x.pdf", PDF), ("x.htm", HTML)], "another file of this upload"),
+])
+def test_a_web_page_that_is_none_or_shares_a_lectures_name_saves_none(tmp_path, files, problem):
+    (tmp_path / "L1.pdf").write_bytes(PDF)
+    saved, problems = lectures.save_lectures(tmp_path, [File(n, d) for n, d in files])
+    assert saved == [] and problem in " ".join(problems)
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["L1.pdf"]
+
+
+def test_the_page_lists_web_pages_with_their_sections(root):
+    course = root / "demo-course"
+    (course / "lectures" / "notes 4.html").write_bytes(HTML)
+    _cache(course, "notes 4.html", ["text", "text", "text"])
+    rows = {r.name: r for r in lectures.lecture_rows(courses.find_courses(root)[0][0])}
+    assert rows["notes 4.html"].web_page and rows["notes 4.html"].pages == 3
+    assert not rows["L1.pdf"].web_page
+    page = _browser(root).get("/c/demo-course/lectures/", base_url=BASE).get_data(as_text=True)
+    assert "notes 4.html" in page and 'muted">sections</span>' in page
+
+
+# --- a whole folder (owner, 2026-11-07) --------------------------------------------------------
+
+
+def _folder(*files):
+    """A folder as a browser sends it: each file named by its path, the chosen folder first."""
+    return {"folder": [(io.BytesIO(data), f"course notes/{path}") for path, data in files]}
+
+
+FOLDER = [("lecture02.html", HTML), ("lecture02_files/style.css", b"p{}"),
+          ("lecture10.html", HTML), (".DS_Store", b"\x00"), (".vscode/settings.json", b"{}"),
+          ("10 Matrices/Quiz review.htm", HTML), ("10 Matrices/talk.mp4", b"\x00\x00"),
+          ("final/Exam.pdf", PDF), ("final/broken.htm", b"\x00" * 100),
+          ("L1.html", HTML)]  # the course has L1.pdf already
+
+
+def _staged(course):
+    return next((course.workspace.root / lectures.STAGING_DIR).iterdir())
+
+
+def test_a_folder_keeps_its_lectures_aside_and_lists_them_to_tick(root, course, started):
+    response = post(_browser(root), "/c/demo-course/lectures/folder", _folder(*FOLDER))
+
+    token = _staged(course).name
+    assert response.headers["Location"] == f"/c/demo-course/lectures/folder/{token}/"
+    staged = lectures.staged_folder(course.workspace.root, token)
+    assert staged.folder == "course notes"
+    assert [(f.name, f.folder) for f in staged.files] == [
+        ("L1.html", ""), ("lecture02.html", ""), ("lecture10.html", ""),  # the top first
+        ("10 Quiz review.htm", "10 Matrices"),  # numbered by its folder
+        ("broken.htm", "final"), ("Exam.pdf", "final")]  # in order, whatever the case
+    why = {f.name: f.problem for f in staged.files}
+    assert why["broken.htm"].startswith("not a web page")
+    assert why["L1.html"].startswith("L1.pdf has the same name")
+    assert why["Exam.pdf"] is None and why["10 Quiz review.htm"] is None
+    assert staged.skipped == {"hidden": 2, "in _files folders": 1, ".mp4": 1}
+    assert sorted(p.name for p in course.workspace.lecture_dir.iterdir()) == [
+        ".hidden.pdf", "L1.pdf", "L2.pdf", "L3.pdf", "notes.txt"]  # nothing saved yet
+    assert started == []
+
+    page = _browser(root).get(response.headers["Location"], base_url=BASE).get_data(as_text=True)
+    assert "Lectures from course notes" in page and "(was Quiz review.htm)" in page
+    assert page.count('name="pick"') == 4 and page.count(" checked>") == 4
+    assert "2 hidden, 1 in _files folders, 1 .mp4" in page
+
+
+def test_the_ticked_files_are_saved_and_read_and_the_rest_dropped(root, course, started):
+    client = _browser(root)
+    post(client, "/c/demo-course/lectures/folder", _folder(*FOLDER))
+    staged = lectures.staged_folder(course.workspace.root, _staged(course).name)
+    ticked = [str(f.index) for f in staged.files if f.name != "Exam.pdf"]
+
+    response = post(client, f"/c/demo-course/lectures/folder/{staged.token}/save",
+                    {"pick": ticked})
+
+    folder = course.workspace.lecture_dir.resolve()
+    names = ["lecture02.html", "lecture10.html", "10 Quiz review.htm"]
+    assert all((folder / n).read_bytes() == HTML for n in names)
+    assert not (folder / "Exam.pdf").exists() and not (folder / "broken.htm").exists()
+    assert started[0]["commands"] == [lectures.read_command(folder / n for n in names)]
+    assert started[0]["title"] == "Read 3 lectures"
+    assert response.headers["Location"] == "/c/demo-course/tasks/20260102-100000-0abcde/"
+    assert list((course.workspace.root / lectures.STAGING_DIR).iterdir()) == []
+
+
+def test_the_tick_buttons_change_only_what_can_be_saved(root, course):
+    post(_browser(root), "/c/demo-course/lectures/folder", _folder(*FOLDER))
+    staged = lectures.staged_folder(course.workspace.root, _staged(course).name)
+    index = {f.name: f.index for f in staged.files}
+    can = {index[n] for n in ("lecture02.html", "lecture10.html", "10 Quiz review.htm",
+                              "Exam.pdf")}
+    some = [str(index["lecture02.html"]), str(index["Exam.pdf"])]
+
+    assert lectures.ticks(staged, [], "all") == can
+    assert lectures.ticks(staged, some, "none") == set()
+    assert lectures.ticks(staged, some, "invert") == can - {int(i) for i in some}
+    assert lectures.ticks(staged, some, "off:final") == {index["lecture02.html"]}
+    assert lectures.ticks(staged, [], "on:10 Matrices") == {index["10 Quiz review.htm"]}
+    # A file that cannot be saved, or what is no index, is never ticked.
+    assert lectures.ticks(staged, [str(index["L1.html"]), "x", "-1", "²", "99"], "") == set()
+
+
+def test_a_tick_button_sends_the_page_back_with_the_ticks_changed(root, course, started):
+    client = _browser(root)
+    post(client, "/c/demo-course/lectures/folder", _folder(*FOLDER))
+    staged = lectures.staged_folder(course.workspace.root, _staged(course).name)
+    index = {f.name: f.index for f in staged.files}
+    url = f"/c/demo-course/lectures/folder/{staged.token}/tick"
+
+    page = post(client, url, {"pick": [str(index["Exam.pdf"])], "tick": "invert"}).get_data(
+        as_text=True)
+    assert page.count(" checked>") == 3 and "3 of 4 ticked" in page
+    assert f'value="{index["Exam.pdf"]}" aria-label="Keep Exam.pdf">' in page  # not ticked
+    assert 'value="on:final">Tick these 1</button>' in page
+    assert 'value="off:10 Matrices">Untick these 1</button>' in page
+    assert "Directly in course notes" in page
+    assert not (course.workspace.lecture_dir / "lecture02.html").exists() and started == []
+
+
+def test_nothing_ticked_or_a_lecture_appearing_since_saves_none(root, course, started):
+    client = _browser(root)
+    post(client, "/c/demo-course/lectures/folder",
+         _folder(("lecture02.html", HTML), ("lecture03.html", HTML)))
+    token = _staged(course).name
+    url = f"/c/demo-course/lectures/folder/{token}/save"
+
+    response = post(client, url, {"pick": []})
+    assert response.status_code == 400 and "Tick at least one lecture" in response.get_data(
+        as_text=True)
+
+    (course.workspace.lecture_dir / "lecture03.pdf").write_bytes(PDF)  # saved meanwhile
+    response = post(client, url, {"pick": ["0", "1"]})
+    page = response.get_data(as_text=True)
+    assert response.status_code == 400 and "lecture03.pdf has the same name" in page
+    assert page.count(" checked>") == 2  # the ticks are kept, to untick the one refused
+    assert not (course.workspace.lecture_dir / "lecture02.html").exists() and started == []
+    assert _staged(course).name == token  # kept, so the owner can save the rest
+
+
+def test_cancelling_or_choosing_another_folder_drops_the_staged_files(root, course, started):
+    client = _browser(root)
+    post(client, "/c/demo-course/lectures/folder", _folder(("a.html", HTML)))
+    first = _staged(course).name
+    post(client, "/c/demo-course/lectures/folder", _folder(("b.html", HTML)))
+    second = _staged(course).name
+    assert second != first and len(list(_staged(course).parent.iterdir())) == 1
+    assert client.get(f"/c/demo-course/lectures/folder/{first}/",
+                      base_url=BASE).status_code == 404
+
+    response = post(client, f"/c/demo-course/lectures/folder/{second}/cancel")
+    assert response.headers["Location"].endswith("/lectures/?notice=folder-cancelled")
+    assert not any((course.workspace.root / lectures.STAGING_DIR).iterdir())
+    assert started == []
+
+
+def test_a_folder_without_lectures_or_a_made_up_token_is_refused(root, course, started):
+    client = _browser(root)
+    response = post(client, "/c/demo-course/lectures/folder",
+                    _folder(("talk.mp4", b"\x00"), ("x_files/a.html", HTML)))
+    assert response.status_code == 400
+    assert "No PDF or web page" in response.get_data(as_text=True)
+    assert not (course.workspace.root / lectures.STAGING_DIR).exists() or not any(
+        (course.workspace.root / lectures.STAGING_DIR).iterdir())
+    for token in ("..", "0" * 15, "../../etc"):
+        assert lectures.staged_folder(course.workspace.root, token) is None
+    assert post(client, "/c/demo-course/lectures/folder/0123456789abcdef/save",
+                {"pick": ["0"]}).status_code == 404
+
+
+@pytest.mark.parametrize(("folders", "name", "numbered"), [
+    (["10 Matrices"], "Quiz review.htm", "10 Quiz review.htm"),
+    (["5.2 Sets", "quizzes"], "Quiz.htm", "5.2 Quiz.htm"),  # the nearest folder with one
+    (["10 Matrices"], "lecture03.html", "lecture03.html"),  # a number of its own is kept
+    (["final"], "Exam.pdf", "Exam.pdf"),
+    (["week 3"], "Quiz.htm", "Quiz.htm"),  # only a folder that starts with its number
+])
+def test_a_name_without_a_number_takes_its_folders(folders, name, numbered):
+    assert lectures._numbered(folders, name) == numbered
+
+
+def test_too_many_files_or_bytes_in_a_folder_says_what_to_do(root, course, monkeypatch):
+    monkeypatch.setattr(lectures, "MAX_FOLDER_FILES", 3)
+    client = _browser(root)
+    response = post(client, "/c/demo-course/lectures/folder",
+                    _folder(*[(f"n{i}.html", HTML) for i in range(5)]))
+    page = response.get_data(as_text=True)
+    assert response.status_code == 413 and "Choose one of its subfolders" in page
+    assert 'href="/c/demo-course/lectures/"' in page
 
 
 # --- the lecture page --------------------------------------------------------------------------
@@ -196,7 +399,7 @@ def test_the_page_lists_lectures_and_the_paid_button(root):
 
 def test_an_upload_reads_only_the_new_files(root, started):
     response = post(_browser(root), "/c/demo-course/lectures/upload",
-                    {"pdf": [(io.BytesIO(PDF), "L4.pdf"), (io.BytesIO(PDF), "L5.pdf")]})
+                    {"lectures": [(io.BytesIO(PDF), "L4.pdf"), (io.BytesIO(PDF), "L5.pdf")]})
 
     folder = (root / "demo-course" / "lectures").resolve()
     assert (folder / "L4.pdf").read_bytes() == PDF
@@ -209,7 +412,7 @@ def test_an_upload_reads_only_the_new_files(root, started):
 
 def test_a_refused_upload_names_its_file_escaped_and_starts_nothing(root, started):
     response = post(_browser(root), "/c/demo-course/lectures/upload",
-                    {"pdf": [(io.BytesIO(PDF), "ok.pdf"), (io.BytesIO(PDF), "<b>x.pdf")]})
+                    {"lectures": [(io.BytesIO(PDF), "ok.pdf"), (io.BytesIO(PDF), "<b>x.pdf")]})
     page = response.get_data(as_text=True)
 
     assert response.status_code == 400 and started == []
@@ -244,7 +447,7 @@ def test_too_large_a_request_is_refused_before_it_is_read(root, started):
     client.get(f"/?token={TOKEN}", base_url=BASE)
 
     response = post(client, "/c/demo-course/lectures/upload",
-                    {"pdf": [(io.BytesIO(PDF + b"x" * 5000), "big.pdf")]})
+                    {"lectures": [(io.BytesIO(PDF + b"x" * 5000), "big.pdf")]})
 
     assert response.status_code == 413 and started == []
 
@@ -252,26 +455,23 @@ def test_too_large_a_request_is_refused_before_it_is_read(root, started):
 # --- new courses -------------------------------------------------------------------------------
 
 
-def test_a_new_course_saves_its_pdfs_then_runs_init_and_reads_them(root, started):
-    response = post(_browser(root), "/new-course",
-                    {"folder": "comp1234", "course": "", "pdf": [(io.BytesIO(PDF), "W1.pdf")]})
+def test_a_new_course_runs_init_alone_and_takes_no_lectures(root, started):
+    client = _browser(root)
+    assert 'type="file"' not in client.get("/new-course", base_url=BASE).get_data(as_text=True)
+    # A file sent anyway is not saved: lectures are added on the Lectures page.
+    response = post(client, "/new-course",
+                    {"folder": "comp1234", "course": "", "lectures": [(io.BytesIO(PDF), "W1.pdf")]})
 
     folder = (root / "comp1234").resolve()
     call = started[0]
-    assert (folder / "lectures" / "W1.pdf").read_bytes() == PDF
+    assert list((folder / "lectures").iterdir()) == []
     assert call["root"] == folder and call["meta"] == {"kind": "create"}
-    assert call["commands"][0][1:] == ["-m", "tutor.workspace", "init", str(folder),
-                                       "--course=comp1234"]  # the id defaults to the folder
-    assert call["commands"][1] == lectures.read_command([folder / "lectures" / "W1.pdf"])
+    assert call["commands"] == [[sys.executable, "-m", "tutor.workspace", "init", str(folder),
+                                 "--course=comp1234"]]  # the id defaults to the folder
     assert call["env"] == {"WORKSPACE_DIR": str(folder), "LECTURE_DIR": str(folder / "lectures")}
     assert response.headers["Location"] == "/c/comp1234/tasks/20260102-100000-0abcde/"
-
-
-def test_a_new_course_without_pdfs_only_runs_init(root, started):
-    post(_browser(root), "/new-course", {"folder": "empty-course", "course": "ec"})
-
-    assert len(started[0]["commands"]) == 1 and started[0]["commands"][0][-1] == "--course=ec"
-    assert (root / "empty-course" / "lectures").is_dir()
+    post(client, "/new-course", {"folder": "empty-course", "course": "ec"})
+    assert started[1]["commands"][0][-1] == "--course=ec"
 
 
 @pytest.mark.parametrize(("folder", "course_id", "problem"), [
@@ -287,13 +487,6 @@ def test_a_refused_new_course_creates_nothing(root, started, folder, course_id, 
 
     assert response.status_code == 400 and problem in response.get_data(as_text=True)
     assert sorted(p.name for p in root.iterdir()) == before and started == []
-
-
-def test_a_bad_pdf_removes_the_new_folder_again(root, started):
-    response = post(_browser(root), "/new-course",
-                    {"folder": "comp1234", "pdf": [(io.BytesIO(b"not a pdf"), "W1.pdf")]})
-
-    assert response.status_code == 400 and not (root / "comp1234").exists() and started == []
 
 
 def test_no_new_course_inside_a_git_repository(tmp_path):
@@ -355,6 +548,8 @@ def test_upload_reads_with_the_same_python(course):
 
 
 def _create_task(root, status="running", codes=(), commands=2):
+    """A create task; two commands as one made before 2026-11-07 (init, then reading the
+    lectures uploaded with it), whose page still shows that stage."""
     folder = root / "comp1234" / tasks.TASKS_DIR / "20260102-100000-0abcde"
     _write(folder / tasks.TASK_FILE, json.dumps({
         "title": "Create comp1234", "status": status, "started": "2026-01-02 10:00:00",

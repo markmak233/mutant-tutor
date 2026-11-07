@@ -77,7 +77,7 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     plan = sub.add_parser("plan", help="plan a batch, then generate it once approved")
     plan.add_argument("--lectures", nargs="+", required=True,
-                      help="lecture file names without .pdf, as in lectures/")
+                      help="lecture file names without .pdf (or .html), as in lectures/")
     plan.add_argument("--prefs", default="", help="your preferences, in plain words")
     plan.add_argument("--count", type=int,
                       help="exactly this many (default: one per knowledge point)")

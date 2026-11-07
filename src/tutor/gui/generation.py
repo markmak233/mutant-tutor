@@ -40,6 +40,7 @@ from pathlib import Path
 from tutor.config import WORKSPACE_FILE
 from tutor.gui import tasks
 from tutor.gui.courses import Course, valid_verdict
+from tutor.materials.cache import is_lecture, lecture_caches, lecture_name
 
 # The command, a list so a test can put a stand-in script here.
 GRAPH = [sys.executable, "-m", "tutor.graph"]
@@ -164,14 +165,13 @@ class PlanView:
 
 
 def lectures(course: Course) -> tuple[list[str], list[str]]:
-    """The lectures a plan can use (read into the cache: cache/lectures/<name>.pdf.md), and
-    the PDFs in the lecture folder not read yet."""
-    cache = course.workspace.root / "cache" / "lectures"
-    ready = sorted(p.name.removesuffix(".pdf.md") for p in _files(cache)
-                   if p.name.endswith(".pdf.md") and _usable(p.name))
-    pdfs = sorted(p.stem for p in _files(course.workspace.lecture_dir)
-                  if p.suffix.lower() == ".pdf" and _usable(p.name))
-    return ready, [name for name in pdfs if name not in ready]
+    """The lectures a plan can use (read into the cache: cache/lectures/<name>.pdf.md, or
+    .html.md), and the lectures in the lecture folder not read yet."""
+    ready = sorted(name for p in lecture_caches(course.workspace.root)
+                   if (name := lecture_name(p)) and _usable(p.name))
+    files = sorted(p.stem for p in _files(course.workspace.lecture_dir)
+                   if is_lecture(p) and _usable(p.name))
+    return ready, [name for name in files if name not in ready]
 
 
 def defaults(course: Course) -> dict:

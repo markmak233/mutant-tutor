@@ -197,9 +197,9 @@ def main(argv: list[str] | None = None) -> int:
     except WorkspaceError as e:
         print(f"workspace: {e}", file=sys.stderr)
         return 1
-    print(f"{args.folder.expanduser().resolve()} is ready. Put the lecture PDFs in lectures/, "
-          "open the folder in VS Code, open a new terminal and check `which pytest` points to "
-          "its .venv.")
+    print(f"{args.folder.expanduser().resolve()} is ready. Put the lectures (PDFs or saved "
+          "web pages) in lectures/, open the folder in VS Code, open a new terminal and check "
+          "`which pytest` points to its .venv.")
     return 0
 
 

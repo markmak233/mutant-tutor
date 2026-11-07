@@ -353,6 +353,31 @@ instead of the original files.
   footers; speed does not matter at this size. PyMuPDF (the earlier choice) is AGPL, which
   would follow the code into a packaged GUI and make the repo's MIT label misleading for
   reuse, and it offered nothing the other two lack here.
+- Web pages (`.html`, `.htm`; `materials/html.py`, owner 2026-11-07, for a course whose notes
+  are a Typora export and one whose material is Moodle quiz reviews saved from the browser).
+  A page has no pages, so it is cut into sections, each cached as one page:
+  `## p.N · slide L.N`, N the section's number and L the number in the file name
+  (lecture10.html -> 10.1, 10.2; none in the name: 1, 2), a dotted number as a slide footer
+  is, so plans, coverage, generation and the judge read it unchanged. A heading starts a
+  section, a Moodle question starts one, and a section past 3000 characters is cut at a
+  blank line, never inside a code block. Text only, as Markdown: code blocks exactly (Typora
+  keeps each line in its editor's `pre.CodeMirror-line`, beside measuring copies left out),
+  formulas as their TeX source (Typora's `math/tex` scripts; Moodle writes `\( \)` in the
+  text), lists, tables; an image leaves `[image: name]`, and no image is read yet. Only the
+  content region is read (Typora's `#write`, Moodle's `role="main"`, else `<main>`,
+  `<article>`, `<body>`), and form fields never: a saved quiz holds the student's answers in
+  them and the session's key (sesskey) in hidden ones; no attribute is copied, so no link
+  either. A Moodle review also leaves out the attempt's summary (times, grade), each mark
+  and state, and the feedback on the student's input, and keeps the question, its choices
+  (not the one picked), the general feedback and the right answer. Nothing in the page runs
+  or is fetched. A lecture is named by its file name without the extension, so `L4.pdf` and
+  `L4.html` together are refused at upload. The standard library's parser, not BeautifulSoup
+  and markdownify as planned below: each source needed its own rules (Typora's editor lines,
+  Moodle's fields) that a generic converter does not know, and it adds no dependency. Tried
+  on the owner's two courses: 34 Typora lectures (96k characters) and 22 quiz reviews, every
+  code block and formula kept; two quiz files were 218k NUL bytes (broken copies), which
+  now read as having no text. The generate prompt still says "one section per PDF page";
+  left as is, since it is calibrated and a section is cited the same way.
 - Other formats, each library added only when a course has such files (pip-installable,
   permissive licence, as optional extras such as `tutor[office]`; a missing one is reported
   with the extra to install, not a crash):
@@ -360,8 +385,8 @@ instead of the original files.
     bytes with position, which go to the vision model directly. Diagrams drawn from shapes
     and SmartArt are lost without rendering, which needs LibreOffice or an export to PDF by
     the user; envcheck reports `soffice` as optional.
-  - `.docx`: python-docx or mammoth (MIT / BSD); saved web pages: BeautifulSoup + markdownify
-    (MIT), keeping LaTeX formulas (not html2text: GPL); `.ipynb`: the standard library's
+  - `.docx`: python-docx or mammoth (MIT / BSD); saved web pages: built (see "Web pages"
+    above), with the standard library; `.ipynb`: the standard library's
     `json` (markdown, code and outputs per cell; output images to the vision model);
     images: Pillow, with pillow-heif for phone photos; `.xlsx`: openpyxl, read as data like
     CSV; EPUB: `zipfile` + BeautifulSoup (not ebooklib: AGPL); captions (`.vtt`, `.srt`):
@@ -2907,11 +2932,13 @@ late; the adaptive review screens can be built with it.
   (`python -m tutor.materials`, free) as a task; the vision model reads the waiting image
   pages only from its own button, which names the model, as each page is a paid call.
   - New course (the owner's "one click after uploading the slides", 2026-11-04): a folder
-    name, an optional course id, optional PDFs. The PDFs are saved into the new folder's
-    `lectures/`, then one task runs `python -m tutor.workspace init` and reads them; until
-    init writes `workspace.toml`, only the task's page is shown. Refused inside a git
-    repository, as init refuses it. Its page shows the stages (course files, the venv,
-    installing the tool, reading the PDFs) with a bar, read from the files init has made
+    name and an optional course id; one task runs `python -m tutor.workspace init`; until
+    init writes `workspace.toml`, only the task's page is shown. It took optional PDFs too,
+    saved first and read after init, until the owner dropped them (2026-11-07): lectures
+    are optional there, and the Lectures page takes files or a whole folder to tick from
+    once the course exists. Refused inside a git repository, as init refuses it. Its page
+    shows the stages (course files, the venv, installing the tool; reading the lectures for
+    a course created before that) with a bar, read from the files init has made
     and the commands that ended, not from the log's words; the install has no measure
     inside it, so it shows how long it has run (owner, 2026-11-06: it looked stuck, as init
     printed its steps only at the end; it now prints each as it happens, and a line before
@@ -2919,6 +2946,22 @@ late; the adaptive review screens can be built with it.
     a failed one stays on its log. A course page lists what still stands between it and
     generating: lectures not read, no models, where tests run not chosen, no `coverage.md`;
     each line links to the page that fixes it (owner, 2026-11-06).
+  - A whole folder (owner, 2026-11-07: the file picker took only lecture files). A second
+    input with `webkitdirectory`, no script: the browser sends every file in the folder, so
+    the server keeps its PDFs and web pages, leaves out what a browser saves beside a page
+    (`Name_files/`) and hidden files, and counts what it left out by kind. They wait in the
+    course's `.lecture-uploads/<token>/`, not yet lectures, on a page where the owner
+    unticks what is none (exams, solutions, a syllabus), as the GUI does not delete a
+    lecture; a file that cannot be saved as it is (its name taken, its content not what its
+    extension says) shows why, with no box. A name with no number takes the one its nearest
+    subfolder starts with ("10 Matrices/Quiz.htm" -> "10 Quiz.htm"), so its sections are
+    numbered like its topic. Tick all, Tick none, Invert, and each subfolder's Tick / Untick
+    these (owner, 2026-11-07): with no script of our own, a button sends the ticks as they
+    are and the page comes back with them changed; files directly in the folder come first,
+    then each subfolder's together. The ticked files then pass the same checks as an
+    upload. One folder waits at a time: choosing another, or Cancel, drops it. The whole folder counts
+    toward a request's 500 MB, videos too, and at most 5000 files; past either, the 413 page
+    says to choose a subfolder.
   - A "discard plan" button stays out for now (owner): it would remove a draft folder, so
     it gets its own step, hiding the folder rather than deleting it.
 - htmx 2.0.11, the newest 2.x on npm (2026-09-22, 0BSD), vendored as

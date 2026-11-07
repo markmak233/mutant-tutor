@@ -336,7 +336,8 @@ src/tutor/
                    `python -m tutor.container build | status`
   llm.py           a small client for OpenAI-compatible APIs (LM Studio, GLM, OpenAI,
                    DeepSeek): roles -> profiles, structured output, streaming, call log
-  materials/       course PDFs -> a per-page markdown cache, image slides via a vision model;
+  materials/       course PDFs and saved web pages -> a per-page (per-section) markdown cache,
+                   image slides via a vision model;
                    `python -m tutor.materials`; `python -m tutor.materials.requires` drafts
                    [requires] from the cached lectures, and `.coverage` coverage.md
   graph/           phase 3 generation with LangGraph: plan -> owner approves -> generate,

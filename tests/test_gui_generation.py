@@ -124,6 +124,13 @@ def test_only_lectures_read_into_the_cache_are_offered(course):
     assert generation.lectures(course) == (["L1", "L2"], ["L3"])
 
 
+def test_a_lecture_saved_as_a_web_page_is_offered_by_its_name(course):
+    _write(course.workspace.lecture_dir / "notes 4.html", "<html></html>")
+    _write(course.workspace.lecture_dir / "notes 5.htm", "<html></html>")
+    _write(course.workspace.root / "cache" / "lectures" / "notes 4.html.md", "")
+    assert generation.lectures(course) == (["L1", "L2", "notes 4"], ["L3", "notes 5"])
+
+
 def test_the_form_starts_from_the_courses_generation_table(course):
     assert generation.defaults(course) == {"mode": "review", "hide_answers": False,
                                            "how": "auto", "max_count": 20}

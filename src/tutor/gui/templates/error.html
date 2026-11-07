@@ -3,4 +3,5 @@
 {% block content %}
 <h1>{{ code }}</h1>
 <p>{{ message }}</p>
+{% if back %}<p><a href="{{ back }}">Back to the form</a></p>{% endif %}
 {% endblock %}
