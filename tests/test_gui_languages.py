@@ -11,7 +11,7 @@ import pytest
 
 pytest.importorskip("flask")  # the `gui` extra
 
-from tutor.gui import courses, environment, tasks  # noqa: E402
+from tutor.gui import courses, environment, languages_page, tasks  # noqa: E402
 from tutor.gui.app import create_app  # noqa: E402
 from tutor.gui.routes.common import C_NEEDS_CONTAINER  # noqa: E402
 from tutor.materials import cache  # noqa: E402
@@ -104,7 +104,7 @@ def test_adding_c_from_the_list_uses_the_lectures_flags_and_shows_its_settings(r
     assert response.status_code == 303 and "notice=language-added" in response.location
     data = _data(course)
     assert data["languages"] == {"c": {"flags": ["-Wall", "-std=c99"]}}
-    assert data["requires"]["gcc"] == environment.IMAGE_GCC
+    assert data["requires"]["gcc"] == languages_page.IMAGE_GCC
     text = _page(client)
     assert "<strong>C</strong> <span class=\"muted\">gcc</span>" in text
     assert 'name="version:gcc" value="12"' in text and ">Remove</button>" in text
@@ -131,7 +131,7 @@ def test_ticking_c_writes_its_table_its_headers_and_gcc_keeping_the_rest(root, c
     data = _data(course)
     assert data["languages"] == {"c": {"flags": ["-Wall", "-std=c99"]}}
     assert data["safety"] == {"allow_headers": ["unistd.h", "sys/stat.h"]}
-    assert data["requires"] == {"python": "3.11", "gcc": environment.IMAGE_GCC}
+    assert data["requires"] == {"python": "3.11", "gcc": languages_page.IMAGE_GCC}
     text = (course.workspace.root / "workspace.toml").read_text(encoding="utf-8")
     assert "# the course id" in text and "# the venv's Python" in text
     assert (course.workspace.root / "workspace.toml.bak").is_file()

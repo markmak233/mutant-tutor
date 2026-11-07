@@ -10,7 +10,7 @@ import secrets
 from flask import Flask, redirect, render_template, request, url_for
 
 from tutor import workspace
-from tutor.gui import courses, environment, tasks
+from tutor.gui import courses, environment, languages_page, tasks
 from tutor.gui.routes.common import course_or_404, start_task
 
 
@@ -24,7 +24,7 @@ def environment_page(course: courses.Course, problems: list[str], code: int = 20
     draft = environment.draft_view(course)
     if rows is None:
         # The packages and tools list: [requires] without the language list's rows.
-        rows = environment.list_rows(course, environment.package_rows(course)
+        rows = environment.list_rows(course, languages_page.package_rows(course)
                                      or [("", "")], draft.draft)
     allowed = environment.allowed(course)
     return render_template("environment.html", course=course, problems=problems,
@@ -36,8 +36,8 @@ def environment_page(course: courses.Course, problems: list[str], code: int = 20
                            has_venv=environment.venv_python(course).exists(),
                            install=environment.install_shown(course),
                            running=tasks.running(course.workspace.root),
-                           language=environment.language_view(course),
-                           languages=environment.languages_view(course),
+                           language=languages_page.language_view(course),
+                           languages=languages_page.languages_view(course),
                            typed_language=typed_language), code
 
 
@@ -81,7 +81,7 @@ def register(app: Flask) -> None:
         ticked = set(form.getlist("import"))
         modules = {k: form.get(f"module:{k}", "") for k in keys}
         # The language list's rows (python, gcc) are not in this form: put back as they are.
-        all_names, all_versions, problems = environment.with_toolchains(course, names, versions)
+        all_names, all_versions, problems = languages_page.with_toolchains(course, names, versions)
         table, more = environment.check_requires(all_names, all_versions,
                                                  environment.runner(course))
         problems += more
@@ -117,7 +117,7 @@ def register(app: Flask) -> None:
         course = course_or_404(name)
         versions = {k.removeprefix("version:"): v for k, v in request.form.items()
                     if k.startswith("version:")}
-        problems = environment.save_language_versions(course, versions)
+        problems = languages_page.save_language_versions(course, versions)
         if problems:
             return environment_page(course, problems, 400)
         return redirect(url_for("environment_view", name=name) + "?notice=requires-saved",
@@ -126,7 +126,7 @@ def register(app: Flask) -> None:
     @app.post("/c/<name>/environment/languages/add")
     def add_language(name: str):
         course = course_or_404(name)
-        problems = environment.add_language(course, request.form.get("language", ""))
+        problems = languages_page.add_language(course, request.form.get("language", ""))
         if problems:
             return environment_page(course, problems, 400)
         notice = ("language-saved-own-editor" if workspace.c_editor_config_kept(
@@ -136,7 +136,7 @@ def register(app: Flask) -> None:
     @app.post("/c/<name>/environment/languages/remove")
     def remove_language(name: str):
         course = course_or_404(name)
-        problems = environment.remove_language(course, request.form.get("language", ""))
+        problems = languages_page.remove_language(course, request.form.get("language", ""))
         if problems:
             return environment_page(course, problems, 400)
         return redirect(url_for("environment_view", name=name) + "?notice=language-removed",
@@ -149,7 +149,7 @@ def register(app: Flask) -> None:
         form = request.form
         typed = {"c": form.get("c") == "on", "flags": form.get("flags", ""),
                  "headers": form.get("headers", "")}
-        problems = environment.save_language(course, typed["c"], typed["flags"],
+        problems = languages_page.save_language(course, typed["c"], typed["flags"],
                                              typed["headers"])
         if problems:
             return environment_page(course, problems, 400, typed_language=typed)

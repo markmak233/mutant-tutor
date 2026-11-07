@@ -24,6 +24,16 @@ REFUSED = ("workspace.toml could not be changed safely, so it was left as it was
            "hand, or report this.")
 
 
+
+def read(root: Path) -> dict:
+    """The course's workspace.toml as plain data; {} when it is missing or not TOML (a page
+    then shows its defaults, and a save is refused by edit's own check)."""
+    try:
+        with (root / WORKSPACE_FILE).open("rb") as f:
+            return tomllib.load(f)
+    except (OSError, tomllib.TOMLDecodeError):
+        return {}
+
 def edit(root: Path, table: str, change: Callable, expected: dict) -> list[str]:
     """Apply `change` (it gets the parsed tomlkit document) to the course's workspace.toml,
     check that `table` now reads as `expected` and nothing else moved, keep a backup, then
