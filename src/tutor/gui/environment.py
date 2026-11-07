@@ -111,6 +111,11 @@ def is_c_course(course: Course) -> bool:
     return languages.is_c(_data(course))
 
 
+def c_without_container(course: Course) -> bool:
+    """A C course whose tests would not run in a container: no batch can start."""
+    return is_c_course(course) and runner(course) != "container"
+
+
 def runner(course: Course) -> str | None:
     """[isolation] runner as written, None when not chosen (or the file cannot be read)."""
     return _data(course).get("isolation", {}).get("runner")

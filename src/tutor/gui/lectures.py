@@ -534,12 +534,10 @@ def setup_gaps(course: Course, rows: list[LectureRow]) -> list[tuple[str, str | 
                      "copy another course's models.", "models", "Models"))
     runner = data.get("isolation", {}).get("runner")
     if languages.is_c(data):
-        # C exercises: validated only in a container, and not generated yet (docs/design.md).
+        # C exercises are validated only in a container (docs/design.md, "C").
         if runner != "container":
             gaps.append(("A C course's tests run only in a container: choose it, and build "
                          "the test image.", "environment_view", "Environment"))
-        gaps.append(("Generating C exercises is not built yet; C exercises written by hand "
-                     "validate already.", None, ""))
     elif runner is None:
         gaps.append(("Where tests run is not chosen, so they run on this machine with a "
                      "warning.", "environment_view", "Environment"))

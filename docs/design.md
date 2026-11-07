@@ -169,7 +169,7 @@ smartCodingReview/                       # public repo (the `tutor/` above), cod
 │   │                                    #   P3 parses LLM output into the same models
 │   ├── materials/                       # P3a course files -> per-file md cache (pypdfium2), vision pages; [requires] draft
 │   ├── llm.py                           # P3a thin OpenAI-compatible client, standard library only, no LangChain
-│   ├── graph/                           # P3 langgraph dependency added here
+│   ├── graph/                           # P3 langgraph dependency added here; languages.py: per-language profiles
 │   ├── retrieval/                       # P4 the page corpus, labels, scores and each route
 │   └── eval/                            # P5 a report from the pipeline's own records, no model calls
 ├── examples/                            # P1 synthetic only, same shape as a real exercise
@@ -2080,8 +2080,9 @@ themselves, so a cheap layer comes first and a stronger one later.
   in `workspace.toml` (extension, compile and run commands, allowlist); those commands run, so
   generation never writes them. A language without a built-in checker needs the container.
 - C (owner, 2026-11-07). Four steps: (1) validation, built; (2) the image and the GUI's
-  Environment page; (3) generation prompts, a `graph/` change explained first; (4) question.md
-  from student.c and hints. The first C course's lectures (C99 with `gcc -Wall -std=c99`,
+  Environment page, built; (3) generation, built (question.md from student.c came forward
+  into it); (4) what the learner touches: the GUI's exercise page and Open in IDE, attempts'
+  snapshots, the progress report and hints, which still read student.py. The first C course's lectures (C99 with `gcc -Wall -std=c99`,
   Makefiles, programs on standard input and output, expected-output files, gdb and valgrind,
   no unit-test framework) show it tests by given input and expected output, so:
   - pytest drives the compiled program (owner chose the recommended option). The rules,
@@ -2169,10 +2170,40 @@ themselves, so a cheap layer comes first and a stronger one later.
       the container. A `gcc` here of another make or version (macOS's clang) is shown as
       "differs", not as missing: the learner's own runs compile with it, validation with the
       image's gcc; only no compiler at all is missing.
-    - New batch is held back for a C course, on the page and by the server (owner): the
-      pipeline writes Python exercises only, so a batch would be Python about C lectures,
-      paid for. The course page says so, and that a C course needs the container. The
-      `tutor.graph` command line is not held back: `graph/` changes come with step 3.
+    - New batch was held back for every C course until step 3 (owner), as the pipeline wrote
+      Python exercises only. Since step 3 it is held back only while the course's tests would
+      not run in a container, on the page and by the server, and `tutor.graph` stops there
+      too, before its first model call: every draft would fail rule `safe`.
+  - Step 3, generation (owner, 2026-11-07; `graph/`, its design explained and approved first).
+    - One prompt template for every language, not a copy per language (owner: otherwise a new
+      version per language). `prompts.SPEC`, `PLAN_TEMPLATE` and `ORACLE_TEMPLATE` hold
+      `{slots}` where a language differs (the rules, where the question goes, the tests, the
+      reference, the main rule, the misconception shown, test data, how to test the "how",
+      the code rules); `PYTHON_PARTS` and `C_PARTS` fill them, and a new language adds its
+      parts, a profile (`graph/languages.py`: its plan and draft models, their schemas, where
+      the question is) and a synthetic example. This keeps the decision that calibrated
+      prompts stay as they are: Python's parts are its old text cut out of it by a script, not
+      retyped, and before the change 35 outputs (system prompts with every option, item, repair
+      and retry prompts per framework and mode, plan and oracle prompts, the three JSON
+      Schemas) were pinned by hash (`tests/test_prompt_pins.py`); they still match, so
+      Python's calibration and what providers have cached of it stand.
+    - Models of its own for C (`CPlanItem` with framework `c`, `CExerciseDraft` with
+      student_c, reference_c, and for a function exercise student_h and driver_c), so the
+      Python schemas the models receive keep their text. A C course's batch is all C (owner).
+      Both shapes are generated (owner): the model writes a function exercise's driver and
+      header, which the student gets as they are.
+    - What the C prompts add: the rules as the validator applies them to C (compile without a
+      warning under the course's flags, which the prompt names; a skeleton that compiles and
+      fails; a mutant that does not compile is broken); the question in student.c's opening
+      `/* */` comment, Markdown as is and no `*/` inside; tests through `testkit_c`, whose API
+      is read from the module; C misconceptions as mutants, a leak only with a `leaks=True`
+      test, never a fault in reading uninitialised memory or unspecified behaviour (no test
+      catches those every time); the C code rules, with the course's extra headers.
+    - A C mutant names its bug in a `/* Mutant: ... */` line (a docstring would not compile),
+      in place of the reference's opening one-line comment, so a diff shows only the bug.
+    - Measured so far with stand-in models only: a C item goes from a reply to a saved exercise
+      through the real validator on the host and in the course's container. The C prompts
+      are not calibrated: the first batches on the C course measure them.
 - Languages in the plan (owner, 2026-11-07), in this order: C, C++ and Java first, as the
   owner has courses in them; then SQL, JavaScript and TypeScript, shell, Rust, R, Go, Haskell,
   assembly, and MATLAB (open, below). Each is designed when a real course with lectures needs
@@ -2822,6 +2853,19 @@ gaps. Each was decided by the owner; change one only with the owner.
   nothing: layer A, the container and the owner's review still answer what a lecture can
   make a model write. Coverage's prompt is version 2 (asked again on the next click);
   `[requires]` folded it into its version 2, not used yet.
+  New prompts mark what they send from outside (owner, 2026-11-07: keep GitHub's
+  prompt-injection scanning as quiet as can be, and record it here). Every prompt written from
+  now on, beginning with C's (`graph/prompts.py`, `material()`), sends text it did not write
+  itself between tags, a closing tag inside broken up, and its system prompt names the tags as
+  material to read, not instructions: the lecture pages (`<lecture>`); in a repair, the
+  previous answer and the validator's report, which quotes what generated code printed
+  (`<previous_answer>`, `<validator_report>`); for the oracle, the question, the interface and
+  the samples another model wrote (`<question>`, `<interface>`, `<samples>`); for the plan,
+  the coverage table, the page list, the existing exercises and the previous plan. The owner's
+  own preferences and feedback are instructions and stay unmarked. Python's generate, plan and
+  oracle prompts stay unmarked as calibrated (pinned, see "C", step 3), as this entry's
+  decision says; markers there wait for a measured change. The marks guide a model; layer A,
+  the container and the owner's review are still what bound the result.
 - No built-in "standard set" of models for a course with none (proposed 2026-11-06). The
   first course adds its models with "Add a model"; later ones copy them from another course.
   A set in the code would need upkeep as providers rename their models, and the owner prefers

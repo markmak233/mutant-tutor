@@ -13,7 +13,7 @@ from typing import Annotated, Literal, TypedDict
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from tutor.schema import Metadata
+from tutor.schema import CMetadata, Metadata
 
 # Fewer planted mistakes make rule 3 a weak check; a draft keeps at least this many after
 # leaving out mutants that cannot be applied (nodes.write_draft).
@@ -80,6 +80,44 @@ class OracleDraft(_Strict):
 
     oracle_py: str = Field(description=(
         "The whole oracle.py: the given interface with every function body written."))
+
+
+# --- C exercises (docs/design.md, "C", step 3) ---------------------------------------------
+# Models of their own, so the Python ones above, whose JSON Schemas the plan and generate
+# models receive, keep their exact text (tests/test_prompt_pins.py). graph/languages.py picks
+# the set by the course's language.
+
+class CPlanItem(PlanItem):
+    """A plan item of a C course: every exercise is C."""
+
+    framework: Literal["c"]
+
+
+class CBatchPlan(_Strict):
+    items: Annotated[list[CPlanItem], Field(min_length=1)]
+
+
+class CExerciseDraft(_Strict):
+    """A C exercise as the generate and repair models return it. Code in C, tests and the
+    oracle in Python (they run the compiled program through tutor.testkit_c)."""
+
+    diagnosis: str = Field(default="", description=(
+        "Repairs only, before any file: which test or rule failed, the right result worked "
+        "out by hand from the question, and which file is wrong (test, reference, question "
+        "or mutant) and why. Empty for a first draft."))
+    metadata: CMetadata
+    student_c: str  # the question in an opening /* */ comment, then the skeleton
+    # Function interface only, both given to the student as they are: the prototypes
+    # student.c defines, and the main that reads a test and calls them. "" for a program.
+    student_h: str = ""
+    driver_c: str = ""
+    test_student_py: str
+    hints_md: str
+    data_files: dict[str, str] = {}  # path inside the exercise folder -> content
+    reference_c: str
+    oracle_py: str
+    test_oracle_py: str
+    mutants: Annotated[list[MutantDraft], Field(min_length=MIN_MUTANTS, max_length=6)]
 
 
 class Attempt(TypedDict):

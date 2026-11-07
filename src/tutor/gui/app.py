@@ -166,9 +166,9 @@ NOTICES.update({
 ENVIRONMENT_NOTICES = {"install": "installed", "build": "image-built",
                        "requires-draft": "draft-ready"}
 RECENT_TASKS = 5
-C_NOT_GENERATED = ("Generating C exercises is not built yet, so this course cannot start a "
-                   "batch: the pipeline would write Python exercises about its C lectures. C "
-                   "exercises written by hand validate already (docs/design.md, \"C\").")
+C_NEEDS_CONTAINER = ("A C course's exercises are validated only in a container, so a batch "
+                     "starts once the course runs its tests in one: choose it on the "
+                     "Environment page (step 3) and build the test image (step 4).")
 UPLOAD_LIMIT_BYTES = 500 * 1024 * 1024  # one upload request, all its files together
 
 
@@ -496,7 +496,7 @@ def create_app(root: Path, token: str, port: int | None = None,
                                values=shown, problems=problems,
                                models=generation.models(course),
                                running=tasks.running(course.workspace.root),
-                               c_course=environment.is_c_course(course)), code
+                               c_blocked=environment.c_without_container(course)), code
 
     @app.get("/c/<name>/new-batch")
     def new_batch(name: str):
@@ -507,10 +507,10 @@ def create_app(root: Path, token: str, port: int | None = None,
         """`plan`: the plan model proposes the batch, and the command pauses for the owner."""
         course = course_or_404(name)
         form = request.form
-        if environment.is_c_course(course):
-            # The pipeline writes Python exercises only, until C generation is built
-            # (owner, 2026-11-07): a C course's batch would be Python about C lectures.
-            return new_batch_page(course, {}, [C_NOT_GENERATED], 409)
+        if environment.c_without_container(course):
+            # Every draft would fail rule `safe` (C runs only in a container), so nothing
+            # starts; `tutor.graph` stops there too, before any model is asked.
+            return new_batch_page(course, {}, [C_NEEDS_CONTAINER], 409)
         values = {"label": form.get("label", ""), "lectures": form.getlist("lecture"),
                   "mode": form.get("mode", ""), "how": form.get("how", ""),
                   "count": form.get("count", ""), "max_count": form.get("max_count", ""),

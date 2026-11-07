@@ -11,7 +11,7 @@ import pytest
 pytest.importorskip("flask")  # the `gui` extra
 
 from tutor.gui import courses, environment, tasks  # noqa: E402
-from tutor.gui.app import C_NOT_GENERATED, create_app  # noqa: E402
+from tutor.gui.app import C_NEEDS_CONTAINER, create_app  # noqa: E402
 from tutor.materials import cache  # noqa: E402
 
 TOKEN = "test-token"
@@ -179,20 +179,22 @@ def test_every_lecture_can_be_asked_again(root, course, started):
     assert started[0]["title"] == "Find requirements in every lecture again"
 
 
-def test_new_batch_is_held_back_for_a_c_course(root, course, started):
+def test_new_batch_waits_for_a_c_course_to_run_its_tests_in_a_container(root, course,
+                                                                        started):
+    """Every draft of a C course on this machine would fail rule `safe`: nothing starts."""
     client = _browser(root)
     post(client, "/c/cdemo/environment/language", {"c": "on", "flags": "-Wall"})
 
     text = _page(client, "/c/cdemo/new-batch")
-    assert "Generating C exercises is not built yet" in text
+    assert "validated only in a container, so a batch starts once" in text
     assert 'action="/c/cdemo/new-batch"' not in text  # no form to start one
-    response = post(client, "/c/cdemo/new-batch", {"label": "w1", "lecture": "lecture02.html",
-                                                    "mode": "learn", "how": "auto"})
+    form = {"label": "w1", "lecture": "lecture02.html", "mode": "learn", "how": "auto"}
+    response = post(client, "/c/cdemo/new-batch", form)
     assert response.status_code == 409
-    assert "Generating C exercises is not built yet" in response.get_data(as_text=True)
-    assert C_NOT_GENERATED.startswith("Generating C exercises")
+    assert C_NEEDS_CONTAINER.startswith("A C course's")
     assert started == []
+    assert "A C course&#39;s tests run only in a container" in _page(client, "/c/cdemo/")
 
-    course_page = _page(client, "/c/cdemo/")
-    assert "A C course&#39;s tests run only in a container" in course_page
-    assert "Generating C exercises is not built yet" in course_page
+    post(client, "/c/cdemo/environment/runner", {"runner": "container"})
+    assert 'action="/c/cdemo/new-batch"' in _page(client, "/c/cdemo/new-batch")
+    assert "A C course&#39;s tests run only in a container" not in _page(client, "/c/cdemo/")

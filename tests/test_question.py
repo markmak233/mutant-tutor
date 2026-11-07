@@ -153,11 +153,10 @@ def test_the_examples_question_md_matches_their_student_py():
     for example in sorted(p for p in root.iterdir() if (p / "exercise").is_dir()):
         exercise = example / "exercise"
         metadata = json.loads((example / "solution" / "metadata.json").read_text(encoding="utf-8"))
-        if metadata.get("language") == "c":
-            continue  # question.md is written by hand until it is rendered from student.c
+        student = exercise / ("student.c" if metadata.get("language") == "c" else "student.py")
         rendered = exercise / "question.md"
         before = rendered.read_text(encoding="utf-8")
-        write_question((exercise / "student.py").read_text(encoding="utf-8"), exercise,
+        write_question(student.read_text(encoding="utf-8"), exercise,
                        location=exercise, metadata=metadata, mode="learn")
         try:
             assert rendered.read_text(encoding="utf-8") == before, example.name

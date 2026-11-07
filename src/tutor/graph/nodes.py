@@ -32,11 +32,12 @@ from pydantic import ValidationError
 
 from tutor import llm
 from tutor.graph import prompts
+from tutor.graph.languages import PROFILES, PYTHON, Profile
 from tutor.graph.settings import DEFAULTS, DEPS_FIELDS
 from tutor.graph.state import (
     MIN_MUTANTS,
-    BatchPlan,
     BatchState,
+    CExerciseDraft,
     ExerciseDraft,
     ItemState,
     MutantDraft,
@@ -46,14 +47,21 @@ from tutor.graph.state import (
 from tutor.materials import cache
 from tutor.question import QUESTION_FILE, question_markdown, write_question
 from tutor.schema import Manifest, SourceRef
+from tutor.testkit_c import DEFAULT_FLAGS, course_flags
 from tutor.validation.checks import RuleResult, Status, ValidationReport, validate
 from tutor.validation.exercise import load_exercise
-from tutor.validation.safety import CORE_IMPORTS, find_hazards, workspace_allow_imports
+from tutor.validation.safety import (
+    CORE_IMPORTS,
+    find_hazards,
+    workspace_allow_headers,
+    workspace_allow_imports,
+)
 
 # The JSON Schemas sent as structured output, one per kind of reply; the replies are
-# parsed back into the same Pydantic models (state.py).
-DRAFT_SCHEMA = ExerciseDraft.model_json_schema()
-PLAN_SCHEMA = BatchPlan.model_json_schema()
+# parsed back into the same Pydantic models (state.py). A C course's plan and draft use its
+# own (graph/languages.py); these are Python's.
+DRAFT_SCHEMA = PYTHON.draft_schema
+PLAN_SCHEMA = PYTHON.plan_schema
 ORACLE_SCHEMA = OracleDraft.model_json_schema()
 # Files of the exercise folder that data_files must not replace.
 OWN_FILES = {"student.py", "test_student.py", "hints.md", "question.md"}
@@ -102,6 +110,8 @@ class Deps:
     repair_thinking: bool = DEFAULTS.repair_thinking
     oracle_thinking: bool = DEFAULTS.oracle_thinking
     concept_lines: int = DEFAULTS.concept_lines
+    # The course's language (graph/languages.py): "c" makes every exercise of the batch C.
+    language: str = "python"
     plan_config: llm.LLMConfig | None = None  # the `plan` role; default: config
     # The `repair` role: a larger model for the repair rounds from `stronger_repair_from` on,
     # where the cheap model fails most (it cannot tell which side of a failure is wrong).
@@ -118,6 +128,10 @@ class Deps:
     # timeout, and on_stream gets (exercise id, characters so far) while it arrives.
     stream: bool = True
     on_stream: Callable[[str, int], None] | None = None
+
+    @property
+    def profile(self) -> Profile:
+        return PROFILES[self.language]
 
     @property
     def drafts(self) -> Path:
@@ -191,7 +205,7 @@ def generate(state: ItemState, deps: Deps) -> ItemState:
     """Round 0: the first draft of the item's exercise, from its plan line and the course
     pages."""
     item = state["item"]
-    user = prompts.item_prompt(item, state["context"], deps.mode)
+    user = prompts.item_prompt(item, state["context"], deps.mode, deps.language)
     return _ask(state, deps, user, "generate", 0)
 
 
@@ -202,11 +216,13 @@ def repair(state: ItemState, deps: Deps) -> ItemState:
     if state.get("draft") is None:
         # Nothing usable came back (cut off while thinking, or not JSON): showing that
         # reply would only lengthen the prompt, so the item is asked again.
-        user = prompts.retry_prompt(item, state["context"], state["failure"] or "", deps.mode)
+        user = prompts.retry_prompt(item, state["context"], state["failure"] or "", deps.mode,
+                                    deps.language)
     else:
         user = prompts.repair_prompt(item, state["context"], state.get("draft_json", ""),
                                      state["failure"] or "", deps.mode,
-                                     unchanged=state.get("unchanged", False))
+                                     unchanged=state.get("unchanged", False),
+                                     language=deps.language)
     round_ = state.get("round", 0) + 1
     stronger = deps.repair_config is not None and round_ >= deps.stronger_repair_from
     if stronger:
@@ -222,6 +238,7 @@ def _ask(state: ItemState, deps: Deps, user: str, purpose: str, round_: int,
     config = config or deps.config
     thinking = deps.thinking if thinking is None else thinking
     conventions = deps.workspace / "conventions.md"
+    c = deps.language == "c"
     messages = [
         {"role": "system", "content": prompts.system_prompt(
             conventions.read_text(encoding="utf-8") if conventions.is_file() else "",
@@ -229,14 +246,18 @@ def _ask(state: ItemState, deps: Deps, user: str, purpose: str, round_: int,
             concept_lines=deps.concept_lines,
             # What the course lets exercises import besides the core modules (the owner
             # ticks them on the Environment page), so the model knows it may.
-            extra_imports=workspace_allow_imports(deps.workspace))},
+            extra_imports=workspace_allow_imports(deps.workspace),
+            language=deps.language,
+            # A C course's compiler flags and extra headers, as its tests will use them.
+            c_flags=(course_flags(deps.workspace) or list(DEFAULT_FLAGS)) if c else (),
+            c_headers=workspace_allow_headers(deps.workspace) if c else ())},
         {"role": "user", "content": user},
     ]
     # A repair round asks a little warmer each time: at temperature 0 an unchanged prompt
     # got the identical draft back (graph/settings.py).
     reply = deps.chat(config, messages, purpose=purpose, log_path=deps.llm_log,
                       max_tokens=deps.max_tokens if thinking else deps.max_tokens_no_thinking,
-                      response_schema=DRAFT_SCHEMA,
+                      response_schema=deps.profile.draft_schema,
                       thinking=thinking,
                       temperature=min(round_ * deps.repair_temperature_step, 0.8),
                       **_streaming(state, deps))
@@ -245,7 +266,7 @@ def _ask(state: ItemState, deps: Deps, user: str, purpose: str, round_: int,
                          "unchanged": round_ > 0 and reply.text.strip()
                          == state.get("draft_json", "").strip()}
     try:
-        update.update(draft=ExerciseDraft.model_validate_json(reply.text), failure=None,
+        update.update(draft=deps.profile.draft.model_validate_json(reply.text), failure=None,
                       format_error=False)
     except ValidationError as e:
         cut = " (the reply was cut off at max_tokens)" if reply.finish_reason == "length" else ""
@@ -291,7 +312,7 @@ def write_oracle(state: ItemState, deps: Deps) -> ItemState:
         return {}
     if draft is None:  # the reply could not be read; repair asks again
         return {"oracle_status": "skipped"}
-    question = _docstring(draft.student_py)
+    question = deps.profile.question(draft)
     interface = draft.oracle_py
     problems = _interface_problems(interface)
     if problems and all(p.endswith(_HAS_BODY) for p in problems):
@@ -300,7 +321,9 @@ def write_oracle(state: ItemState, deps: Deps) -> ItemState:
         # oracle model never sees the bodies, so its reading stays independent.
         interface, problems = _as_interface(interface), []
     if not question:
-        problems.insert(0, "student.py has no module docstring: the question goes there")
+        problems.insert(0, "student.c does not start with a /* ... */ comment: the question "
+                        "goes there" if deps.language == "c"
+                        else "student.py has no module docstring: the question goes there")
     if problems:
         return _oracle_failed(state, "oracle_py must be an interface for another model to "
                               "fill in: " + "; ".join(problems))
@@ -309,9 +332,9 @@ def write_oracle(state: ItemState, deps: Deps) -> ItemState:
     if key == state.get("oracle_key") and state.get("oracle_py"):
         return {"draft": draft.model_copy(update={"oracle_py": state["oracle_py"]}),
                 "oracle_status": "kept"}
-    messages = [{"role": "system", "content": prompts.oracle_spec()},
+    messages = [{"role": "system", "content": prompts.oracle_spec(deps.language)},
                 {"role": "user", "content": prompts.oracle_prompt(
-                    question, interface, draft.data_files)}]
+                    question, interface, draft.data_files, language=deps.language)}]
     allowed = CORE_IMPORTS | workspace_allow_imports(deps.workspace)
     spent: ItemState = {}
     for _ in range(1 + ORACLE_RETRIES):
@@ -488,13 +511,16 @@ def _report_text(report: ValidationReport) -> str:
                      for r in report.results) + ("\nVALID\n" if report.valid else "\nINVALID\n")
 
 
-def write_draft(draft: ExerciseDraft, exercise_id: str, root: Path, mode: str | None = None,
-                lecture: str | None = None) -> tuple[Path, Path, dict[str, str]]:
+def write_draft(draft: ExerciseDraft | CExerciseDraft, exercise_id: str, root: Path,
+                mode: str | None = None, lecture: str | None = None
+                ) -> tuple[Path, Path, dict[str, str]]:
     """root/exercises/<id> and root/solutions/<id>, laid out like a batch, and the mutants
     left out: one that cannot be applied is left out (name -> why) while MIN_MUTANTS others
     remain, so one copying slip does not cost the whole exercise; fewer is a format error.
     `mode`: the batch's, for the question's line under the title. `lecture`: the plan item's,
-    the name of its cache file."""
+    the name of its cache file. A C draft (CExerciseDraft) writes .c files, and for a
+    function exercise the given student.h and driver.c."""
+    c = isinstance(draft, CExerciseDraft)
     if draft.metadata.id != exercise_id:
         raise DraftError(f"metadata.id is {draft.metadata.id!r}, the plan names {exercise_id!r}")
     if draft.metadata.source == "synthetic":
@@ -502,15 +528,17 @@ def write_draft(draft: ExerciseDraft, exercise_id: str, root: Path, mode: str | 
         # always comes from course pages, which it must cite.
         raise DraftError('metadata.source is "synthetic": give the lecture, slides and PDF '
                          "pages the exercise comes from")
-    if escaped_docstring(draft.student_py):
+    if not c and escaped_docstring(draft.student_py):
         raise DraftError('student.py\'s docstring has a backslash but is not a raw string: '
                          'Python reads "\\frac" as a form feed and "\\neq" as a line break. '
                          'Write it as r"""...""" so the LaTeX stays as written')
+    if c:
+        _check_c_shape(draft)
     if root.exists():
         shutil.rmtree(root)
     exercise, solution = root / "exercises" / exercise_id, root / "solutions" / exercise_id
     metadata = draft.metadata
-    if metadata.standalone is None:
+    if not c and metadata.standalone is None:
         # A generated exercise is always under rule "main"; only the model's explicit
         # false (a framework-launched program) is kept.
         metadata = metadata.model_copy(update={"standalone": True})
@@ -521,18 +549,25 @@ def write_draft(draft: ExerciseDraft, exercise_id: str, root: Path, mode: str | 
         # round's prompt stays as the model wrote it.
         source = metadata.source.model_copy(update={"lecture": lecture})
         metadata = metadata.model_copy(update={"source": source})
+    student, reference, suffix = ((draft.student_c, draft.reference_c, ".c") if c
+                                  else (draft.student_py, draft.reference_py, ".py"))
     files = {
-        exercise / "student.py": draft.student_py,
+        exercise / f"student{suffix}": student,
         exercise / "test_student.py": draft.test_student_py,
         exercise / "hints.md": draft.hints_md,
         solution / "metadata.json": metadata.model_dump_json(
             indent=2, exclude_unset=True, exclude_none=True) + "\n",
-        solution / "reference.py": draft.reference_py,
-        solution / "skeleton.py": draft.student_py,  # what the student starts from
+        solution / f"reference{suffix}": reference,
+        solution / f"skeleton{suffix}": student,  # what the student starts from
         solution / "oracle.py": draft.oracle_py,
         solution / "test_oracle.py": draft.test_oracle_py,
     }
-    question = question_markdown(draft.student_py, metadata.model_dump(mode="json"), mode)
+    if c and draft.driver_c:
+        # Given to the student as they are; the tests compile driver.c with student.c.
+        files[exercise / "driver.c"] = draft.driver_c
+        files[exercise / "student.h"] = draft.student_h
+    question = question_markdown(student, metadata.model_dump(mode="json"), mode,
+                                 "c" if c else "python")
     if question:  # the question again as Markdown, for reading in a previewer
         files[exercise / QUESTION_FILE] = question
     for name, content in draft.data_files.items():
@@ -543,8 +578,8 @@ def write_draft(draft: ExerciseDraft, exercise_id: str, root: Path, mode: str | 
     dropped = {}  # every mutant that cannot be applied, so one repair round fixes them all
     for mutant in draft.mutants:
         try:
-            files[solution / "mutants" / f"{mutant.name}.py"] = apply_mutant(
-                draft.reference_py, mutant)
+            files[solution / "mutants" / f"{mutant.name}{suffix}"] = apply_mutant(
+                reference, mutant, "c" if c else "python")
         except DraftError as e:
             dropped[mutant.name] = str(e)
     if dropped and len(draft.mutants) - len(dropped) < MIN_MUTANTS:
@@ -553,6 +588,23 @@ def write_draft(draft: ExerciseDraft, exercise_id: str, root: Path, mode: str | 
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content if content.endswith("\n") else content + "\n", encoding="utf-8")
     return exercise, solution, dropped
+
+
+def _check_c_shape(draft: CExerciseDraft) -> None:
+    """What a C draft's files must be for its interface, before anything is written: the
+    question in student.c's opening comment; a function exercise's given driver.c and
+    student.h; none for a whole program, whose main is student.c's."""
+    if not PROFILES["c"].question(draft):
+        raise DraftError("student_c must start with the question in a /* ... */ comment, "
+                         "with no */ inside it")
+    if draft.metadata.interface == "function" and not (draft.driver_c.strip()
+                                                       and draft.student_h.strip()):
+        raise DraftError("a function exercise needs driver_c (the main that calls the "
+                         "student's functions) and student_h (their prototypes)")
+    if draft.metadata.interface == "file" and (draft.driver_c.strip()
+                                               or draft.student_h.strip()):
+        raise DraftError("a whole program (file interface) has its main in student_c: leave "
+                         'driver_c and student_h ""')
 
 
 def escaped_docstring(code: str) -> bool:
@@ -584,6 +636,11 @@ def _data_path(name: str) -> PurePosixPath:
         raise DraftError(f"data file {name!r}: give a relative path inside the exercise "
                          "folder, not a Python file or one of student.py / test_student.py "
                          "/ hints.md / question.md")
+    if path.suffix in (".c", ".h"):
+        # C code goes in its own fields (student_c, driver_c, student_h), where the checks
+        # and the question see it, never in a data file.
+        raise DraftError(f"data file {name!r}: C code is not a data file; give it in "
+                         "student_c, driver_c or student_h")
     return path
 
 
@@ -600,19 +657,29 @@ def _closest(code: str, old: str) -> str:
     return f"; the closest line in reference.py is, exactly: {exact!r}"
 
 
-def apply_mutant(reference: str, mutant: MutantDraft) -> str:
-    """The reference with the mutant's replacements, and its docstring saying the bug."""
+def apply_mutant(reference: str, mutant: MutantDraft, language: str = "python") -> str:
+    """The reference with the mutant's replacements, and its docstring (in C its opening
+    comment) saying the bug."""
     code = reference
+    suffix = ".c" if language == "c" else ".py"
     # Each replacement must hit exactly one place, so the mutant is the change it states.
     for r in mutant.replacements:
         count = code.count(r.old)
         if count != 1:
             raise DraftError(f"mutant {mutant.name}: {r.old!r} occurs {count} times in "
-                             "reference.py; `old` must be exact text that occurs once"
+                             f"reference{suffix}; `old` must be exact text that occurs once"
                              + _closest(code, r.old))
         code = code.replace(r.old, r.new)
     if code == reference:
         raise DraftError(f"mutant {mutant.name} changes nothing")
+    if language == "c":
+        # A comment, not a docstring, which would not compile; one line in place of the
+        # reference's opening one-line comment, so a diff shows only the bug.
+        note = f"/* Mutant: {mutant.bug.rstrip('.').replace('*/', '* /')}. */"
+        lines = code.splitlines()
+        if lines and lines[0].lstrip().startswith("/*") and lines[0].rstrip().endswith("*/"):
+            return "\n".join([note, *lines[1:]]) + "\n"
+        return f"{note}\n{code}"
     doc = f'"""Mutant: {mutant.bug.rstrip(".")}."""'
     try:
         first = ast.parse(code).body[0]
@@ -662,12 +729,13 @@ def save(state: ItemState, deps: Deps) -> ItemState:
             shutil.rmtree(staging)  # left by a copy that failed
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copytree(source, staging)
-        if source.parent.name == "exercises" and (staging / "student.py").is_file():
+        student = staging / f"student{deps.profile.suffix}"
+        if source.parent.name == "exercises" and student.is_file():
             # The question's "How to run" names the folder it will have from now on; the
             # line under its title comes from the exercise's metadata and the batch mode.
             metadata = json.loads(
                 (src / "solutions" / item.id / "metadata.json").read_text(encoding="utf-8"))
-            write_question((staging / "student.py").read_text(encoding="utf-8"), staging,
+            write_question(student.read_text(encoding="utf-8"), staging,
                            location=target, metadata=metadata, mode=deps.mode)
         staged.append((staging, target))
     for staging, target in staged:
@@ -802,18 +870,18 @@ def plan_batch(state: BatchState, deps: Deps) -> BatchState:
         existing=existing_exercises(deps.workspace), preferences=state.get("preferences", ""),
         count=count, max_count=max_count, feedback=state.get("feedback", ""),
         previous=json.dumps(state["plan"], indent=1) if state.get("plan") else "",
-        mode=deps.mode)
+        mode=deps.mode, language=deps.language)
     config = deps.plan_config or deps.config
     problems: list[str] = []
     plan: list[dict] = []
     for _ in range(1 + PLAN_RETRIES):
-        messages = [{"role": "system", "content": prompts.PLAN_SPEC},
+        messages = [{"role": "system", "content": prompts.plan_spec(deps.language)},
                     {"role": "user", "content": prompts.plan_prompt(**inputs, problems=problems)}]
         reply = deps.chat(config, messages, purpose="plan", log_path=deps.llm_log,
-                          max_tokens=deps.max_tokens, response_schema=PLAN_SCHEMA,
+                          max_tokens=deps.max_tokens, response_schema=deps.profile.plan_schema,
                           thinking=deps.plan_thinking)
         try:
-            items = BatchPlan.model_validate_json(reply.text).items
+            items = deps.profile.batch_plan.model_validate_json(reply.text).items
         except ValidationError as e:
             problems = ["the reply does not fit the JSON schema: "
                         + "; ".join(_describe(err) for err in e.errors()[:10])]
@@ -853,13 +921,14 @@ def blocking_problems(items: list[PlanItem], lectures: list[str],
     return found
 
 
-def apply_decision(state: BatchState, decision: dict, existing: list[str]) -> BatchState:
+def apply_decision(state: BatchState, decision: dict, existing: list[str],
+                   profile: Profile = PYTHON) -> BatchState:
     """The owner's answer to the plan: approve (with the plan as they may have edited it)
     or send it back with feedback. The CLI refuses a plan with blocking problems first;
     this check is for any other caller."""
     if decision.get("action") == "approve":
         plan = decision.get("plan", state["plan"])
-        items = BatchPlan.model_validate({"items": plan}).items  # an edited plan must fit
+        items = profile.batch_plan.model_validate({"items": plan}).items  # an edited plan must fit
         if found := blocking_problems(items, state["lectures"], existing):
             raise ValueError("the approved plan cannot run: " + "; ".join(found))
         return {"plan": plan, "approved": True}
@@ -868,7 +937,7 @@ def apply_decision(state: BatchState, decision: dict, existing: list[str]) -> Ba
 
 def collect(state: BatchState, deps: Deps) -> BatchState:
     """After all items: the manifest, and the coverage.md changes proposed to the owner."""
-    saved = [PlanItem.model_validate(p) for p in state["plan"]
+    saved = [deps.profile.plan_item.model_validate(p) for p in state["plan"]
              if any(r["id"] == p["id"] and r["outcome"] == "saved" for r in state["results"])]
     write_manifest(deps, saved, notes=("Owner's preferences: " + state["preferences"])
                    if state.get("preferences") else None,

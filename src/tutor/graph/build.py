@@ -33,7 +33,7 @@ from tutor.container import check_course
 from tutor.exchange import AwaitingAnswer
 from tutor.graph import nodes
 from tutor.graph.nodes import Deps
-from tutor.graph.state import BatchState, ItemState, PlanItem
+from tutor.graph.state import BatchState, ItemState
 
 
 def build_item(deps: Deps):
@@ -71,7 +71,8 @@ def build_batch(deps: Deps, checkpointer):
     def approve(state: BatchState) -> BatchState:
         # Pauses the graph; `Command(resume=decision)` continues it, also in a new process.
         decision = interrupt({"plan": state["plan"], "problems": state.get("plan_problems", [])})
-        return nodes.apply_decision(state, decision, nodes.existing_ids(deps.workspace))
+        return nodes.apply_decision(state, decision, nodes.existing_ids(deps.workspace),
+                                    deps.profile)
 
     def after_approve(state: BatchState):
         if not state.get("approved"):
@@ -84,7 +85,7 @@ def build_batch(deps: Deps, checkpointer):
         return [Send("item", {"item": p}) for p in ordered]
 
     def item(payload: dict) -> BatchState:
-        plan_item = PlanItem.model_validate(payload["item"])
+        plan_item = deps.profile.plan_item.model_validate(payload["item"])
         final: ItemState = {"item": plan_item}
         try:
             # Docker may have stopped since the batch began. The item that finds out reports

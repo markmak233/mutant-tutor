@@ -358,10 +358,10 @@ Phase numbers match `docs/design.md`.
 - ✅ After 5: [a container for every test run](#where-exercise-code-runs), one fresh Docker
   container per run, chosen per course; every saved exercise validated in it as on the host
 - **6** Second course: another language or framework, to prove nothing is shaped around one
-  course. In progress: a C course (its lectures already read as web pages); validating C
-  exercises is built (pytest drives the compiled program, with sanitizers, in a container),
-  generating them is next; then C++ and Java (the order is in design.md, "Languages in the
-  plan")
+  course. In progress: a C course (its lectures already read as web pages); generating and
+  validating C exercises is built (pytest drives the compiled program, with sanitizers, in a
+  container; one prompt template filled per language), the learner's pages and hints come
+  next; then C++ and Java (the order is in design.md, "Languages in the plan")
 - **7** ✅ Local GUI, built ahead of 6: a web app on the CLI's functions, localhost only;
   solving stays in the IDE. The pages, Open in VS Code, background tasks, generation with
   the plan approved in the page, lectures (PDFs, web pages, a whole folder to tick from), a

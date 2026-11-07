@@ -120,6 +120,7 @@ def test_c_is_refused_unless_the_course_runs_its_tests_in_a_container():
 def test_safe_reads_every_c_file_a_run_compiles(tmp_path, in_container):
     root, ex = copy_example(tmp_path, "station-drop-low-c")
     assert check_safety(ex).detail == "10 files checked"
+    added = len(ex.skeleton.read_text(encoding="utf-8").splitlines()) + 1  # the line appended
 
     (root / "solution" / "skeleton.c").write_text(
         ex.skeleton.read_text(encoding="utf-8") + 'int run(void) { return system("ls"); }\n',
@@ -130,7 +131,7 @@ def test_safe_reads_every_c_file_a_run_compiles(tmp_path, in_container):
 
     detail = check_safety(load_exercise(root / "exercise", root / "solution")).detail
     assert "driver.c line 1: #include <unistd.h> is not allowed" in detail
-    assert "solution/skeleton.c line 23: system is not allowed" in detail
+    assert f"solution/skeleton.c line {added}: system is not allowed" in detail
 
 
 def test_a_course_may_allow_more_headers(tmp_path, in_container):

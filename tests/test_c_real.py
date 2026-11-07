@@ -75,3 +75,30 @@ def test_a_leak_fails_a_run_that_asks_for_the_check(course):
     assert result.outcome is Outcome.FAILED
     assert (result.counts.passed, result.counts.failed) == (1, 1)
     assert "LeakSanitizer: detected memory leaks" in result.output
+
+
+def test_a_generated_c_item_is_validated_in_the_container_and_saved(course):
+    """Generation's path for a C course (graph/, step 3): a model's reply (a stand-in) is
+    written out, validated in the course's container, and saved."""
+    pytest.importorskip("langgraph")
+    import json
+
+    from test_graph_c import ITEM, FakeModel, c_draft
+
+    from tutor.graph.build import build_item
+    from tutor.graph.nodes import Deps
+    from tutor.llm import LLMConfig
+    from tutor.materials import cache
+
+    entries = [cache.Entry(n, f"1.{n}", "text", f"h{n}", f"page {n}") for n in range(1, 7)]
+    cache.save(cache.cache_path(course, course / "lectures" / "L1.pdf"),
+               cache.render("L1.pdf", entries))
+    d = Deps(workspace=course, batch_dir=course / "batches" / "2026-11-07_p3-real",
+             config=LLMConfig("m", "glm", "http://x/v1", "m"),
+             chat=FakeModel(json.dumps(c_draft())), language="c")
+
+    final = build_item(d).invoke({"item": ITEM})
+
+    assert final["outcome"] == "saved", final.get("failure")
+    assert (d.batch_dir / "exercises" / "drop-low" / "driver.c").is_file()
+    assert containers_left() == ""

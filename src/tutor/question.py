@@ -1,7 +1,8 @@
 """The question of an exercise as Markdown, for reading in a previewer.
 
 The question lives in student.py's module docstring, the one source; question.md is made
-from it by code (no model), so the two never disagree. Two layouts:
+from it by code (no model), so the two never disagree. A C exercise keeps it in student.c's
+opening /* ... */ comment, in the Markdown layout (question_source). Two layouts:
 
 - Markdown (docs/design.md, "question.md format"; generated batches from 2026-10-31): the
   docstring is already Markdown, a raw string so LaTeX keeps its backslashes, starting with
@@ -50,16 +51,35 @@ def _docstring(student_source: str) -> str:
         return ""
 
 
+def c_comment(student_source: str) -> str:
+    """student.c's opening /* ... */ comment, the question; "" when the file does not start
+    with one. A " * " in front of every line, a common C style, is taken off."""
+    text = student_source.lstrip()
+    if not text.startswith("/*") or "*/" not in text:
+        return ""
+    lines = text[2:text.index("*/")].splitlines()
+    starred = [line for line in lines if line.strip()]
+    if starred and all(line.lstrip().startswith("*") for line in starred):
+        lines = [re.sub(r"^\s*\* ?", "", line) for line in lines]
+    return textwrap.dedent("\n".join(lines)).strip()
+
+
+def question_source(student_source: str, language: str = "python") -> str:
+    """The question as written: student.py's docstring, or student.c's opening comment."""
+    return c_comment(student_source) if language == "c" else _docstring(student_source)
+
+
 def is_markdown(doc: str) -> bool:
     """The Markdown layout starts with a "# " title; the plain one with bare title text."""
     return doc.startswith("# ")
 
 
 def question_markdown(student_source: str, metadata: dict | None = None,
-                      mode: str | None = None) -> str:
-    """student.py's module docstring as Markdown, without "How to run"; "" when it has
-    none. `metadata` and `mode` fill the Markdown layout's line under the title."""
-    doc = _docstring(student_source)
+                      mode: str | None = None, language: str = "python") -> str:
+    """student.py's module docstring (student.c's opening comment) as Markdown, without
+    "How to run"; "" when it has none. `metadata` and `mode` fill the Markdown layout's
+    line under the title."""
+    doc = question_source(student_source, language)
     if not doc:
         return ""
     if is_markdown(doc):
@@ -172,7 +192,7 @@ def run_block(location: Path) -> str:
 
 
 def markdown_question(doc: str, metadata: dict | None = None, mode: str | None = None,
-                      location: Path | None = None) -> str:
+                      location: Path | None = None, language: str = "python") -> str:
     """A Markdown-layout docstring as question.md: the title, the line under it, the
     contents, a rule; Concept, a rule; the other sections; a rule and "How to run" when
     `location` is known (a draft has none). The model writes only the title and the
@@ -205,7 +225,7 @@ def markdown_question(doc: str, metadata: dict | None = None, mode: str | None =
             out += ["---", ""]
         out += ([f"## {heading}", ""] if heading else []) + [_text(body), ""]
     if location is not None:
-        out += ["---", "", markdown_run_block(location, commands, notes)]
+        out += ["---", "", markdown_run_block(location, commands, notes, language)]
     return re.sub(r"\n{3,}", "\n\n", "\n".join(out)).strip() + "\n"
 
 
@@ -260,13 +280,15 @@ def _anchor(heading: str) -> str:
 
 
 def markdown_run_block(location: Path, commands: list[str] | None = None,
-                       notes: list[str] | None = None) -> str:
+                       notes: list[str] | None = None, language: str = "python") -> str:
     """The Markdown layout's "How to run": the folder, the tests, the program (the "## Run"
-    section's commands as written, else plain `python student.py`), the Run section's
-    notes, and the hint command."""
+    section's commands as written, else plain `python student.py`, or for C a compile and
+    run), the Run section's notes, and the hint command."""
     shown = _shown(location)
     # Aligned with "# the tests", and at least one space before the comment.
-    program = commands or [f"{'python student.py':<27} # the program"]
+    default = ("cc -Wall student.c -o program && ./program" if language == "c"
+               else "python student.py")
+    program = commands or [f"{default:<27} # the program"]
     return "\n".join([
         "## How to run", "",
         "With the repository's virtual environment active:", "",
@@ -284,12 +306,14 @@ def write_question(student_source: str, exercise_dir: Path,
     """Write exercise_dir/question.md; False (nothing written) when there is no question.
     `location`: where the exercise lives for good, for the "How to run" block (none
     while it is still a draft, whose folder is temporary). `metadata` (metadata.json) and
-    `mode` (the batch's) fill the Markdown layout's line under the title."""
-    doc = _docstring(student_source)
+    `mode` (the batch's) fill the Markdown layout's line under the title; its language says
+    where the question is (a C exercise's in student.c's opening comment)."""
+    language = (metadata or {}).get("language", "python")
+    doc = question_source(student_source, language)
     if not doc:
         return False
     if is_markdown(doc):
-        text = markdown_question(doc, metadata, mode, location)
+        text = markdown_question(doc, metadata, mode, location, language)
     else:
         text = question_markdown(student_source)
         if location is not None:
@@ -315,7 +339,8 @@ def main(argv: list[str]) -> int:
         metadata = json.loads(meta.read_text(encoding="utf-8")) if meta.is_file() else None
         # student.py holds the question in every batch (week 1-3 skeletons are code only);
         # the skeleton is the fallback when the owner's half-edited student.py does not parse.
-        sources = [exercise / "student.py", solution / "skeleton.py"]
+        suffix = ".c" if (metadata or {}).get("language") == "c" else ".py"
+        sources = [exercise / f"student{suffix}", solution / f"skeleton{suffix}"]
         written = any(path.is_file() and write_question(path.read_text(encoding="utf-8"),
                                                          exercise, exercise, metadata, mode)
                       for path in sources)

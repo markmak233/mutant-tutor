@@ -31,14 +31,16 @@ import argparse
 import json
 import os
 import sys
+import tomllib
 from datetime import date
 from pathlib import Path
 
 from pydantic import ValidationError
 
-from tutor.config import WorkspaceError, load_env, load_workspace
+from tutor.config import WORKSPACE_FILE, WorkspaceError, load_env, load_workspace
 from tutor.container import ContainerError, check_course
 from tutor.exchange import AwaitingAnswer
+from tutor.graph.languages import course_language, profile_of
 from tutor.graph.nodes import (
     Deps,
     blocking_problems,
@@ -55,7 +57,6 @@ from tutor.graph.settings import (
     parse_set,
     resolve,
 )
-from tutor.graph.state import BatchPlan, PlanItem
 from tutor.llm import LLMError, config_for, roles
 
 _CONTINUE = object()  # resume a run that stopped midway (nothing new to send)
@@ -127,12 +128,27 @@ def main(argv: list[str] | None = None) -> int:
         workspace = load_workspace().root
         # Before the first LLM call: a draft that cannot be validated is a draft paid for.
         check_course(workspace)
+        _check_language(workspace)
         if args.command == "item":
             return _item(args, workspace, build)
         return _batch(args, workspace, build)
     except (WorkspaceError, ContainerError, LLMError, OSError, ValidationError, ValueError) as e:
         print(f"stopped: {e}", file=sys.stderr)
         return 1
+
+
+def _check_language(workspace: Path) -> None:
+    """A C course's exercises are validated only in a container (docs/design.md, "C"): one
+    whose tests would run on this machine fails rule `safe` on every draft, so it stops here,
+    before any model is paid for. ValueError with what to do."""
+    if course_language(workspace) != "c":
+        return
+    with (workspace / WORKSPACE_FILE).open("rb") as f:
+        runner = tomllib.load(f).get("isolation", {}).get("runner")
+    if runner != "container":
+        raise ValueError('this is a C course, and C exercises are validated only in a '
+                         'container: set [isolation] runner = "container" (the Environment '
+                         "page, step 3) and build the test image")
 
 
 def _given(args) -> dict:
@@ -220,6 +236,7 @@ def _deps(workspace: Path, batch_dir: Path, profiles: dict,
         drafts = workspace / "batches" / ".drafts" / batch_dir.name / "checks"
         extra["check"] = reusing_reports(check_round, drafts)
     return Deps(workspace=workspace, batch_dir=batch_dir, config=config,
+                language=course_language(workspace),
                 plan_config=plan_config, oracle_config=oracle_config,
                 repair_config=repair_config, on_update=_progress, on_stream=_receiving,
                 **extra, **{name: getattr(settings, name) for name in DEPS_FIELDS})
@@ -234,7 +251,8 @@ def _optional_role(role: str, profile: str | None, workspace: Path):
 
 
 def _item(args, workspace: Path, build) -> int:
-    item = PlanItem.model_validate_json(args.item_file.read_text(encoding="utf-8"))
+    item = profile_of(workspace).plan_item.model_validate_json(
+        args.item_file.read_text(encoding="utf-8"))
     existing = sorted((workspace / "batches").glob(f"*_p3-{args.batch}"))
     batch_dir = (existing[-1] if existing
                  else workspace / "batches" / f"{date.today()}_p3-{args.batch}")
@@ -339,7 +357,8 @@ def _batch(args, workspace: Path, build) -> int:
                 continue
             plan_file = deps.drafts / "plan.json"
             plan, edited = _owner_plan(deps.drafts, snapshot.values["plan"])
-            problems = (blocking_problems(BatchPlan.model_validate({"items": plan}).items,
+            problems = (blocking_problems(deps.profile.batch_plan.model_validate(
+                {"items": plan}).items,
                                           snapshot.values["lectures"], existing_ids(workspace))
                         if edited else snapshot.values.get("plan_problems", []))
             _show_plan(plan, problems, plan_file, workspace)
@@ -354,7 +373,7 @@ def _batch(args, workspace: Path, build) -> int:
                 return 0
             if answer.get("approve"):
                 plan = json.loads(plan_file.read_text(encoding="utf-8"))  # with the owner's edits
-                items = BatchPlan.model_validate({"items": plan}).items
+                items = deps.profile.batch_plan.model_validate({"items": plan}).items
                 if found := blocking_problems(items, snapshot.values["lectures"],
                                               existing_ids(workspace)):
                     raise ValueError(f"{plan_file.name} cannot be approved: {'; '.join(found)}."
