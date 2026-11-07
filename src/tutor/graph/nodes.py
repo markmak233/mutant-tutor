@@ -226,7 +226,10 @@ def _ask(state: ItemState, deps: Deps, user: str, purpose: str, round_: int,
         {"role": "system", "content": prompts.system_prompt(
             conventions.read_text(encoding="utf-8") if conventions.is_file() else "",
             oracle_interface=deps.oracle_config is not None,
-            concept_lines=deps.concept_lines)},
+            concept_lines=deps.concept_lines,
+            # What the course lets exercises import besides the core modules (the owner
+            # ticks them on the Environment page), so the model knows it may.
+            extra_imports=workspace_allow_imports(deps.workspace))},
         {"role": "user", "content": user},
     ]
     # A repair round asks a little warmer each time: at temperature 0 an unchanged prompt
@@ -756,7 +759,9 @@ def write_manifest(deps: Deps, items: list[PlanItem], notes: str | None = None,
     path.parent.mkdir(parents=True, exist_ok=True)
     sources = list(known.sources) if known else []
     for item in items:
-        source = SourceRef(path=f"lectures/{item.lecture}.pdf", slides=item.slides)
+        # The lecture's own file, as its cache names it: L4.pdf, or notes saved as L4.html.
+        read_from = cache.lecture_cache(deps.workspace, item.lecture).name.removesuffix(".md")
+        source = SourceRef(path=f"lectures/{read_from}", slides=item.slides)
         if source not in sources:
             sources.append(source)
     if known:

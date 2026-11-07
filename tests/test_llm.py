@@ -224,6 +224,10 @@ def test_thinking_off_tries_each_switch_until_the_model_accepts_one(monkeypatch,
     assert [b.get("thinking") or b.get("reasoning_effort") for b in bodies] == [
         {"type": "disabled"}, "low"]
     bodies.clear()
+    # The next call in this run goes straight to the switch it accepted: refused once only.
+    chat(config, [], purpose="vision", thinking=False)
+    assert [b.get("thinking") or b.get("reasoning_effort") for b in bodies] == ["low"]
+    bodies.clear()
     chat(config, [], purpose="generate")  # thinking left on: no switch sent
     assert "thinking" not in bodies[0] and "reasoning_effort" not in bodies[0]
 
@@ -425,3 +429,43 @@ def test_embed_is_not_for_an_assistant_profile():
     config = LLMConfig("helper", "assistant", "assistant:helper", "helper")
     with pytest.raises(LLMError, match="no API"):
         llm.embed(config, ["a"], purpose="t")
+
+
+# --- python -m tutor.llm check ------------------------------------------------------------
+
+
+def test_check_sends_one_tiny_request_with_thinking_off(sent):
+    config = LLMConfig("local", "lmstudio", "http://localhost:1234/v1", "m",
+                       thinking_off=({"reasoning_effort": "none"},))
+
+    line = llm.check(config)
+
+    body = json.loads(sent[0][0].data)
+    assert line.startswith("ok, answered '## Mean v1'") and len(sent) == 1
+    assert body["max_tokens"] == 32 and body["reasoning_effort"] == "none"
+    assert body["messages"][0]["content"] == llm.CHECK_PROMPT
+
+
+def test_check_skips_an_assistant(sent):
+    config = LLMConfig("cc", "assistant", "assistant:cc", "cc")
+
+    assert llm.check(config).startswith("nothing to check") and sent == []
+
+
+def test_check_command_reports_each_profile_and_never_the_key(sent, tmp_path, monkeypatch,
+                                                               capsys):
+    root = workspace(tmp_path)
+    monkeypatch.chdir(tmp_path)  # no .env here
+    monkeypatch.setenv("WORKSPACE_DIR", str(root))
+    monkeypatch.delenv("ZHIPU_API_KEY", raising=False)
+
+    assert llm.main(["check"]) == 1  # glm-flash has no key
+    out = capsys.readouterr().out
+    assert "gemma-local: ok" in out and "glm-flash: failed" in out and "ZHIPU_API_KEY" in out
+
+    monkeypatch.setenv("ZHIPU_API_KEY", SECRET)
+    assert llm.main(["check", "glm-flash"]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("glm-flash: ok") and SECRET not in out
+    logged = (root / "logs" / "llm_calls.jsonl").read_text(encoding="utf-8")
+    assert '"purpose": "check"' in logged and SECRET not in logged

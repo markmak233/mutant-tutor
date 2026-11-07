@@ -1,0 +1,24 @@
+{# Small pieces the pages share. A <progress> element, not a styled div: the
+   Content-Security-Policy forbids inline style attributes, which a width would need. #}
+{% macro bar(done, total) -%}
+<div class="bar">
+  <progress value="{{ done }}" max="{{ total or 1 }}" aria-label="{{ done }} of {{ total }} passed"></progress>
+  <span class="bar-text">{{ done }} / {{ total }}</span>
+</div>
+{%- endmacro %}
+
+{# An action button: a POST form, so a link or an image elsewhere cannot trigger it. #}
+{% macro action(url, label, primary=False) -%}
+<form method="post" action="{{ url }}" class="action"><button type="submit"{% if primary %} class="primary"{% endif %}>{{ label }}</button></form>
+{%- endmacro %}
+
+{# The end of a task's output. column-reverse keeps the box scrolled to the newest line,
+   without a script. #}
+{% macro log_box(log, cut) -%}
+{% if cut %}<p class="muted">Only the end of the output is shown.</p>{% endif %}
+<div class="log"><pre>{{ log }}</pre></div>
+{%- endmacro %}
+
+{% macro chip(value, text=None) -%}
+<span class="chip chip-{{ value | replace(',', '') | replace(' ', '-') }}">{{ text or value }}</span>
+{%- endmacro %}

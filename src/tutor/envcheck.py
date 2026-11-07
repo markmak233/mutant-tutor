@@ -1,21 +1,36 @@
 """Check this machine against the current workspace's [requires] table.
 
 Check, don't install: every failure carries a hint saying what to fix
-(docs/design.md, "Environment"). Run with `python -m tutor.envcheck`.
+(docs/design.md, "Environment"). Run with `python -m tutor.envcheck`, or with `--json` for
+the GUI's Environment page, which runs it with the course's own .venv: the check is about
+the interpreter that runs it, so that is the one the learner's tests use.
+
+This module also owns what a [requires] entry may be (requires_problems) and pip's form of
+its packages (pip_requirements), so the venv install (tutor.workspace), the image
+(tutor.container) and the GUI agree.
 """
 
 from __future__ import annotations
 
+import argparse
+import json
 import os
 import platform
 import re
 import subprocess
 import sys
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import asdict, dataclass
 from importlib import metadata
 from pathlib import Path
 
 from tutor.config import Workspace, WorkspaceError, load_env, load_workspace
+
+# The names checked by their own rule below; any other name is a pip package.
+NOT_PIP = ("python", "java", "hadoop")
+NEEDS_JAVA = ("pyspark", "hadoop")
+PACKAGE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+VERSION = re.compile(r"^\d+(\.\d+)*$")  # a prefix of dotted numbers: "3.5" means 3.5.x
 
 
 @dataclass(frozen=True)
@@ -37,6 +52,27 @@ def version_matches(found: str, required: str) -> bool:
     """`required` is a prefix of dotted parts: "3.5" matches "3.5.9" but not "3.50.1"."""
     want = required.split(".")
     return found.split(".")[: len(want)] == want
+
+
+def requires_problems(requires: Mapping[str, str]) -> list[str]:
+    """What is wrong with a [requires] table, one line each; [] when nothing. A name or a
+    version goes into a pip command and an image recipe, so only plain ones pass."""
+    problems = []
+    for name, version in requires.items():
+        if not PACKAGE.match(name):
+            problems.append(f"[requires] {name!r} is not a package name")
+        elif not VERSION.match(version):
+            problems.append(f"[requires] {name} = {version!r}: use a version prefix such as "
+                            '"3.5"')
+    problems += [f"[requires] has {name} but no java, and {name} needs a JVM"
+                 for name in NEEDS_JAVA if name in requires and "java" not in requires]
+    return problems
+
+
+def pip_requirements(requires: Mapping[str, str]) -> list[str]:
+    """The table's pip packages as pip takes them: pyspark = "3.5" is `pyspark==3.5.*`,
+    which is what version_matches accepts. Call requires_problems first."""
+    return [f"{name}=={prefix}.*" for name, prefix in requires.items() if name not in NOT_PIP]
 
 
 def parse_java_version(output: str) -> str | None:
@@ -62,7 +98,7 @@ def parse_hadoop_version(jar_names: list[str]) -> str | None:
 def check_workspace(ws: Workspace) -> list[CheckResult]:
     """Check every [requires] entry of the workspace, in the order they are written, plus
     Hadoop's native files on Windows when the course needs Spark or Hadoop."""
-    results = [_check(name, required, ws.course) for name, required in ws.requires.items()]
+    results = [_check(name, required, ws) for name, required in ws.requires.items()]
     if sys.platform == "win32" and ({"pyspark", "hadoop"} & set(ws.requires)):
         results.append(check_winutils(os.environ.get("HADOOP_HOME"), os.environ.get("PATH", "")))
     return results
@@ -87,11 +123,13 @@ def check_winutils(hadoop_home: str | None, path: str) -> CheckResult:
     return CheckResult(name, required, "present")
 
 
-def _check(name: str, required: str, course: str) -> CheckResult:
+def _check(name: str, required: str, ws: Workspace) -> CheckResult:
     """Dispatch on the requirement name.
 
     python, java and hadoop are special; any other name is a pip package, so a new
-    course can require a new library without changing this code.
+    course can require a new library without changing this code. A missing package is
+    installed into the course's own .venv by `tutor.workspace init`, which installs the
+    [requires] packages too.
     """
     if name == "python":
         return CheckResult(
@@ -111,7 +149,9 @@ def _check(name: str, required: str, course: str) -> CheckResult:
         found = metadata.version(name)
     except metadata.PackageNotFoundError:
         found = None
-    return CheckResult(name, required, found, f'pip install -e ".[{course}]"')
+    return CheckResult(name, required, found,
+                       f"install it into the course's .venv: python -m tutor.workspace init "
+                       f"{ws.root}")
 
 
 def _java_version() -> str | None:
@@ -142,8 +182,13 @@ def _hadoop_version() -> str | None:
     return parse_hadoop_version([p.name for p in common.iterdir()])
 
 
-def main() -> int:
-    """Print one line per requirement; exit code 0 only if everything is ok."""
+def main(argv: list[str] | None = None) -> int:
+    """Print one line per requirement, or with --json one object (the course, the
+    interpreter checked, and each result with `ok`); exit code 0 only if everything is ok."""
+    parser = argparse.ArgumentParser(prog="python -m tutor.envcheck",
+                                     description=__doc__.split("\n")[0])
+    parser.add_argument("--json", action="store_true", help="print the results as JSON")
+    args = parser.parse_args(argv)
     load_env()
     try:
         ws = load_workspace()
@@ -151,6 +196,10 @@ def main() -> int:
         print(f"workspace: {e}", file=sys.stderr)
         return 1
     results = check_workspace(ws)
+    if args.json:
+        print(json.dumps({"course": ws.course, "python": sys.executable,
+                          "results": [{**asdict(r), "ok": r.ok} for r in results]}))
+        return 0 if all(r.ok for r in results) else 1
     print(f"course {ws.course}")
     for r in results:
         status = "ok  " if r.ok else "FAIL"

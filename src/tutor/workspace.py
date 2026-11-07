@@ -6,7 +6,10 @@ with this package, and the VS Code files that activate it in the folder's termin
 
 Running it again fills in only what is missing: an existing file is kept, even a wrong one,
 as the owner may have edited it. Nothing outside the folder changes: no system package, no
-`~/.zshrc`. The only thing installed is Python packages into the folder's own .venv.
+`~/.zshrc`. The only thing installed is Python packages into the folder's own .venv: this
+package, and the pip packages workspace.toml's [requires] names (owner, 2026-11-06), so
+running it again after editing [requires] is how a course's venv catches up; the GUI's
+Environment page runs it for that.
 """
 
 from __future__ import annotations
@@ -15,11 +18,13 @@ import argparse
 import re
 import subprocess
 import sys
+import tomllib
 import venv
 from collections.abc import Callable
 from pathlib import Path
 
 from tutor.config import WORKSPACE_FILE, WorkspaceError, _enclosing_git_repo
+from tutor.envcheck import pip_requirements, requires_problems
 
 DEFAULT_EXTRAS = "gen,dev"  # generating exercises, and pytest + hypothesis to validate them
 REPO = Path(__file__).resolve().parents[2]
@@ -86,12 +91,16 @@ def _make_venv(venv_dir: Path) -> None:
 
 def init(root: Path, course: str | None = None, extras: str = DEFAULT_EXTRAS,
          make_venv: Callable[[Path], None] = _make_venv,
-         run: Callable = subprocess.run) -> list[str]:
+         run: Callable = subprocess.run,
+         say: Callable[[str], None] = lambda line: None) -> list[str]:
     """Create what is missing in `root` and return one line per step.
 
-    `make_venv` and `run` are parameters so tests need no network and no real venv. Raises
-    WorkspaceError, before changing anything, on a bad argument or a folder inside a git
-    repository. A failed install raises too: run the command again after fixing it.
+    `make_venv` and `run` are parameters so tests need no network and no real venv. `say`
+    gets each step's line as it happens, and a line before the install, which takes minutes
+    the first time: the command prints them at once, so its log (the GUI's progress) never
+    looks stuck. Raises WorkspaceError, before changing anything, on a bad argument or a
+    folder inside a git repository. A failed install raises too: run the command again
+    after fixing it.
     """
     root = root.expanduser().resolve()
     course = course or root.name
@@ -105,8 +114,14 @@ def init(root: Path, course: str | None = None, extras: str = DEFAULT_EXTRAS,
                              "outside it, so course material is never committed")
     if not (REPO / "pyproject.toml").is_file():
         raise WorkspaceError(f"no pyproject.toml in {REPO}: run this from a source checkout")
+    packages = pip_requirements(_requires(root))  # [] for a new course: python only
 
     steps: list[str] = []
+
+    def step(line: str) -> None:
+        steps.append(line)
+        say(line)
+
     (root / "lectures").mkdir(parents=True, exist_ok=True)
     version = f"{sys.version_info.major}.{sys.version_info.minor}"
     files = {
@@ -118,26 +133,53 @@ def init(root: Path, course: str | None = None, extras: str = DEFAULT_EXTRAS,
     for name, text in files.items():
         path = root / name
         if path.exists():
-            steps.append(f"kept    {name}")
+            step(f"kept    {name}")
             continue
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8", newline="\n")
-        steps.append(f"created {name}")
+        step(f"created {name}")
 
     venv_dir = root / ".venv"
     if venv_python(venv_dir).exists():
-        steps.append("kept    .venv")
+        step("kept    .venv")
     else:
+        say("creating .venv ...")
         make_venv(venv_dir)
-        steps.append(f"created .venv (Python {version})")
+        step(f"created .venv (Python {version})")
     # Every time: pip does nothing if all is there, and this finishes an install that failed
-    # and adds extras named later.
-    result = run([str(venv_python(venv_dir)), "-m", "pip", "install", "-q", "-e",
-                  f"{REPO}[{extras}]"], capture_output=True, text=True)
+    # and adds extras and [requires] packages named later. One pip call, so pip resolves this
+    # package's own dependencies and the course's together.
+    what = ", ".join([f"tutor[{extras}]", *packages])
+    say(f"installing {what} into .venv (a few minutes the first time) ...")
+    result = run(install_command(venv_dir, extras, packages), capture_output=True, text=True)
     if result.returncode != 0:
         raise WorkspaceError(f"pip install failed, run this again once fixed:\n{result.stderr}")
-    steps.append(f"installed tutor[{extras}] into .venv")
+    step(f"installed {what} into .venv")
     return steps
+
+
+def install_command(venv_dir: Path, extras: str, packages: list[str]) -> list[str]:
+    """The pip command init runs; the GUI shows it before its Install button."""
+    return [str(venv_python(venv_dir)), "-m", "pip", "install", "-q", "-e", f"{REPO}[{extras}]",
+            *packages]
+
+
+def _requires(root: Path) -> dict[str, str]:
+    """[requires] of the folder's workspace.toml, checked; {} before there is one. Read
+    before anything is created, so a broken table changes nothing."""
+    path = root / WORKSPACE_FILE
+    try:
+        with path.open("rb") as f:
+            data = tomllib.load(f)
+    except FileNotFoundError:
+        return {}
+    except (OSError, tomllib.TOMLDecodeError) as e:
+        raise WorkspaceError(f"{path}: {e}") from e
+    # str(), as load_workspace does: a version written unquoted would load as a number.
+    requires = {name: str(version) for name, version in data.get("requires", {}).items()}
+    if problems := requires_problems(requires):
+        raise WorkspaceError(f"{path}: {problems[0]}; fix it, then run this again")
+    return requires
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -151,14 +193,13 @@ def main(argv: list[str] | None = None) -> int:
                         help=f"this package's extras to install (default: {DEFAULT_EXTRAS})")
     args = parser.parse_args(argv)
     try:
-        steps = init(args.folder, args.course, args.extras)
+        init(args.folder, args.course, args.extras, say=lambda line: print(line, flush=True))
     except WorkspaceError as e:
         print(f"workspace: {e}", file=sys.stderr)
         return 1
-    print(*steps, sep="\n")
-    print(f"{args.folder.expanduser().resolve()} is ready. Put the lecture PDFs in lectures/, "
-          "open the folder in VS Code, open a new terminal and check `which pytest` points to "
-          "its .venv.")
+    print(f"{args.folder.expanduser().resolve()} is ready. Put the lectures (PDFs or saved "
+          "web pages) in lectures/, open the folder in VS Code, open a new terminal and check "
+          "`which pytest` points to its .venv.")
     return 0
 
 

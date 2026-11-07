@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{# The course's lectures (PDFs, web pages) with what the cache holds of each, the upload
+   forms (files, or a whole folder, whose lectures are ticked on lecture_folder.html first),
+   and the buttons that read them (lectures.py). Uploading starts the free text read at once;
+   the vision model, which costs money, runs only from its own button. #}
+{% from "_macros.html" import action, chip %}
+{% block title %}Lectures · {{ course.workspace.course }}{% endblock %}
+{% block crumbs %}
+<a href="{{ url_for('course', name=course.folder) }}">{{ course.workspace.course }}</a>
+<span>Lectures</span>
+{% endblock %}
+{% block content %}
+<div class="title-line">
+  <h1>Lectures</h1>
+  <div class="actions">{% if rows %}{{ action(url_for('read_lectures', name=course.folder), "Read new and changed") }}{% endif %}</div>
+</div>
+{% if running %}
+<p class="notice notice-bad">A task is running in this course:
+  <a href="{{ url_for('task', name=course.folder, task_id=running.id) }}">{{ running.title }}</a>.
+  Uploading saves the files now, but reading them waits until it ends: start it again then.</p>
+{% endif %}
+{% if problems %}
+<ul class="notice notice-bad form-problems">{% for line in problems %}<li>{{ line }}</li>{% endfor %}</ul>
+<p class="muted">Nothing was saved.</p>
+{% endif %}
+<form method="post" action="{{ url_for('upload_lectures', name=course.folder) }}" enctype="multipart/form-data" class="form">
+  <label class="field">Add lectures
+    <span class="muted">PDFs, or notes saved from a browser as web pages (.html, .htm; their text is read, not their images); one or more, {{ max_mb }} MB each at most; the text is read right after, at no cost</span>
+    <input type="file" name="lectures" accept=".pdf,.html,.htm,application/pdf,text/html" multiple required>
+  </label>
+  <div class="actions"><button type="submit" class="primary">Upload and read</button></div>
+</form>
+<form method="post" action="{{ url_for('stage_lecture_folder', name=course.folder) }}" enctype="multipart/form-data" class="form">
+  <label class="field">Or add a folder
+    <span class="muted">the PDFs and web pages in it and its subfolders; the next page lists them, and you untick what is not a lecture before anything is saved. The browser sends the whole folder, videos and images too ({{ limit_mb }} MB in all at most), but only PDFs and web pages are kept.</span>
+    <input type="file" name="folder" webkitdirectory multiple required>
+  </label>
+  <div class="actions"><button type="submit">Upload and choose</button></div>
+</form>
+{% set waiting = rows | sum(attribute="waiting") %}
+{% if waiting %}
+<div class="notice notice-ok">
+  {{ waiting }} image page{{ "s wait" if waiting != 1 else " waits" }} for the vision model, which reads what the text layer does not hold (diagrams, slides that are pictures).
+  {% if vision %}It is {{ vision }}, and each page is one call, so this costs money.
+  {{ action(url_for('transcribe_lectures', name=course.folder), "Transcribe " ~ waiting ~ " image page" ~ ("s" if waiting != 1 else "")) }}
+  {% else %}No vision model is set: add <code>vision = "&lt;profile&gt;"</code> to <code>[llm.roles]</code> in workspace.toml.{% endif %}
+</div>
+{% endif %}
+{% if rows %}
+<table>
+  <thead><tr><th>Lecture</th><th class="num">Pages read</th><th>State</th></tr></thead>
+  <tbody>
+  {% for row in rows %}
+    <tr>
+      <td>{{ row.name }}</td>
+      <td class="num">{{ row.pages or "" }}{% if row.pages and row.web_page %} <span class="muted">sections</span>{% endif %}</td>
+      <td>{% if not row.read %}{{ chip("not read") }}{% elif row.waiting %}{{ chip("image pages waiting", row.waiting ~ " image page" ~ ("s" if row.waiting != 1 else "") ~ " waiting") }}{% else %}{{ chip("read") }}{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p>No lectures yet.</p>
+{% endif %}
+{% endblock %}

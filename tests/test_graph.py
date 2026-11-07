@@ -285,6 +285,26 @@ def test_the_model_gets_the_rules_conventions_pages_and_the_schema(workspace):
     assert (update["round"], update["tokens"], update["failure"]) == (0, 1500, None)
 
 
+def test_the_courses_allowed_modules_are_named_as_importable(workspace):
+    """[safety] allow_imports passes the safety check, so the generating model is told it may
+    use them (owner, 2026-11-06); the oracle's prompt keeps the core modules only."""
+    (workspace / "workspace.toml").write_text(
+        'course = "demo"\n[safety]\nallow_imports = ["nltk"]\n', encoding="utf-8")
+    model = FakeModel(json.dumps(draft()))
+    nodes.generate({"item": ITEM, "context": ""}, deps(workspace, model))
+    system = model.calls[0][1][0]["content"]
+    rule = system[system.index("imports only from"):system.index("the exercise's framework")]
+    assert "nltk" in rule and "collections" in rule
+    assert "nltk" not in prompts.oracle_spec()
+
+
+def test_a_course_with_no_allowed_modules_gets_the_same_prompt_as_before():
+    """So its text, and what a provider has cached of it, do not change."""
+    plain = prompts.system_prompt("rules")
+    assert prompts.system_prompt("rules", extra_imports=()) == plain
+    assert "nltk" not in plain and "nltk" in prompts.system_prompt("rules", extra_imports=["nltk"])
+
+
 def test_a_reply_that_does_not_parse_is_a_format_failure(workspace):
     model = FakeModel('{"metadata": {', finish_reason="length")
     update = nodes.generate({"item": ITEM, "context": ""}, deps(workspace, model))
@@ -838,7 +858,8 @@ def test_an_oracle_left_unwritten_is_a_failure_of_the_round(workspace):
     assert nodes.after_oracle({**state, **update, "round": 0}, d) == "repair"
 
 
-def test_the_oracle_must_come_from_another_provider(workspace):
+def test_an_oracle_from_the_writers_provider_runs_with_a_note(workspace, capsys):
+    """Allowed (owner, 2026-11-07; it was refused): one key is all some people have."""
     from tutor.graph.__main__ import _deps
 
     (workspace / "workspace.toml").write_text(
@@ -846,10 +867,13 @@ def test_the_oracle_must_come_from_another_provider(workspace):
         '[llm.profiles.glm-full]\nprovider = "glm"\nmodel = "glm-5.3"\n'
         '[llm.profiles.gpt]\nprovider = "openai"\nmodel = "gpt-6.1-terra"\n'
         '[llm.roles]\ngenerate = "glm-flash"\noracle = "glm-full"\n', encoding="utf-8")
-    with pytest.raises(ValueError, match="come from one provider"):
-        _deps(workspace, workspace / "batches" / "b", {})
+    d = _deps(workspace, workspace / "batches" / "b", {})
+    assert d.oracle_config.name == "glm-full"
+    out = capsys.readouterr().out
+    assert out.count("note: the oracle (glm-full) and glm-flash") == 1
+    assert "less independent" in out
     d = _deps(workspace, workspace / "batches" / "b", {"oracle_profile": "gpt"})
-    assert d.oracle_config.name == "gpt"
+    assert d.oracle_config.name == "gpt" and "note:" not in capsys.readouterr().out
     d = _deps(workspace, workspace / "batches" / "b",
               {"oracle_profile": "gpt", "plan_profile": "glm-full"})
     assert d.plan_config.name == "glm-full"
@@ -977,15 +1001,15 @@ def test_the_repair_role_takes_over_from_the_second_repair(workspace):
     assert log["repair_model"] == "deepseek-pro: deepseek-v4-pro"
 
 
-def test_the_oracle_must_differ_from_the_repair_model_too(workspace):
+def test_the_repair_model_is_compared_with_the_oracle_too(workspace, capsys):
     from tutor.graph.__main__ import _deps
 
     (workspace / "workspace.toml").write_text(
         'course = "demo"\n[llm.profiles.ds]\nprovider = "deepseek"\nmodel = "f"\n'
         '[llm.profiles.gpt]\nprovider = "openai"\nmodel = "g"\n'
         '[llm.roles]\ngenerate = "ds"\nrepair = "gpt"\noracle = "gpt"\n', encoding="utf-8")
-    with pytest.raises(ValueError, match="the oracle \\(gpt\\) and gpt, which writes"):
-        _deps(workspace, workspace / "batches" / "b", {})
+    _deps(workspace, workspace / "batches" / "b", {})
+    assert "note: the oracle (gpt) and gpt, which writes" in capsys.readouterr().out
 
 
 def test_a_repair_writes_its_diagnosis_first_and_it_is_logged(workspace):
@@ -1111,7 +1135,7 @@ def test_one_assistant_may_write_the_oracle_through_a_second_profile(workspace, 
     d = _deps(workspace, workspace / "batches" / "b", {})
     assert d.oracle_config.name == "cc-oracle"
     assert "fresh context" in capsys.readouterr().out  # allowed, with a reminder
-    with pytest.raises(ValueError, match="through a second profile"):
+    with pytest.raises(ValueError, match="one assistant profile, whose requests would mix"):
         _deps(workspace, workspace / "batches" / "b", {"oracle_profile": "cc"})
 
 

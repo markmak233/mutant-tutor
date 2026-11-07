@@ -1,0 +1,13 @@
+{# What the roles chosen in the form would mean, just above Save (llm_settings.role_warnings,
+   save_roles' problems). htmx asks the role_check route for this part again whenever a role
+   changes, so the page warns while choosing with no script of its own. "Save even so" saves
+   roles that have a warning; without it a save of changed roles comes back held. #}
+<div id="role-check">
+{% if check_problems %}<ul class="notice notice-bad form-problems">{% for line in check_problems %}<li>{{ line }}</li>{% endfor %}</ul>{% endif %}
+{% if check_warnings %}
+<div class="notice notice-bad">
+  <ul class="form-problems">{% for line in check_warnings %}<li>{{ line }}</li>{% endfor %}</ul>
+  <label><input type="checkbox" name="confirm" value="1"{% if check_confirm %} checked{% endif %}> Save even so</label>
+</div>
+{% endif %}
+</div>

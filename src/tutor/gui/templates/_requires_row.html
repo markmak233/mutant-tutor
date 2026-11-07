@@ -1,0 +1,15 @@
+{# One row of the Environment page's [requires] list (environment.ListRow): the page draws
+   one per entry, and "+ Add a row" fetches a blank one (requires_row) that htmx appends.
+   "−" removes its row with htmx's "delete" swap, which drops the target whatever the reply;
+   nothing is written until the form is saved. No script of ours.
+   `key` ties the row's "exercises may import" tick and module box to it; a pip package
+   ticked there goes into [safety] allow_imports (owner, 2026-11-06), so the static check
+   lets exercises import it. python, java and hadoop are not modules, so they have none. #}
+<tr>
+  <td><input type="hidden" name="key" value="{{ row.key }}"><input type="text" name="name" value="{{ row.name }}" aria-label="Name" autocomplete="off" spellcheck="false"></td>
+  <td><input type="text" name="version" value="{{ row.version }}" aria-label="Version" autocomplete="off" spellcheck="false"></td>
+  <td class="muted">{% if row.name %}{{ kind(row.name) }}{% if row.name not in not_pip %} · <a href="https://pypi.org/project/{{ row.name }}/" rel="noreferrer noopener" target="_blank">check it on PyPI</a>{% endif %}{% endif %}</td>
+  <td class="row-import">{% if row.name not in not_pip %}<label><input type="checkbox" name="import" value="{{ row.key }}"{% if row.ticked %} checked{% endif %} aria-label="Exercises may import {{ row.name or 'this package' }}"> as</label>
+    <input type="text" name="module:{{ row.key }}" value="{{ row.module }}" aria-label="Module name of {{ row.name or 'this package' }}" placeholder="module" autocomplete="off" spellcheck="false">{% endif %}</td>
+  <td class="row-remove"><button type="button" class="small" hx-get="{{ url_for('requires_row', name=course.folder) }}" hx-target="closest tr" hx-swap="delete" aria-label="Remove {{ row.name or 'this row' }}" title="Remove this row">−</button></td>
+</tr>

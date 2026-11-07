@@ -15,8 +15,9 @@ items are generated in parallel (--parallel, default from the CPU count) into
 coverage-proposal.md lists the coverage.md changes for the owner to apply.
 
 With an `oracle` role (or --oracle-profile), that model writes each exercise's oracle.py
-from the question alone; it must be another provider than the generating model. With a
-`repair` role (or --repair-profile), a larger model takes over from the second repair.
+from the question alone; best another provider than the models that write the exercise
+(one provider is allowed, with a note: less independent). With a `repair` role (or
+--repair-profile), a larger model takes over from the second repair.
 
 Tunable values (repair rounds, thinking, token limits, ...; see graph/settings.py) come
 from the defaults, then workspace.toml's [generation] table, then this run's flags:
@@ -77,7 +78,7 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     plan = sub.add_parser("plan", help="plan a batch, then generate it once approved")
     plan.add_argument("--lectures", nargs="+", required=True,
-                      help="lecture file names without .pdf, as in lectures/")
+                      help="lecture file names without .pdf (or .html), as in lectures/")
     plan.add_argument("--prefs", default="", help="your preferences, in plain words")
     plan.add_argument("--count", type=int,
                       help="exactly this many (default: one per knowledge point)")
@@ -184,18 +185,29 @@ def _deps(workspace: Path, batch_dir: Path, profiles: dict,
     oracle_config = _optional_role("oracle", profiles.get("oracle_profile"), workspace)
     repair_config = _optional_role("repair", profiles.get("repair_profile"), workspace)
     for writer in (config, repair_config):
-        if oracle_config and writer and (oracle_config.provider, oracle_config.base_url) == (
-                writer.provider, writer.base_url):
-            # One provider's models share training data and habits: not an independent
-            # reading. One assistant profile for both would also mix their requests.
-            extra = (" (one assistant may do both through a second profile, answered in a "
-                     "fresh context: docs/assistant-mode.md)"
-                     if oracle_config.provider == "assistant" else "")
+        if not (oracle_config and writer) or (writer is repair_config and config
+                                              and writer.name == config.name):
+            continue  # no oracle, no repair role, or repair is the generate profile: said once
+        same_place = (oracle_config.provider, oracle_config.base_url) == (writer.provider,
+                                                                          writer.base_url)
+        if same_place and oracle_config.provider == "assistant":
+            # One assistant profile for both: their requests would mix in one queue.
             raise ValueError(f"the oracle ({oracle_config.name}) and {writer.name}, which "
-                             f"writes the exercise, come from one provider; choose another "
-                             f"oracle{extra}")
-        if (oracle_config and writer and oracle_config.provider == writer.provider ==
-                "assistant" and oracle_config.model == writer.model):
+                             "writes the exercise, are one assistant profile, whose requests "
+                             "would mix; one assistant may do both through a second profile, "
+                             "answered in a fresh context: docs/assistant-mode.md")
+        if same_place:
+            # Allowed with a note (owner, 2026-11-07; it was refused): not everyone pays for
+            # two providers, and an oracle call still reads the question alone, apart from
+            # the exercise, where with no oracle role the generating model writes oracle.py
+            # in the same reply. One provider's models share training data and habits, so
+            # the reading is less independent than another provider's.
+            print(f"note: the oracle ({oracle_config.name}) and {writer.name}, which writes "
+                  "the exercise, come from one provider: its check is a second reading by "
+                  "that provider's model, apart from the exercise but less independent than "
+                  "another provider's.", flush=True)
+        elif (oracle_config.provider == writer.provider == "assistant"
+                and oracle_config.model == writer.model):
             # Allowed (owner, 2026-10-29), but the reader is the same assistant: say so.
             print(f"note: {writer.model} writes the exercise and, through "
                   f"{oracle_config.name}, the oracle; answer the oracle requests in a fresh "

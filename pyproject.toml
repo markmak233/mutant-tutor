@@ -29,6 +29,18 @@ gen = [
     "langgraph>=1.2,<2",
     "langgraph-checkpoint-sqlite>=3,<4",
 ]
+# The local GUI (python -m tutor.gui; docs/design.md, "Local GUI"): Flask brings Werkzeug,
+# Jinja2, MarkupSafe, itsdangerous, click and blinker; with waitress, markdown-it-py (and its
+# mdurl), its dollar-math plugin and latex2mathml for the questions' formulas, 12 packages.
+gui = [
+    "flask>=3.1,<4",
+    "waitress>=3,<4",
+    "markdown-it-py>=4,<5",
+    "mdit-py-plugins>=0.5,<1",
+    "latex2mathml>=3.77,<4",
+    # Writes a course's workspace.toml from the settings page, keeping the owner's comments.
+    "tomlkit>=0.13,<1",
+]
 dev = [
     "pytest>=8",
     "hypothesis>=6",
@@ -43,6 +55,11 @@ dev = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+# The GUI's pages and stylesheet are not Python files, so a built package must be told to
+# include them.
+[tool.setuptools.package-data]
+"tutor.gui" = ["templates/*.html", "static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -7,6 +7,16 @@ from pathlib import Path
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _fresh_thinking_switches():
+    """llm.py remembers, per run, the thinking-off switch each model accepted: each test
+    starts as a new run."""
+    from tutor import llm
+    llm._ACCEPTED.clear()
+    yield
+    llm._ACCEPTED.clear()
+
+
 @pytest.fixture
 def symlink() -> Callable[..., None]:
     """symlink(link, target, target_is_directory=False): make `link` point at `target`.

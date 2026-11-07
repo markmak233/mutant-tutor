@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% from "_macros.html" import action, bar, chip %}
+{% block title %}{{ batch.name }}{% endblock %}
+{% block crumbs %}
+<a href="{{ url_for('course', name=course.folder) }}">{{ course.workspace.course }}</a>
+<span>{{ batch.name }}</span>
+{% endblock %}
+{% block content %}
+<div class="title-line">
+  <h1>{{ batch.name }}</h1>
+  <div class="actions">
+    {{ action(url_for('validate_batch', name=course.folder, batch=batch.name), "Validate all") }}
+    {{ action(url_for('open_batch_folder', name=course.folder, batch=batch.name), "Open exercises folder") }}
+  </div>
+</div>
+<p class="muted">Mode: {{ batch.mode }}</p>
+{# Exercises of the plan that did not come out: they are on the plan page, with "Try again"
+   (generation.not_succeeded; owner, 2026-11-06). #}
+{% if missing %}{% set plan, ids = missing %}
+<p class="notice notice-bad">{{ ids | length }} exercise{{ "s" if ids | length != 1 }} of the plan did not come out: {{ ids | join(", ") }}.
+  <a href="{{ url_for('plan', name=course.folder, label=plan.label) }}">Open the plan</a> to see why and try {{ "them" if ids | length != 1 else "it" }} again.</p>
+{% endif %}
+{{ bar(batch.count("passed"), batch.exercises | length) }}
+<table>
+  <thead><tr><th>Exercise</th><th>Priority</th><th>Progress</th>
+    <th class="num">Runs to pass</th><th>Validated</th></tr></thead>
+  <tbody>
+  {% for row in batch.exercises %}
+    <tr class="priority-{{ row.priority }}">
+      <td><a href="{{ url_for('exercise', name=course.folder, batch=batch.name, exercise=row.id) }}">{{ row.title }}</a>
+        <div class="muted">{{ row.id }}</div></td>
+      <td>{{ row.priority }}</td>
+      <td>{{ chip(row.status, labels[row.status]) }}</td>
+      <td class="num">{{ row.runs_to_pass or "" }}</td>
+      <td>{% if row.valid is none %}<span class="muted">no report</span>{% elif row.valid %}valid{% else %}{{ chip("invalid") }}{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

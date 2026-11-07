@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{# A course's environment (environment.py), as four steps in the order they are done (owner,
+   2026-11-06: by topic it read unclearly). The check of this machine (step 2) and the test
+   image (step 4) load with htmx after the page, since each asks a process or Docker, and
+   each says there whether its step is done. Every install is shown in full before its
+   button; system installs are the user's, in their terminal. A task started here comes
+   back to this page when it succeeds. #}
+{% from "_macros.html" import action, chip %}
+{% block title %}Environment · {{ course.workspace.course }}{% endblock %}
+{% block crumbs %}
+<a href="{{ url_for('course', name=course.folder) }}">{{ course.workspace.course }}</a>
+<span>Environment</span>
+{% endblock %}
+{% block content %}
+<h1>Environment</h1>
+<p class="muted">Four steps, in this order. This page installs only Python packages into the course's own <code>.venv</code>, and builds the test image. Java, Hadoop or another Python you install in your own terminal, then check again in step 2.</p>
+{% if running %}
+<p class="notice notice-bad">A task is running in this course:
+  <a href="{{ url_for('task', name=course.folder, task_id=running.id) }}">{{ running.title }}</a>.
+  Installing or building starts when it ends.</p>
+{% endif %}
+{% if problems %}
+<ul class="notice notice-bad form-problems">{% for line in problems %}<li>{{ line }}</li>{% endfor %}</ul>
+<p class="muted">Nothing was saved.</p>
+{% endif %}
+
+<section class="step">
+<h2><span class="step-no">1</span>What the course needs</h2>
+<p class="muted">The software its tests need: <code>[requires]</code> in workspace.toml. Let a model find it in the lectures, or type it in the list; nothing is written until you add or save.</p>
+
+{# 7b: a model's draft from the lectures (environment.draft_view). It costs money, so it runs
+   only from its button; its entries are only candidates until ticked and added. #}
+<h3>Find it in the lectures (optional)</h3>
+<p class="muted">A model reads each lecture and lists the software its code uses, with the page and the words that show it. Entries whose words are not on that page are dropped, and so is Python's standard library.</p>
+{% set d = draft.draft %}
+{% if not (d.done or d.todo) %}
+<p>No lecture is read yet: read them on the <a href="{{ url_for('lecture_list', name=course.folder) }}">Lectures</a> page first.</p>
+{% else %}
+{% if d.todo %}
+<div class="notice notice-ok">
+  {{ d.todo | length }} lecture{{ "s" if d.todo | length != 1 }} not looked at yet{% if d.done %}, or changed since{% endif %}.
+  {% if draft.model %}This asks {{ draft.model }}, one request per lecture, {% if draft.tokens_k %}about {{ draft.tokens_k }} thousand{% else %}under a thousand{% endif %} input tokens in all: a paid model charges for them.
+  {{ action(url_for('draft_requires', name=course.folder), "Look at " ~ (d.todo | length) ~ " lecture" ~ ("s" if d.todo | length != 1 else "")) }}
+  {% else %}No model is set for it: choose one for the setup, plan or generate role on the <a href="{{ url_for('models', name=course.folder) }}">Models</a> page.{% endif %}
+</div>
+{% endif %}
+{% if d.done %}<p class="muted">{{ d.done | length }} lecture{{ "s" if d.done | length != 1 }} looked at, by {{ d.models | join(", ") }}.</p>{% endif %}
+{% if draft.rows %}
+<form method="post" action="{{ url_for('accept_requires', name=course.folder) }}" class="form wide">
+  <table class="draft">
+    <thead><tr><th></th><th>Name</th><th>Version</th><th>Now</th><th>Where the slides show it</th></tr></thead>
+    <tbody>
+    {% for row in draft.rows %}
+      {% set c = row.candidate %}
+      <tr>
+        <td><input type="checkbox" name="accept" value="{{ c.name }}" aria-label="Add {{ c.name }}"{% if c.name in chosen %} checked{% endif %}></td>
+        <td>{{ c.name }} <span class="muted">{{ kind(c.name) }}</span>
+          {% if c.kind == "pip" %}<br><a href="https://pypi.org/project/{{ c.name }}/" rel="noreferrer noopener" target="_blank">check it on PyPI</a>{% endif %}
+          {% if c.mapped %}<br>{{ chip("name from the model") }}{% endif %}</td>
+        <td><input type="text" name="version:{{ c.name }}" value="{{ chosen.get(c.name, row.version) }}" aria-label="Version of {{ c.name }}" autocomplete="off" spellcheck="false">
+          {% if not c.versions %}<span class="muted">the slides state none</span>{% elif c.versions | length > 1 or c.versions[0] != row.version %}<span class="muted">the slides say {{ c.versions | join(", ") }}</span>{% endif %}</td>
+        <td>{{ chip(row.status) }}</td>
+        <td><details><summary>{{ c.sources[0].lecture }} p.{{ c.sources[0].page }}{% if c.sources | length > 1 %} and {{ c.sources | length - 1 }} more{% endif %}</summary>
+          <ul class="sources">{% for s in c.sources %}<li>{{ s.lecture }} p.{{ s.page }}: <code>{{ s.quote }}</code></li>{% endfor %}</ul></details></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <p class="muted">"Name from the model": the slides show only the module imported, and the pip name is the model's; check it on PyPI before installing, as a made-up name can be one somebody registered. For exercises to import a package, tick "Exercises may import" for it in the list below once it is added.</p>
+  <div class="actions"><button type="submit" class="primary">Add the ticked ones to the list</button></div>
+</form>
+{% elif d.done %}
+<p>No software found in the lectures looked at.</p>
+{% endif %}
+{% if draft.others %}
+<p class="muted">Also named, not checked here:</p>
+<ul class="sources">{% for c in draft.others %}<li>{{ c.name }}{% if c.versions %} {{ c.versions[0] }}{% endif %} <span class="muted">{{ c.sources[0].lecture }} p.{{ c.sources[0].page }}: <code>{{ c.sources[0].quote }}</code></span></li>{% endfor %}</ul>
+{% endif %}
+{% if d.dropped %}
+<details class="review">
+  <summary>{{ d.dropped | length }} entr{{ "ies" if d.dropped | length != 1 else "y" }} dropped by the checks</summary>
+  <ul class="sources">{% for x in d.dropped %}<li>{{ x.lecture }} p.{{ x.page }} <strong>{{ x.name }}</strong>: {{ x.reason }}</li>{% endfor %}</ul>
+</details>
+{% endif %}
+{% endif %}
+
+<h3>The list</h3>
+<form method="post" action="{{ url_for('save_requires', name=course.folder) }}" class="form">
+  <p class="muted">A version is a prefix: 3.5 means any 3.5.x. <code>python</code>, <code>java</code> and <code>hadoop</code> are checked on this machine; any other name is a pip package. Adding or removing rows changes nothing until you save.</p>
+  <table class="requires">
+    <thead><tr><th>Name</th><th>Version</th><th>What it is</th><th>Exercises may import</th><th></th></tr></thead>
+    <tbody id="requires-rows">
+    {% for row in rows %}{% include "_requires_row.html" %}{% endfor %}
+    </tbody>
+  </table>
+  <p class="muted">"Exercises may import": the generated exercises may use the package, as the module named in its box ([safety] allow_imports); untick it and they may not. Without a tick they use only Python's core modules. Widening what exercise code may import is your call, package by package.{% if others_allowed %} Also allowed, though not in the list: {{ others_allowed | join(", ") }}.{% endif %}</p>
+  <div class="actions">
+    <button type="button" class="small" hx-get="{{ url_for('requires_row', name=course.folder) }}" hx-target="#requires-rows" hx-swap="beforeend">+ Add a row</button>
+    <button type="submit" class="primary">Save the requirements</button>
+  </div>
+</form>
+</section>
+
+<section class="step">
+<h2><span class="step-no">2</span>Install on this machine</h2>
+<p class="muted">The Python packages of step 1 go into the course's own <code>.venv</code>, where your tests run in the IDE; the check below says what this machine still lacks.</p>
+<div class="actions">{{ action(url_for('install_packages', name=course.folder), "Install into .venv", primary=True) }}</div>
+<details class="review">
+  <summary>What "Install into .venv" runs</summary>
+  <dl>
+    <dt>Command</dt><dd><code>python -m tutor.workspace init {{ course.workspace.root }}</code>, which {% if not has_venv %}first creates <code>.venv</code>, then {% endif %}runs<br><code class="wrap">{{ install }}</code></dd>
+    <dt>What it does</dt><dd>Installs this tool and the pip packages in [requires] into the course's <code>.venv</code>; what is there already is left as it is.</dd>
+    <dt>Where</dt><dd>Only inside <code>{{ course.workspace.root }}/.venv</code>. Nothing outside the course folder changes: no PATH, no shell profile.</dd>
+    <dt>Admin rights</dt><dd>None (no sudo).</dd>
+    <dt>Downloads from</dt><dd>PyPI, through pip.</dd>
+    <dt>To undo</dt><dd><code>.venv/bin/python -m pip uninstall NAME</code> in the course folder, or delete <code>.venv</code> and install again.</dd>
+  </dl>
+</details>
+<div id="env-check" hx-get="{{ url_for('environment_check', name=course.folder) }}" hx-trigger="load" hx-swap="outerHTML">
+  <p class="muted"><span class="spinner-inline" aria-hidden="true"></span>Checking with the course's <code>.venv</code> …</p>
+</div>
+</section>
+
+<section class="step">
+<h2><span class="step-no">3</span>Where tests run {{ chip("done") if runner else chip("to do") }}</h2>
+<form method="post" action="{{ url_for('save_runner', name=course.folder) }}" class="form">
+  <p class="muted">For validation and generation; your own test runs in the IDE stay on this machine. Now: {% if runner %}<strong>{{ runner }}</strong>{% else %}not chosen (they run on this machine, with a warning){% endif %}.</p>
+  <label class="check"><input type="radio" name="runner" value="container"{% if runner == "container" %} checked{% endif %}>
+    <strong>In a container</strong> <span class="muted">every run in a fresh Docker container with no network and no access to your files; needs Docker and the test image of step 4</span></label>
+  <label class="check"><input type="radio" name="runner" value="host"{% if runner == "host" %} checked{% endif %}>
+    <strong>On this machine</strong> <span class="muted">no Docker needed, and step 4 is skipped</span></label>
+  <label class="check warn"><input type="checkbox" name="understood">
+    I understand that on this machine, code a model generated runs with my rights: it can read and change my files.</label>
+  <div class="actions"><button type="submit" class="primary">Save</button></div>
+</form>
+</section>
+
+<section class="step{% if runner == 'host' %} step-dim{% endif %}">
+<h2><span class="step-no">4</span>Test image</h2>
+<div id="env-docker" hx-get="{{ url_for('environment_docker', name=course.folder) }}" hx-trigger="load" hx-swap="outerHTML">
+  <p class="muted"><span class="spinner-inline" aria-hidden="true"></span>Asking Docker …</p>
+</div>
+</section>
+{% endblock %}

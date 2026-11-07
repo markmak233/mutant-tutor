@@ -44,8 +44,12 @@ container for isolation is fine; deploying the tool as a service is not.
   once before validating a batch (not per exercise: importing pyspark alone takes a second or two).
   `tests/test_env.py` runs the same checker. One exception (owner, 2026-11-05): `python -m tutor.workspace
   init` creates a course's own `.venv` and installs Python packages into it, and changes nothing outside
-  the course's folder. System software is still only checked.
-- Installation: Python deps as per-course extras, `pip install -e ".[bigdata]"`; system deps (Java,
+  the course's folder. The GUI may run that command and `python -m tutor.container build`, whose
+  recipe is our code's (owner, 2026-11-06). System software is still only checked.
+- Installation: Python deps were per-course extras, `pip install -e ".[bigdata]"`; since each course
+  has its own venv, `python -m tutor.workspace init` installs `[requires]`'s pip packages into it
+  (`pyspark = "3.5"` as `pyspark==3.5.*`, the prefix envcheck accepts, in the same pip call as this
+  package; owner, 2026-11-06), and envcheck's hint names that command. System deps (Java,
   Hadoop) in a per-course guide `docs/setup/<course>.md`, linked from README (decided 2026-10-25:
   README stays course-agnostic, and each course's system deps and pitfalls differ; the guide
   marks which platforms were actually tested). No install script: setup is one-off, and when it breaks,
@@ -153,7 +157,7 @@ smartCodingReview/                       # public repo (the `tutor/` above), cod
 ├── src/tutor/
 │   ├── __init__.py
 │   ├── config.py                        # P1 reads WORKSPACE_DIR, derives subpaths
-│   ├── envcheck.py                      # P1 checks the workspace's [requires]
+│   ├── envcheck.py                      # P1 checks the workspace's [requires]; owns its rules
 │   ├── workspace.py                     # creates a course workspace: folder, .venv, terminal files
 │   ├── execution.py                     # P1 copy to temp dir -> subprocess pytest -> delete
 │   ├── validation/                      # P1 the checks; P2 rule 0, P3a the safety check (internals designed before coding)
@@ -161,7 +165,7 @@ smartCodingReview/                       # public repo (the `tutor/` above), cod
 │   ├── attempts.py                      # P2a pytest plugin: one attempts.jsonl line per exercise run
 │   ├── schema.py                        # P2 Pydantic models of metadata.json / manifest.json (rule 0),
 │   │                                    #   P3 parses LLM output into the same models
-│   ├── materials/                       # P3a course files -> per-file md cache (pypdfium2), vision pages
+│   ├── materials/                       # P3a course files -> per-file md cache (pypdfium2), vision pages; [requires] draft
 │   ├── llm.py                           # P3a thin OpenAI-compatible client, standard library only, no LangChain
 │   ├── graph/                           # P3 langgraph dependency added here
 │   ├── retrieval/                       # P4 the page corpus, labels, scores and each route
@@ -349,6 +353,31 @@ instead of the original files.
   footers; speed does not matter at this size. PyMuPDF (the earlier choice) is AGPL, which
   would follow the code into a packaged GUI and make the repo's MIT label misleading for
   reuse, and it offered nothing the other two lack here.
+- Web pages (`.html`, `.htm`; `materials/html.py`, owner 2026-11-07, for a course whose notes
+  are a Typora export and one whose material is Moodle quiz reviews saved from the browser).
+  A page has no pages, so it is cut into sections, each cached as one page:
+  `## p.N · slide L.N`, N the section's number and L the number in the file name
+  (lecture10.html -> 10.1, 10.2; none in the name: 1, 2), a dotted number as a slide footer
+  is, so plans, coverage, generation and the judge read it unchanged. A heading starts a
+  section, a Moodle question starts one, and a section past 3000 characters is cut at a
+  blank line, never inside a code block. Text only, as Markdown: code blocks exactly (Typora
+  keeps each line in its editor's `pre.CodeMirror-line`, beside measuring copies left out),
+  formulas as their TeX source (Typora's `math/tex` scripts; Moodle writes `\( \)` in the
+  text), lists, tables; an image leaves `[image: name]`, and no image is read yet. Only the
+  content region is read (Typora's `#write`, Moodle's `role="main"`, else `<main>`,
+  `<article>`, `<body>`), and form fields never: a saved quiz holds the student's answers in
+  them and the session's key (sesskey) in hidden ones; no attribute is copied, so no link
+  either. A Moodle review also leaves out the attempt's summary (times, grade), each mark
+  and state, and the feedback on the student's input, and keeps the question, its choices
+  (not the one picked), the general feedback and the right answer. Nothing in the page runs
+  or is fetched. A lecture is named by its file name without the extension, so `L4.pdf` and
+  `L4.html` together are refused at upload. The standard library's parser, not BeautifulSoup
+  and markdownify as planned below: each source needed its own rules (Typora's editor lines,
+  Moodle's fields) that a generic converter does not know, and it adds no dependency. Tried
+  on the owner's two courses: 34 Typora lectures (96k characters) and 22 quiz reviews, every
+  code block and formula kept; two quiz files were 218k NUL bytes (broken copies), which
+  now read as having no text. The generate prompt still says "one section per PDF page";
+  left as is, since it is calibrated and a section is cited the same way.
 - Other formats, each library added only when a course has such files (pip-installable,
   permissive licence, as optional extras such as `tutor[office]`; a missing one is reported
   with the extra to install, not a crash):
@@ -356,8 +385,8 @@ instead of the original files.
     bytes with position, which go to the vision model directly. Diagrams drawn from shapes
     and SmartArt are lost without rendering, which needs LibreOffice or an export to PDF by
     the user; envcheck reports `soffice` as optional.
-  - `.docx`: python-docx or mammoth (MIT / BSD); saved web pages: BeautifulSoup + markdownify
-    (MIT), keeping LaTeX formulas (not html2text: GPL); `.ipynb`: the standard library's
+  - `.docx`: python-docx or mammoth (MIT / BSD); saved web pages: built (see "Web pages"
+    above), with the standard library; `.ipynb`: the standard library's
     `json` (markdown, code and outputs per cell; output images to the vision model);
     images: Pillow, with pillow-heif for phone photos; `.xlsx`: openpyxl, read as data like
     CSV; EPUB: `zipfile` + BeautifulSoup (not ebooklib: AGPL); captions (`.vtt`, `.srt`):
@@ -1068,7 +1097,8 @@ Design approved 2026-10-28 (owner):
   (`stronger_repair_from`), since the cheap model fails at diagnosis, not at writing: on
   the hardest week 4 item DeepSeek-Flash sent drafts back unchanged or half fixed, while
   GPT generating fixed it in one repair. Each attempt records its model; the manifest
-  names the repair model; the oracle must come from another provider than both writers.
+  names the repair model; the oracle must come from another provider than both writers
+  (since 2026-11-07 best, not must: see "One provider's oracle" under the Models page).
   First try with DeepSeek-V4-Pro (thinking off) did not fix that item either, and lost a
   round copying the oracle's code, which rule 4's failure shows, into the oracle
   interface; the message now says not to.
@@ -1148,7 +1178,8 @@ Design approved 2026-10-28 (owner):
   the per-item token budget, context size, plan size, parallelism, mode. Three sources,
   later ones winning: the defaults (the measured values; `Deps` takes its defaults from
   them, so tests and scripts run like the CLI), workspace.toml `[generation]` (the owner by
-  hand now, a GUI later; the pipeline reads workspace.toml and never writes it), and the
+  hand; the GUI's settings page writes only [llm] so far; the pipeline reads
+  workspace.toml and never writes it), and the
   run's flags (`--set name=value`, plus the older named flags). Unknown names and values
   out of range are errors that name them. A batch saves what it resolved in run.json, so
   every resume runs with the same values even if `[generation]` changed; `resume --set`
@@ -1549,9 +1580,10 @@ is set per run, as a code batch of the same course needs its tracebacks, and not
 an exercise as hand calculation. The answers are still in `test_student.py`, and in `first_error` in the
 attempt log. Multiple choice and short answer are outside this: the validator cannot check them.
 
-## Evaluation metrics (README results table)
+## Evaluation metrics (the results table)
 
-Decided 2026-11-05 (owner), for phase 5's light version. The numbers are in the README, "Results".
+Decided 2026-11-05 (owner), for phase 5's light version. The numbers are in `docs/details.md`,
+"Results" (in the README until 2026-11-07; the README links to them).
 
 - First-pass validity rate; validity after repair loop.
 - What stopped the first draft, by rule. This replaces the mutant kill rate, which is 100% on saved
@@ -1574,7 +1606,7 @@ on 49 exercises, and a failure there is only a warning. It overwrites one file, 
 copy per test run would pile up. In a generated batch, an exercise whose `student.py` differs from its skeleton
 with no logged run is listed, which shows runs lost outside the course venv; a batch written by hand has a
 `student.py` that differs from the start, so there it cannot be seen. No `first_error`, failure detail or rating remark
-is copied, as any of them can hold an answer. The README's table is public, so it changes only on request.
+is copied, as any of them can hold an answer. The results table is public, so it changes only on request.
 
 ## Prompt layout for caching
 
@@ -1625,12 +1657,15 @@ deterministic judge, hybrid RAG with recall@k, the phase 5 metrics, the hint lea
     memory, so generation and validation do not run at the same time.
   - First cloud provider (owner, 2026-10-28): Zhipu's bigmodel.cn, OpenAI-compatible at
     `https://open.bigmodel.cn/api/paas/v4`, with GLM-5.3-Flash (native image input, base64
-    data URLs, 1M context; the owner has free tokens for it). How to minimise thinking
+    data URLs, 1M context; the owner has free tokens for it, and for GLM-5.3-FlashX,
+    owner 2026-11-07). How to minimise thinking
     differs by provider and model: LM Studio takes `reasoning_effort: "none"`; GLM takes
     `thinking: {"type": "disabled"}`, but GLM-5.3 models reject it and accept only
     `reasoning_effort` low / high / max, so the client tries `disabled` and falls back to
-    `low` on a 400. With a cloud model the slide images go to that provider; the README
-    states this data flow.
+    `low` on a 400. The switch a model accepted is remembered for the rest of the run, by
+    provider, base URL and model (owner, 2026-11-07: before, every GLM-5.3 call was refused
+    once first); a new run tries the first switch again. With a cloud model the slide
+    images go to that provider; the README states this data flow.
   - Several models (owner, 2026-10-28): keys stay in `.env`, one per provider
     (`ZHIPU_API_KEY=...`); everything else is named profiles in the workspace's
     `workspace.toml` (`[llm.profiles.<name>]`: provider, model, optional base_url,
@@ -1867,8 +1902,9 @@ program. Accepted for now (raised in the same review); `pytest-timeout` is the f
 become a problem.
 
 The README states this boundary too ("Running exercise code is not sandboxed", 2026-10-26;
-"Where exercise code runs" since the container shipped, 2026-11-06), since anyone who clones
-the repo validates code on their own machine.
+"Where exercise code runs" since the container shipped, 2026-11-06, in `docs/details.md` since
+2026-11-07 with a line and a link in the README), since anyone who clones the repo validates
+code on their own machine.
 
 Where isolation goes (decided 2026-10-28; built with the [3] isolation item): whatever
 phase 3 adds (a container, a static check against network, subprocesses and files outside
@@ -2033,6 +2069,34 @@ themselves, so a cheap layer comes first and a stronger one later.
   allowlists. A few languages built in, others configured by the owner in `workspace.toml`
   (extension, compile and run commands, allowlist); those commands run, so generation never
   writes them. A language without a built-in checker needs the container.
+- Languages in the plan (owner, 2026-11-07), in this order: C, C++ and Java first, as the
+  owner has courses in them; then SQL, JavaScript and TypeScript, shell, Rust, R, Go, Haskell,
+  assembly, and MATLAB (open, below). Each is designed when a real course with lectures needs
+  it, since a design from guesses gets shaped around the wrong course; the order may follow
+  the course at hand. What each brings:
+  - C and C++: gcc or clang, a compile per run; a static check cannot bound what C does
+    (pointers, inline assembly, system calls), so container only; sanitizers (ASan, UBSan)
+    turn memory errors into failing tests. C++ reuses C's compiler and harness.
+  - Java: OpenJDK (a build such as Eclipse Temurin), not Oracle's JDK, whose licence terms
+    differ by version; a JVM start per run is slow (a heavy framework for the executor's caps); courses
+    test with JUnit, which bears on whether tests stay pytest.
+  - SQL: `sqlite3` from Python's standard library, no compiler; sqlglot can allow only the
+    statements an exercise needs; a course on another dialect (PostgreSQL) needs that server
+    in the container.
+  - JavaScript and TypeScript: Node.js and the TypeScript compiler; npm packages are a supply
+    chain risk, so installed from a lock file when the image is built, never per run.
+  - Shell: system-level by nature (files, processes), so the high risk tier, container only;
+    a static check means little.
+  - Rust: compiles take seconds per run; crates fetched when the image is built, runs offline.
+  - R: Rscript; packages from CRAN when the image is built.
+  - Go: fast compiles. Haskell: GHC is a large toolchain and compiles slowly.
+  - Assembly (MIPS, RISC-V): run in a simulator (SPIM, MARS, RARS), not on the machine.
+  - MATLAB: a proprietary product; running it needs a MathWorks licence, also in a container.
+    GNU Octave (free, GPL) runs most MATLAB code but not every toolbox. Open: Octave for
+    MATLAB courses, with exercises kept to what both run.
+  - Licences: every other toolchain above is free to install and run. Images are built on the
+    user's machine and not published, so the GPL's terms for distributing (bash, gcc, R,
+    Octave) do not arise; publishing images would bring them.
 
 ## CI
 
@@ -2596,6 +2660,11 @@ gaps. Each was decided by the owner; change one only with the owner.
   handled by describing the intended use positively (README "Intended use", no
   prohibitions), by MIT's as-is clause, and by protecting users (phase 3 note on malicious
   material).
+- A short README (owner, 2026-11-07: it had grown to 415 lines). The README says what the
+  repository is, what it does, how to start and its intended use, in about 100 lines; how
+  validation and generation work, the results, the RAG comparison, where exercise code
+  runs, the layout and the roadmap moved word for word to `docs/details.md`, which it links,
+  with design.md behind both.
 - No CONTRIBUTING.md or SECURITY.md (decided 2026-10-26, before going public; a Codex review
   suggested both without knowing the repo's intent). This is a personal portfolio and
   revision tool, not a project seeking contributors: setup and checks are in README and
@@ -2636,8 +2705,26 @@ gaps. Each was decided by the owner; change one only with the owner.
   changes to, and every plan is approved before anything is generated; whoever can edit them
   can edit `workspace.toml` or the code. Markers in a prompt do not stop injection anyway, and
   the suggested cut to 8,000 characters would drop rows of a real `coverage.md` (about 14,000).
-  The untrusted input is lecture material, answered by layer A and the test-run container (see
-  "Code execution safety").
+  The same holds for an exercise's sample data that the held-out writer sends: the generator
+  wrote it and saw it, and a list of allowed file names, also suggested, kept none of the 17 real
+  files (all under `sample_input/`). The untrusted input is lecture material, answered by layer A
+  and the test-run container (see "Code execution safety").
+  Lecture text itself is marked, since 2026-11-07 (owner, after the same scanning flagged
+  `materials/coverage.py` on the GUI's pull request): the coverage and `[requires]` drafts
+  send it between `<lecture>` and `</lecture>` (a closing tag inside it broken up), and their
+  instructions end by saying it is material to read, not instructions. Only those two
+  prompts, which are not calibrated; the generate, plan and vision prompts are, and stay as
+  they are until a change can be measured. It marks the boundary for the model and enforces
+  nothing: layer A, the container and the owner's review still answer what a lecture can
+  make a model write. Coverage's prompt is version 2 (asked again on the next click);
+  `[requires]` folded it into its version 2, not used yet.
+- No built-in "standard set" of models for a course with none (proposed 2026-11-06). The
+  first course adds its models with "Add a model"; later ones copy them from another course.
+  A set in the code would need upkeep as providers rename their models, and the owner prefers
+  the user to choose. Decided 2026-11-06. Not undone by the models.dev catalog (owner,
+  2026-11-07, under the Models page): nothing comes with the code, the list is downloaded
+  on the owner's click, and it only fills the New model form; the course gets nothing until
+  the owner saves.
 
 ## Deferred
 
@@ -2660,10 +2747,21 @@ format (see "Learning rules").
   Output, Example and Constraints in English (the rules read as an exam states them, with
   no mistranslated rule); whether `hints.md` and `tutor.hint` follow.
 
+The GUI in other languages (owner, 2026-11-07; not built). Why not now: the GUI's text still
+changes with every step (23 templates, the notices, and messages written by the Python
+modules: several hundred strings), so a translation now would double each change and its
+tests; and the exercises themselves are in the lectures' language, so a translated GUI
+around them helps only half. Revisit at packaging and release, when the text has settled, and
+together with translated `question.md` above.
+- Shape: gettext (Flask-Babel), English as the only source; the language from a setting or the
+  browser; untranslated strings fall back to English.
+
 Later phases, after phase 5 (order decided 2026-10-26, numbered 2026-10-30): phase 6 the
-second course, phase 7 the local GUI, then packaging and release. Adaptive review is a
-maybe, not a phase (owner, 2026-10-30: batches are started by hand for now); exam mode
-is not done (see "Decisions not to do").
+second course, phase 7 the local GUI, then packaging and release. Changed by the owner on
+2026-11-05 and 2026-11-06: the test-run container first, then the GUI, then the rest of phase 6
+(another language or framework), since the second course so far is plain Python. Adaptive
+review is a maybe, not a phase (owner, 2026-10-30: batches are started by hand for now); exam
+mode is not done (see "Decisions not to do").
 - Second course: use the tool for another course (other language or framework) to prove workspace,
   testkit and setup recipes are not shaped around one course. A long-term goal. Brings the module
   risk tiers and other languages (see "Code execution safety"); isolation layer B came first, after
@@ -2690,9 +2788,212 @@ is not done (see "Decisions not to do").
     on the host (the page gives the commands); Docker Desktop to choose the container. A plain
     Python course needs only the line and a key.
 
-Local GUI (phase 7: after the second course, just before packaging and release;
-discussed 2026-10-26). It sits on top of the files and functions the earlier phases build,
-so it comes late; the adaptive review screens can be built with it.
+Local GUI (phase 7, started 2026-11-06 ahead of the rest of phase 6, see above; discussed
+2026-10-26). It sits on top of the files and functions the earlier phases build, so it comes
+late; the adaptive review screens can be built with it.
+- Build order (owner, 2026-11-06), one step at a time, each usable on its own: (1) read-only
+  pages: courses, batches, exercises with progress and validation; (2) "Open in IDE" and "Open
+  folder"; (3) long tasks: a CLI command as a child process, its log polled (htmx comes here);
+  (4) generation: lectures, preferences, approving the plan in the page (it was expected to
+  touch `graph/__main__.py`; it did not, see below); (5) uploading lectures and a new
+  course; (6) settings: models and keys; (7) the environment page, split (owner, 2026-11-06)
+  into 7a, without a model, and 7b, a model drafting `[requires]`. Steps 1 to 7 are built.
+- Courses (owner, 2026-11-06): every folder under one root that holds a `workspace.toml`, as
+  `tutor.workspace init` lays them out; the root is `--root`, else the folder above
+  `WORKSPACE_DIR`. Each is checked like any workspace (refused inside a git repository). A
+  command the GUI starts gets that course's `WORKSPACE_DIR` and `LECTURE_DIR`.
+- Access (step 1): the server listens on 127.0.0.1 only. A random token per launch is in the
+  link the command prints and opens; the first request swaps it for an HttpOnly,
+  SameSite=Strict cookie and redirects to the page without it, and every request without it
+  gets 403. The Host header must be 127.0.0.1 or localhost with this port, against DNS
+  rebinding. Jinja2 escapes every value and the Content-Security-Policy allows scripts from
+  the server only, none inline. Names from a URL or a manifest are followed only as plain,
+  visible folder names that stay inside their parent once links are resolved. Step 1 has GET
+  routes only. From step 2, a route that does something on the machine answers POST only (no
+  link or image can trigger it), and its Origin header must be this server's, besides the
+  SameSite cookie; it redirects back (303) with a fixed notice code, so the page never
+  echoes text from the request. The Referrer-Policy is `same-origin`: under `no-referrer`
+  browsers send `Origin: null` on a POST, and the first real click got 403 (the Flask test
+  client sets headers by hand, so only a click in Chrome showed it; buttons are now checked
+  that way). The GUI reads only `WORKSPACE_DIR` from `.env`, not the
+  whole file: its environment passes to what it starts (VS Code, its terminals, the code
+  run there), and API keys must not.
+- Step 1's pages (owner, 2026-11-06, after the first version looked like a file browser): a
+  dashboard per course (progress bar, must exercises passed, the next must exercise not yet
+  passed in the newest batch that has one, the last runs with time and result, never a run's
+  `first_error`), batches with progress bars, and the question rendered.
+- Questions are rendered, not shown as source (owner, 2026-11-06): Markdown by markdown-it-py
+  with raw HTML off; `<details>` blocks (17 of 60 questions) by recognising their exact shape
+  and writing only fixed tags; LaTeX (31 of 60) as MathML made on the server, so no script and
+  no change to the CSP (KaTeX would need inline styles). latex2mathml copies text it does not
+  understand into its output (`\text{<script>}` came out as a script tag), so its output is
+  kept only if every element and attribute is plain presentation MathML, else the formula is
+  shown as escaped source: over the 60 questions, 1131 formulas, all MathML, 9 ms at most.
+- Long tasks (step 3, owner, 2026-11-06): a task is a list of existing CLI commands, from a
+  table in the code with checked paths, run one after another by `python -m tutor.gui.runner`
+  in a session of its own; each runs to the end even if one before failed (a batch goes on past
+  an INVALID exercise). Its folder in the course's `logs/gui-tasks/` holds `task.json` (the
+  commands, exit codes, state) and `output.log`, so the GUI only reads files and a task goes on
+  when the GUI stops; the newest 20 are kept. The commands run in the repo, so each reads `.env`
+  itself, with the course's `WORKSPACE_DIR` and `LECTURE_DIR` set. One task per course at a
+  time: validation already runs in parallel, and two at once could push runs past their limits.
+  The page polls the end of the log every second with htmx and stops when the task ends.
+  A task that ends with every command done sends the watching page back to the page it was
+  started from, with a notice saying what finished (owner, 2026-11-06: "跑完跳转" for every
+  task): lectures read to Lectures, Validate all to its batch, Check to Models, install,
+  build and the [requires] draft to Environment, a plan's tasks to its plan, a new course to
+  its page. The target is worked out from the task's kind and names through `url_for`, never
+  a URL kept in `task.json`. One that failed or was stopped stays on its log, where the
+  error is, with a link back; a Validate all with an INVALID exercise is such a one. Only
+  the poll redirects, so opening an old task's page shows its log.
+  The first task is "Validate all" on a batch, which rewrites each `validation.json` as the
+  command line does; generating came in step 4, building the image comes in step 7.
+- Docker before a task (owner, 2026-11-06): a task that runs tests or calls a model
+  (validation, plan, approve, send back, continue) starts only if the course's tests can run
+  now. For a course with `[isolation] runner = "container"` the GUI asks Docker first, as the
+  commands do; if `docker` is missing, Docker Desktop is not running, or the image is
+  missing, nothing starts and the page says which, with what to do (install Docker Desktop,
+  start it, or build the image). A course on the host is not checked. The commands keep
+  their own check; this one spares a task that would fail at once.
+- Which Python a task runs exercise code with (owner, 2026-11-06, after a course's tests on
+  this machine ran in this tool's venv, which lacks the course's packages): validation and
+  generation start with the course's own `.venv` when its tests run on this machine, since the
+  learner's tests run there and `[requires]` is installed there, and the test runs follow
+  `sys.executable`; `tutor.workspace init` installs this tool into it. A course whose tests
+  run in a container, or that has no `.venv` yet, uses this tool's interpreter.
+- Validating a generated batch (owner, 2026-11-06: "Validate all" did not start by itself):
+  Approve and Continue run `python -m tutor.validation.batch <label>` after the graph in the
+  same task, which calls the validation command once per exercise the manifest lists, so each
+  `validation.json` is written for the files as saved; the graph itself still writes none
+  (`validate()` has no side effects). A batch with no manifest yet has nothing to validate,
+  and its run's own exit code says how it ended.
+- Each exercise's status on the plan page (owner, 2026-11-06: "题目旁边显示状态", after an
+  exercise of a real batch failed on a provider error and only Claude could tell, or redo
+  it): once a plan is approved, each row says what its exercise came to: valid, invalid or
+  saved and not validated yet (manifest and validation.json), discarded with the check its
+  last round failed and how many repairs it took (the check's output only when asked, see
+  "Try again with a note"), failed with the error, or not generated yet (generation.jsonl's last
+  line for it, so a later try counts). One discarded or failed has "Try again": the graph's
+  existing `item` command generates it alone, with the plan's item and what the batch was
+  planned with (run.json's models and settings), and adds it to the manifest, which only
+  ever grows; then it is validated. It costs money, as approving does; only while no task of
+  the plan runs, and the page says so while one does (a course runs one task at a time). No
+  change to `graph/`. The batch page, which lists only what the manifest has, names the
+  plan's exercises that did not come out and links to the plan to try them again (owner).
+  With two or more, "Try all N again" runs each one's commands one after another in one
+  task.
+- "Try again with a note" (owner, 2026-11-07, after a real retry failed rule 1 the same way
+  twice: the reference and the tests read an ambiguous question differently, and nothing
+  about the retry had changed). Under an exercise that did not come out, a folded section
+  shows the last round's check output (its first 1500 characters, from generation.jsonl)
+  and takes a note. The note is added to that exercise's `notes` in the item file the retry
+  writes, after the plan's own notes, for this try only: `plan.json` stays as approved. The
+  notes are the generate prompt's last line, so the cached part before them (the lecture's
+  pages, the example) is unchanged and a try with a note costs what one without does. The
+  note is kept beside the item file, and the next try's box starts from it. A batch made
+  with `hide_answers` (hand-calculation exercises) shows no check output, which can quote
+  expected values; the note still works there. "Try all" takes no notes.
+- Fixing in the page, not through Claude (owner, 2026-11-06: "这些漏洞下次在网页有补充"):
+  - A task that failed or was stopped has "Run again", when it is safe to run twice (reading
+    lectures, transcribing, Validate all, Check, install, build, the two drafts). It posts to
+    the action that started the task, whose route makes the commands again with its checks;
+    the commands in task.json are never run back, as code run on this machine could change
+    that file. Generating has Continue and "Try again" instead, and a new course its page.
+  - A running task with no new output for 30 s says what it waits for, by its kind (the
+    plan model, the generate model, pip, docker build, the test runs) and for how long: a
+    model's reply is printed only once it is whole, and a plan call took 12 minutes while
+    the page showed nothing new.
+- Stopping a task: the test runner starts each pytest or `docker run` in a session of its own,
+  out of reach of one process group, so the runner lists every process below it (`ps`), sends
+  each Ctrl+C (a `docker run` client passes it into its container), and kills what is left
+  after 10 s; a container left without its client ends at its own limit. The runner sets its
+  own Ctrl+C handler first: a process started in the background has SIGINT ignored and passes
+  that on, and the first real Stop did nothing until it did. Checked by a click in Chrome on a
+  copy of two examples, in containers: stopped in 7 s, no container or process left, and the
+  interrupted exercise's `validation.json` not rewritten. Windows: Ctrl+Break, not tested.
+- Generation (step 4, owner, 2026-11-06): no change to `graph/`. Started without a terminal,
+  `python -m tutor.graph plan` already pauses at the plan and exits 0, so the GUI runs the
+  CLI's commands as tasks: the new-batch form starts `plan` (lectures read into the cache,
+  a label, learn or review, an optional count, preferences, and "hand calculation", which is
+  `--set hide_answers=true`); the plan page shows `plan.json` and starts `resume --approve`,
+  `resume --feedback=...` or, for a run that stopped, `resume`. Free text goes in as one
+  argument in `--name=value` form, so text starting with "-" is not taken for an option, and
+  no shell is involved. Editing the plan is "Edit plan.json in VS Code", since approving
+  already uses the owner's edited `plan.json`; no editor in the page (owner). The form names
+  the model of each role from `[llm.roles]` and says it costs money, with no estimate: tokens
+  per exercise vary too much for one to help (owner). Approve and Send back run only on the
+  owner's click; tests and Chrome checks use a stand-in for the command
+  (`tests/fake_graph.py`), never a model or a real course.
+  - Where a batch stands is read from files, since the plan's state proper is in LangGraph's
+    checkpoint, which needs the `gen` extra: a GUI task running for its label; a manifest
+    (written once every item has finished): generated; a draft folder for a plan id or a
+    `generation.jsonl`: stopped midway, Continue; else `plan.json`: waiting for the owner. A
+    plan being made again (feedback) that stopped leaves the old `plan.json`, and approving
+    would finish the new plan and approve it unseen; when the GUI's own last task for the
+    label was a planning one that did not finish, the page offers Continue, not Approve. A
+    batch planned in a terminal has no such history. Assistant mode (exit 3) shows as
+    waiting for the assistant: its requests are answered from a terminal, then Continue.
+  - The new-batch form is the one page that shows what a request sent: a refused form comes
+    back with the values typed, escaped like everything else.
+  - How many exercises (owner, 2026-11-06): "let the plan model decide", with its limit in
+    view (`--max-count`: `[generation] max_count`, else 20, since some lectures hold far
+    more than 6 points; the CLI's default stays 6), or "exactly N" (`--count`).
+    The plan model already counts the knowledge points that deserve an exercise, so no
+    separate call counts them first: it would read the same pages for a second fee, and the
+    two answers could differ. The limit sat out of sight before; a plan that the model
+    stopped at the limit now says so on the plan page, since points may have been merged or
+    left out. The limit is kept in the batch's state when the plan is made, so a plan sent
+    back cannot go past it; more means adding items to `plan.json` or a new batch.
+- Lectures and new courses (step 5, owner, 2026-11-06). A course's Lectures page lists each
+  PDF with what the cache holds (not read, read, image pages waiting). Uploads: PDFs only,
+  checked by their first bytes; 100 MB each and 500 MB a request; the name kept as given
+  (spaces, brackets, any letters) unless it holds a separator or a character Windows or a
+  glob reserves, with ".pdf" in lower case, as the cache and the plan find lectures by that
+  name; never over an existing file, since exercises cite its slides (delete the old one
+  first). A set of files is saved all or none: hidden part files first, then hard links,
+  which fail rather than replace. Each upload starts the text-layer read
+  (`python -m tutor.materials`, free) as a task; the vision model reads the waiting image
+  pages only from its own button, which names the model, as each page is a paid call.
+  - New course (the owner's "one click after uploading the slides", 2026-11-04): a folder
+    name and an optional course id; one task runs `python -m tutor.workspace init`; until
+    init writes `workspace.toml`, only the task's page is shown. It took optional PDFs too,
+    saved first and read after init, until the owner dropped them (2026-11-07): lectures
+    are optional there, and the Lectures page takes files or a whole folder to tick from
+    once the course exists. Refused inside a git repository, as init refuses it. Its page
+    shows the stages (course files, the venv, installing the tool; reading the lectures for
+    a course created before that) with a bar, read from the files init has made
+    and the commands that ended, not from the log's words; the install has no measure
+    inside it, so it shows how long it has run (owner, 2026-11-06: it looked stuck, as init
+    printed its steps only at the end; it now prints each as it happens, and a line before
+    the install). Once ready, htmx's poll is answered with `HX-Redirect` to the course page;
+    a failed one stays on its log. A course page lists what still stands between it and
+    generating: lectures not read, no models, where tests run not chosen, no `coverage.md`;
+    each line links to the page that fixes it (owner, 2026-11-06).
+  - A whole folder (owner, 2026-11-07: the file picker took only lecture files). A second
+    input with `webkitdirectory`, no script: the browser sends every file in the folder, so
+    the server keeps its PDFs and web pages, leaves out what a browser saves beside a page
+    (`Name_files/`) and hidden files, and counts what it left out by kind. They wait in the
+    course's `.lecture-uploads/<token>/`, not yet lectures, on a page where the owner
+    unticks what is none (exams, solutions, a syllabus), as the GUI does not delete a
+    lecture; a file that cannot be saved as it is (its name taken, its content not what its
+    extension says) shows why, with no box. A name with no number takes the one its nearest
+    subfolder starts with ("10 Matrices/Quiz.htm" -> "10 Quiz.htm"), so its sections are
+    numbered like its topic. Tick all, Tick none, Invert, and each subfolder's Tick / Untick
+    these (owner, 2026-11-07): with no script of our own, a button sends the ticks as they
+    are and the page comes back with them changed; files directly in the folder come first,
+    then each subfolder's together. The ticked files then pass the same checks as an
+    upload. One folder waits at a time: choosing another, or Cancel, drops it. The whole folder counts
+    toward a request's 500 MB, videos too, and at most 5000 files; past either, the 413 page
+    says to choose a subfolder.
+  - A "discard plan" button stays out for now (owner): it would remove a draft folder, so
+    it gets its own step, hiding the folder rather than deleting it.
+- htmx 2.0.11, the newest 2.x on npm (2026-09-22, 0BSD), vendored as
+  `static/htmx-2.0.11.min.js` after its tarball matched npm's sha512; a test pins the file's
+  sha256. Its config turns off eval, script tags in swapped HTML and its inline indicator
+  styles, so the CSP did not change. `selfRequestsOnly` keeps its requests on this server.
+- Dependencies: the `gui` extra, so the rest of the tool does not carry them: Flask and
+  waitress (8 packages), markdown-it-py, its dollar-math plugin, latex2mathml and tomlkit
+  (13 in all, all pure Python and MIT).
 - Shape: a local web app (a thin Flask backend reusing the CLI functions, which a later MCP
   server could share too, plus a light frontend), served by waitress, bound to `127.0.0.1`
   with a per-launch token or a Host header check so other web pages cannot drive it.
@@ -2715,23 +3016,214 @@ so it comes late; the adaptive review screens can be built with it.
   pages that do not need a SPA framework. What still needs care: escaping everything not
   written by us (lecture text, LLM hints, learner code) to prevent XSS.
 - Manage, do not edit: drag lectures and lab files into the workspace, pick sources and start
-  generation with the preference chat box (approving the batch plan there if phase 3 adopts
-  the human-in-the-loop item),
+  generation with the preferences box, approving the batch plan there (step 4),
   browse batches with status from `validation.json`, progress from `attempts.jsonl`, mode and
   sources from `manifest.json`, coverage from `coverage.md`.
-- Solving stays in the IDE: an "Open in IDE" button runs `code <exercise dir>` (or a
-  `vscode://file/...` link; JetBrains has its own launcher). The GUI never runs the learner's
-  tests; the IDE's `pytest` and the attempts plugin stay the one record of attempts.
+- Solving stays in the IDE: "Open in VS Code" (step 2) runs `code <course folder> <student.py>`,
+  the course folder and not the exercise's, since the course's `.vscode` settings put its venv
+  in the terminal; VS Code reuses a window that has the folder open. `code` is looked up on
+  PATH, then inside the macOS app (not on PATH here). JetBrains has its own launcher, later.
+  The GUI never runs the learner's tests; the IDE's `pytest` and the attempts plugin stay the
+  one record of attempts.
 - An "Open folder" button next to it (owner, 2026-11-05) on course, batch and exercise pages
   shows the folder in Finder or Explorer. Only paths inside the workspace, and never a way
-  into `solutions/`.
+  into `solutions/`: a batch's button opens its `exercises/`, not the batch folder beside
+  `solutions/`. Both buttons go through `gui/launch.py`, the one place that can say "not
+  available". Only macOS is tested; the Windows and Linux branches are not.
 - Shows only `exercises/`; `solutions/` (reference, pseudocode) at most after the exercise is
   solved and on explicit request, matching the tutoring rule.
 - Files stay the source of truth; no database (SQLite remains deferred).
 - Local only, per "Local-first": no accounts, no hosting. A settings page picks the model
-  (API or local) and stores the user's own key in `.env` or the OS keychain, never shown
-  again in full, with the data-flow note next to it.
+  (API or local) and stores the user's own key, never shown again in full, with the
+  data-flow note next to it (built in step 6, below).
+- Settings (step 6, owner, 2026-11-06):
+  - Keys in the repository's `.env`, the file the commands already read, not the OS
+    keychain for now (that would need a dependency and a change to how llm.py reads keys,
+    and Linux without a desktop has none). The user adds and removes keys by name, any
+    key-like name (`…_KEY`, `…_TOKEN`, `…_SECRET`) or one a profile names; WORKSPACE_DIR
+    and the other settings in the file are never listed or touched. A page shows the last
+    4 characters of a long key and never sends one back, even in a refused form. The file
+    is parsed as text, never loaded into the GUI's environment, kept line for line
+    otherwise, replaced in one step and readable by its owner only. A key also set in the
+    environment the GUI started from wins (load_env's rule), and the page says so.
+  - A course's Models page writes its workspace.toml's [llm] with tomlkit (owner), which
+    keeps the owner's comments; a changed value loses only its own line's comment. Every
+    save is checked before the file is replaced: read back with tomllib, [llm] must be
+    exactly what was intended, worked out from the old data and not from tomlkit, and every
+    other table unchanged; the file before is kept as `workspace.toml.bak`. A new key in a
+    table goes after its last key, not after the comments that end it and belong to the
+    next table (tomlkit's `Container._insert_after`, pinned by a test). Profiles are
+    checked by llm.py's own rules; roles by generation's (the oracle from another provider
+    than generate and repair); a profile in use cannot be removed, and a renamed one takes
+    its roles along. "Copy from another course" fills a course that has none. The checked
+    write is `gui/toml_edit.py` since step 7a, which writes [requires] and [isolation] the
+    same way.
+  - Filling New model from models.dev (owner, 2026-11-07: the form was plain, with only
+    the providers llm.py knows by name; "custom" meant finding and typing a base URL). The
+    public catalog at `https://models.dev/api.json` (MIT, no key) lists providers with
+    their base URL and key variable, and their models with release date, thinking and how
+    far it can be turned down, image input, context and USD price. Downloaded only on
+    "Fetch the list" / "Refresh the list" (beside the provider choice), never by itself;
+    the request carries nothing of the courses. Kept in `<root>/.cache/models-dev.json`,
+    reduced to what is used (about 1.2 MB, 204 providers of 235): the providers models.dev
+    marks as taking OpenAI's requests, plus those it lists with their own SDK whose
+    OpenAI-compatible URL is checked in their docs (`catalog.OPENAI_URLS`: Anthropic,
+    Gemini, xAI, Mistral, Groq, Together, MiniMax, OpenRouter); the rest are counted on the
+    page. A downloaded value is checked before it is kept (https, or http on this machine;
+    a key name in capitals; a plain model id) and shown escaped. Above the hand-written
+    form, which stays: a provider (common ones first, the key's state in `.env` by name),
+    its models newest first without withdrawn ones, and "Use", which fills the form and
+    saves nothing. A provider llm.py knows (DeepSeek, Zhipu and z.ai as `glm`, OpenAI, LM
+    Studio) keeps its own way to turn thinking off; another one is `custom` with its URL,
+    and a thinking model gets the lowest `reasoning_effort` it takes (none, minimal, low),
+    or a note that each call thinks. No script: choosing a provider is a GET form, so the
+    page can be reloaded. Anthropic goes through its OpenAI-compatible layer, which has no
+    prompt caching; the page says so.
+  - One provider's oracle (owner, 2026-11-07: "not everyone buys several APIs; do not
+    forbid it, at least warn"). The oracle at the same provider and address as generate or
+    repair was refused, by the Models page and by the graph before any call. It now runs,
+    with a note at the run's start and a warning on the page: an oracle call still reads
+    the question alone, apart from the exercise, while with no oracle role (always
+    allowed) the generating model writes oracle.py in the same reply, the least
+    independent; refusing the better of the two pushed one-key users to the worse. Still
+    refused: one assistant profile for both, whose requests would mix in one queue. Left
+    as it was: when rule 1 fails and rule 4 agrees, repair is told oracle.py was written
+    by "another model", which with one model is not quite so; that text is part of a
+    calibrated prompt, so it stays.
+  - One maker's oracle (owner, 2026-11-07: "a whole family gives no warning"). Saving
+    roles refused an oracle at the same provider and address as generate or repair, as
+    the graph did; the same maker's model through another site (GLM at bigmodel.cn and
+    z.ai, DeepSeek directly and through OpenRouter) passed, though it is no independent
+    reading either. The maker comes from models.dev's canonical model id ("zhipuai/...";
+    for about 85% of its models), else an aggregator's id that starts with a known maker
+    ("deepseek/..."); the kept list now has it (format 2: a list kept before is fetched
+    again). One model, one provider and one maker are each a warning, said while the
+    roles are being chosen: htmx asks a read-only route for the part above Save whenever
+    a role changes (hx-get on each select; no script of our own), with "Save even so" to
+    tick. Without htmx, a save of changed roles that have a warning comes back held, the
+    roles as chosen in the form; once saved, the page keeps saying so. A model the list
+    does not know is not compared by maker. A role set to none is
+    not compared, and repair set to none is generate. The graph's own check stays as it
+    was: it runs without the list. With no script the page cannot warn while a role is
+    being chosen, so each model's provider and maker follow its name in the role choices
+    and in the table (owner, 2026-11-07). A save that is refused or held back keeps the
+    roles as chosen in the form (they were reset to the file's, which looked wiped). The
+    GUI never fetches the list by itself; a list kept in an older format is named as such,
+    with its date, and the page asks to fetch it again.
+  - The form follows its provider (owner, 2026-11-07: an empty base URL under "deepseek"
+    read as a contradiction). A provider llm.py knows shows its own base URL in the field,
+    editable for another site of the same provider (z.ai for glm), and its way to turn
+    thinking off in grey; saving leaves its own URL out of the file, so a change in llm.py
+    reaches it. custom requires a URL; assistant greys out the key, the URL and More. With
+    no script, Apply beside the provider sends the whole form back by GET, nothing typed
+    lost, and replaces a known provider's own URL with the new provider's. A save whose URL
+    is another known provider's own (changed without Apply, or a known one as custom) is
+    refused, saying which. With htmx the provider's choice swaps the fields at once (the
+    page as Apply would send it, cut to those fields with hx-select), so Apply is only the
+    way without it. Base URL moved out of More, as it decides where calls go. Enter
+    still saves: an off-screen Save is the form's first button. A new model's time limit
+    is filled in as 900 s (owner, 2026-11-07; every cloud profile had been given it by
+    hand, as plan and generate calls with thinking run past llm.py's 300 s); editing a
+    model shows what its file has.
+  - "Check" (owner): `python -m tutor.llm check [PROFILE ...]`, as a task, sends each model
+    one tiny request (thinking off, 32 output tokens) and says ok or the provider's reason,
+    so a wrong key or model name shows before a run that spends more. An assistant profile
+    has nothing to check; a profile only the embedding role uses gets an embedding call.
+  - Not in this step: the `[generation]` tunables (their defaults are measured values).
 - Environment page:
+  - The page is four numbered steps in the order they are done (owner, 2026-11-06, after
+    trying it on a new course: by topic it read unclearly): (1) what the course needs, the
+    model's draft then the list; (2) install on this machine, the check below its button;
+    (3) where tests run; (4) the test image, dimmed and "not needed" on the host. Each says
+    whether it is done; steps 2 and 4 say so in their htmx parts.
+  - Built in step 7a (owner, 2026-11-06), no model involved, one page per course:
+    - The check is `python -m tutor.envcheck --json` run with the course's own `.venv`:
+      envcheck checks the interpreter that runs it, and the learner's tests use that venv.
+      It runs from the repository, as tasks do, so it reads `.env` itself (JAVA_HOME,
+      HADOOP_HOME) and the GUI still never loads it. 0.2 s warm; the check and the image's
+      state load into the page with htmx, since Docker can take seconds while its VM wakes.
+    - "Exercises may import" (owner, 2026-11-06): each pip row of the list has a tick and the
+      module it is imported as; the ticked ones go into `[safety] allow_imports` in the same
+      checked write as `[requires]`, an unticked one comes out, and modules no row names (an
+      OS course's `subprocess`) stay, listed under the table. Unticked by default: widening
+      the static check is the owner's call, package by package. The module box starts with
+      what the lectures' code imports it as when the draft saw it (scikit-learn is sklearn),
+      else the name with `-` as `_`. The generate and repair prompt names them as importable
+      next to the core modules (owner, 2026-11-06), or the model would be told it may not use
+      what the check lets through. A course with none gets the same prompt text as before
+      (checked by its hash), so its prompt cache holds. The oracle's prompt keeps the core
+      modules only, to stay independent of the exercise; an exercise whose answer needs the
+      library itself may then get no oracle, to decide when one does.
+    - `[requires]` is a table in the page (owner, 2026-11-06): "+ Add a row" appends a blank
+      row fetched by htmx, "−" removes its row with htmx's `delete` swap, so no script of
+      ours; nothing is written until Save, and a cleared name is dropped too. The rules
+      are envcheck's (`requires_problems`, now shared by the venv install and the image: a
+      plain package name, a version prefix of dotted numbers, a JVM for pyspark and hadoop),
+      plus a Hadoop release the image can build when tests run in the container. Each pip
+      name links to its PyPI page, for the owner to check a name before installing it.
+    - "Install into .venv" runs `tutor.workspace init` again as a task, which makes the
+      `.venv` if missing and installs this package and `[requires]` (the same command a
+      command-line user runs). The page shows first the pip command, where it installs,
+      that it needs no admin rights and changes nothing outside the course folder, that it
+      downloads from PyPI, and how to undo it.
+    - Where tests run: container or host, written to `[isolation] runner` only when chosen;
+      host only with a tick saying generated code then runs with the user's rights. A new
+      `[isolation]` table goes after init's commented lines, its header saying the page set it.
+    - The test image: Docker missing, not running, image missing or out of date, ready with
+      its size. "Build image" runs `tutor.container build` with the course's venv, so the
+      image takes its package versions; before it, the page shows the recipe
+      (`python -m tutor.container recipe`, in that venv), each download and its source, the
+      sizes measured so far for scale, and how to remove the image.
+    - Not in 7a: the per-platform recipes for system software below (only Java and Hadoop
+      exist so far, both in `docs/setup/bigdata.md`, and each recipe needs checking on each
+      platform, while only macOS is at hand); the page points to `docs/setup/` instead. A
+      broken venv being rebuilt, and a venv on another Python, are not handled either.
+    - Checked by a click in Chrome on a scratch course: a row added, host refused without
+      the tick, container saved, the install (2 s) and the build (8 s, cached layers, 0.18
+      GB) run as tasks, the check then ok; the three real courses only opened.
+  - Built in step 7b (owner, 2026-11-06): a model drafts `[requires]` from the lectures
+    (`python -m tutor.materials.requires`, a task from the page's button, which names the
+    model and the input tokens; only on that click, as it may cost money).
+    - The model: the new `setup` role's, else `plan`'s, else `generate`'s, so nothing new has
+      to be set up. One request per cached lecture, the fixed instructions first (for the
+      provider's prompt cache) and the lecture after; thinking off; a JSON schema: kind
+      (pip, python, java, hadoop, other), pip name, module imported, version only if the
+      page states one, page, and the page's own words that show it.
+    - The answer is stored as given, `cache/requires/<lecture>.json`, keyed by the lecture's
+      text and the prompt version: a lecture is asked once, and again only when it changes.
+      The checks run each time the draft is read, so a better check needs no new call:
+      the quote must be on its page (spaces aside) and name the software (the pip name or
+      the module, as a whole word: "six" is not in "sixty"; "other" more loosely, as it is
+      only shown); the standard library goes (`sys.stdlib_module_names`); versions keep
+      their dotted numbers ("3.5.x" is 3.5, Java "1.8" is 8, as envcheck reads it).
+    - A pip name its quotes do not show (`import cv2` for opencv-python) is the model's
+      knowledge, flagged "name from the model", with its PyPI link: a made-up name can be
+      one somebody registered. One piece of software across lectures is one candidate with
+      every source; versions stated differently are all shown.
+    - The page lists candidates with a tick, a version box, what [requires] holds now (new,
+      listed, listed with another version) and the sources; nothing is written until the
+      owner ticks entries and adds them, by 7a's rules (a pyspark without java is refused).
+      The box starts at the stated version's major.minor (3.5.1 as 3.5; Java its major),
+      the slide's own beside it. Software envcheck cannot check (a database, CUDA) is only
+      listed. `[safety] allow_imports` is not drafted: widening the static check is a safety
+      decision, and the page says a package exercises import must be added there by hand.
+    - A course without models gets no button: the GUI does not read `.env`, so it cannot tell
+      whether the LLM_* variables would answer.
+    - Prompt version 2 (owner, 2026-11-07): only software that builds, runs or tests the
+      course's code on the student's own computer, a compiler, build tool and debugger
+      named among them. A C course's first lecture had brought in what its lab machines
+      are reached with (PuTTY, WinSCP, X2Go, ssh), its editors (vi, emacs) and commands
+      every Unix-like system has (tar, nohup); these are now left out by name. Such
+      entries were "other", only listed and never installed, so the change cleans the
+      list; the new version asks every lecture again on the next click.
+    - Measured on the private deep learning course, with GLM-5.3-Flash (free): 16 lectures,
+      157k tokens in and 715 out, 10 candidates, one dropped (a plural, before "other"
+      matched loosely). It found torch, numpy and scikit-learn with the versions the slides
+      state (scikit-learn from `sklearn`, so flagged), pandas, torchvision and a newer
+      Python than the course's [requires], which held only python; matplotlib, which the
+      course's venv holds, is in no slide. Nothing was added: that is the owner's click. The
+      page was checked by a click in Chrome on a scratch course, its run button with a
+      stand-in command.
   - Infer requirements from course material: an LLM reads lectures and labs for named tools
     and versions and drafts `[requires]`; the owner confirms before `workspace.toml` is
     written.
@@ -2756,8 +3248,10 @@ so it comes late; the adaptive review screens can be built with it.
     or platform missing from the recipes is reported as needing a new recipe.
   - One click after uploading a new course's slides creates its workspace venv and terminal files
     (owner's wish, 2026-11-04), by calling `python -m tutor.workspace init`.
-  - This partly changes "Check, don't install" (see "Environment"): confirm with the owner
-    when the GUI phase starts.
+  - How far this relaxes "Check, don't install" (owner, 2026-11-06): the GUI installs Python
+    packages only into a course's own venv (through `tutor.workspace init`) and builds the
+    test image (through `tutor.container build`); it never runs a system install, which the
+    user runs in their own terminal before "Check again".
   - The test-run container (layer B, "Code execution safety"; owner, 2026-11-05). The GUI
     itself stays on the host, since it opens the IDE and folders and reads keys; only test
     runs go into the container. The page shows, per course: Docker missing, not running,
@@ -2768,6 +3262,38 @@ so it comes late; the adaptive review screens can be built with it.
     `[requires]` is confirmed. The user chooses host or container for a new course, nothing
     switched silently, with a warning when it matters: choosing the host (generated code runs
     with their rights), and a course set to the container while Docker is not available.
+- Coverage page (owner, 2026-11-06): a course's `coverage.md` shown, and a model's draft of
+  it (`python -m tutor.materials.coverage`, a task from the page's button, which names the
+  model and the input tokens). A course without the file plans from slide titles alone.
+  - The model and the storing are the [requires] draft's: the `setup` role's model, else
+    `plan`'s, else `generate`'s; one request per cached lecture, instructions first; the
+    answer stored as given in `cache/coverage/<lecture>.json`, keyed by the lecture's text
+    and the prompt version, so a lecture is asked once and a new lecture costs only itself.
+    Each answer lists the lecture's knowledge points, each with its first and last page, a
+    status (gap-code, gap-tracing, gap-design, concept, n/a) and, for gap-code, what an
+    exercise could check.
+  - Checked when read: a point whose pages are not in the lecture, or run backwards, is
+    dropped; pages become slide footers ("1.2-1.3"; "p.N" where a page has none), as the
+    plan and its slices read them; the pages no point covers are listed per lecture; a `|`
+    in a point cannot break the table. `ex:<id>` is never guessed: the plan already lists the
+    existing exercises and avoids them, and the owner marks rows as batches are made.
+  - `coverage-draft.md` is rewritten by each run, so it is never the file to edit. It never
+    writes over `coverage.md`: "Use as coverage.md" creates that file only when there is none
+    (opened for exclusive creation), with the header of a kept file. Each lecture's section
+    has the lecture's file name as its heading, so a later run can tell which lectures the
+    file has.
+  - Adding as lectures come (owner, 2026-11-06, "能做到增量添加吗"): the drafted lectures
+    `coverage.md` has no section for are offered with a tick; the ticked ones are appended at
+    its end, each with a line saying it came from the draft. Nothing already in the file
+    changes (the old text must be the start of the new), and the file before is kept as
+    `coverage.md.bak`. A hand-made file that names its lectures its own way (no heading is a
+    lecture's file name) cannot be matched, so nothing is ticked there and the page says so.
+  - Measured on the private test course with GLM-5.3-Flash (free): 20 lectures, 80k tokens
+    in and 13.5k out, 276 points (65 gap-code, 46 gap-tracing, 3 gap-design, 145 concept,
+    17 n/a), none dropped, a page or two uncovered in 5 lectures. Its PDFs have no slide
+    footers, so its ranges are PDF pages; generation sends such a lecture whole anyway.
+    Using the draft is the owner's click. Checked by a click in Chrome on a scratch course:
+    use, then add a second lecture after a hand-written line, which stayed.
 - Packaging the GUI itself as an image (owner asked, 2026-11-05: the aim is opening it in one click,
   see "Packaging and release", which does not need this, so an image is at most a later option). The
   costs: to start test containers from inside, it needs the Docker socket, which amounts to root on
