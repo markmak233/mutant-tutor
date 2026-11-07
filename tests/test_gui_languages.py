@@ -3,6 +3,7 @@ host refused for a C course, a C compiler that only differs here, asking every l
 and New batch held back for C until C generation is built. No venv, Docker or model: tasks
 are recorded instead of started. Lecture lines are made up."""
 
+import json
 import tomllib
 from pathlib import Path
 
@@ -101,6 +102,10 @@ def test_ticking_c_writes_its_table_its_headers_and_gcc_keeping_the_rest(root, c
     text = (course.workspace.root / "workspace.toml").read_text(encoding="utf-8")
     assert "# the course id" in text and "# the venv's Python" in text
     assert (course.workspace.root / "workspace.toml.bak").is_file()
+    # VS Code's C settings follow the flags (step 4b).
+    editor = json.loads((course.workspace.root / ".vscode" / "c_cpp_properties.json")
+                        .read_text(encoding="utf-8"))
+    assert editor["configurations"][0]["cStandard"] == "c99"
 
 
 def test_unticking_c_removes_its_table_and_headers_and_leaves_requires(root, course):
@@ -113,6 +118,20 @@ def test_unticking_c_removes_its_table_and_headers_and_leaves_requires(root, cou
     data = _data(course)
     assert "languages" not in data and "safety" not in data
     assert data["requires"]["gcc"] == environment.IMAGE_GCC
+    assert not (course.workspace.root / ".vscode" / "c_cpp_properties.json").exists()
+
+
+def test_a_courses_own_vs_code_c_settings_are_left_alone(root, course):
+    own = course.workspace.root / ".vscode" / "c_cpp_properties.json"
+    own.parent.mkdir(exist_ok=True)
+    mine = '{"configurations": [{"name": "Mine"}], "version": 4}\n'
+    own.write_text(mine, encoding="utf-8")
+
+    response = post(_browser(root), "/c/cdemo/environment/language",
+                    {"c": "on", "flags": "-Wall -std=c99", "headers": ""})
+
+    assert "notice=language-saved-own-editor" in response.location
+    assert own.read_text(encoding="utf-8") == mine
 
 
 @pytest.mark.parametrize(("flags", "headers", "says"), [

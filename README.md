@@ -83,8 +83,9 @@ provided as is (see [LICENSE](LICENSE)).
 
 Done: validation, generation, held-out checks, hints, the retrieval comparison, the
 evaluation, a container per test run, and the local GUI. In progress: a C course (its
-exercises are generated and validated, with sanitizers, in a container; the learner's pages
-and hints come next); then packaging and release.
+exercises are generated and validated, with sanitizers, in a container, and solved with the
+same pages, attempts and hints as Python's; the first real batch is next); then packaging and
+release.
 
 - [`docs/details.md`](docs/details.md): how validation and generation work, the results, the
   RAG comparison, where exercise code runs, the layout and the roadmap

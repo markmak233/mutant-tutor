@@ -138,6 +138,26 @@ def test_signed_overflow_is_stopped_by_the_sanitizer(tmp_path):
         program.run(stdin="2")
 
 
+def test_a_sanitizer_report_names_the_file_and_leaves_out_the_process_id(tmp_path):
+    """UBSan's line starts with the file name, which the learner needs to find the line;
+    ASan's starts with "==<pid>==", which only differs between runs of the same mistake."""
+    ubsan = compiled(tmp_path, "#include <stdio.h>\nint main(void) {\n    volatile int z = 0;"
+                               "\n    printf(\"%d\\n\", 1 / z);\n    return 0;\n}\n")
+    with pytest.raises(AssertionError) as caught:
+        ubsan.run()
+    assert "\np.c:4:" in str(caught.value) and "runtime error: division by zero" in str(
+        caught.value)
+
+    other = tmp_path / "other"
+    other.mkdir()
+    asan = compiled(other, "#include <stdlib.h>\nint main(void) {\n    int *p = malloc(4);"
+                           "\n    free(p);\n    free(p);\n    return 0;\n}\n")
+    with pytest.raises(AssertionError) as caught:
+        asan.run()
+    report = str(caught.value).splitlines()[1]
+    assert report.startswith("ERROR: AddressSanitizer: attempting double-free")
+
+
 def test_a_program_that_never_ends_fails_its_test_at_the_time_limit(tmp_path):
     program = compiled(tmp_path, "int main(void) { for (;;) {} }\n")
 

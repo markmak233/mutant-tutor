@@ -565,3 +565,22 @@ def test_validation_does_not_start_without_docker(root, monkeypatch):
 
     assert response.headers["Location"] == f"/c/demo-course/b/{BATCH}/?notice=docker-stopped"
     assert "Docker Desktop is not running" in page
+
+
+def test_a_c_exercise_opens_and_names_its_student_c(root):
+    """A C exercise's learner writes in student.c: the page names it, says where its question
+    is when there is no question.md, and Open in VS Code opens it."""
+    folder = root / "demo-course" / "batches" / BATCH / "exercises" / "ex-two"
+    (folder / "question.md").unlink()
+    _write(folder / "student.c", "/* # Second\n\nTask text. */\nint main(void) { return 0; }\n")
+    launcher = FakeLauncher()
+    client = _browser(root, launcher)
+
+    page = get(client, f"/c/demo-course/b/{BATCH}/e/ex-two/").get_data(as_text=True)
+    post(client, f"/c/demo-course/b/{BATCH}/e/ex-two/open-ide")
+
+    assert "with <code>student.c</code>" in page
+    assert "the question is the opening comment of <code>student.c</code>" in page
+    assert "student.py" not in page
+    course = (root / "demo-course").resolve()
+    assert launcher.calls == [("vscode", course, folder.resolve() / "student.c")]

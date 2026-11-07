@@ -2082,7 +2082,7 @@ themselves, so a cheap layer comes first and a stronger one later.
 - C (owner, 2026-11-07). Four steps: (1) validation, built; (2) the image and the GUI's
   Environment page, built; (3) generation, built (question.md from student.c came forward
   into it); (4) what the learner touches: the GUI's exercise page and Open in IDE, attempts'
-  snapshots, the progress report and hints, which still read student.py. The first C course's lectures (C99 with `gcc -Wall -std=c99`,
+  snapshots and the progress report (4a), hints and the held-out check (4b), built. The first C course's lectures (C99 with `gcc -Wall -std=c99`,
   Makefiles, programs on standard input and output, expected-output files, gdb and valgrind,
   no unit-test framework) show it tests by given input and expected output, so:
   - pytest drives the compiled program (owner chose the recommended option). The rules,
@@ -2204,6 +2204,51 @@ themselves, so a cheap layer comes first and a stronger one later.
     - Measured so far with stand-in models only: a C item goes from a reply to a saved exercise
       through the real validator on the host and in the course's container. The C prompts
       are not calibrated: the first batches on the C course measure them.
+  - Step 4, what the learner touches (owner, 2026-11-07), in two parts: 4a the solving itself
+    (the exercise page, attempts, the progress report), 4b hints and the held-out check.
+    - Which file is the learner's code is told by the file in the exercise folder
+      (`tutor.languages.student_path`: student.c if there, else student.py), not by
+      metadata.json (owner chose the recommended option): metadata sits in `solutions/`, and
+      the learner's side (the GUI's pages, the attempts plugin, which loads in every pytest
+      run and so imports only light modules) reads the exercise folder alone. Commands that
+      load the whole exercise (hints, held-out) use its metadata's language as before.
+    - 4a: the exercise page names student.c and says the question is its opening comment when
+      there is no question.md; Open in VS Code opens student.c; attempts keeps a failing
+      run's student.c as `<hash>.c`, so the held-out check can run it as C; the progress
+      report compares student.c with skeleton.c to tell an edited exercise from an untouched
+      one.
+    - 4b, hints. Layer 1 has C rules of its own (`hint/rules.py` C_RULES), read from what the
+      compiler and the sanitizers print as testkit_c passes it on, written from real runs of
+      both compilers (clang on the learner's Mac, gcc in the container, `pytest -m docker`):
+      a full-width character in the code (not in a comment or string); a library function
+      without its header (the #include the compiler's note names) or a function called
+      before its prototype; a function not defined (the linker); the compiler's first error;
+      a forbidden function (`csource`'s tokens); a program that never finishes; and by the
+      sanitizer's report an index outside an array, memory used after free, a double or bad
+      free, a NULL or invalid pointer, a stack overflow, a leak, signed overflow, division
+      by zero, a bad shift, other undefined behaviour. The place is the first frame in the
+      student's own file, so a fault inside scanf names the student's line. Review mode
+      names the kind only, as for Python. Python's rules and their order are unchanged.
+    - Layer 2 reads a C mutant's bug from its `/* Mutant: ... */` line; signatures leave
+      out a sanitizer's process id and the folders before a C file's name, which differ
+      between two runs of one mistake. testkit_c now starts a sanitizer's excerpt at its
+      line, so UBSan's names the file ("student.c:4:20: runtime error"), without ASan's
+      process id.
+    - Layer 3 names student.c and its opening comment to the model (Python's text is
+      unchanged), and the leak check blanks C comments, so the question's text in the
+      reference is not taken for code.
+    - Held-out checks the learner's own C code (the passing student.c, the `.c` copies of
+      failing runs). A model's held-out solutions and the teaching judge stay Python-only
+      (their prompts and calibration are Python's): both refuse a C exercise by name, and a
+      model's file in a C exercise would be skipped, never run unchecked. To be designed
+      with the first real C batches.
+    - With no "## Run" section, a C question's "How to run" compiles with the course's own
+      flags, and a function exercise's driver.c (`question.c_run_command`).
+    - VS Code: ticking C on the Environment page also writes `.vscode/c_cpp_properties.json`
+      with the flags' C standard (`-std=c99` -> cStandard c99) and the flags, so completion
+      and red underlines follow the course and not the compiler's default (owner's
+      question, 2026-11-07); unticking removes it. A file the course already had is left
+      alone, and the page says so. It is read by Microsoft's C/C++ extension.
 - Languages in the plan (owner, 2026-11-07), in this order: C, C++ and Java first, as the
   owner has courses in them; then SQL, JavaScript and TypeScript, shell, Rust, R, Go, Haskell,
   assembly, and MATLAB (open, below). Each is designed when a real course with lectures needs

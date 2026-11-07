@@ -102,3 +102,32 @@ def test_a_generated_c_item_is_validated_in_the_container_and_saved(course):
     assert final["outcome"] == "saved", final.get("failure")
     assert (d.batch_dir / "exercises" / "drop-low" / "driver.c").is_file()
     assert containers_left() == ""
+
+
+def test_the_hint_command_reads_gccs_output_in_the_container(course):
+    """The hint command runs where the course's tests run: gcc's words (curly quotes,
+    "implicit declaration") and its sanitizer reports give the same hints as clang's."""
+    from tutor.hint.__main__ import hint_for
+
+    root = course / "hint-drop-low"
+    shutil.copytree(EXAMPLES / "station-drop-low-c", root,
+                    ignore=shutil.ignore_patterns("validation.json"))
+    exercise, solution = root / "exercise", root / "solution"
+
+    def hint_with(source: str):
+        (exercise / "student.c").write_text(source, encoding="utf-8")
+        return hint_for(exercise, say=lambda text: None)
+
+    reference = (solution / "reference.c").read_text(encoding="utf-8")
+    no_header = reference.replace('#include "student.h"', '#include "student.h"\n'
+                                  "int stray(void) { return (int)strlen(\"x\"); }", 1)
+    mutants = sorted((solution / "mutants").glob("*.c"))
+
+    logic = hint_with(mutants[0].read_text(encoding="utf-8"))
+    bounds = hint_with(mutants[2].read_text(encoding="utf-8"))
+    header = hint_with(no_header)
+
+    assert (logic.layer, logic.key) == ("mutant", mutants[0].stem)
+    assert bounds.key == "c-bounds" and bounds.text.startswith("line 8 of student.c")
+    assert header.key == "c-undeclared" and "#include <string.h>" in header.text
+    assert containers_left() == ""

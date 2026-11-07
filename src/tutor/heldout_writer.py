@@ -51,6 +51,7 @@ from tutor import llm
 from tutor.config import WorkspaceError, load_env, load_workspace
 from tutor.execution import copied_files
 from tutor.materials.slides import lecture_context
+from tutor.schema import language_of
 from tutor.validation.exercise import STUDENT_FILE, TEST_FILE
 from tutor.validation.heldout import MODEL_DIR
 from tutor.validation.heldout import MODEL_META as META_FILE
@@ -153,6 +154,11 @@ def gather(batch_dir: Path, exercise_id: str, workspace: Path) -> Inputs:
     solution = batch_dir / "solutions" / exercise_id
     exercise = batch_dir / "exercises" / exercise_id
     metadata = json.loads((solution / "metadata.json").read_text(encoding="utf-8"))
+    if language_of(metadata) != "python":
+        # Its prompt and checks are Python's; validation/heldout.py still checks the
+        # owner's own C code (docs/design.md, "C", step 4b).
+        raise HeldOutWriteError(f"a {language_of(metadata)} exercise: the model writer "
+                                "supports Python exercises only so far")
     # The original skeleton, never exercises/<id>/student.py: that file may hold the
     # owner's answer, which must not shape the model's reading.
     skeleton = (solution / "skeleton.py").read_text(encoding="utf-8")

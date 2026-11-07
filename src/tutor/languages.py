@@ -12,6 +12,10 @@ for a pip package and failing later.
 
 suggested_c_flags reads the course's cached lectures for the gcc command lines they show and
 proposes their flags, with the line it took them from; no model is asked.
+
+student_path tells which file of an exercise folder is the learner's code. It lives here, in
+a module of the standard library only, because the attempts plugin (loaded in every pytest
+run) and the progress report need it and must stay light.
 """
 
 from __future__ import annotations
@@ -26,6 +30,9 @@ from tutor.testkit_c import check_flags
 
 SUPPORTED = ("c",)
 C_KEYS = frozenset({"flags"})
+# The suffix of each language's code files: student<suffix>, skeleton<suffix>,
+# reference<suffix>, mutants/*<suffix> (validation/exercise.py lays the files out).
+CODE_SUFFIX = {"python": ".py", "c": ".c"}
 # Toolchains of languages not supported yet, by the name a [requires] entry would give them.
 TOOLCHAINS = {
     "javac": "Java", "maven": "Java", "mvn": "Java", "gradle": "Java",
@@ -48,6 +55,17 @@ def declared(data: Mapping) -> list[str]:
 def is_c(data: Mapping) -> bool:
     """Whether the course declares C ([languages.c])."""
     return "c" in declared(data)
+
+
+def student_path(exercise_dir: Path) -> Path:
+    """The learner's code file in an exercise folder: student.c in a C exercise, else
+    student.py (also when neither is there, so a message names the usual file). Told by the
+    file that is there, not by metadata.json: that sits in solutions/, and the learner's
+    side (the GUI's pages, the attempts plugin) reads only the exercise folder."""
+    for suffix in CODE_SUFFIX.values():
+        if (path := exercise_dir / f"student{suffix}").is_file():
+            return path
+    return exercise_dir / "student.py"
 
 
 def problems(data: Mapping) -> list[str]:

@@ -171,3 +171,24 @@ def test_a_formulas_bar_in_a_table_row_does_not_split_the_cell():
     md = question_markdown(doc)
     assert "| `m` | items, $m = \\vert S\\vert $ |" in md
     assert "Outside a table $|S|$ stays." in md
+
+
+def test_a_c_questions_run_line_uses_the_courses_flags_and_the_driver(tmp_path):
+    """With no "## Run" section, a C question's run line compiles as the course does
+    ([languages.c] flags), with driver.c in a function exercise."""
+    from tutor.question import c_run_command
+
+    (tmp_path / "workspace.toml").write_text('course = "x"\n[languages.c]\nflags = ["-Wall", '
+                                             '"-std=c99"]\n', encoding="utf-8")
+    whole = tmp_path / "batches" / "b" / "exercises" / "whole"
+    function = tmp_path / "batches" / "b" / "exercises" / "function"
+    whole.mkdir(parents=True)
+    function.mkdir(parents=True)
+    (function / "driver.c").write_text("int main(void) { return 0; }\n", encoding="utf-8")
+
+    assert c_run_command(whole, {"interface": "file"}) == (
+        "cc -Wall -std=c99 student.c -o program && ./program")
+    assert c_run_command(function, {"interface": "function"}) == (
+        "cc -Wall -std=c99 student.c driver.c -o program && ./program")
+    # Outside a course (the repo's examples): testkit_c's defaults.
+    assert c_run_command(tmp_path.parent, None).startswith("cc -std=c11 -Wall student.c ")

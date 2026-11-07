@@ -27,6 +27,8 @@ import sys
 import textwrap
 from pathlib import Path
 
+from tutor.testkit_c import DEFAULT_FLAGS, course_flags
+
 QUESTION_FILE = "question.md"
 REPO = Path(__file__).resolve().parents[2]
 
@@ -192,7 +194,8 @@ def run_block(location: Path) -> str:
 
 
 def markdown_question(doc: str, metadata: dict | None = None, mode: str | None = None,
-                      location: Path | None = None, language: str = "python") -> str:
+                      location: Path | None = None, language: str = "python",
+                      default_run: str | None = None) -> str:
     """A Markdown-layout docstring as question.md: the title, the line under it, the
     contents, a rule; Concept, a rule; the other sections; a rule and "How to run" when
     `location` is known (a draft has none). The model writes only the title and the
@@ -225,7 +228,8 @@ def markdown_question(doc: str, metadata: dict | None = None, mode: str | None =
             out += ["---", ""]
         out += ([f"## {heading}", ""] if heading else []) + [_text(body), ""]
     if location is not None:
-        out += ["---", "", markdown_run_block(location, commands, notes, language)]
+        out += ["---", "", markdown_run_block(location, commands, notes, language,
+                                              default_run)]
     return re.sub(r"\n{3,}", "\n\n", "\n".join(out)).strip() + "\n"
 
 
@@ -280,14 +284,15 @@ def _anchor(heading: str) -> str:
 
 
 def markdown_run_block(location: Path, commands: list[str] | None = None,
-                       notes: list[str] | None = None, language: str = "python") -> str:
+                       notes: list[str] | None = None, language: str = "python",
+                       default: str | None = None) -> str:
     """The Markdown layout's "How to run": the folder, the tests, the program (the "## Run"
-    section's commands as written, else plain `python student.py`, or for C a compile and
-    run), the Run section's notes, and the hint command."""
+    section's commands as written, else `default`: plain `python student.py`, or for C a
+    compile and run (c_run_command)), the Run section's notes, and the hint command."""
     shown = _shown(location)
     # Aligned with "# the tests", and at least one space before the comment.
-    default = ("cc -Wall student.c -o program && ./program" if language == "c"
-               else "python student.py")
+    default = default or ("cc -Wall student.c -o program && ./program" if language == "c"
+                          else "python student.py")
     program = commands or [f"{default:<27} # the program"]
     return "\n".join([
         "## How to run", "",
@@ -298,6 +303,20 @@ def markdown_run_block(location: Path, commands: list[str] | None = None,
         "specific; or ask",
         "> for a hint from the repository's folder:", ">",
         "> ```bash", f'> python -m tutor.hint "{shown}"', "> ```", ""])
+
+
+def c_run_command(exercise_dir: Path, metadata: dict | None) -> str:
+    """How a learner compiles and runs a C exercise by hand when its question gives no
+    "## Run" section: the course's own flags ([languages.c] flags of the workspace.toml
+    above the folder, else testkit_c's defaults), and a function exercise's driver.c."""
+    try:
+        flags = course_flags(exercise_dir) or list(DEFAULT_FLAGS)
+    except ValueError:  # malformed flags: the tests say so; the question keeps the defaults
+        flags = list(DEFAULT_FLAGS)
+    function = ((metadata or {}).get("interface") == "function"
+                or (exercise_dir / "driver.c").is_file())
+    files = "student.c driver.c" if function else "student.c"
+    return f"cc {' '.join(flags)} {files} -o program && ./program"
 
 
 def write_question(student_source: str, exercise_dir: Path,
@@ -313,7 +332,8 @@ def write_question(student_source: str, exercise_dir: Path,
     if not doc:
         return False
     if is_markdown(doc):
-        text = markdown_question(doc, metadata, mode, location, language)
+        default = c_run_command(exercise_dir, metadata) if language == "c" else None
+        text = markdown_question(doc, metadata, mode, location, language, default)
     else:
         text = question_markdown(student_source)
         if location is not None:

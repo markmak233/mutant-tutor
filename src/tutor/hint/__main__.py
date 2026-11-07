@@ -1,11 +1,13 @@
 """A hint for an exercise you are solving (docs/design.md, roadmap 3c).
 
-    python -m tutor.hint [--no-llm] <exercise folder>     the folder with your student.py
+    python -m tutor.hint [--no-llm] <exercise folder>     the folder with your student.py/.c
 
-Runs your tests in a temporary copy (student.py is never changed, and the run is not
-recorded as an attempt), then tries the cheapest and most certain layer first:
+Runs your tests in a temporary copy (your student.py, or student.c in a C exercise, is never
+changed, and the run is not recorded as an attempt), then tries the cheapest and most
+certain layer first:
 1. rules: a known low-level mistake (syntax, full-width punctuation, a TODO left, an RDD
-   used like a list, output as tuples, ...) with its line and cause;
+   used like a list, output as tuples, ...; in C a compile error, a missing #include, an
+   index outside an array, a bad pointer, ...) with its line and cause;
 2. known mistakes: your tests fail exactly as one of the exercise's planted mutants does,
    so you are told that mistake (in a review batch, only what goes wrong);
 3. a model's hint, when the workspace names a `hint` model in [llm.roles] (--no-llm skips
@@ -30,10 +32,11 @@ from tutor.execution import Outcome, run_pytest
 from tutor.hint import mutants
 from tutor.hint.llm_hint import HintModel, HintRefused, model_hint
 from tutor.hint.rules import Hint, first_rule
+from tutor.languages import student_path
 from tutor.llm import LLMError, config_for, roles
 from tutor.testkit import DEFAULT_PARTITIONS, PARTITIONS_ENV
 from tutor.validation.checks import failure_excerpt
-from tutor.validation.exercise import STUDENT_FILE, TEST_FILE, ExerciseError, load_exercise
+from tutor.validation.exercise import TEST_FILE, ExerciseError, load_exercise
 
 
 def locate(exercise_dir: Path) -> tuple[Path, str]:
@@ -52,7 +55,7 @@ def locate(exercise_dir: Path) -> tuple[Path, str]:
 
 def hint_for(exercise_dir: Path, run_tests=run_pytest, say=print,
              model: HintModel | None = None, level: int = 1) -> Hint | None:
-    """The hint for the student.py in `exercise_dir`, or None when every test passes.
+    """The hint for the student file in `exercise_dir`, or None when every test passes.
     `model` gives layer 3, at `level` (1 + the model hints already given for this code)."""
     solution_dir, mode = locate(exercise_dir)
     ex = load_exercise(exercise_dir, solution_dir)
@@ -62,12 +65,12 @@ def hint_for(exercise_dir: Path, run_tests=run_pytest, say=print,
     def run(candidate: Path):
         return run_tests(ex.run_files(candidate), timeout, env)
 
-    student = exercise_dir / STUDENT_FILE
+    student = exercise_dir / ex.student_file  # student.py, or student.c in a C exercise
     result = run(student)
     if result.outcome is Outcome.PASSED:
         return None
     rule = first_rule(student.read_text(encoding="utf-8"), result.output,
-                      ex.metadata.get("constraints", {}), mode)
+                      ex.metadata.get("constraints", {}), mode, ex.language)
     if rule:
         return rule
     ran: list[str] = []
@@ -83,10 +86,10 @@ def hint_for(exercise_dir: Path, run_tests=run_pytest, say=print,
             say(f"(note on the exercise: its tests cannot tell {a} from {b})")
     found = mutants.matches(mutants.signature(result.output), known)
     exact = [m for m in found if m.exact]
+    files = {path.stem: path for path in ex.mutants}  # mutants/<name>.py or .c
     if len(exact) > 1:
         # The tests cannot tell these mistakes apart, so neither can a hint.
-        described = [mutants.bug_of(solution_dir / "mutants" / f"{m.mutant}.py")
-                     for m in exact]
+        described = [mutants.bug_of(files[m.mutant]) for m in exact]
         parts = [bug if mode == "learn" else (effect or "the result differs")
                  for bug, effect in described]
         return Hint("mutant", "|".join(m.mutant for m in exact),
@@ -94,7 +97,7 @@ def hint_for(exercise_dir: Path, run_tests=run_pytest, say=print,
                     + "; ".join(parts))
     if found:
         best = found[0]
-        bug, effect = mutants.bug_of(solution_dir / "mutants" / f"{best.mutant}.py")
+        bug, effect = mutants.bug_of(files[best.mutant])
         # Exact: the same tests fail with the same values. Otherwise only the same tests
         # fail, which other mistakes may share, so it is offered as a guess.
         how = ("your tests fail exactly as a known mistake" if best.exact else
@@ -118,7 +121,8 @@ def hint_for(exercise_dir: Path, run_tests=run_pytest, say=print,
                               constraints=ex.metadata.get("constraints", {}),
                               output=result.output,
                               reference=ex.reference.read_text(encoding="utf-8"),
-                              visible=visible, mode=mode, level=level)
+                              visible=visible, mode=mode, level=level,
+                              language=ex.language)
         except HintRefused as e:
             # Blocked twice by the leak guard, or the model failed: fall through to the
             # first error. The key records why in attempts.jsonl.
@@ -130,17 +134,18 @@ def hint_for(exercise_dir: Path, run_tests=run_pytest, say=print,
 
 
 def code_hash(exercise_dir: Path) -> str:
-    """A short fingerprint of student.py: the same hash means the code did not change."""
-    return hashlib.sha256((exercise_dir / STUDENT_FILE).read_bytes()).hexdigest()[:12]
+    """A short fingerprint of the student file: the same hash means the code did not
+    change."""
+    return hashlib.sha256(student_path(exercise_dir).read_bytes()).hexdigest()[:12]
 
 
 def model_hints_given(exercise_dir: Path) -> int:
-    """How many model hints this exercise got for the student.py as it is now."""
+    """How many model hints this exercise got for the student file as it is now."""
     try:
         workspace = load_workspace()
     except WorkspaceError:
         return 0
-    where = exercise_of(exercise_dir / STUDENT_FILE, workspace.root)
+    where = exercise_of(student_path(exercise_dir), workspace.root)
     path = workspace.attempts_dir / ATTEMPTS_FILE
     if where is None or not path.is_file():
         return 0
@@ -156,12 +161,12 @@ def model_hints_given(exercise_dir: Path) -> int:
 
 def log_hint(exercise_dir: Path, hint: Hint | None) -> None:
     """One line in the workspace's attempts.jsonl, for exercises of a workspace batch;
-    `code` (a hash of student.py) tells a repeated request from one after a change."""
+    `code` (a hash of the student file) tells a repeated request from one after a change."""
     try:
         workspace = load_workspace()
     except WorkspaceError:
         return
-    where = exercise_of(exercise_dir / STUDENT_FILE, workspace.root)
+    where = exercise_of(student_path(exercise_dir), workspace.root)
     if where is None:
         return
     workspace.attempts_dir.mkdir(exist_ok=True)
@@ -204,8 +209,10 @@ def main(argv: list[str] | None = None) -> int:
     except (ExerciseError, ContainerError) as e:
         print(f"stopped: {e}", file=sys.stderr)
         return 1
-    print("every test passes; also try TUTOR_PARTITIONS=4 pytest test_student.py"
-          if hint is None else f"hint: {hint.text}")
+    # Partitions matter to Spark and MRJob exercises, not to C ones.
+    passed = ("every test passes" if student_path(exercise_dir).suffix == ".c" else
+              "every test passes; also try TUTOR_PARTITIONS=4 pytest test_student.py")
+    print(passed if hint is None else f"hint: {hint.text}")
     if hint and hint.key.startswith("level-") and hint.key != "level-3":
         print("(ask again without changing your code for a more specific hint)")
     log_hint(exercise_dir, hint)

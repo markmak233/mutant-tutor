@@ -5,11 +5,11 @@ so they can share one misreading of the question, and killing every planted muta
 shows the planted bugs are caught. The held-out set is code the generator and repair
 never saw, judged by the exercise's own tests:
 
-- a correct solution (the owner's passing student.py) must pass under every condition the
-  validator puts the reference through (rules 1 and 5), and agree with the oracle on
-  random inputs (rule 4). If it does not, the tests reject a correct answer, or they let
+- a correct solution (the owner's passing student.py, or student.c) must pass under every
+  condition the validator puts the reference through (rules 1 and 5), and agree with the
+  oracle on random inputs (rule 4). If it does not, the tests reject a correct answer, or they let
   the owner's code pass with a bug that only shows at other partition counts or inputs;
-- a wrong solution (a failing student.py the attempts plugin kept) must still be caught,
+- a wrong solution (a failing one the attempts plugin kept) must still be caught,
   as rule 3 catches a mutant. If it is not, the tests have become weaker since.
 
 A second source (step 2): files another model wrote from the question and the slides alone
@@ -57,6 +57,7 @@ from pathlib import Path
 from tutor.attempts import ATTEMPTS_FILE
 from tutor.config import WorkspaceError, load_env, load_workspace
 from tutor.container import ContainerError
+from tutor.languages import student_path
 from tutor.validation.checks import (
     RuleResult,
     Status,
@@ -68,7 +69,7 @@ from tutor.validation.checks import (
     in_parallel,
     mutant_verdict,
 )
-from tutor.validation.exercise import STUDENT_FILE, ExerciseError, ExerciseFiles, load_exercise
+from tutor.validation.exercise import ExerciseError, ExerciseFiles, load_exercise
 from tutor.validation.safety import allowed_imports, find_hazards, workspace_allow_imports
 
 REPORT_FILE = "heldout.json"
@@ -86,7 +87,7 @@ class Candidate:
     """One held-out solution."""
 
     kind: str  # CORRECT, WRONG or SLIDES
-    label: str  # how the report names it: "student.py", "attempt 10-30 23:35:43"
+    label: str  # how the report names it: "student.py" (".c"), "attempt 10-30 23:35:43"
     path: Path
     source: str  # where it came from, relative: exercises/<id>/student.py, attempts/code/...
     author: str = OWNER
@@ -106,10 +107,11 @@ class HeldOutResult:
 
 def owner_candidates(batch_dir: Path, exercise_id: str, attempts_dir: Path) -> list[Candidate]:
     """The owner's code for one exercise, found through attempts.jsonl:
-    - CORRECT: the exercise's student.py, if a run of it ever passed. The log keeps no copy
+    - CORRECT: the exercise's student.py (student.c in a C exercise), if a run of it ever
+      passed. The log keeps no copy
       of passing code, so this is the file as it is now; if the owner changed it after
       passing, its "tests" check says so;
-    - WRONG: each student.py kept from a "failed" run (the plugin keeps one copy per
+    - WRONG: each student file kept from a "failed" run (the plugin keeps one copy per
       content). "error" runs are left out: the tests never ran (a syntax or import error),
       so they show nothing about the tests. "incomplete" and "interrupted" runs keep none.
     """
@@ -125,10 +127,10 @@ def owner_candidates(batch_dir: Path, exercise_id: str, attempts_dir: Path) -> l
                 runs.append(run)
 
     found = []
-    student = batch_dir / "exercises" / exercise_id / STUDENT_FILE
+    student = student_path(batch_dir / "exercises" / exercise_id)
     if student.is_file() and any(run.get("result") == "passed" for run in runs):
-        found.append(Candidate(CORRECT, STUDENT_FILE, student,
-                               f"exercises/{exercise_id}/{STUDENT_FILE}"))
+        found.append(Candidate(CORRECT, student.name, student,
+                               f"exercises/{exercise_id}/{student.name}"))
     seen = set()  # several runs of unchanged code name the same copy
     for run in runs:
         code = run.get("code")  # relative to attempts/, e.g. code/<batch>/<id>/<hash>.py
@@ -188,8 +190,7 @@ def check_heldout(ex: ExerciseFiles, candidates: list[Candidate],
     # A model's file is code from outside, like a generated exercise: the same static check
     # before anything runs it. The owner's own code is not checked, as in their own runs.
     allowed = allowed_imports(ex.metadata["framework"], workspace_allow_imports(ex.exercise_dir))
-    hazards = {c.path: (find_hazards(c.path.read_text(encoding="utf-8"), allowed)
-                        if c.author == MODEL else [])
+    hazards = {c.path: (_model_hazards(ex, c.path, allowed) if c.author == MODEL else [])
                for c in candidates}
     # Candidates are independent: check them at once (execution.py caps how many test runs
     # go at a time) and flatten the results back into the candidates' order.
@@ -199,6 +200,14 @@ def check_heldout(ex: ExerciseFiles, candidates: list[Candidate],
                      if hazards[c.path] else _check_one(ex, c, timeout_s))
         for c in candidates])
     return [result for results in per_candidate for result in results]
+
+
+def _model_hazards(ex: ExerciseFiles, path: Path, allowed: frozenset[str]) -> list[str]:
+    """Why a model's file must not run. The model writer is Python-only (docs/design.md,
+    "C", step 4b), so a model's file in a C exercise is never run rather than run unchecked."""
+    if ex.language != "python":
+        return [f"a model's {ex.language} file: no static check for it here yet"]
+    return find_hazards(path.read_text(encoding="utf-8"), allowed)
 
 
 def _check_one(ex: ExerciseFiles, c: Candidate, timeout_s: float) -> list[HeldOutResult]:

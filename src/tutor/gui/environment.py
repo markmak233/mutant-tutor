@@ -388,7 +388,8 @@ def language_view(course: Course) -> LanguageView:
 
 def save_language(course: Course, c: bool, flags_text: str, headers_text: str) -> list[str]:
     """Tick C: [languages.c] flags, [safety] allow_headers, and `gcc` in [requires] when it
-    is not there. Untick: [languages.c] and allow_headers go; [requires] stays as it is."""
+    is not there, then VS Code's .vscode/c_cpp_properties.json with the flags' C standard.
+    Untick: [languages.c], allow_headers and that file go; [requires] stays as it is."""
     data = _data(course)
     if not isinstance(data.get("languages", {}), dict):
         return ["[languages] in workspace.toml is not a table of languages: fix it by hand."]
@@ -441,7 +442,11 @@ def save_language(course: Course, c: bool, flags_text: str, headers_text: str) -
                 doc["requires"] = tomlkit.table()
             put(doc["requires"], "gcc", IMAGE_GCC)
 
-    return toml_edit.edit_tables(course.workspace.root, change, expected)
+    problems = toml_edit.edit_tables(course.workspace.root, change, expected)
+    if not problems:
+        # VS Code's C settings follow the flags (or go with C), unless the course has its own.
+        workspace.write_c_editor_config(course.workspace.root, flags if c else None)
+    return problems
 
 
 @dataclass(frozen=True)

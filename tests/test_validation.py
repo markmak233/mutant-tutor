@@ -7,6 +7,7 @@ Unit tests build tiny pure-Python exercises in a temp dir, so they need no Spark
 
 import json
 import os
+import shutil
 from pathlib import Path
 
 import pytest
@@ -1112,3 +1113,40 @@ def test_a_models_file_that_fails_the_safety_check_is_never_run(tmp_path):
     assert [(r.check, r.status, r.duration_s) for r in results] == [
         ("safety", Status.SKIPPED, 0.0)]
     assert "never run: line 1: import of 'subprocess'" in results[0].detail
+
+
+def test_a_c_exercises_owner_candidates_are_its_student_c_and_c_copies(tmp_path):
+    """Held-out for C (step 4b): the passing student.c and the .c copies attempts kept."""
+    batch = tmp_path / "batches" / "b1"
+    (batch / "exercises" / "demo").mkdir(parents=True)
+    (batch / "exercises" / "demo" / "student.c").write_text("int main(void) { return 0; }\n",
+                                                            encoding="utf-8")
+    attempts = tmp_path / "attempts"
+    (attempts / "code" / "b1" / "demo").mkdir(parents=True)
+    (attempts / "code" / "b1" / "demo" / "aaa.c").write_text("int main(void) { return 1; }\n",
+                                                             encoding="utf-8")
+    write_attempts(
+        attempts,
+        {"time": "2026-11-07T20:00:00", "batch": "b1", "exercise": "demo", "result": "failed",
+         "code": "code/b1/demo/aaa.c"},
+        {"time": "2026-11-07T20:05:00", "batch": "b1", "exercise": "demo", "result": "passed"},
+    )
+
+    found = heldout.owner_candidates(batch, "demo", attempts)
+
+    assert [(c.kind, c.label, c.source) for c in found] == [
+        (CORRECT, "student.c", "exercises/demo/student.c"),
+        (WRONG, "attempt 11-07 20:00:00", "attempts/code/b1/demo/aaa.c"),
+    ]
+
+
+def test_a_models_file_in_a_c_exercise_is_never_run(tmp_path):
+    """The model writer is Python-only, so a model's file in a C exercise has no static
+    check here: it is skipped, never run unchecked."""
+    root = tmp_path / "ex"
+    shutil.copytree(EXAMPLES / "station-drop-low-c", root,
+                    ignore=shutil.ignore_patterns("validation.json"))
+    ex = load_exercise(root / "exercise", root / "solution")
+
+    assert heldout._model_hazards(ex, root / "solution" / "reference.c", frozenset()) == [
+        "a model's c file: no static check for it here yet"]

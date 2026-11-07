@@ -57,7 +57,7 @@ from types import ModuleType
 
 from flask import Flask, abort, make_response, redirect, render_template, request, url_for
 
-from tutor import llm
+from tutor import llm, workspace
 from tutor.eval import report
 from tutor.gui import (
     catalog,
@@ -72,6 +72,7 @@ from tutor.gui import (
     rendering,
     tasks,
 )
+from tutor.languages import student_path
 
 COOKIE = "tutor_token"
 _HEADERS = {
@@ -91,7 +92,8 @@ STATUS_LABELS = {report.PASSED: "passed", report.STARTED: "started",
 # What an action can report back, by code; nothing else is ever shown. (kind, text)
 NOTICES = {
     "opened-folder": ("ok", "Opened in the file manager."),
-    "opened-ide": ("ok", "Opened in VS Code: the course folder, with this exercise's student.py."),
+    "opened-ide": ("ok", "Opened in VS Code: the course folder, with this exercise's student "
+                          "file."),
     "no-vscode": ("bad", "VS Code was not found. Install it, or in VS Code run "
                          "\"Shell Command: Install 'code' command in PATH\"."),
     "no-file-manager": ("bad", "No file manager command (xdg-open) was found."),
@@ -143,9 +145,16 @@ NOTICES = {
     "cannot-build": ("bad", "[requires] has no image recipe: see the test image part below."),
     "no-setup-model": ("bad", "Nothing was started: this course has no model for it. Choose "
                               "one for the setup, plan or generate role on the Models page."),
-    "language-saved": ("ok", "Saved in workspace.toml (the file before is workspace.toml.bak). "
-                             "A C course's tests need the container and a test image with gcc: "
+    "language-saved": ("ok", "Saved in workspace.toml (the file before is workspace.toml.bak), "
+                             "and VS Code's C settings in .vscode/c_cpp_properties.json. A C "
+                             "course's tests need the container and a test image with gcc: "
                              "steps 3 and 4 below."),
+    "language-saved-own-editor": ("ok", "Saved in workspace.toml (the file before is "
+                                        "workspace.toml.bak). .vscode/c_cpp_properties.json is "
+                                        "this course's own, so it was left as it is: set its "
+                                        "cStandard to match the flags. A C course's tests need "
+                                        "the container and a test image with gcc: steps 3 and "
+                                        "4 below."),
     "language-removed": ("ok", "C is no longer this course's language (the file before is "
                                "workspace.toml.bak); [requires] is as it was."),
 }
@@ -295,11 +304,15 @@ def create_app(root: Path, token: str, port: int | None = None,
 
     @app.get("/c/<name>/b/<batch>/e/<exercise>/")
     def exercise(name: str, batch: str, exercise: str):
-        course, view, row, _ = exercise_or_404(name, batch, exercise)
+        course, view, row, folder = exercise_or_404(name, batch, exercise)
         text = courses.question(course, batch, exercise)
+        # The file the learner writes in: student.py, or student.c in a C exercise.
+        student = student_path(folder).name
         return render_template("exercise.html", course=course, batch=view, row=row,
                                question=rendering.question_html(text) if text else None,
-                               labels=STATUS_LABELS)
+                               labels=STATUS_LABELS, student=student,
+                               question_in=("the opening comment" if student.endswith(".c")
+                                            else "the docstring"))
 
     # --- actions: POST only, each back to its page with a notice ----------------------------
 
@@ -326,7 +339,7 @@ def create_app(root: Path, token: str, port: int | None = None,
     @app.post("/c/<name>/b/<batch>/e/<exercise>/open-ide")
     def open_exercise_in_ide(name: str, batch: str, exercise: str):
         course, _, _, folder = exercise_or_404(name, batch, exercise)
-        student = folder / "student.py"
+        student = student_path(folder)  # student.py, or student.c in a C exercise
 
         def ide():
             launcher.open_in_vscode(course.workspace.root,
@@ -1122,7 +1135,8 @@ def create_app(root: Path, token: str, port: int | None = None,
                                              typed["headers"])
         if problems:
             return environment_page(course, problems, 400, typed_language=typed)
-        notice = "language-saved" if typed["c"] else "language-removed"
+        notice = ("language-removed" if not typed["c"] else "language-saved-own-editor"
+                  if workspace.c_editor_config_kept(course.workspace.root) else "language-saved")
         return redirect(url_for("environment_view", name=name) + f"?notice={notice}", code=303)
 
     @app.post("/c/<name>/environment/accept")

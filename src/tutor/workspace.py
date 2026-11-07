@@ -15,6 +15,7 @@ Environment page runs it for that.
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import subprocess
 import sys
@@ -74,6 +75,76 @@ ZPROFILE = """\
 # ZDOTDIR points here, so zsh no longer reads ~/.zprofile by itself (see .zshrc in this folder).
 [[ -f "$HOME/.zprofile" ]] && source "$HOME/.zprofile"
 """
+
+# VS Code's C/C++ extension takes the C standard for its completion and red underlines from
+# .vscode/c_cpp_properties.json; without one it assumes the compiler's default, not the
+# course's -std (docs/design.md, "C", step 4b). Written when the owner ticks C on the
+# Environment page. Only a file named as this one's (C_EDITOR_NAME) is rewritten or removed,
+# so a file the owner wrote stays theirs.
+C_EDITOR_FILE = ".vscode/c_cpp_properties.json"
+C_EDITOR_NAME = "tutor: from [languages.c] in workspace.toml"
+# gcc's -std values, by the cStandard VS Code names the same standard with.
+_C_STANDARDS = {
+    "c89": "c89", "c90": "c89", "iso9899:1990": "c89", "iso9899:199409": "c89",
+    "c99": "c99", "c9x": "c99", "iso9899:1999": "c99",
+    "c11": "c11", "c1x": "c11", "iso9899:2011": "c11",
+    "c17": "c17", "c18": "c17", "iso9899:2017": "c17", "iso9899:2018": "c17",
+    "c2x": "c23", "c23": "c23",
+    "gnu89": "gnu89", "gnu90": "gnu89", "gnu99": "gnu99", "gnu9x": "gnu99",
+    "gnu11": "gnu11", "gnu1x": "gnu11", "gnu17": "gnu17", "gnu18": "gnu17",
+    "gnu2x": "gnu23", "gnu23": "gnu23",
+}
+
+
+def c_standard(flags: list[str]) -> str:
+    """VS Code's cStandard for these compiler flags; the last -std wins, as in gcc.
+    "${default}" (the compiler's own) when they name none or one VS Code has no name for."""
+    standard = "${default}"
+    for flag in flags:
+        if flag == "-ansi":
+            standard = "c89"
+        elif flag.startswith("-std="):
+            standard = _C_STANDARDS.get(flag.removeprefix("-std="), "${default}")
+    return standard
+
+
+def c_editor_config(flags: list[str]) -> str:
+    """The text of .vscode/c_cpp_properties.json for a C course with these flags. Headers
+    the exercises include ("student.h") sit beside student.c, so the folder is searched."""
+    return json.dumps({"configurations": [{
+        "name": C_EDITOR_NAME,
+        "cStandard": c_standard(flags),
+        "compilerArgs": list(flags),
+        "includePath": ["${workspaceFolder}/**"],
+        "intelliSenseMode": "${default}",
+    }], "version": 4}, indent=2) + "\n"
+
+
+def c_editor_config_kept(root: Path) -> bool:
+    """Whether the course has a c_cpp_properties.json of its own, which is left alone."""
+    path = root / C_EDITOR_FILE
+    if not path.is_file():
+        return False
+    try:
+        names = [c.get("name") for c in json.loads(path.read_text(encoding="utf-8"))
+                 .get("configurations", [])]
+    except (ValueError, AttributeError, OSError):
+        return True  # unreadable as ours: someone else's
+    return names != [C_EDITOR_NAME]
+
+
+def write_c_editor_config(root: Path, flags: list[str] | None) -> bool:
+    """Write (flags) or remove (None) this course's c_cpp_properties.json, unless the course
+    has one of its own; False when it was left alone for that reason."""
+    if c_editor_config_kept(root):
+        return False
+    path = root / C_EDITOR_FILE
+    if flags is None:
+        path.unlink(missing_ok=True)
+        return True
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(c_editor_config(flags), encoding="utf-8", newline="\n")
+    return True
 
 
 def venv_python(venv_dir: Path) -> Path:

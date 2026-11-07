@@ -83,6 +83,7 @@ _SHOWN_LINES = 30  # of a compiler's or sanitizer's message
 _SANITIZER = re.compile(
     r"ERROR: (AddressSanitizer|LeakSanitizer)|SUMMARY: UndefinedBehaviorSanitizer"
     r"|:\d+:\d+: runtime error: ")
+_PROCESS_ID = re.compile(r"^==\d+==")
 
 
 class CompileError(Exception):
@@ -150,9 +151,14 @@ class Program:
                      proc.stderr.decode("utf-8", "replace"), proc.returncode)
         report = _SANITIZER.search(result.stderr)
         if report:
+            # From the start of the report's line: UBSan's begins "student.c:4:20: runtime
+            # error", and the match starts after the file name, which the learner needs.
+            # ASan's begins "==1234==ERROR": the process id means nothing and differs every
+            # run, so it is left out.
+            start = result.stderr.rfind("\n", 0, report.start()) + 1
+            text = _PROCESS_ID.sub("", result.stderr[start:], count=1)
             raise AssertionError("the sanitizer stopped the program (a memory error or "
-                                 "undefined behaviour):\n"
-                                 + _excerpt(_up_to_summary(result.stderr[report.start():])))
+                                 "undefined behaviour):\n" + _excerpt(_up_to_summary(text)))
         if check and result.returncode != 0:
             raise AssertionError(f"the program {_exit_text(result.returncode)}"
                                  + (f"; it printed to stderr:\n{_excerpt(result.stderr)}"

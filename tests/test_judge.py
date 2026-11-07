@@ -321,3 +321,14 @@ def test_a_planted_defect_labels_only_its_point_and_is_scored_apart(tmp_path):
     assert "real ratings:" in text and "planted defects (found / planted):\ntargets  1/1" in text
     real_clear = text.split("planted defects")[0]
     assert "targets        0" in real_clear  # the planted one is not in the real table
+
+
+def test_a_c_exercise_is_refused_by_name(tmp_path):
+    """The judge's prompt and calibration are Python's (step 4b)."""
+    solution = tmp_path / "b" / "solutions" / "demo"
+    solution.mkdir(parents=True)
+    (tmp_path / "b" / "exercises" / "demo").mkdir(parents=True)
+    (solution / "metadata.json").write_text('{"language": "c"}', encoding="utf-8")
+
+    with pytest.raises(JudgeError, match="Python exercises only"):
+        gather(tmp_path / "b", "demo", tmp_path)

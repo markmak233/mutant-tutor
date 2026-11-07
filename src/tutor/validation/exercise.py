@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from tutor.execution import DEFAULT_TIMEOUT_S
+from tutor.languages import CODE_SUFFIX
 from tutor.schema import language_of
 from tutor.testkit_c import C_FLAGS_ENV, DEFAULT_FLAGS, course_flags
 
@@ -31,9 +32,6 @@ STUDENT_FILE = "student.py"
 TEST_FILE = "test_student.py"
 ORACLE_FILE = "oracle.py"
 ORACLE_TEST_FILE = "test_oracle.py"
-
-# The suffix of each language's code files: student<suffix>, reference<suffix>, ...
-CODE_SUFFIX = {"python": ".py", "c": ".c"}
 
 # Never copied into a test run: student.py is replaced by the code under test, and the
 # rest is for people (hints) or left behind by running things by hand.

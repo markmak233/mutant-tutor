@@ -14,10 +14,11 @@ repo's own tests are never recorded. One line per exercise per run, e.g.
 "result" is "error", "failed", "interrupted" (Ctrl+C before the run finished),
 "incomplete" (a test was skipped) or "passed": only a run where every test ran and passed.
 
-A failed or errored run also keeps a copy of the student.py it tested, under
-attempts/code/<batch>/<exercise>/<hash>.py (one copy per distinct content), named in the
-line's "code" field: the owner's real mistakes, replayable as wrong solutions that an
-exercise's tests must catch (the held-out set, roadmap 3b).
+A failed or errored run also keeps a copy of the student file it tested (student.py, or
+student.c in a C exercise), under attempts/code/<batch>/<exercise>/<hash>.py (.c) (one copy
+per distinct content), named in the line's "code" field: the owner's real mistakes,
+replayable as wrong solutions that an exercise's tests must catch (the held-out set,
+roadmap 3b).
 
 The held-out checks, the hint command and the evaluation report read the file; it is also
 kept for choosing review batches later. After a run is recorded the workspace's private report
@@ -38,9 +39,10 @@ from datetime import datetime
 from pathlib import Path
 
 from tutor.config import Workspace, WorkspaceError, load_env, load_workspace
+from tutor.languages import student_path
 
 ATTEMPTS_FILE = "attempts.jsonl"
-CODE_DIR = "code"  # snapshots of failing student.py files, inside attempts/
+CODE_DIR = "code"  # snapshots of failing student files, inside attempts/
 INTERRUPTED = 2  # pytest.ExitCode.INTERRUPTED, without importing pytest here
 _FIRST_ERROR_CHARS = 300
 # Terminal colour codes: pytest colours its assertion diffs when the terminal (or VS Code)
@@ -182,7 +184,7 @@ def _write(duration_s: float, interrupted: bool = False) -> None:
                 "duration_s": round(duration_s, 1),
             }
             if result in ("failed", "error"):
-                student = workspace.batches_dir / batch / "exercises" / exercise / "student.py"
+                student = student_path(workspace.batches_dir / batch / "exercises" / exercise)
                 if code := _snapshot(student, workspace.attempts_dir, batch, exercise):
                     line["code"] = code
             f.write(json.dumps(line, ensure_ascii=False) + "\n")
@@ -202,11 +204,13 @@ def _rebuild_report(workspace: Workspace) -> None:
 
 
 def _snapshot(student: Path, attempts_dir: Path, batch: str, exercise: str) -> str | None:
-    """Copy the failing student.py into attempts/code/ once per content; its path relative
+    """Copy the failing student file into attempts/code/ once per content, keeping its
+    suffix (.py, .c) so the held-out check can run it as that language; its path relative
     to attempts/, or None (with a warning) when it cannot be copied."""
     try:
         data = student.read_bytes()
-        relative = Path(CODE_DIR, batch, exercise, hashlib.sha256(data).hexdigest()[:12] + ".py")
+        name = hashlib.sha256(data).hexdigest()[:12] + student.suffix
+        relative = Path(CODE_DIR, batch, exercise, name)
         target = attempts_dir / relative
         if not target.exists():  # the same mistake run again is kept once
             target.parent.mkdir(parents=True, exist_ok=True)
