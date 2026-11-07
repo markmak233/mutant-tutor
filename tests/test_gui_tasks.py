@@ -146,6 +146,18 @@ def test_a_runner_that_died_shows_as_lost_and_frees_the_course(tmp_path):
     assert tasks.running(tmp_path) is None
 
 
+def test_a_runner_that_is_alive_stays_running(tmp_path):
+    # The other half of the check above, on each platform's own way to ask (Windows: an exit
+    # code through ctypes; elsewhere a signal 0): this process is surely alive.
+    folder = tmp_path / tasks.TASKS_DIR / "20260101-000000-abcdef"
+    folder.mkdir(parents=True)
+    (folder / tasks.TASK_FILE).write_text(json.dumps(
+        {"title": "x", "status": "running", "started": "2026-01-01 00:00:00",
+         "pid": os.getpid()}), encoding="utf-8")
+
+    assert tasks.get(tmp_path, folder.name).status == tasks.RUNNING
+
+
 def test_a_runner_that_never_started_is_lost_after_30_s(tmp_path):
     folder = tmp_path / tasks.TASKS_DIR / "20260101-000000-abcdef"
     folder.mkdir(parents=True)

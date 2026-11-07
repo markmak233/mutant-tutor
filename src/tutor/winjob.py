@@ -6,7 +6,8 @@ a grandchild whose parent has already exited, such as the JVM PySpark starts und
 A Job Object is a kernel container instead: a process assigned to it stays in it, every
 process it starts later joins it automatically, and one call ends them all.
 
-Only execution.py imports this, and only on Windows: ctypes.WinDLL does not exist elsewhere.
+Only execution.py and the GUI's tasks (`process_alive`) import this, and only on Windows:
+ctypes.WinDLL does not exist elsewhere.
 """
 
 from __future__ import annotations
@@ -21,6 +22,9 @@ _JOB_OBJECT_BASIC_ACCOUNTING_INFORMATION = 1  # information classes for Set/Quer
 _JOB_OBJECT_EXTENDED_LIMIT_INFORMATION = 9
 _PROCESS_TERMINATE = 0x0001  # the rights AssignProcessToJobObject needs on the process
 _PROCESS_SET_QUOTA = 0x0100
+_PROCESS_QUERY_LIMITED_INFORMATION = 0x1000  # enough to read an exit code
+_STILL_ACTIVE = 259  # GetExitCodeProcess's answer for a process that has not ended
+_ERROR_ACCESS_DENIED = 5
 
 
 # The structures the two information classes above read and write, field for field as in
@@ -85,6 +89,7 @@ for _name, _args, _result in [
     ("AssignProcessToJobObject", [wintypes.HANDLE, wintypes.HANDLE], wintypes.BOOL),
     ("TerminateJobObject", [wintypes.HANDLE, wintypes.UINT], wintypes.BOOL),
     ("CloseHandle", [wintypes.HANDLE], wintypes.BOOL),
+    ("GetExitCodeProcess", [wintypes.HANDLE, wintypes.LPDWORD], wintypes.BOOL),
 ]:
     _function = getattr(_kernel32, _name)
     _function.argtypes, _function.restype = _args, _result
@@ -147,3 +152,20 @@ class Job:
         if self._handle:
             _kernel32.CloseHandle(self._handle)
             self._handle = None
+
+
+def process_alive(pid: int) -> bool:
+    """Whether a process with this pid is still running: Windows' answer to POSIX's
+    `os.kill(pid, 0)`. A process that ended with exit code 259 reads as running, which
+    Windows' API cannot tell apart; as on POSIX, a pid reused since is taken for the same."""
+    handle = _kernel32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        # No such process; one the user may not open (another user's) still exists.
+        return ctypes.get_last_error() == _ERROR_ACCESS_DENIED
+    try:
+        code = wintypes.DWORD()
+        if not _kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+            return True  # cannot tell: showing it as running is what happened before
+        return code.value == _STILL_ACTIVE
+    finally:
+        _kernel32.CloseHandle(handle)
