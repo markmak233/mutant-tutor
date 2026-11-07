@@ -181,11 +181,13 @@ def _lecture_stems(folder: Path) -> dict[str, str]:
 
 def _clash(folder: Path, name: str, taken: dict[str, str]) -> str | None:
     """Why `name` cannot be saved beside the lectures in `folder`: one of that name exists,
-    or `taken` (_lecture_stems, plus what this upload saves before it) has its stem."""
-    if (folder / name).exists():
+    in any case (L1.pdf for l1.pdf: one file on macOS and Windows, two on Linux), or `taken`
+    (_lecture_stems, plus what this upload saves before it) has its stem."""
+    other = taken.get(Path(name).stem.casefold(), "")
+    if (folder / name).exists() or other.casefold() == name.casefold():
         return (f"{name}: a lecture with this name exists. To replace it, delete the old "
                 "file first; exercises may cite its slides.")
-    if other := taken.get(Path(name).stem.casefold()):
+    if other:
         return (f"{name}: {other} has the same name before its extension, and a lecture is "
                 "named by that: rename one of them.")
     return None

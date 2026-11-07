@@ -27,7 +27,8 @@ def _batch(workspace: Path, ids: list[str]) -> Path:
     batch = workspace / "batches" / "2026-11-06_p3-demo"
     shutil.copytree(EXAMPLE / "exercise", batch / "exercises" / NAME)
     shutil.copytree(EXAMPLE / "solution", batch / "solutions" / NAME)
-    (batch / "solutions" / NAME / "validation.json").unlink()
+    # A report from a local run of the example (git-ignored, so absent in a fresh clone).
+    (batch / "solutions" / NAME / "validation.json").unlink(missing_ok=True)
     (batch / "manifest.json").write_text(json.dumps({"exercises": ids}), encoding="utf-8")
     return batch
 

@@ -165,6 +165,15 @@ def test_one_bad_file_saves_none(tmp_path, name, data, problem):
     assert (tmp_path / "L1.pdf").read_bytes() == b"%PDF- the old one"
 
 
+def test_a_name_differing_only_in_case_is_the_same_lecture_on_any_system(tmp_path):
+    """On Linux l1.pdf and L1.pdf are two files, so no exists() can tell: the names are
+    compared as the lecture folder lists them. The folder here is empty, as Linux sees it."""
+    problem = lectures._clash(tmp_path, "l1.pdf", {"l1": "L1.pdf"})
+    assert problem.startswith("l1.pdf: a lecture with this name exists")
+    assert "same name before its extension" in lectures._clash(tmp_path, "l1.html",
+                                                               {"l1": "L1.pdf"})
+
+
 def test_a_file_over_the_limit_saves_none(tmp_path, monkeypatch):
     monkeypatch.setattr(lectures, "MAX_LECTURE_BYTES", 100)
     monkeypatch.setattr(lectures, "_CHUNK", 16)
