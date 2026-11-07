@@ -431,6 +431,11 @@ def item_statuses(course: Course, view: PlanView) -> dict[str, ItemStatus]:
             valid = valid_verdict(batch_dir, exercise)
             statuses[exercise] = ItemStatus(ITEM_SAVED if valid is None
                                             else ITEM_VALID if valid else ITEM_INVALID)
+        elif exercise in outcomes and outcomes[exercise].get("outcome") == "saved":
+            # Saved, but the manifest is written only by `collect`, once every item has
+            # finished: until then (or for good, if the run stopped) it is not in it. Shown as
+            # discarded before, with "Try again" on a stopped run, which would pay for it twice.
+            statuses[exercise] = ItemStatus(ITEM_SAVED)
         elif exercise in outcomes and outcomes[exercise].get("outcome") == "error":
             error = str(outcomes[exercise].get("error", ""))
             statuses[exercise] = ItemStatus(ITEM_ERROR, error[:200],
