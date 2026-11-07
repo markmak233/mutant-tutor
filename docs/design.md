@@ -173,7 +173,10 @@ smartCodingReview/                       # public repo (the `tutor/` above), cod
 │   │                                    #   P3 parses LLM output into the same models
 │   ├── materials/                       # P3a course files -> per-file md cache (pypdfium2), vision pages; [requires] draft
 │   ├── llm.py                           # P3a thin OpenAI-compatible client, standard library only, no LangChain
-│   ├── graph/                           # P3 langgraph dependency added here; languages.py: per-language profiles
+│   ├── graph/                           # P3 langgraph dependency added here; languages.py: per-language profiles;
+│   │                                    #   nodes.py an item's nodes, oracle.py, drafts.py, batch.py, build.py the wiring
+│   ├── gui/                             # P7 the local web GUI: app.py the request checks, routes/ one module per
+│   │                                    #   page area, the other modules what each page reads and writes
 │   ├── retrieval/                       # P4 the page corpus, labels, scores and each route
 │   └── eval/                            # P5 a report from the pipeline's own records, no model calls
 ├── examples/                            # P1 synthetic only, same shape as a real exercise
@@ -2842,6 +2845,16 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
       **done 2026-11-08** (see "CI").
    2. A little refactoring of the files over 500 lines (`gui/app.py`, `graph/nodes.py`,
       `graph/prompts.py`, ...), planned and explained first; the prompt pins must still pass.
+      **Done 2026-11-08** (owner's rule since: a file past 300 lines is watched, from 500 a
+      split is considered, AGENTS.md). Code moved as it was, by line range, one commit per
+      file: `gui/app.py` 1281 -> 155 (routes into `gui/routes/`, one module per page area,
+      still registered on the app, so no endpoint name changed); `graph/nodes.py` 1060 -> 421
+      (`oracle.py`, `drafts.py`, `batch.py`; the prompt pins still match);
+      `gui/environment.py` 663 -> 471 (`languages_page.py`); `gui/generation.py` 618 -> 455
+      (`plan_items.py`: each exercise's status and Try again); `gui/lectures.py` 559 -> 432
+      (`course_setup.py`). Left whole, each one job: `graph/prompts.py` (672, mostly prompt
+      text; split by language when a third one comes), `validation/checks.py` (611, the rules
+      in order), `graph/__main__.py` (509), `eval/report.py` (505), `llm.py` (504).
    3. `tutor test`: the learner's tests in the course's image, as validation runs them, from
       the IDE's terminal: live output, attempts and snapshots written on the host from the
       result, and a time limit (an exception to "No timeout on the learner's own `pytest`
