@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from flask import Flask, abort, redirect, render_template, request, url_for
 
-from tutor.gui import courses, environment, generation, tasks
+from tutor.gui import courses, environment, generation, plan_items, tasks
 from tutor.gui.routes.common import (
     C_NEEDS_CONTAINER,
     NOTICES,
@@ -43,7 +43,7 @@ def plan_page(template: str, name: str, label: str):
     quiet = tasks.quiet_s(view.task) if view.task else None
     return render_template(template, course=course, plan=view, log=log, cut=cut,
                            models=generation.models(course), explain=generation.EXPLAIN,
-                           statuses=generation.item_statuses(course, view), quiet=quiet,
+                           statuses=plan_items.item_statuses(course, view), quiet=quiet,
                            waiting_for=waiting_for(course, view.task) if quiet else "")
 
 
@@ -148,13 +148,13 @@ def register(app: Flask) -> None:
         note = generation.clean_text(request.form.get("note", ""))
         if note is None:
             return redirect(f"{back}?notice=note-bad", code=303)
-        status = generation.item_statuses(course, view).get(exercise)
+        status = plan_items.item_statuses(course, view).get(exercise)
         running = view.task is not None and view.task.active
         if status is None or not status.can_retry or running:
             return redirect(f"{back}?notice=plan-moved", code=303)
         if problem := courses.container_problem(course):
             return redirect(f"{back}?notice={problem}", code=303)
-        commands = generation.prepare_retry(course, view, exercise, courses.task_python(course),
+        commands = plan_items.prepare_retry(course, view, exercise, courses.task_python(course),
                                             note=note)
         if commands is None:
             abort(404, "The plan has no such exercise.")
@@ -169,7 +169,7 @@ def register(app: Flask) -> None:
         another in one task, each then validated (owner, 2026-11-06)."""
         course, view = plan_or_404(name, label)
         back = url_for("plan", name=name, label=label)
-        failed = [k for k, v in generation.item_statuses(course, view).items() if v.can_retry]
+        failed = [k for k, v in plan_items.item_statuses(course, view).items() if v.can_retry]
         if not failed or (view.task is not None and view.task.active):
             return redirect(f"{back}?notice=plan-moved", code=303)
         if problem := courses.container_problem(course):
@@ -177,7 +177,7 @@ def register(app: Flask) -> None:
         python = courses.task_python(course)
         commands = []
         for exercise in failed:
-            commands += generation.prepare_retry(course, view, exercise, python) or []
+            commands += plan_items.prepare_retry(course, view, exercise, python) or []
         if not commands:
             abort(404, "The plan has none of these exercises.")
         return start_task(course, f"Generate {len(failed)} exercises again", commands,

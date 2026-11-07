@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from flask import Flask, abort, redirect, render_template, url_for
 
-from tutor.gui import courses, generation, lectures, rendering, tasks
+from tutor.gui import courses, generation, lectures, plan_items, rendering, tasks
 from tutor.gui.routes.common import (
     RECENT_TASKS,
     STATUS_LABELS,
@@ -50,7 +50,7 @@ def register(app: Flask) -> None:
     def batch(name: str, batch: str):
         course, view = batch_or_404(name, batch)
         return render_template("batch.html", course=course, batch=view, labels=STATUS_LABELS,
-                               missing=generation.not_succeeded(course, batch))
+                               missing=plan_items.not_succeeded(course, batch))
 
     @app.get("/c/<name>/b/<batch>/e/<exercise>/")
     def exercise(name: str, batch: str, exercise: str):

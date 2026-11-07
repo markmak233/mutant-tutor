@@ -24,7 +24,7 @@
     <thead><tr><th class="num">#</th><th>Exercise</th>{% if statuses %}<th>Status</th>{% endif %}<th>Source</th><th>What it practises</th></tr></thead>
     <tbody>
     {% for item in plan.items %}
-      {# Once approved, each exercise's status next to it (generation.item_statuses), and a
+      {# Once approved, each exercise's status next to it (plan_items.item_statuses), and a
          button to generate one that did not succeed again (owner, 2026-11-06). #}
       {% set status = statuses.get(item.id) %}
       <tr>
