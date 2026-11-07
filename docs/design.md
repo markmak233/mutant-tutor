@@ -2173,7 +2173,9 @@ themselves, so a cheap layer comes first and a stronger one later.
     prove the cause; Docker Desktop's VM on the owner's Mac uses 18 bits, and 32 bits there
     (arm64) did not reproduce it in 40 runs. CI prints the value and sets 28 (see "CI"); for a
     user on such a Linux host, `tutor doctor` ("Roadmap" 6) is to check the value and give the
-    `sysctl` command. Confirmed or not by the next CI run.
+    `sysctl` command. With 28 set, the next CI run (2026-11-08) passed every C test, and
+    nothing else about C had changed; as the hang is intermittent, one run is strong evidence,
+    not proof.
   - Step 2, a course's language (owner, 2026-11-07; `tutor/languages.py`, the Environment
     page). A course is a C course when workspace.toml has `[languages.c]`, which only the
     owner writes, through the page or by hand; not inferred from `[requires]`, where `java`
@@ -2353,7 +2355,8 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
   sanitizer libraries (now "C needs WSL", see "C"), a GUI task whose runner died shown as
   running for good, since liveness was not checked there (now `winjob.process_alive`), and two
   tests that expected "/" in paths. Docker: the skips above, a test that took the image's own
-  /home/runner for the host's home (GitHub's user is `runner` too), and the C timeouts.
+  /home/runner for the host's home (GitHub's user is `runner` too), and the C timeouts. After
+  the fixes, the second run had all five jobs green.
 - Why more systems pay (2026-11-07): on the second-language pull request, gcc on the Ubuntu
   runner, in a UTF-8 locale, quotes with ‘ ’ where clang and the container's gcc (C locale) print ' ',
   and a C hint test failed. CI is where a toolchain or locale the owner's machines do not have
@@ -2834,8 +2837,8 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
    setup, one execution environment for validation and the learner, and measured trust). In
    order, each its own step:
    1. CI: a `docker` job (`pytest -m docker`; GitHub's Ubuntu runners have Docker) and the
-      fast suite on macOS and Windows as well. Done when all three are green;
-      the jobs written 2026-11-08 (see "CI").
+      fast suite on macOS and Windows as well. Done when all three are green:
+      **done 2026-11-08** (see "CI").
    2. A little refactoring of the files over 500 lines (`gui/app.py`, `graph/nodes.py`,
       `graph/prompts.py`, ...), planned and explained first; the prompt pins must still pass.
    3. `tutor test`: the learner's tests in the course's image, as validation runs them, from
