@@ -2823,8 +2823,8 @@ late; the adaptive review screens can be built with it.
   exercise of a real batch failed on a provider error and only Claude could tell, or redo
   it): once a plan is approved, each row says what its exercise came to: valid, invalid or
   saved and not validated yet (manifest and validation.json), discarded with the check its
-  last round failed and how many repairs it took (not the check's details, which can quote
-  expected values), failed with the error, or not generated yet (generation.jsonl's last
+  last round failed and how many repairs it took (the check's output only when asked, see
+  "Try again with a note"), failed with the error, or not generated yet (generation.jsonl's last
   line for it, so a later try counts). One discarded or failed has "Try again": the graph's
   existing `item` command generates it alone, with the plan's item and what the batch was
   planned with (run.json's models and settings), and adds it to the manifest, which only
@@ -2834,6 +2834,17 @@ late; the adaptive review screens can be built with it.
   plan's exercises that did not come out and links to the plan to try them again (owner).
   With two or more, "Try all N again" runs each one's commands one after another in one
   task.
+- "Try again with a note" (owner, 2026-11-07, after a real retry failed rule 1 the same way
+  twice: the reference and the tests read an ambiguous question differently, and nothing
+  about the retry had changed). Under an exercise that did not come out, a folded section
+  shows the last round's check output (its first 1500 characters, from generation.jsonl)
+  and takes a note. The note is added to that exercise's `notes` in the item file the retry
+  writes, after the plan's own notes, for this try only: `plan.json` stays as approved. The
+  notes are the generate prompt's last line, so the cached part before them (the lecture's
+  pages, the example) is unchanged and a try with a note costs what one without does. The
+  note is kept beside the item file, and the next try's box starts from it. A batch made
+  with `hide_answers` (hand-calculation exercises) shows no check output, which can quote
+  expected values; the note still works there. "Try all" takes no notes.
 - Fixing in the page, not through Claude (owner, 2026-11-06: "这些漏洞下次在网页有补充"):
   - A task that failed or was stopped has "Run again", when it is safe to run twice (reading
     lectures, transcribing, Validate all, Check, install, build, the two drafts). It posts to

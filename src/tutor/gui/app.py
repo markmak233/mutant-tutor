@@ -106,6 +106,8 @@ NOTICES = {
                               "most."),
     "plan-moved": ("bad", "The batch is no longer at that step; this page shows where it is "
                           "now."),
+    "note-bad": ("bad", "The note was not used: write plain text, 2000 characters at most, "
+                        "or leave it empty to try again without one."),
     "key-saved": ("ok", "Saved in .env. Commands started from now on use it."),
     "key-deleted": ("ok", "Removed from .env."),
     "model-saved": ("ok", "Saved in workspace.toml (the file before is workspace.toml.bak)."),
@@ -567,20 +569,27 @@ def create_app(root: Path, token: str, port: int | None = None,
     def retry_item(name: str, label: str):
         """Generate one exercise that did not succeed again, then validate it (owner,
         2026-11-06): only one the plan page shows as discarded or failed, and only while no
-        task of this plan runs; it costs money, as approving does."""
+        task of this plan runs; it costs money, as approving does. "Try again with a note"
+        posts a note too, added to the exercise's notes for this try (owner, 2026-11-07, after
+        a retry failed the same way, as nothing about it had changed)."""
         course, view = plan_or_404(name, label)
         exercise = request.form.get("item", "")
         back = url_for("plan", name=name, label=label)
+        note = generation.clean_text(request.form.get("note", ""))
+        if note is None:
+            return redirect(f"{back}?notice=note-bad", code=303)
         status = generation.item_statuses(course, view).get(exercise)
         running = view.task is not None and view.task.active
         if status is None or not status.can_retry or running:
             return redirect(f"{back}?notice=plan-moved", code=303)
         if problem := courses.container_problem(course):
             return redirect(f"{back}?notice={problem}", code=303)
-        commands = generation.prepare_retry(course, view, exercise, courses.task_python(course))
+        commands = generation.prepare_retry(course, view, exercise, courses.task_python(course),
+                                            note=note)
         if commands is None:
             abort(404, "The plan has no such exercise.")
-        return start_task(course, f"Generate {exercise} again", commands,
+        return start_task(course, f"Generate {exercise} again" + (" with a note" if note else ""),
+                          commands,
                           meta={"kind": generation.RETRY, "label": label, "item": exercise},
                           then=back)
 

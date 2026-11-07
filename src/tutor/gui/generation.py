@@ -132,6 +132,12 @@ class PlanView:
         return self.state == WAITING and bool(self.items)
 
     @property
+    def hides_answers(self) -> bool:
+        """Generated with hide_answers (hand-calculation exercises): the page then shows
+        nothing that can quote a test's expected value."""
+        return str(self.settings.get("hide_answers", "")).lower() == "true"
+
+    @property
     def can_continue(self) -> bool:
         return self.state in (STOPPED, NO_PLAN, ASSISTANT)
 
@@ -376,12 +382,18 @@ def _running_state(task: tasks.Task) -> str:
 ITEM_VALID, ITEM_INVALID, ITEM_SAVED = "valid", "invalid", "saved, not validated"
 ITEM_DISCARDED, ITEM_ERROR, ITEM_PENDING = "discarded", "error", "not generated yet"
 _ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,79}$")  # a plan id, safe as a file name
+DETAIL_CHARS = 1500  # of the last round's failure shown, enough for pytest's first assertion
+NOTE_PREFIX = "The owner adds, for this try: "  # how a retry's note joins the item's notes
 
 
 @dataclass(frozen=True)
 class ItemStatus:
     state: str
     reason: str = ""  # why it did not succeed: the rule that failed, or the error
+    # The last round's failure as the check printed it, so the owner can write a note for
+    # the next try; "" when the batch hides answers, as it can quote expected values.
+    detail: str = ""
+    note: str = ""  # the note the last "Try again with a note" used, to start the next from
 
     @property
     def can_retry(self) -> bool:
@@ -421,24 +433,47 @@ def item_statuses(course: Course, view: PlanView) -> dict[str, ItemStatus]:
                                             else ITEM_VALID if valid else ITEM_INVALID)
         elif exercise in outcomes and outcomes[exercise].get("outcome") == "error":
             error = str(outcomes[exercise].get("error", ""))
-            statuses[exercise] = ItemStatus(ITEM_ERROR, error[:200])
+            statuses[exercise] = ItemStatus(ITEM_ERROR, error[:200],
+                                            note=last_note(view, exercise))
         elif exercise in outcomes:
-            statuses[exercise] = ItemStatus(ITEM_DISCARDED, _failure(outcomes[exercise]))
+            detail = "" if view.hides_answers else _failure_text(outcomes[exercise])
+            statuses[exercise] = ItemStatus(ITEM_DISCARDED, _failure(outcomes[exercise]),
+                                            detail[:DETAIL_CHARS], last_note(view, exercise))
         else:
             statuses[exercise] = ItemStatus(ITEM_PENDING)
     return statuses
 
 
-def _failure(line: dict) -> str:
-    """Which check the last round failed, and after how many rounds; not the check's details,
-    which can quote expected values."""
+def _failure_text(line: dict) -> str:
+    """The last round's failure as generation.jsonl keeps it (the check and its output)."""
     attempts = [a for a in line.get("attempts", []) if isinstance(a, dict)]
-    text = str(attempts[-1].get("failure") or "") if attempts else ""
+    return str(attempts[-1].get("failure") or "") if attempts else ""
+
+
+def _failure(line: dict) -> str:
+    """Which check the last round failed, and after how many rounds, in a line; the check's
+    output, which can quote expected values, is ItemStatus.detail, shown only when asked."""
+    text = _failure_text(line)
     rule = text.split(": ")[0] if text else "it did not pass the checks"
     if text.startswith("format"):
         rule = "the reply did not fit the exercise's format"
     rounds = line.get("rounds", 0)
     return f"{rule}, after {rounds} repair{'s' if rounds != 1 else ''}"
+
+
+def _note_file(draft: Path, exercise: str) -> Path:
+    """Where a retry's note is kept: beside the item file the retry writes."""
+    return draft / f"retry-{exercise}.note.txt"
+
+
+def last_note(view: PlanView, exercise: str) -> str:
+    """The note the last "Try again with a note" for this exercise used ("" if none)."""
+    if view.draft is None or not _ID.match(exercise):
+        return ""
+    try:
+        return _note_file(view.draft, exercise).read_text(encoding="utf-8")
+    except OSError:
+        return ""
 
 
 def not_succeeded(course: Course, batch: str) -> tuple[PlanView, list[str]] | None:
@@ -454,11 +489,16 @@ def not_succeeded(course: Course, batch: str) -> tuple[PlanView, list[str]] | No
 
 
 def prepare_retry(course: Course, view: PlanView, exercise: str,
-                  python: str | None = None) -> list[list[str]] | None:
+                  python: str | None = None, note: str = "") -> list[list[str]] | None:
     """The commands that generate one exercise of the plan again and validate it: the graph's
     `item` command, which adds a saved exercise to the batch's manifest, run with what the
     batch was planned with (run.json's models and settings), so it matches the others.
-    Writes the plan's item as the command reads it; None when the plan has no such item."""
+    Writes the plan's item as the command reads it; None when the plan has no such item.
+
+    A note (already checked by clean_text) is added to the item's notes for this try only:
+    plan.json keeps the plan as approved. The notes are the generate prompt's last line, so
+    the cached part before them (the lecture's pages, the example) is unchanged. The note is
+    kept beside the item, so the page can start the next note from it."""
     if view.draft is None or view.batch is None or not _ID.match(exercise):
         return None
     try:
@@ -469,6 +509,10 @@ def prepare_retry(course: Course, view: PlanView, exercise: str,
     item = next((i for i in plan if isinstance(i, dict) and i.get("id") == exercise), None)
     if item is None:
         return None
+    if note:
+        notes = str(item.get("notes") or "")
+        item = {**item, "notes": (notes + "\n" if notes else "") + NOTE_PREFIX + note}
+        _note_file(view.draft, exercise).write_text(note, encoding="utf-8")
     path = view.draft / f"retry-{exercise}.json"
     path.write_text(json.dumps(item, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
     flags = [f"--{name.replace('_', '-')}={value}"

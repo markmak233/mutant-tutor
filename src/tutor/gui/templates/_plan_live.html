@@ -40,6 +40,26 @@
           {% if item.notes %}<div class="muted">Checks: {{ item.notes }}</div>{% endif %}
           {% if item.reason %}<div class="muted">Why: {{ item.reason }}</div>{% endif %}</td>
       </tr>
+      {# A try with nothing changed tends to fail the same way, so the owner can read what the
+         last round failed on and add a note for the next try (owner, 2026-11-07). #}
+      {% if status and status.can_retry and not running %}
+      <tr class="retry-note"><td></td><td colspan="4">
+        <details{% if status.note %} open{% endif %}>
+          <summary>Try again with a note{% if status.detail %}, and what the last round failed on{% endif %}</summary>
+          {% if status.detail %}<p class="muted">The last round's check output. It can show the expected values of the discarded draft's tests.</p>
+          <pre class="failure">{{ status.detail }}</pre>
+          {% elif plan.hides_answers and status.state == "discarded" %}<p class="muted">The last round's check output is not shown: this batch hides answers, and the output can quote them.</p>{% endif %}
+          <form method="post" action="{{ url_for('retry_item', name=course.folder, label=plan.label) }}" class="form">
+            <input type="hidden" name="item" value="{{ item.id }}">
+            <label class="field">Note for the next try
+              <span class="muted">added to this exercise's notes for this try only (plan.json stays as approved), e.g. which reading of the question the reference and the tests must share{% if status.note %}; this is the note the last try used{% endif %}</span>
+              <textarea name="note" rows="3" maxlength="2000" required>{{ status.note }}</textarea>
+            </label>
+            <div class="actions"><button type="submit">Try again with this note</button></div>
+          </form>
+        </details>
+      </td></tr>
+      {% endif %}
     {% endfor %}
     </tbody>
   </table>
@@ -48,7 +68,7 @@
   {% set failed = statuses.values() | selectattr("can_retry") | list if statuses else [] %}
   {% if failed and not running %}
   {% if failed | length > 1 %}<div class="actions">{{ action(url_for('retry_all', name=course.folder, label=plan.label), "Try all " ~ (failed | length) ~ " again", primary=True) }}</div>{% endif %}
-  <p class="muted">"Try again" generates an exercise once more with this batch's models and settings, then validates it{% if failed | length > 1 %}; "Try all" does so for each that did not come out, one after another{% endif %}. Like approving, it costs money.</p>
+  <p class="muted">"Try again" generates an exercise once more with this batch's models and settings, then validates it{% if failed | length > 1 %}; "Try all" does so for each that did not come out, one after another, with no notes{% endif %}. Like approving, it costs money.</p>
   {% endif %}
 
   {% if plan.shows_plan and plan.at_limit %}

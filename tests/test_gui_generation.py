@@ -550,13 +550,13 @@ def test_plan_send_back_and_approve_with_a_stand_in_for_the_graph(root, course, 
 # --- each exercise's status, and generating one again (owner, 2026-11-06) ---------------------
 
 
-def _generated(course, label="w9-test"):
+def _generated(course, label="w9-test", hide_answers=True):
     """A batch generated from a 4-item plan: a valid, b saved with no verdict yet, c discarded,
     d failed with a provider error."""
     draft = _draft(course, label, ids=("a", "b", "c", "d"))
     _write(draft / "run.json", json.dumps({
         "profiles": {"repair_profile": "deepseek-pro", "plan_profile": "glm-flash"},
-        "settings": {"mode": "review", "hide_answers": True, "max_rounds": 3,
+        "settings": {"mode": "review", "hide_answers": hide_answers, "max_rounds": 3,
                      "parallel": None}}))
     batch = course.workspace.root / "batches" / draft.name
     _write(batch / "manifest.json", json.dumps({"exercises": ["a", "b"]}))
@@ -595,8 +595,9 @@ def test_the_plan_page_shows_the_status_and_try_again_only_where_it_failed(root,
     page = get(_browser(root), "/c/demo-course/plans/w9-test/").get_data(as_text=True)
 
     assert "chip-valid" in page and "chip-discarded" in page and "chip-error" in page
-    assert page.count('name="item" value=') == 2
-    assert 'name="item" value="c"' in page and 'name="item" value="d"' in page
+    # Each of the two: "Try again", and "Try again with a note".
+    assert page.count('name="item" value="c"') == 2 and page.count('name="item" value="d"') == 2
+    assert page.count('name="item" value=') == 4
     assert 'href="/c/demo-course/b/2026-01-02_p3-w9-test/e/a/"' in page  # a saved one links
 
 
@@ -683,3 +684,90 @@ def test_try_all_generates_every_exercise_that_did_not_come_out_in_one_task(
     assert [c[4] for c in commands[::2]] == [str(draft / "retry-c.json"),
                                              str(draft / "retry-d.json")]
     assert meta == {"kind": "retry", "label": "w9-test", "items": ["c", "d"]}
+
+
+# --- trying again with a note (owner, 2026-11-07) ----------------------------------------------
+
+
+def _record_starts(monkeypatch):
+    started = []
+    monkeypatch.setattr(tasks, "start", lambda course_root, title, commands, env, meta=None:
+                        started.append((title, commands, meta)) or tasks.Task(
+                            "20260102-100000-abcdef", course_root, title, "running", "", None,
+                            commands, [], 1, meta or {}))
+    monkeypatch.setattr(courses, "container_problem", lambda course: None)
+    return started
+
+
+def test_the_last_rounds_failure_is_shown_unless_the_batch_hides_answers(root, course):
+    _generated(course, hide_answers=False)
+    view = generation.plan_view(course, "w9-test", history=[])
+    statuses = generation.item_statuses(course, view)
+    assert statuses["c"].detail == "rule 1 (reference passes) FAIL: expected 42, got 41"
+    assert statuses["d"].detail == ""  # an error has its reason line, and no check output
+    page = get(_browser(root), "/c/demo-course/plans/w9-test/").get_data(as_text=True)
+    assert "expected 42, got 41" in page and "what the last round failed on" in page
+
+
+def test_a_batch_that_hides_answers_shows_no_check_output(root, course):
+    _generated(course)  # hide_answers: hand-calculation exercises
+    view = generation.plan_view(course, "w9-test", history=[])
+    assert generation.item_statuses(course, view)["c"].detail == ""
+    page = get(_browser(root), "/c/demo-course/plans/w9-test/").get_data(as_text=True)
+    assert "expected 42" not in page and "this batch hides answers" in page
+
+
+def test_a_note_is_added_to_the_items_notes_for_that_try_only(root, course, monkeypatch):
+    draft, _ = _generated(course)
+    plan = (draft / "plan.json").read_text(encoding="utf-8")
+    started = _record_starts(monkeypatch)
+    note = "Sum the list from the left.\nThe tests and the reference must agree."
+
+    response = post(_browser(root), "/c/demo-course/plans/w9-test/retry",
+                    {"item": "c", "note": note.replace("\n", "\r\n")})
+
+    assert response.headers["Location"] == "/c/demo-course/plans/w9-test/"
+    item = json.loads((draft / "retry-c.json").read_text(encoding="utf-8"))
+    assert item["notes"] == generation.NOTE_PREFIX + note  # the plan's item had no notes
+    assert (draft / "plan.json").read_text(encoding="utf-8") == plan  # the plan as approved
+    assert started[0][0] == "Generate c again with a note"
+    # The next page starts the next note from this one.
+    view = generation.plan_view(course, "w9-test", history=[])
+    assert generation.item_statuses(course, view)["c"].note == note
+    page = get(_browser(root), "/c/demo-course/plans/w9-test/").get_data(as_text=True)
+    assert "Sum the list from the left." in page
+
+
+def test_a_note_follows_the_notes_the_plan_gave(course):
+    draft, _ = _generated(course)
+    items = json.loads((draft / "plan.json").read_text(encoding="utf-8"))
+    items[2]["notes"] = "check an empty list"
+    _write(draft / "plan.json", json.dumps(items))
+    view = generation.plan_view(course, "w9-test", history=[])
+    generation.prepare_retry(course, view, "c", note="keep the order")
+    item = json.loads((draft / "retry-c.json").read_text(encoding="utf-8"))
+    assert item["notes"] == "check an empty list\n" + generation.NOTE_PREFIX + "keep the order"
+
+
+@pytest.mark.parametrize("note", ["x" * 2001, "a\x00b", "a\x1bb"])
+def test_a_note_that_is_not_plain_text_starts_nothing(root, course, note, monkeypatch):
+    draft, _ = _generated(course)
+    monkeypatch.setattr(tasks, "start", lambda *a, **k: pytest.fail("nothing may start"))
+    response = post(_browser(root), "/c/demo-course/plans/w9-test/retry",
+                    {"item": "c", "note": note})
+    assert "notice=note-bad" in response.headers["Location"]
+    assert not (draft / "retry-c.note.txt").exists()
+
+
+def test_try_again_without_a_note_and_try_all_leave_the_notes_as_planned(root, course,
+                                                                       monkeypatch):
+    draft, _ = _generated(course)
+    _write(draft / "retry-c.note.txt", "an earlier note")
+    _record_starts(monkeypatch)
+    client = _browser(root)
+    for path, form in (("retry", {"item": "c"}), ("retry-all", {})):
+        post(client, f"/c/demo-course/plans/w9-test/{path}", form)
+        item = json.loads((draft / "retry-c.json").read_text(encoding="utf-8"))
+        assert "notes" not in item  # the plan's item, unchanged
+    # The earlier note stays, to start the next note from.
+    assert (draft / "retry-c.note.txt").read_text(encoding="utf-8") == "an earlier note"

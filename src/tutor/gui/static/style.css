@@ -256,6 +256,10 @@ table.requires td.row-import input[type="text"] { width: 8rem; margin-left: 0.25
 /* Each exercise's status on the plan page (owner, 2026-11-06) */
 td.item-status { white-space: normal; min-width: 9rem; }
 td.item-status form.action { margin-top: 0.3rem; }
+/* Under an exercise that did not come out: its last failure and a note for the next try */
+tr.retry-note td { border-top: none; padding-top: 0; }
+tr.retry-note details summary { cursor: pointer; }
+pre.failure { margin: 0.4rem 0; padding: 0.6rem 0.8rem; max-height: 20rem; overflow: auto; background: var(--code-bg); border-radius: 6px; font-size: 0.85em; white-space: pre-wrap; overflow-wrap: anywhere; }
 .chip-valid { background: var(--passed-bg); color: var(--passed); }
 .chip-saved-not-validated, .chip-not-generated-yet { background: var(--track); color: var(--muted); }
 .chip-discarded { background: var(--started-bg); color: var(--started); }
