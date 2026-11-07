@@ -18,6 +18,18 @@
 {% if problems %}
 <ul class="notice notice-bad form-problems">{% for line in problems %}<li>{{ line }}</li>{% endfor %}</ul>
 {% endif %}
+{% if warnings %}
+{# The saved roles' oracle is a less independent reading (llm_settings.role_warnings): a
+   reminder. Roles being chosen get theirs above Save (_role_check.html). #}
+<div class="notice notice-bad">
+  <p>The roles are saved, but:</p>
+  <ul class="form-problems">{% for line in warnings %}<li>{{ line }}</li>{% endfor %}</ul>
+  <p>An oracle by another provider and maker, below, makes its reading independent.</p>
+</div>
+{% endif %}
+{% if unsaved and check_warnings and not problems %}
+<p class="notice notice-bad">Not saved yet: read the warning above "Save the roles", and tick "Save even so" to save them as they are.</p>
+{% endif %}
 {% if not profiles %}
 <p>No models yet.</p>
 {% if others %}
@@ -34,7 +46,7 @@
     {% set key_name = p.data.api_key_env %}
     <tr>
       <td><a href="{{ url_for('edit_model', name=course.folder, profile=p.name) }}">{{ p.name }}</a></td>
-      <td>{{ p.data.provider }}: {{ p.data.model or p.name }}</td>
+      <td>{{ p.data.provider }}: {{ p.data.model or p.name }}{% if makers.get(p.name) %} <span class="muted">by {{ makers[p.name] }}</span>{% endif %}</td>
       <td>{% if key_name %}<code>{{ key_name }}</code> {% if key_name in key_set %}set{% else %}<a href="{{ url_for('key_list') }}">{{ chip("not set") }}</a>{% endif %}{% else %}<span class="muted">none needed</span>{% endif %}</td>
       <td class="muted">{{ p.roles | join(", ") }}</td>
       <td class="row-actions">
@@ -45,7 +57,9 @@
   {% endfor %}
   </tbody>
 </table>
-<form method="post" action="{{ url_for('save_roles', name=course.folder) }}" class="form">
+{# htmx: a role changed asks role_check for the part above Save (hx-get on each select;
+   where it goes, and the whole form's choices, from here). #}
+<form method="post" action="{{ url_for('save_roles', name=course.folder) }}" class="form" hx-target="#role-check" hx-swap="outerHTML" hx-include="closest form">
   <h2>Roles</h2>
   <p class="muted">Which model does each job.</p>
   {% for title, group in groups %}
@@ -54,14 +68,15 @@
     {% for role, what in group %}
     <label class="role">
       <span><strong>{{ role }}</strong> <span class="muted">{{ what }}</span></span>
-      <select name="{{ role }}">
+      <select name="{{ role }}" hx-get="{{ url_for('role_check', name=course.folder) }}" hx-trigger="change">
         <option value="">none</option>
-        {% for p in profiles %}<option value="{{ p.name }}"{% if roles.get(role) == p.name %} selected{% endif %}>{{ p.name }}</option>{% endfor %}
+        {% for p in profiles %}<option value="{{ p.name }}"{% if roles.get(role) == p.name %} selected{% endif %}>{{ p.name }} ({{ p.data.provider }}{% if makers.get(p.name) %}, by {{ makers[p.name] }}{% endif %})</option>{% endfor %}
       </select>
     </label>
     {% endfor %}
   </fieldset>
   {% endfor %}
+  {% include "_role_check.html" %}
   <div class="actions"><button type="submit" class="primary">Save the roles</button></div>
 </form>
 {% endif %}

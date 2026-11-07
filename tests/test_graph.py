@@ -858,7 +858,8 @@ def test_an_oracle_left_unwritten_is_a_failure_of_the_round(workspace):
     assert nodes.after_oracle({**state, **update, "round": 0}, d) == "repair"
 
 
-def test_the_oracle_must_come_from_another_provider(workspace):
+def test_an_oracle_from_the_writers_provider_runs_with_a_note(workspace, capsys):
+    """Allowed (owner, 2026-11-07; it was refused): one key is all some people have."""
     from tutor.graph.__main__ import _deps
 
     (workspace / "workspace.toml").write_text(
@@ -866,10 +867,13 @@ def test_the_oracle_must_come_from_another_provider(workspace):
         '[llm.profiles.glm-full]\nprovider = "glm"\nmodel = "glm-5.3"\n'
         '[llm.profiles.gpt]\nprovider = "openai"\nmodel = "gpt-6.1-terra"\n'
         '[llm.roles]\ngenerate = "glm-flash"\noracle = "glm-full"\n', encoding="utf-8")
-    with pytest.raises(ValueError, match="come from one provider"):
-        _deps(workspace, workspace / "batches" / "b", {})
+    d = _deps(workspace, workspace / "batches" / "b", {})
+    assert d.oracle_config.name == "glm-full"
+    out = capsys.readouterr().out
+    assert out.count("note: the oracle (glm-full) and glm-flash") == 1
+    assert "less independent" in out
     d = _deps(workspace, workspace / "batches" / "b", {"oracle_profile": "gpt"})
-    assert d.oracle_config.name == "gpt"
+    assert d.oracle_config.name == "gpt" and "note:" not in capsys.readouterr().out
     d = _deps(workspace, workspace / "batches" / "b",
               {"oracle_profile": "gpt", "plan_profile": "glm-full"})
     assert d.plan_config.name == "glm-full"
@@ -997,15 +1001,15 @@ def test_the_repair_role_takes_over_from_the_second_repair(workspace):
     assert log["repair_model"] == "deepseek-pro: deepseek-v4-pro"
 
 
-def test_the_oracle_must_differ_from_the_repair_model_too(workspace):
+def test_the_repair_model_is_compared_with_the_oracle_too(workspace, capsys):
     from tutor.graph.__main__ import _deps
 
     (workspace / "workspace.toml").write_text(
         'course = "demo"\n[llm.profiles.ds]\nprovider = "deepseek"\nmodel = "f"\n'
         '[llm.profiles.gpt]\nprovider = "openai"\nmodel = "g"\n'
         '[llm.roles]\ngenerate = "ds"\nrepair = "gpt"\noracle = "gpt"\n', encoding="utf-8")
-    with pytest.raises(ValueError, match="the oracle \\(gpt\\) and gpt, which writes"):
-        _deps(workspace, workspace / "batches" / "b", {})
+    _deps(workspace, workspace / "batches" / "b", {})
+    assert "note: the oracle (gpt) and gpt, which writes" in capsys.readouterr().out
 
 
 def test_a_repair_writes_its_diagnosis_first_and_it_is_logged(workspace):
@@ -1131,7 +1135,7 @@ def test_one_assistant_may_write_the_oracle_through_a_second_profile(workspace, 
     d = _deps(workspace, workspace / "batches" / "b", {})
     assert d.oracle_config.name == "cc-oracle"
     assert "fresh context" in capsys.readouterr().out  # allowed, with a reminder
-    with pytest.raises(ValueError, match="through a second profile"):
+    with pytest.raises(ValueError, match="one assistant profile, whose requests would mix"):
         _deps(workspace, workspace / "batches" / "b", {"oracle_profile": "cc"})
 
 

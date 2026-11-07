@@ -268,3 +268,11 @@ table.folder-files td.why { color: var(--bad); }
 table.folder-files td.num { white-space: nowrap; }
 table.folder-files tr.folder-row td { background: var(--track); }
 table.folder-files tr.folder-row button { margin-left: 0.6rem; }
+/* New model: the models.dev catalog above the form (profile.html). */
+section.catalog { margin-bottom: 1.5rem; }
+form.catalog-pick { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; margin: 0.6rem 0; }
+form.catalog-pick select { margin-left: 0.4rem; max-width: 28rem; }
+table.catalog-models td.num, table.catalog-models td:nth-child(2), table.catalog-models td:nth-child(3) { white-space: nowrap; }
+table.catalog-models tr.chosen td { background: var(--track); }
+/* The model form's off-screen Save, which Enter presses (profile.html). */
+.enter-saves { position: absolute; left: -10000px; width: 1px; height: 1px; overflow: hidden; }

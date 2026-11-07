@@ -13,6 +13,7 @@ comes from another provider than the models that write and repair the exercise. 
 from __future__ import annotations
 
 import copy
+import json
 import re
 import sys
 import tomllib
@@ -24,6 +25,7 @@ import tomlkit
 from tutor import llm
 from tutor.config import WORKSPACE_FILE
 from tutor.gui import keys, toml_edit
+from tutor.gui.catalog import same_url
 from tutor.gui.courses import Course
 from tutor.gui.toml_edit import put as _put
 from tutor.gui.toml_edit import spaced as _spaced
@@ -36,8 +38,9 @@ ROLE_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
     ("Generating exercises", [
         ("plan", "plans a batch (empty: the generate model)"),
         ("generate", "writes each exercise"),
-        ("oracle", "writes an independent check from the question alone; another provider "
-                   "than generate and repair"),
+        ("oracle", "writes an independent check from the question alone: best a model by "
+                   "another provider and maker than generate and repair (each model's maker "
+                   "follows its name, where models.dev knows it)"),
         ("repair", "takes over the repairs from the second on (empty: the generate model)")]),
     ("While you learn", [("hint", "gives hints on your attempts"),
                          ("judge", "scores hints and questions in evaluations")]),
@@ -90,6 +93,23 @@ def key_users(all_courses: list[Course]) -> dict[str, list[str]]:
     return users
 
 
+# A new model's time limit per call, filled into the New model form (owner, 2026-11-07):
+# plan and generate calls with thinking can run past llm.py's default of 300 s (one plan call
+# took 12 minutes), and every cloud profile had been given 900 by hand.
+NEW_TIMEOUT_S = 900
+
+
+def provider_defaults() -> dict[str, dict[str, str]]:
+    """What each provider llm.py knows brings by itself, as the model form shows it: its
+    base URL ("" for none), and how it turns thinking off, e.g. 'thinking {"type":
+    "disabled"}, else reasoning_effort "none"' ("" for no way of its own)."""
+    return {name: {"base_url": url or "",
+                   "thinking_off": ", else ".join(" ".join(f"{k} {json.dumps(v)}"
+                                                          for k, v in fields.items())
+                                                 for fields in off)}
+            for name, (url, off) in llm.PROVIDERS.items()}
+
+
 def check_profile(course: Course, name: str, form: dict[str, str]
                   ) -> tuple[dict | None, list[str]]:
     """A profile's fields from a form, or the problems."""
@@ -105,6 +125,19 @@ def check_profile(course: Course, name: str, form: dict[str, str]
                         "capital letters, digits and '_'.")
     if "base_url" in data and not data["base_url"].startswith(("http://", "https://")):
         problems.append("The base URL starts with http:// or https://.")
+    elif "base_url" in data and (provider := data.get("provider")) in llm.PROVIDERS:
+        # The form shows a known provider's own URL (owner, 2026-11-07); kept out of the
+        # file, it follows llm.py if that changes. Another known provider's own URL here
+        # means the provider was changed without Apply, or a known one hides as custom.
+        if same_url(data["base_url"], llm.PROVIDERS[provider][0] or ""):
+            del data["base_url"]
+        elif other := next((p for p, (url, _) in llm.PROVIDERS.items()
+                            if url and p != provider and same_url(data["base_url"], url)),
+                           None):
+            problems.append(f"The base URL is {other}'s own address, but the provider is "
+                            f"{provider}: choose {other} as the provider (it knows how to "
+                            "turn its thinking off), or after changing the provider click "
+                            "Apply, which puts that provider's own address here.")
     for effort in ("reasoning_effort", "reasoning_effort_on"):
         if effort in data and not _WORD.match(data[effort]):
             problems.append(f"{effort}: one word such as low or high.")
@@ -186,26 +219,108 @@ def delete_profile(course: Course, name: str) -> list[str]:
     return _edit(course, change, expected)
 
 
-def save_roles(course: Course, chosen: dict[str, str]) -> list[str]:
-    """Set each offered role to a profile, or to none (""). Roles not offered stay."""
+def merged_roles(course: Course, chosen: dict[str, str]) -> dict[str, str]:
+    """The roles as they would be saved: the file's, with each chosen one set, or removed
+    when chosen as none ("")."""
+    roles = {**section(course).get("roles", {}), **{r: n for r, n in chosen.items() if n}}
+    for role, name in chosen.items():
+        if not name:
+            roles.pop(role, None)
+    return roles
+
+
+def profile_makers(course: Course, found) -> dict[str, str]:
+    """Each profile's maker, as the models.dev list (`found`, a catalog.Catalog or None) says:
+    who made the model it calls, at its base URL; profiles it does not know are left out."""
+    if not found:
+        return {}
+    makers = {}
+    for name, data in section(course).get("profiles", {}).items():
+        try:
+            config = llm._from_profile(name, data, {data.get("api_key_env", ""): "x"},
+                                       course.workspace.root)
+        except (llm.LLMError, TypeError, ValueError, AttributeError):
+            continue
+        if config.provider != "assistant" and (maker := found.maker(config.base_url,
+                                                                    config.model)):
+            makers[name] = maker
+    return makers
+
+
+def role_warnings(course: Course, roles: dict[str, str], found) -> list[str]:
+    """Why the oracle is a less independent reading than it should be, for each model that
+    writes the exercise (generate, and repair unless it is none, when generate repairs):
+    one model, one provider at one address, or one maker through different sites (z.ai and
+    bigmodel.cn for GLM, OpenRouter for DeepSeek), as the models.dev list says (`found`, a
+    catalog.Catalog or None). Warnings, not refusals (owner, 2026-11-07): not everyone pays
+    for two providers, and the page asks before saving. A role set to none is not compared;
+    one assistant profile for both is refused by save_roles."""
+    known = section(course).get("profiles", {})
+    oracle = roles.get("oracle")
+    if oracle not in known:
+        return []
+    makers = profile_makers(course, found)
+
+    def source(name: str) -> tuple[str, str] | None:
+        try:
+            return _source(course, name, known)
+        except (llm.LLMError, TypeError, ValueError, AttributeError):
+            return None
+
+    warnings = []
+    for writer in ("generate", "repair"):
+        name = roles.get(writer)
+        if name not in known or (writer == "repair" and name == roles.get("generate")):
+            continue
+        here, there = source(oracle), source(name)
+        if here is None or there is None:
+            continue  # a profile llm.py cannot read: its own page says why
+        if here[0] == there[0] == "assistant" and name != oracle:
+            if known[oracle].get("model", oracle) == known[name].get("model", name):
+                warnings.append(f"The oracle ({oracle}) and {writer} ({name}) are one "
+                                "assistant through two profiles: answer the oracle's requests "
+                                "in a fresh context that has not seen the exercise "
+                                "(docs/assistant-mode.md).")
+        elif name == oracle:
+            if here[0] != "assistant":  # one assistant profile for both is refused
+                warnings.append(f"The oracle and {writer} are one model ({oracle}): its check "
+                                "is a second reading by the model that wrote the exercise, "
+                                "apart from it, but the least independent one.")
+        elif here == there:
+            warnings.append(f"The oracle ({oracle}) and {writer} ({name}) come from one "
+                            "provider: its check is a second reading by that provider's "
+                            "model, apart from the exercise but less independent than "
+                            "another provider's.")
+        elif makers.get(oracle) and makers.get(name) == makers.get(oracle):
+            warnings.append(f"The oracle ({oracle}) and {writer} ({name}) are both models "
+                            f"made by {makers[oracle]} (so says models.dev), only called "
+                            "through different sites. One maker's models share training "
+                            "data and habits, so its reading is less independent than "
+                            "another maker's.")
+    return warnings
+
+
+def save_roles(course: Course, chosen: dict[str, str], dry_run: bool = False) -> list[str]:
+    """Set each offered role to a profile, or to none (""). Roles not offered stay.
+    `dry_run`: only the problems, nothing written."""
     old = section(course)
     known = old.get("profiles", {})
     problems = [f"{role}: no model named {name}." for role, name in chosen.items()
                 if name and name not in known]
     if problems:
         return problems
-    roles = {**old.get("roles", {}), **{r: n for r, n in chosen.items() if n}}
-    for role, name in chosen.items():
-        if not name:
-            roles.pop(role, None)
+    roles = merged_roles(course, chosen)
     oracle = roles.get("oracle")
     for writer in ("generate", "repair"):
-        if oracle and roles.get(writer) and _source(course, oracle, known) == _source(
-                course, roles[writer], known):
-            problems.append(f"The oracle ({oracle}) and {writer} ({roles[writer]}) come from "
-                            "one provider: an oracle from the same provider is not an "
-                            "independent reading. Choose another oracle.")
-    if problems:
+        # One assistant profile for both: their requests would mix in one queue. Any other
+        # oracle close to a writer is a warning (role_warnings), as in the graph.
+        if oracle and roles.get(writer) == oracle and known[oracle].get(
+                "provider") == "assistant":
+            problems.append(f"The oracle and {writer} are one assistant profile ({oracle}), "
+                            "whose requests would mix: give the oracle a second profile of "
+                            "the assistant, answered in a fresh context "
+                            "(docs/assistant-mode.md).")
+    if problems or dry_run:
         return problems
     expected = copy.deepcopy(old)
     expected["roles"] = roles

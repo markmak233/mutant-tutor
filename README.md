@@ -104,9 +104,12 @@ each added after a measured failure (details and numbers in [`docs/design.md`](d
 
 Each role (plan, generate, repair, oracle, and vision for reading slides) is a profile in
 the workspace's `workspace.toml`, so any OpenAI-compatible models can be combined, local or
-cloud; the one rule is that the oracle comes from another provider than the models that
-write the exercise. With no API key at all, a coding assistant on a subscription (Claude
-Code, Codex) can answer every call as request files: see
+cloud. The oracle is best another provider's, by another maker, than the models that
+write the exercise; with one key, one provider still works, with a warning that its check is
+less independent. In the GUI, New model can fill the form from the public
+[models.dev](https://models.dev) catalog (base URL, key name, models newest first, prices),
+downloaded only when you click. With no API key at all, a coding assistant on a subscription
+(Claude Code, Codex) can answer every call as request files: see
 [`docs/assistant-mode.md`](docs/assistant-mode.md).
 
 Measured on one week of stream algorithms (11 exercises, the same plan for every setup, all

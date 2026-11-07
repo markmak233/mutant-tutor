@@ -66,6 +66,12 @@ PROVIDERS = {
     # (one for the oracle) are recognised as the same reader.
     "assistant": (None, ()),
 }
+# The thinking-off switch each model accepted, by (provider, base URL, model): its index in
+# the profile's thinking_off. A model that refuses the first switch (GLM-5.3 refuses
+# `thinking: disabled` and takes reasoning_effort low) is then refused once per run, not on
+# every call (owner, 2026-11-07). Per process: every run tries the first switch again, so a
+# provider that starts accepting it is noticed.
+_ACCEPTED: dict[tuple[str, str, str], int] = {}
 # Providers that send token usage in a streamed reply's last piece when asked to with
 # stream_options (documented); others stream without the option, which may be refused.
 STREAM_USAGE = {"openai", "deepseek"}
@@ -246,16 +252,22 @@ def chat(config: LLMConfig, messages: list[dict], *, purpose: str,
         body["stream"] = True
         if config.provider in STREAM_USAGE:
             body["stream_options"] = {"include_usage": True}
+    key = (config.provider, config.base_url, config.model)
     if thinking:
-        variants = [config.thinking_on]
+        variants, first = [config.thinking_on], 0
     else:
         variants = list(config.thinking_off) or [{}]
-    for number, extra in enumerate(variants, 1):
+        first = min(_ACCEPTED.get(key, 0), len(variants) - 1)  # the switch it took before
+    for number in range(first, len(variants)):
         try:
-            return _post(config, {**body, **extra}, purpose, log_path, on_progress)
+            reply = _post(config, {**body, **variants[number]}, purpose, log_path, on_progress)
         except _Rejected as e:
-            if number == len(variants):
+            if number == len(variants) - 1:
                 raise LLMError(str(e)) from None
+            continue
+        if not thinking:
+            _ACCEPTED[key] = number
+        return reply
     raise AssertionError("unreachable")
 
 

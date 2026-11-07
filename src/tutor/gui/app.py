@@ -60,6 +60,7 @@ from flask import Flask, abort, make_response, redirect, render_template, reques
 from tutor import llm
 from tutor.eval import report
 from tutor.gui import (
+    catalog,
     courses,
     coverage,
     environment,
@@ -108,6 +109,7 @@ NOTICES = {
                           "now."),
     "note-bad": ("bad", "The note was not used: write plain text, 2000 characters at most, "
                         "or leave it empty to try again without one."),
+    "catalog-fetched": ("ok", "The list from models.dev is up to date: choose a provider."),
     "folder-cancelled": ("ok", "Nothing was saved from the folder, and its files are no "
                                "longer kept."),
     "key-saved": ("ok", "Saved in .env. Commands started from now on use it."),
@@ -821,29 +823,98 @@ def create_app(root: Path, token: str, port: int | None = None,
             return keys_page([problem], 400)
         return redirect(url_for("key_list") + "?notice=key-deleted", code=303)
 
-    def models_page(course: courses.Course, problems: list[str], code: int = 200):
+    def models_page(course: courses.Course, problems: list[str], code: int = 200,
+                    unsaved: dict[str, str] | None = None):
+        """The models and roles; `unsaved`: roles chosen but refused or held back by a
+        warning, kept in the form with what stopped them just above Save."""
         others = [c for c in courses.find_courses(app.config["ROOT"])[0]
                   if c.folder != course.folder and llm_settings.section(c).get("profiles")]
-        values = keys.read(app.config["ENV_FILE"])
+        saved = llm_settings.section(course).get("roles", {})
+        roles = unsaved if unsaved is not None else saved
+        found = catalog.load(app.config["ROOT"])
+        warnings = llm_settings.role_warnings(course, roles, found)
         return render_template("models.html", course=course, problems=problems,
-                               profiles=llm_settings.profiles(course),
-                               roles=llm_settings.section(course).get("roles", {}),
+                               profiles=llm_settings.profiles(course), roles=roles,
+                               warnings=[] if unsaved is not None else warnings,
+                               check_warnings=warnings if unsaved is not None else [],
+                               check_problems=problems, check_confirm=False,
+                               makers=llm_settings.profile_makers(course, found),
+                               unsaved=unsaved is not None,
                                groups=llm_settings.ROLE_GROUPS, others=others,
-                               key_set={n for n in values} | set(os.environ)), code
+                               key_set=key_names()), code
 
     @app.get("/c/<name>/models/")
     def models(name: str):
         return models_page(course_or_404(name), [])
 
     def profile_page(course: courses.Course, original: str | None, values: dict,
-                     problems: list[str], code: int = 200):
+                     problems: list[str], code: int = 200, shelf: dict | None = None):
         return render_template("profile.html", course=course, original=original,
                                values=values, problems=problems, fields=llm_settings.FIELDS,
-                               providers=list(llm.PROVIDERS)), code
+                               providers=list(llm.PROVIDERS), shelf=shelf,
+                               common=catalog.COMMON,
+                               defaults=llm_settings.provider_defaults()), code
+
+    def applied() -> dict | None:
+        """The form as Apply sent it back (a GET of every field, after the provider was
+        changed), so the page shows the fields that provider needs; None without Apply."""
+        if not request.args.get("apply"):
+            return None
+        values = {k: request.args.get(k, "") for k in ("name", *llm_settings.FIELDS)}
+        # A provider's own address was shown for the provider before: the new one shows
+        # its own instead. An address typed in (z.ai for glm, say) stays.
+        if any(url and catalog.same_url(values["base_url"], url)
+               for url, _ in llm.PROVIDERS.values()):
+            values["base_url"] = ""
+        return values
+
+    def key_names() -> set[str]:
+        """The keys set, by name: in .env, or in the environment the GUI started from."""
+        return set(keys.read(app.config["ENV_FILE"])) | set(os.environ)
 
     @app.get("/c/<name>/models/new")
     def new_model(name: str):
-        return profile_page(course_or_404(name), None, {"name": ""}, [])
+        """A blank form, with the models.dev catalog above it (catalog.py): `catalog` picks
+        a provider, whose models are listed, `model` one of them, which fills the form, and
+        `all` lists every model instead of the newest."""
+        course = course_or_404(name)
+        found = catalog.load(app.config["ROOT"])
+        provider = found.provider(request.args.get("catalog", "")) if found else None
+        model = next((m for m in provider.models if m.id == request.args.get("model")),
+                     None) if provider else None
+        values: dict = {"name": ""}
+        notes: list[str] = []
+        if provider and model:
+            taken = {p.name for p in llm_settings.profiles(course)}
+            values, notes = catalog.fill(provider, model, taken)
+        values = applied() or {**values, "timeout_s": values.get("timeout_s")
+                               or str(llm_settings.NEW_TIMEOUT_S)}
+        listed = list(provider.models) if provider else []
+        shown = listed if request.args.get("all") else listed[:catalog.SHOWN]
+        if model and model not in shown:
+            shown.append(model)
+        shelf = {"catalog": found, "stale": "" if found else catalog.stale(app.config["ROOT"]),
+                 "provider": provider, "model": model, "notes": notes,
+                 "models": shown, "hidden": len(listed) - len(shown),
+                 "key_set": bool(provider and provider.key_env in key_names())}
+        return profile_page(course, None, values, [], shelf=shelf)
+
+    @app.post("/c/<name>/models/catalog")
+    def refresh_catalog(name: str):
+        """Download models.dev's catalog again, then back to New model on the provider that
+        was chosen; on a failure, the page says why and keeps the copy before."""
+        course = course_or_404(name)
+        root = app.config["ROOT"]
+        if problem := catalog.refresh(root):
+            shelf = {"catalog": catalog.load(root), "stale": catalog.stale(root),
+                     "provider": None, "model": None,
+                     "notes": [], "models": [], "hidden": 0, "key_set": False}
+            return profile_page(course, None, {"name": ""}, [problem], 502, shelf=shelf)
+        found = catalog.load(root)
+        chosen = request.form.get("catalog", "")
+        args = {"catalog": chosen} if found and found.provider(chosen) else {}
+        return redirect(url_for("new_model", name=name, notice="catalog-fetched", **args),
+                        code=303)
 
     @app.get("/c/<name>/models/m/<profile>/")
     def edit_model(name: str, profile: str):
@@ -851,8 +922,8 @@ def create_app(root: Path, token: str, port: int | None = None,
         data = llm_settings.section(course).get("profiles", {}).get(profile)
         if not isinstance(data, dict):
             abort(404, "No such model.")
-        return profile_page(course, profile, {"name": profile, **{k: str(v) for k, v in
-                                                                  data.items()}}, [])
+        values = applied() or {"name": profile, **{k: str(v) for k, v in data.items()}}
+        return profile_page(course, profile, values, [])
 
     @app.post("/c/<name>/models/save")
     def save_model(name: str):
@@ -880,10 +951,38 @@ def create_app(root: Path, token: str, port: int | None = None,
         course = course_or_404(name)
         chosen = {role: request.form.get(role, "") for role in llm_settings.ROLES
                   if role in request.form}
+        roles = llm_settings.merged_roles(course, chosen)
+        if problems := llm_settings.save_roles(course, chosen, dry_run=True):
+            # The roles as chosen stay in the form (owner, 2026-11-07: they were reset to
+            # the file's, which looked like the choices were wiped).
+            return models_page(course, problems, 400, unsaved=roles)
+        changed = roles != llm_settings.section(course).get("roles", {})
+        if changed and not request.form.get("confirm") and llm_settings.role_warnings(
+                course, roles, catalog.load(app.config["ROOT"])):
+            # Asked before saving (owner, 2026-11-07): the roles as chosen come back with
+            # the warning and "Save even so" above Save. With htmx the warning was shown
+            # while choosing, and the box ticked saves at once.
+            return models_page(course, [], 409, unsaved=roles)
         problems = llm_settings.save_roles(course, chosen)
         if problems:
-            return models_page(course, problems, 400)
+            return models_page(course, problems, 400, unsaved=roles)
         return redirect(url_for("models", name=name) + "?notice=roles-saved", code=303)
+
+    @app.get("/c/<name>/models/roles/check")
+    def role_check(name: str):
+        """The part above Save for the roles chosen in the form (_role_check.html): htmx
+        asks for it whenever a role changes. Reads only; nothing is saved."""
+        course = course_or_404(name)
+        chosen = {role: request.args.get(role, "") for role in llm_settings.ROLES
+                  if role in request.args}
+        roles = llm_settings.merged_roles(course, chosen)
+        same = roles == llm_settings.section(course).get("roles", {})
+        warnings = [] if same else llm_settings.role_warnings(
+            course, roles, catalog.load(app.config["ROOT"]))
+        return render_template("_role_check.html", check_warnings=warnings,
+                               check_problems=llm_settings.save_roles(course, chosen,
+                                                                      dry_run=True),
+                               check_confirm=bool(request.args.get("confirm")))
 
     @app.post("/c/<name>/models/copy")
     def copy_models(name: str):

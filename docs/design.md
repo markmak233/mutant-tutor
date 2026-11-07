@@ -1097,7 +1097,8 @@ Design approved 2026-10-28 (owner):
   (`stronger_repair_from`), since the cheap model fails at diagnosis, not at writing: on
   the hardest week 4 item DeepSeek-Flash sent drafts back unchanged or half fixed, while
   GPT generating fixed it in one repair. Each attempt records its model; the manifest
-  names the repair model; the oracle must come from another provider than both writers.
+  names the repair model; the oracle must come from another provider than both writers
+  (since 2026-11-07 best, not must: see "One provider's oracle" under the Models page).
   First try with DeepSeek-V4-Pro (thinking off) did not fix that item either, and lost a
   round copying the oracle's code, which rule 4's failure shows, into the oracle
   interface; the message now says not to.
@@ -1655,12 +1656,15 @@ deterministic judge, hybrid RAG with recall@k, the phase 5 metrics, the hint lea
     memory, so generation and validation do not run at the same time.
   - First cloud provider (owner, 2026-10-28): Zhipu's bigmodel.cn, OpenAI-compatible at
     `https://open.bigmodel.cn/api/paas/v4`, with GLM-5.3-Flash (native image input, base64
-    data URLs, 1M context; the owner has free tokens for it). How to minimise thinking
+    data URLs, 1M context; the owner has free tokens for it, and for GLM-5.3-FlashX,
+    owner 2026-11-07). How to minimise thinking
     differs by provider and model: LM Studio takes `reasoning_effort: "none"`; GLM takes
     `thinking: {"type": "disabled"}`, but GLM-5.3 models reject it and accept only
     `reasoning_effort` low / high / max, so the client tries `disabled` and falls back to
-    `low` on a 400. With a cloud model the slide images go to that provider; the README
-    states this data flow.
+    `low` on a 400. The switch a model accepted is remembered for the rest of the run, by
+    provider, base URL and model (owner, 2026-11-07: before, every GLM-5.3 call was refused
+    once first); a new run tries the first switch again. With a cloud model the slide
+    images go to that provider; the README states this data flow.
   - Several models (owner, 2026-10-28): keys stay in `.env`, one per provider
     (`ZHIPU_API_KEY=...`); everything else is named profiles in the workspace's
     `workspace.toml` (`[llm.profiles.<name>]`: provider, model, optional base_url,
@@ -2701,7 +2705,10 @@ gaps. Each was decided by the owner; change one only with the owner.
 - No built-in "standard set" of models for a course with none (proposed 2026-11-06). The
   first course adds its models with "Add a model"; later ones copy them from another course.
   A set in the code would need upkeep as providers rename their models, and the owner prefers
-  the user to choose. Decided 2026-11-06.
+  the user to choose. Decided 2026-11-06. Not undone by the models.dev catalog (owner,
+  2026-11-07, under the Models page): nothing comes with the code, the list is downloaded
+  on the owner's click, and it only fills the New model form; the course gets nothing until
+  the owner saves.
 
 ## Deferred
 
@@ -3035,6 +3042,73 @@ late; the adaptive review screens can be built with it.
     its roles along. "Copy from another course" fills a course that has none. The checked
     write is `gui/toml_edit.py` since step 7a, which writes [requires] and [isolation] the
     same way.
+  - Filling New model from models.dev (owner, 2026-11-07: the form was plain, with only
+    the providers llm.py knows by name; "custom" meant finding and typing a base URL). The
+    public catalog at `https://models.dev/api.json` (MIT, no key) lists providers with
+    their base URL and key variable, and their models with release date, thinking and how
+    far it can be turned down, image input, context and USD price. Downloaded only on
+    "Fetch the list" / "Refresh the list" (beside the provider choice), never by itself;
+    the request carries nothing of the courses. Kept in `<root>/.cache/models-dev.json`,
+    reduced to what is used (about 1.2 MB, 204 providers of 235): the providers models.dev
+    marks as taking OpenAI's requests, plus those it lists with their own SDK whose
+    OpenAI-compatible URL is checked in their docs (`catalog.OPENAI_URLS`: Anthropic,
+    Gemini, xAI, Mistral, Groq, Together, MiniMax, OpenRouter); the rest are counted on the
+    page. A downloaded value is checked before it is kept (https, or http on this machine;
+    a key name in capitals; a plain model id) and shown escaped. Above the hand-written
+    form, which stays: a provider (common ones first, the key's state in `.env` by name),
+    its models newest first without withdrawn ones, and "Use", which fills the form and
+    saves nothing. A provider llm.py knows (DeepSeek, Zhipu and z.ai as `glm`, OpenAI, LM
+    Studio) keeps its own way to turn thinking off; another one is `custom` with its URL,
+    and a thinking model gets the lowest `reasoning_effort` it takes (none, minimal, low),
+    or a note that each call thinks. No script: choosing a provider is a GET form, so the
+    page can be reloaded. Anthropic goes through its OpenAI-compatible layer, which has no
+    prompt caching; the page says so.
+  - One provider's oracle (owner, 2026-11-07: "not everyone buys several APIs; do not
+    forbid it, at least warn"). The oracle at the same provider and address as generate or
+    repair was refused, by the Models page and by the graph before any call. It now runs,
+    with a note at the run's start and a warning on the page: an oracle call still reads
+    the question alone, apart from the exercise, while with no oracle role (always
+    allowed) the generating model writes oracle.py in the same reply, the least
+    independent; refusing the better of the two pushed one-key users to the worse. Still
+    refused: one assistant profile for both, whose requests would mix in one queue. Left
+    as it was: when rule 1 fails and rule 4 agrees, repair is told oracle.py was written
+    by "another model", which with one model is not quite so; that text is part of a
+    calibrated prompt, so it stays.
+  - One maker's oracle (owner, 2026-11-07: "a whole family gives no warning"). Saving
+    roles refused an oracle at the same provider and address as generate or repair, as
+    the graph did; the same maker's model through another site (GLM at bigmodel.cn and
+    z.ai, DeepSeek directly and through OpenRouter) passed, though it is no independent
+    reading either. The maker comes from models.dev's canonical model id ("zhipuai/...";
+    for about 85% of its models), else an aggregator's id that starts with a known maker
+    ("deepseek/..."); the kept list now has it (format 2: a list kept before is fetched
+    again). One model, one provider and one maker are each a warning, said while the
+    roles are being chosen: htmx asks a read-only route for the part above Save whenever
+    a role changes (hx-get on each select; no script of our own), with "Save even so" to
+    tick. Without htmx, a save of changed roles that have a warning comes back held, the
+    roles as chosen in the form; once saved, the page keeps saying so. A model the list
+    does not know is not compared by maker. A role set to none is
+    not compared, and repair set to none is generate. The graph's own check stays as it
+    was: it runs without the list. With no script the page cannot warn while a role is
+    being chosen, so each model's provider and maker follow its name in the role choices
+    and in the table (owner, 2026-11-07). A save that is refused or held back keeps the
+    roles as chosen in the form (they were reset to the file's, which looked wiped). The
+    GUI never fetches the list by itself; a list kept in an older format is named as such,
+    with its date, and the page asks to fetch it again.
+  - The form follows its provider (owner, 2026-11-07: an empty base URL under "deepseek"
+    read as a contradiction). A provider llm.py knows shows its own base URL in the field,
+    editable for another site of the same provider (z.ai for glm), and its way to turn
+    thinking off in grey; saving leaves its own URL out of the file, so a change in llm.py
+    reaches it. custom requires a URL; assistant greys out the key, the URL and More. With
+    no script, Apply beside the provider sends the whole form back by GET, nothing typed
+    lost, and replaces a known provider's own URL with the new provider's. A save whose URL
+    is another known provider's own (changed without Apply, or a known one as custom) is
+    refused, saying which. With htmx the provider's choice swaps the fields at once (the
+    page as Apply would send it, cut to those fields with hx-select), so Apply is only the
+    way without it. Base URL moved out of More, as it decides where calls go. Enter
+    still saves: an off-screen Save is the form's first button. A new model's time limit
+    is filled in as 900 s (owner, 2026-11-07; every cloud profile had been given it by
+    hand, as plan and generate calls with thinking run past llm.py's 300 s); editing a
+    model shows what its file has.
   - "Check" (owner): `python -m tutor.llm check [PROFILE ...]`, as a task, sends each model
     one tiny request (thinking off, 32 output tokens) and says ok or the provider's reason,
     so a wrong key or model name shows before a run that spends more. An assistant profile

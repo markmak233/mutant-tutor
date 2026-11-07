@@ -259,12 +259,12 @@ def test_roles_are_saved_and_one_set_to_none_is_removed(course):
     assert "# A second provider, for the oracle." in _toml(course)
 
 
-def test_the_oracle_must_come_from_another_provider(course):
-    before = _toml(course)
-
-    problems = llm_settings.save_roles(course, {"oracle": "cheap"})
-
-    assert "one provider" in problems[0] and _toml(course) == before
+def test_an_oracle_as_close_as_one_model_is_warned_about_not_refused(course):
+    """Owner, 2026-11-07: not everyone pays for two providers; the page warns instead."""
+    assert llm_settings.save_roles(course, {"oracle": "cheap"}, dry_run=True) == []
+    roles = llm_settings.merged_roles(course, {"oracle": "cheap"})
+    warnings = llm_settings.role_warnings(course, roles, None)
+    assert len(warnings) == 1 and "one model (cheap)" in warnings[0]
 
 
 def test_a_role_cannot_name_a_missing_model(course):
@@ -302,6 +302,70 @@ def test_a_new_key_goes_after_the_tables_last_key_not_its_trailing_comment():
 
     assert tomlkit.dumps(doc) == ('[llm.roles]\nvision = "a"  # x\noracle = "b"\n\n'
                                   '# about the next table\n[next]\n')
+
+
+# --- the model form follows its provider (owner, 2026-11-07) -----------------------------------
+
+
+def test_a_providers_own_url_is_left_out_and_anothers_refused(course):
+    data, problems = llm_settings.check_profile(course, "ds", _form(
+        base_url="https://api.deepseek.com/"))
+    assert problems == [] and "base_url" not in data  # its own: llm.py's default
+
+    data, _ = llm_settings.check_profile(course, "z", _form(
+        provider="glm", model="glm-5.3-flash", base_url="https://api.z.ai/api/paas/v4"))
+    assert data["base_url"] == "https://api.z.ai/api/paas/v4"  # another site of glm: kept
+
+    for provider in ("glm", "custom"):  # changed without Apply; a known one as custom
+        _, problems = llm_settings.check_profile(course, "x", _form(
+            provider=provider, base_url="https://api.deepseek.com"))
+        assert "deepseek's own address" in problems[0] and "Apply" in problems[0]
+
+
+def _form_page(client, path):
+    return client.get(path, base_url=BASE).get_data(as_text=True)
+
+
+def test_the_form_shows_what_the_provider_brings(root, env_file):
+    client = _browser(root, env_file)
+
+    text = _form_page(client, "/c/demo-course/models/new")
+    assert 'option value="" selected>choose one' in text and 'class="enter-saves"' in text
+    assert 'name="timeout_s" value="900"' in text  # a new model starts at 900 s
+    # Apply: every field comes back, and the provider's own address and thinking switch.
+    text = _form_page(client, "/c/demo-course/models/new?apply=1&name=ds&provider=deepseek"
+                              "&model=deepseek-v4-flash&api_key_env=DEEPSEEK_API_KEY")
+    assert 'name="base_url" value="https://api.deepseek.com"' in text
+    assert 'placeholder="built in: thinking {&#34;type&#34;: &#34;disabled&#34;}' in text
+    assert 'name="model" value="deepseek-v4-flash"' in text and 'name="name" value="ds"' in text
+    # Changed to glm with deepseek's address still shown: glm's own replaces it; one typed
+    # in stays.
+    text = _form_page(client, "/c/demo-course/models/new?apply=1&provider=glm"
+                              "&base_url=https://api.deepseek.com")
+    assert 'name="base_url" value="https://open.bigmodel.cn/api/paas/v4"' in text
+    text = _form_page(client, "/c/demo-course/models/new?apply=1&provider=glm"
+                              "&base_url=https://api.z.ai/api/paas/v4")
+    assert 'name="base_url" value="https://api.z.ai/api/paas/v4"' in text
+    text = _form_page(client, "/c/demo-course/models/new?apply=1&provider=custom"
+                              "&base_url=https://api.deepseek.com")
+    assert 'value="" placeholder="https://api.example.com/v1" required' in text
+    text = _form_page(client, "/c/demo-course/models/new?apply=1&provider=assistant")
+    assert 'name="base_url" value="" disabled' in text
+    assert 'name="api_key_env" value="" disabled' in text
+    # Editing a model with no base URL in the file shows the one it uses; its time limit
+    # stays as the file has it (none: 300 s), and Apply keeps one cleared by hand.
+    text = _form_page(client, "/c/demo-course/models/m/cheap/")
+    assert 'name="base_url" value="https://open.bigmodel.cn/api/paas/v4"' in text
+    assert 'name="timeout_s" value=""' in text
+    text = _form_page(client, "/c/demo-course/models/new?apply=1&provider=glm&timeout_s=")
+    assert 'name="timeout_s" value=""' in text
+
+
+def test_saving_the_shown_own_url_writes_none(root, env_file, course):
+    response = post(_browser(root, env_file), "/c/demo-course/models/save",
+                    {"name": "ds", **_form(base_url="https://api.deepseek.com")})
+    assert response.status_code == 303
+    assert "base_url" not in tomllib.loads(_toml(course))["llm"]["profiles"]["ds"]
 
 
 def test_the_models_page_shows_each_key_set_or_not(root, env_file, monkeypatch):

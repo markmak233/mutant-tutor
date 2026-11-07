@@ -224,6 +224,10 @@ def test_thinking_off_tries_each_switch_until_the_model_accepts_one(monkeypatch,
     assert [b.get("thinking") or b.get("reasoning_effort") for b in bodies] == [
         {"type": "disabled"}, "low"]
     bodies.clear()
+    # The next call in this run goes straight to the switch it accepted: refused once only.
+    chat(config, [], purpose="vision", thinking=False)
+    assert [b.get("thinking") or b.get("reasoning_effort") for b in bodies] == ["low"]
+    bodies.clear()
     chat(config, [], purpose="generate")  # thinking left on: no switch sent
     assert "thinking" not in bodies[0] and "reasoning_effort" not in bodies[0]
 
