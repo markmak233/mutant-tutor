@@ -2038,6 +2038,34 @@ themselves, so a cheap layer comes first and a stronger one later.
   allowlists. A few languages built in, others configured by the owner in `workspace.toml`
   (extension, compile and run commands, allowlist); those commands run, so generation never
   writes them. A language without a built-in checker needs the container.
+- Languages in the plan (owner, 2026-11-07), in this order: C, C++ and Java first, as the
+  owner has courses in them; then SQL, JavaScript and TypeScript, shell, Rust, R, Go, Haskell,
+  assembly, and MATLAB (open, below). Each is designed when a real course with lectures needs
+  it, since a design from guesses gets shaped around the wrong course; the order may follow
+  the course at hand. What each brings:
+  - C and C++: gcc or clang, a compile per run; a static check cannot bound what C does
+    (pointers, inline assembly, system calls), so container only; sanitizers (ASan, UBSan)
+    turn memory errors into failing tests. C++ reuses C's compiler and harness.
+  - Java: OpenJDK (a build such as Eclipse Temurin), not Oracle's JDK, whose licence terms
+    differ by version; a JVM start per run is slow (a heavy framework for the executor's caps); courses
+    test with JUnit, which bears on whether tests stay pytest.
+  - SQL: `sqlite3` from Python's standard library, no compiler; sqlglot can allow only the
+    statements an exercise needs; a course on another dialect (PostgreSQL) needs that server
+    in the container.
+  - JavaScript and TypeScript: Node.js and the TypeScript compiler; npm packages are a supply
+    chain risk, so installed from a lock file when the image is built, never per run.
+  - Shell: system-level by nature (files, processes), so the high risk tier, container only;
+    a static check means little.
+  - Rust: compiles take seconds per run; crates fetched when the image is built, runs offline.
+  - R: Rscript; packages from CRAN when the image is built.
+  - Go: fast compiles. Haskell: GHC is a large toolchain and compiles slowly.
+  - Assembly (MIPS, RISC-V): run in a simulator (SPIM, MARS, RARS), not on the machine.
+  - MATLAB: a proprietary product; running it needs a MathWorks licence, also in a container.
+    GNU Octave (free, GPL) runs most MATLAB code but not every toolbox. Open: Octave for
+    MATLAB courses, with exercises kept to what both run.
+  - Licences: every other toolchain above is free to install and run. Images are built on the
+    user's machine and not published, so the GPL's terms for distributing (bash, gcc, R,
+    Octave) do not arise; publishing images would bring them.
 
 ## CI
 
@@ -2670,6 +2698,15 @@ format (see "Learning rules").
   first use (exams use it); whether to translate only Concept and keep Task, Input,
   Output, Example and Constraints in English (the rules read as an exam states them, with
   no mistranslated rule); whether `hints.md` and `tutor.hint` follow.
+
+The GUI in other languages (owner, 2026-11-07; not built). Why not now: the GUI's text still
+changes with every step (23 templates, the notices, and messages written by the Python
+modules: several hundred strings), so a translation now would double each change and its
+tests; and the exercises themselves are in the lectures' language, so a translated GUI
+around them helps only half. Revisit at packaging and release, when the text has settled, and
+together with translated `question.md` above.
+- Shape: gettext (Flask-Babel), English as the only source; the language from a setting or the
+  browser; untranslated strings fall back to English.
 
 Later phases, after phase 5 (order decided 2026-10-26, numbered 2026-10-30): phase 6 the
 second course, phase 7 the local GUI, then packaging and release. Changed by the owner on
