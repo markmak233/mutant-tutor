@@ -12,7 +12,8 @@ import pytest
 pytest.importorskip("flask")  # the `gui` extra
 
 from tutor.gui import courses, environment, tasks  # noqa: E402
-from tutor.gui.app import C_NEEDS_CONTAINER, create_app  # noqa: E402
+from tutor.gui.app import create_app  # noqa: E402
+from tutor.gui.routes.common import C_NEEDS_CONTAINER  # noqa: E402
 from tutor.materials import cache  # noqa: E402
 
 TOKEN = "test-token"
