@@ -195,7 +195,10 @@ def _c_undefined(_source: str, output: str) -> str | None:
 
 def _c_compile(_source: str, output: str) -> str | None:
     if found := _C_ERROR.search(output):
-        return f"line {found[2]} of {found[1]}: {found[3].strip()}"
+        # gcc quotes with ‘ ’ in a UTF-8 locale and with ' ' in the C locale (clang always
+        # with ' '), so one mistake reads the same on every machine.
+        message = found[3].strip().replace("‘", "'").replace("’", "'")
+        return f"line {found[2]} of {found[1]}: {message}"
     return None
 
 

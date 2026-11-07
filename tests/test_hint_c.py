@@ -102,6 +102,17 @@ def test_gccs_missing_header_and_linker_messages_are_read():
     assert rule("", linker).text.startswith("`total` is called but not defined anywhere")
 
 
+def test_gccs_curly_quotes_read_as_straight_ones():
+    """gcc in a UTF-8 locale (GitHub's Ubuntu runner) quotes with ‘ ’, in the C locale (the
+    container) with ' ': the hint reads the same either way, as clang's does."""
+    for quote_open, quote_close in (("‘", "’"), ("'", "'")):
+        gcc = (f"E   student.c:3:22: error: expected {quote_open};{quote_close} before "
+               f"{quote_open}return{quote_close}\n")
+
+        assert rule("", gcc).text.startswith(
+            "the code does not compile: line 3 of student.c: expected ';' before 'return'.")
+
+
 def test_a_program_that_never_finishes_is_named():
     """testkit_c's message at its time limit (its own tests run a real endless loop; here
     that would wait 5 s for every test of the exercise)."""
