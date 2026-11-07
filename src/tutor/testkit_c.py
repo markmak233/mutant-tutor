@@ -90,6 +90,30 @@ class CompileError(Exception):
     """The code did not compile (or link); the message is the compiler's."""
 
 
+# C does not run natively on Windows (owner, 2026-11-07; docs/design.md, "C"): its compilers
+# there (MinGW's gcc) have no AddressSanitizer or UBSan, and the alternatives would each need
+# an install and hint rules of their own. WSL has Linux's gcc, as the course's container does.
+WINDOWS = ("C exercises do not run natively on Windows: their tests need AddressSanitizer and "
+           "UBSan, which compilers there lack. Open the course in WSL (Windows Subsystem for "
+           "Linux), where `sudo apt install gcc` brings both")
+# A compiler without the sanitizers' libraries (MinGW, a minimal Linux install) stops here.
+_NO_SANITIZER = re.compile(r"cannot find -l(?:asan|ubsan)|library not found for -l(?:asan|ubsan)")
+NO_SANITIZER = ("this C compiler lacks the AddressSanitizer or UBSan library the tests build "
+                "with: install them with the compiler (Debian and Ubuntu: `sudo apt install "
+                "gcc`), or run the tests in the course's container")
+
+
+def host_problem(compiler: str | None = None) -> str | None:
+    """Why C programs cannot be built on this machine, or None: native Windows, or no
+    compiler on PATH. The same reasons `build` gives, for a caller (a test) to check first."""
+    if sys.platform == "win32":
+        return WINDOWS
+    compiler = compiler or os.environ.get("CC") or "cc"
+    if shutil.which(compiler) is None:
+        return f"no C compiler: `{compiler}` was not found (install gcc or clang, or set CC)"
+    return None
+
+
 class CompilerWarning(UserWarning):
     """The compiler warned; pytest lists it under "warnings summary"."""
 
@@ -176,6 +200,8 @@ def build(*sources: str) -> Program:
     """
     __tracebackhide__ = True  # a compile error shows the test file's line and the message
     folder = _caller_folder()
+    if sys.platform == "win32":
+        raise CompileError(WINDOWS)
     compiler = os.environ.get("CC") or "cc"
     strict = os.environ.get(C_STRICT_ENV) == "1"
     out_dir = Path(tempfile.mkdtemp(prefix="tutor-c-"))
@@ -195,6 +221,8 @@ def build(*sources: str) -> Program:
         raise CompileError(f"compiling took over {COMPILE_TIMEOUT_S:g} s") from None
     message = (proc.stderr + proc.stdout).strip()
     if proc.returncode != 0:
+        if _NO_SANITIZER.search(message):
+            raise CompileError(f"{NO_SANITIZER}:\n{_excerpt(message)}")
         note = " (warnings count as errors here: the reference must compile cleanly)" \
             if strict else ""
         raise CompileError(f"{' '.join(sources)} did not compile{note}:\n{_excerpt(message)}")
