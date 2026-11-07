@@ -195,3 +195,12 @@ def save(path: Path, text: str) -> None:
     with os.fdopen(fd, "w", encoding="utf-8") as f:
         f.write(text)
     os.replace(tmp, path)
+
+
+def as_material(text: str) -> str:
+    """A lecture's text between <lecture> and </lecture>, for a prompt that tells the model
+    the lecture is material to read, not instructions (owner, 2026-11-07). A closing tag
+    inside the lecture is broken up, so the text cannot seem to end early. This marks the
+    boundary for the model; it does not enforce one: what a model writes from a lecture is
+    still checked after (layer A, the test container, the owner's review)."""
+    return "<lecture>\n" + text.replace("</lecture>", "</ lecture>") + "\n</lecture>"

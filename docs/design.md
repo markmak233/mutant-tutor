@@ -2709,6 +2709,15 @@ gaps. Each was decided by the owner; change one only with the owner.
   wrote it and saw it, and a list of allowed file names, also suggested, kept none of the 17 real
   files (all under `sample_input/`). The untrusted input is lecture material, answered by layer A
   and the test-run container (see "Code execution safety").
+  Lecture text itself is marked, since 2026-11-07 (owner, after the same scanning flagged
+  `materials/coverage.py` on the GUI's pull request): the coverage and `[requires]` drafts
+  send it between `<lecture>` and `</lecture>` (a closing tag inside it broken up), and their
+  instructions end by saying it is material to read, not instructions. Only those two
+  prompts, which are not calibrated; the generate, plan and vision prompts are, and stay as
+  they are until a change can be measured. It marks the boundary for the model and enforces
+  nothing: layer A, the container and the owner's review still answer what a lecture can
+  make a model write. Coverage's prompt is version 2 (asked again on the next click);
+  `[requires]` folded it into its version 2, not used yet.
 - No built-in "standard set" of models for a course with none (proposed 2026-11-06). The
   first course adds its models with "Add a model"; later ones copy them from another course.
   A set in the code would need upkeep as providers rename their models, and the owner prefers
