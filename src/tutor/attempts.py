@@ -34,7 +34,7 @@ import warnings
 from pathlib import Path
 
 from tutor import attempt_records
-from tutor.attempt_records import Tally, _rebuild_report, short_error, write_attempt
+from tutor.attempt_records import Tally, rebuild_report, short_error, write_attempt
 from tutor.attempt_transport import EXPORT_ENV, append_event
 from tutor.config import WorkspaceError, load_env, load_workspace
 
@@ -162,4 +162,4 @@ def _write(duration_s: float, interrupted: bool = False) -> None:
         write_attempt(workspace, batch, exercise, tally, duration_s,
                       interrupted=interrupted,
                       partitions=int(os.environ.get("TUTOR_PARTITIONS", "2")), rebuild=False)
-    _rebuild_report(workspace)  # all exercise lines are durable before rebuilding once
+    rebuild_report(workspace)  # all exercise lines are durable before rebuilding once

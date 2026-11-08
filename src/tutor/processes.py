@@ -168,7 +168,10 @@ def stream_output(tree: ProcessTree, say: Callable[[str], None],
         reason = "keyboard_interrupt"
     finally:
         tree.kill()
-        tree.proc.wait(timeout=5)
+        try:
+            tree.proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass  # the tree was killed; never let a slow exit replace the run's result
         # Once the tree is gone EOF should follow immediately. Bound the wait anyway;
         # a deliberately detached host descendant can outlive a POSIX process group.
         reader.join(timeout=2)

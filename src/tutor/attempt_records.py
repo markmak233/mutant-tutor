@@ -76,11 +76,11 @@ def write_attempt(workspace: Workspace, batch: str, exercise: str, tally: Tally,
     with (workspace.attempts_dir / ATTEMPTS_FILE).open("a", encoding="utf-8") as stream:
         stream.write(json.dumps(line, ensure_ascii=False) + "\n")
     if rebuild:
-        _rebuild_report(workspace)  # the log is closed before its report is read
+        rebuild_report(workspace)  # the log is closed before its report is read
     return line
 
 
-def _rebuild_report(workspace: Workspace) -> None:
+def rebuild_report(workspace: Workspace) -> None:
     """Bring the private report up to date. Imported here as this plugin loads in every pytest
     run of the venv and only a recorded run needs it. The attempt is already safe on disk, so a
     failure here costs a stale report and a warning, and never the test result."""
