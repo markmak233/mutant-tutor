@@ -10,6 +10,11 @@ as the owner may have edited it. Nothing outside the folder changes: no system p
 package, and the pip packages workspace.toml's [requires] names (owner, 2026-11-06), so
 running it again after editing [requires] is how a course's venv catches up; the GUI's
 Environment page runs it for that.
+
+`--python PATH --replace-venv` makes the .venv anew with another Python already on this
+machine (tutor.pythons finds them), for a course whose packages do not run on the one it has
+(docs/design.md, "Version conflicts"). The .venv before is kept as .venv.old until the new one
+is installed, and put back if the install fails.
 """
 
 from __future__ import annotations
@@ -17,6 +22,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shutil
 import subprocess
 import sys
 import tomllib
@@ -154,16 +160,26 @@ def venv_python(venv_dir: Path) -> Path:
     return venv_dir / "bin" / "python"
 
 
-def _make_venv(venv_dir: Path) -> None:
-    # EnvBuilder uses the base interpreter even when run from another venv, so the new venv
-    # does not depend on the one this command runs in.
-    venv.EnvBuilder(with_pip=True).create(venv_dir)
+def _make_venv(venv_dir: Path, python: Path | None = None) -> None:
+    """The .venv, with this command's Python, or with `python` (another interpreter on this
+    machine), which then makes it itself."""
+    if python is None:
+        # EnvBuilder uses the base interpreter even when run from another venv, so the new
+        # venv does not depend on the one this command runs in.
+        venv.EnvBuilder(with_pip=True).create(venv_dir)
+        return
+    done = subprocess.run([str(python), "-m", "venv", str(venv_dir)], capture_output=True,
+                          text=True)
+    if done.returncode != 0:
+        raise WorkspaceError(f"{python} could not make a venv:\n{done.stderr.strip()}")
 
 
 def init(root: Path, course: str | None = None, extras: str = DEFAULT_EXTRAS,
-         make_venv: Callable[[Path], None] = _make_venv,
+         make_venv: Callable[..., None] = _make_venv,
          run: Callable = subprocess.run,
-         say: Callable[[str], None] = lambda line: None) -> list[str]:
+         say: Callable[[str], None] = lambda line: None,
+         python: Path | None = None, python_version: str | None = None,
+         replace_venv: bool = False) -> list[str]:
     """Create what is missing in `root` and return one line per step.
 
     `make_venv` and `run` are parameters so tests need no network and no real venv. `say`
@@ -172,6 +188,11 @@ def init(root: Path, course: str | None = None, extras: str = DEFAULT_EXTRAS,
     looks stuck. Raises WorkspaceError, before changing anything, on a bad argument or a
     folder inside a git repository. A failed install raises too: run the command again
     after fixing it.
+
+    `python` (with its `python_version`, "3.12") makes the .venv with that interpreter, and
+    [requires] is checked as if it named that Python. `replace_venv`: an existing .venv is
+    moved to .venv.old first, deleted once the new one is installed, and moved back if
+    anything fails, so a failed switch leaves the course as it was.
     """
     root = root.expanduser().resolve()
     course = course or root.name
@@ -185,7 +206,11 @@ def init(root: Path, course: str | None = None, extras: str = DEFAULT_EXTRAS,
                              "outside it, so course material is never committed")
     if not (REPO / "pyproject.toml").is_file():
         raise WorkspaceError(f"no pyproject.toml in {REPO}: run this from a source checkout")
-    packages = pip_requirements(_requires(root))  # [] for a new course: python only
+    if replace_venv and python is None:
+        raise WorkspaceError("--replace-venv makes the .venv with another Python: give --python")
+    # [requires] as it will be: a switch to another Python is checked against that one, as a
+    # package may conflict with the Python the course has (what the switch is for).
+    packages = pip_requirements(_requires(root, python_version))
 
     steps: list[str] = []
 
@@ -194,7 +219,7 @@ def init(root: Path, course: str | None = None, extras: str = DEFAULT_EXTRAS,
         say(line)
 
     (root / "lectures").mkdir(parents=True, exist_ok=True)
-    version = f"{sys.version_info.major}.{sys.version_info.minor}"
+    version = python_version or f"{sys.version_info.major}.{sys.version_info.minor}"
     files = {
         WORKSPACE_FILE: WORKSPACE_TOML.format(course=course, version=version),
         ".vscode/settings.json": SETTINGS,
@@ -211,21 +236,42 @@ def init(root: Path, course: str | None = None, extras: str = DEFAULT_EXTRAS,
         step(f"created {name}")
 
     venv_dir = root / ".venv"
-    if venv_python(venv_dir).exists():
-        step("kept    .venv")
-    else:
-        say("creating .venv ...")
-        make_venv(venv_dir)
-        step(f"created .venv (Python {version})")
-    # Every time: pip does nothing if all is there, and this finishes an install that failed
-    # and adds extras and [requires] packages named later. One pip call, so pip resolves this
-    # package's own dependencies and the course's together.
-    what = ", ".join([f"tutor[{extras}]", *packages])
-    say(f"installing {what} into .venv (a few minutes the first time) ...")
-    result = run(install_command(venv_dir, extras, packages), capture_output=True, text=True)
-    if result.returncode != 0:
-        raise WorkspaceError(f"pip install failed, run this again once fixed:\n{result.stderr}")
+    old = root / ".venv.old"
+    if replace_venv and venv_dir.exists():
+        if old.exists():  # left by a switch that was stopped: the .venv now is the newer
+            shutil.rmtree(old)
+        venv_dir.rename(old)
+        step("moved   .venv to .venv.old (put back if this fails)")
+    try:
+        if venv_python(venv_dir).exists():
+            step("kept    .venv")
+        else:
+            say("creating .venv ...")
+            if python is None:
+                make_venv(venv_dir)
+            else:
+                make_venv(venv_dir, python)
+            step(f"created .venv (Python {version})")
+        # Every time: pip does nothing if all is there, and this finishes an install that
+        # failed and adds extras and [requires] packages named later. One pip call, so pip
+        # resolves this package's own dependencies and the course's together.
+        what = ", ".join([f"tutor[{extras}]", *packages])
+        say(f"installing {what} into .venv (a few minutes the first time) ...")
+        result = run(install_command(venv_dir, extras, packages), capture_output=True,
+                     text=True)
+        if result.returncode != 0:
+            raise WorkspaceError("pip install failed, run this again once fixed:\n"
+                                 f"{result.stderr}")
+    except BaseException:
+        if replace_venv and old.exists():  # the switch failed (or was stopped): undo it
+            shutil.rmtree(venv_dir, ignore_errors=True)
+            old.rename(venv_dir)
+            say("put the .venv before back")
+        raise
     step(f"installed {what} into .venv")
+    if replace_venv and old.exists():
+        shutil.rmtree(old, ignore_errors=True)
+        step("deleted .venv.old")
     return steps
 
 
@@ -235,9 +281,10 @@ def install_command(venv_dir: Path, extras: str, packages: list[str]) -> list[st
             *packages]
 
 
-def _requires(root: Path) -> dict[str, str]:
+def _requires(root: Path, python_version: str | None = None) -> dict[str, str]:
     """[requires] of the folder's workspace.toml, checked; {} before there is one. Read
-    before anything is created, so a broken table changes nothing."""
+    before anything is created, so a broken table changes nothing. `python_version`: checked
+    as if its python entry named that one (a switch to it)."""
     path = root / WORKSPACE_FILE
     try:
         with path.open("rb") as f:
@@ -248,7 +295,8 @@ def _requires(root: Path) -> dict[str, str]:
         raise WorkspaceError(f"{path}: {e}") from e
     # str(), as load_workspace does: a version written unquoted would load as a number.
     requires = {name: str(version) for name, version in data.get("requires", {}).items()}
-    if problems := requires_problems(requires):
+    checked = {**requires, "python": python_version} if python_version else requires
+    if problems := requires_problems(checked):
         raise WorkspaceError(f"{path}: {problems[0]}; fix it, then run this again")
     return requires
 
@@ -262,12 +310,34 @@ def main(argv: list[str] | None = None) -> int:
     create.add_argument("--course", help="course id (default: the folder's name)")
     create.add_argument("--extras", default=DEFAULT_EXTRAS,
                         help=f"this package's extras to install (default: {DEFAULT_EXTRAS})")
+    create.add_argument("--python", type=Path,
+                        help="make the .venv with this interpreter (default: the one running "
+                             "this)")
+    create.add_argument("--replace-venv", action="store_true",
+                        help="make the .venv anew with --python; the one before is put back "
+                             "if this fails")
     args = parser.parse_args(argv)
+    python_version = None
+    if args.python is not None:
+        from tutor import pythons
+
+        found = pythons.ask(args.python)
+        if found is None:
+            print(f"workspace: {args.python} does not run as a Python", file=sys.stderr)
+            return 1
+        python_version = found.minor
     try:
-        init(args.folder, args.course, args.extras, say=lambda line: print(line, flush=True))
+        init(args.folder, args.course, args.extras, say=lambda line: print(line, flush=True),
+             python=args.python, python_version=python_version,
+             replace_venv=args.replace_venv)
     except WorkspaceError as e:
         print(f"workspace: {e}", file=sys.stderr)
         return 1
+    root = args.folder.expanduser().resolve()
+    if python_version and _requires(root, python_version).get("python") != python_version:
+        # The GUI's switch writes it (gui/python_switch.py); from here, the owner does.
+        print(f'note: [requires] in workspace.toml still names another Python: set python = '
+              f'"{python_version}" there, so the check and the test image use this one too.')
     print(f"{args.folder.expanduser().resolve()} is ready. Put the lectures (PDFs or saved "
           "web pages) in lectures/, open the folder in VS Code, open a new terminal and check "
           "`which pytest` points to its .venv.")

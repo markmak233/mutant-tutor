@@ -9,8 +9,8 @@ import secrets
 
 from flask import Flask, redirect, render_template, request, url_for
 
-from tutor import workspace
-from tutor.gui import courses, environment, languages_page, tasks
+from tutor import pythons, workspace
+from tutor.gui import courses, environment, languages_page, python_switch, tasks
 from tutor.gui.routes.common import course_or_404, start_task
 
 
@@ -58,11 +58,37 @@ def register(app: Flask) -> None:
 
     @app.get("/c/<name>/environment/check")
     def environment_check(name: str):
-        """The part htmx loads: envcheck in the course's venv (a process, 0.2 s warm)."""
+        """The part htmx loads: envcheck in the course's venv (a process, 0.2 s warm), and
+        when it finds what another Python could fix, the Pythons on this machine."""
         course = course_or_404(name)
-        return render_template("_env_check.html", course=course,
-                               check=environment.check(course), kind=environment.kind,
-                               differs=environment.differs)
+        check = environment.check(course)
+        return render_template("_env_check.html", course=course, check=check,
+                               kind=environment.kind, differs=environment.differs,
+                               switch=switch_options(course, check))
+
+    def switch_options(course: courses.Course, check: environment.Check):
+        """The Pythons to offer, or [] when the check found nothing another one could fix."""
+        if check.problem or not python_switch.related(check.results):
+            return []
+        current = pythons.ask(environment.venv_python(course))
+        return python_switch.options(course.workspace.requires, check.results,
+                                     current.version if current else None)
+
+    @app.post("/c/<name>/environment/python")
+    def switch_python(name: str):
+        """Make the .venv anew with another Python: only one this page offers now, worked out
+        again here, so a form cannot name any other program to run."""
+        course = course_or_404(name)
+        chosen = request.form.get("python", "")
+        offered = [o.found for o in switch_options(course, environment.check(course))
+                   if o.offered]
+        found = next((f for f in offered if str(f.path) == chosen), None)
+        if found is None:
+            return redirect(url_for("environment_view", name=name) + "?notice=python-not-offered",
+                            code=303)
+        return start_task(course, f"Make .venv with Python {found.minor}",
+                          [python_switch.command(course.workspace.root, found.path)],
+                          meta={"kind": "install"})
 
     @app.get("/c/<name>/environment/docker")
     def environment_docker(name: str):

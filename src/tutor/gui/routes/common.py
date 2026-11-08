@@ -69,6 +69,8 @@ NOTICES = {
     "runner-saved": ("ok", "Saved in workspace.toml (the file before is workspace.toml.bak). "
                            "Validation and generation started from now on use it."),
     "no-venv": ("bad", "This course has no .venv yet: install into .venv first."),
+    "python-not-offered": ("bad", "Nothing was started: that Python is not one step 2's check "
+                                  "offers now. Check again, then choose from its list."),
     "cannot-build": ("bad", "[requires] has no image recipe: see the test image part below."),
     "no-setup-model": ("bad", "Nothing was started: this course has no model for it. Choose "
                               "one for the setup, plan or generate role on the Models page."),

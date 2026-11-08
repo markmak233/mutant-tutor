@@ -21,6 +21,20 @@
     </tbody>
   </table>
   {% if not check.results %}<p class="muted">[requires] is empty, so there is nothing to check.</p>{% endif %}
+  {# Another Python, when a row above is one it could fix (gui/python_switch.py): which suit
+     the course is worked out from those rows and the known conflicts, not by a model. #}
+  {% if switch %}
+  <div class="python-switch">
+    <p><strong>Another Python for this course.</strong> <span class="muted">The Pythons found on this machine. Those that suit the course get a button: it makes the <code>.venv</code> anew with that Python, puts the one before back if anything fails, then sets <code>[requires] python</code> (the file before is workspace.toml.bak).</span></p>
+    <table class="compact"><tbody>
+    {% for o in switch %}
+      <tr><td>Python {{ o.found.version }} <span class="muted">{{ o.found.path }}</span></td>
+        <td>{% if o.current %}{{ chip("current", "this .venv's") }}{% elif o.problems %}<span class="muted">{{ o.problems | join("; ") }}</span>{% else %}<form method="post" action="{{ url_for('switch_python', name=course.folder) }}" class="action"><input type="hidden" name="python" value="{{ o.found.path }}"><button type="submit" class="small">Make .venv with Python {{ o.found.minor }}</button></form>{% endif %}</td></tr>
+    {% endfor %}
+    </tbody></table>
+    {% if not switch | selectattr("offered") | list %}<p class="muted">None of the Pythons found suits this course. Install an earlier one in your own terminal (the course's setup notes in <code>docs/setup/</code> say how), then check again.</p>{% endif %}
+  </div>
+  {% endif %}
   {% endif %}
   <p class="muted">{% if check.python %}Checked with <code>{{ check.python }}</code>. {% endif %}{% if not check.ok %}Python packages: "Install into .venv" above. Java, Hadoop, Python: install them in your own terminal (the course's setup notes in <code>docs/setup/</code> say how), set <code>JAVA_HOME</code> or <code>HADOOP_HOME</code> in <code>.env</code>, then check again.{% endif %}</p>
   <button type="button" class="small" hx-get="{{ url_for('environment_check', name=course.folder) }}" hx-target="#env-check" hx-swap="outerHTML">Check again</button>

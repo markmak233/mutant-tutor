@@ -2356,6 +2356,18 @@ every language and framework, so one way of handling them:
   once, unless this Python still finds it (a backport is installed) or a companion rule
   brings it back (that rule's check reports it). The image's own check runs it too, so an
   image whose package cannot import refuses to be called ready.
+- The fix path in the page (owner, 2026-11-08; "GUI" in AGENTS.md: a gap found in the page
+  gets a fix there): when the check reports a conflict with the course's Python or a removed
+  import, step 2 lists the Pythons already on this machine (`tutor/pythons.py`: python3.X on
+  PATH, and the py launcher's list on Windows; each asked for its version and its base
+  interpreter) and marks which suit the course, worked out by code: the conflicts on each
+  version, and every version from a removed module's removal on. A button on a suitable one
+  runs `python -m tutor.gui.python_switch`: `tutor.workspace init --python ... --replace-venv`
+  makes the `.venv` anew (the one before kept as `.venv.old` and put back if anything fails,
+  `[requires]` checked against the new Python), and only then sets `[requires] python`
+  (`workspace.toml.bak` kept). The server runs only a Python it offers, found again on the
+  request, never a path from the form. Installing a Python that is not on the machine is the
+  owner's, until packaging ("Roadmap" 6).
 - Then a model, for what neither covers (planned, with `tutor doctor`; "Roadmap" 6): it reads
   the failure's text, the versions and `[requires]`, and proposes a change as structured data
   (a version, the course's Python, a companion), which the owner confirms before it is applied
@@ -2978,7 +2990,13 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
    course's runner as a smoke test, and says what to do next for each failure) and a fresh
    install timed on macOS, Windows and Linux; Docker on Windows is first tested there.
    `tutor doctor` also brings the model that turns an install failure no rule covers into a
-   proposed fix, under the limits in "Version conflicts".
+   proposed fix, under the limits in "Version conflicts" (owner, 2026-11-08: with doctor, not
+   before: most of its fixes need another Python or a version bound `[requires]` cannot
+   write yet, and doctor runs before any course, so it needs a model of its own). And uv
+   offers the Pythons the machine lacks in the Environment page's switch (`uv python
+   install`, into the user's folder, no administrator rights); whether that counts as
+   installing system software, which `tutor doctor` never does, is the owner's to decide
+   then.
    Later, each when its trigger comes: a JDK instead of a JRE in the image (a course that
    compiles Java in it); a separate execution backend (a third runner such as Podman; until
    then the host or container switch in `execution.py` is enough); VS Code Dev Containers on
