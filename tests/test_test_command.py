@@ -18,7 +18,9 @@ def course(tmp_path):
     (tmp_path / "workspace.toml").write_text(
         'course = "demo"\n[requires]\npython = "3.11"\n'
         '[isolation]\nrunner = "container"\n', encoding="utf-8")
-    (exercise / "student.py").write_text("def f():\n    return 0\n", encoding="utf-8")
+    # newline="\n": Windows would write \r\n, and the stand-ins below compare bytes.
+    (exercise / "student.py").write_text("def f():\n    return 0\n", encoding="utf-8",
+                                         newline="\n")
     (exercise / "test_student.py").write_text("def test_it():\n    assert False\n",
                                               encoding="utf-8")
     return exercise
