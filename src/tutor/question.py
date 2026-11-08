@@ -25,6 +25,7 @@ import json
 import re
 import sys
 import textwrap
+import tomllib
 from pathlib import Path
 
 from tutor.testkit_c import DEFAULT_FLAGS, course_flags
@@ -177,17 +178,40 @@ def run_block(location: Path) -> str:
     """How to run the exercise from a terminal (owner, 2026-10-30): its folder, the tests,
     the program, a hint. The plain layout's version: its Run section stays above it."""
     shown = _shown(location)
+    command, intro, note = _practice_help(location)
     return (
         "\n## How to run\n\n"
-        "With the repository's virtual environment active:\n\n"
+        f"{intro}\n\n"
         "```bash\n"
         f'cd "{shown}"\n'
-        "pytest test_student.py      # the tests\n"
+        f"{command:<27} # the tests\n"
         "python student.py           # the program, with the arguments Run shows, if any\n"
-        "```\n\n"
+        f"```\n\n{note}"
         "Stuck? `hints.md` in this folder has three levels of hints, each more specific; "
         f'or, from the repository\'s folder: `python -m tutor.hint "{shown}"`\n'
     )
+
+
+def _practice_help(location: Path) -> tuple[str, str, str]:
+    """Prefer the approved container command for new questions; keep examples unchanged.
+
+    Only the course's runner is read, never .env or model settings. Bad configuration is
+    diagnosed by execution, not repaired or silently rewritten while rendering guidance.
+    """
+    for folder in (location, *location.parents):
+        marker = folder / "workspace.toml"
+        if not marker.is_file():
+            continue
+        try:
+            data = tomllib.loads(marker.read_text(encoding="utf-8"))
+        except (OSError, tomllib.TOMLDecodeError):
+            break
+        if data.get("isolation", {}).get("runner") == "container":
+            return ("tutor test", "With tutor installed and Docker running:",
+                    "`tutor test` uses the course image. The program commands above and "
+                    "`pytest test_student.py` run on the host and need its toolchain.\n\n")
+        break
+    return "pytest test_student.py", "With the repository's virtual environment active:", ""
 
 
 # --- the Markdown layout ----------------------------------------------------------------
@@ -290,15 +314,17 @@ def markdown_run_block(location: Path, commands: list[str] | None = None,
     section's commands as written, else `default`: plain `python student.py`, or for C a
     compile and run (c_run_command)), the Run section's notes, and the hint command."""
     shown = _shown(location)
+    test_command, intro, note = _practice_help(location)
     # Aligned with "# the tests", and at least one space before the comment.
     default = default or ("cc -Wall student.c -o program && ./program" if language == "c"
                           else "python student.py")
     program = commands or [f"{default:<27} # the program"]
     return "\n".join([
         "## How to run", "",
-        "With the repository's virtual environment active:", "",
-        "```bash", f'cd "{shown}"', "pytest test_student.py      # the tests", *program,
-        "```", "", *([" ".join(notes), ""] if notes else []),
+        intro, "",
+        "```bash", f'cd "{shown}"', f"{test_command:<27} # the tests", *program,
+        "```", "", *([note.rstrip(), ""] if note else []),
+        *([" ".join(notes), ""] if notes else []),
         "> **Stuck?** `hints.md` in this folder has three levels of hints, each more "
         "specific; or ask",
         "> for a hint from the repository's folder:", ">",

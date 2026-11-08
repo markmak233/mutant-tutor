@@ -164,6 +164,18 @@ def test_the_examples_question_md_matches_their_student_py():
             rendered.write_text(before, encoding="utf-8")
 
 
+def test_new_container_questions_recommend_the_learner_command(tmp_path):
+    """Only rendered guidance changes; no existing answer or saved question is rewritten."""
+    from tutor.question import markdown_run_block
+
+    (tmp_path / "workspace.toml").write_text(
+        'course = "demo"\n[isolation]\nrunner = "container"\n', encoding="utf-8")
+    location = tmp_path / "batches" / "b" / "exercises" / "e"
+    for rendered in (run_block(location), markdown_run_block(location)):
+        assert "tutor test" in rendered and "Docker running" in rendered
+        assert "run on the host and need its toolchain" in rendered
+
+
 
 def test_a_formulas_bar_in_a_table_row_does_not_split_the_cell():
     doc = ('r"""# Sizes\n\n## Input\n\n| Parameter | Meaning |\n|---|---|\n'

@@ -17,6 +17,10 @@ requires-python = ">=3.11"
 # reading course PDFs into the materials cache (docs/design.md, "Reading files").
 dependencies = ["pydantic>=2,<3", "pypdfium2>=5,<6", "pillow>=10"]
 
+# The learner command shares its dispatcher with python -m tutor. GUI packaging is later.
+[project.scripts]
+tutor = "tutor.__main__:main"
+
 [project.optional-dependencies]
 bigdata = [
     "pyspark>=3.5,<3.6",

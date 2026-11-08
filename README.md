@@ -68,6 +68,13 @@ python -m tutor.gui             # every course folder next to WORKSPACE_DIR's, o
 
 It listens on 127.0.0.1 only, with a token for each launch.
 
+For a course set to the container, run `tutor test` from an exercise folder (or
+`python -m tutor test`). It shows live output and records attempts on the host, with a
+300-second limit (`--timeout SECONDS` to change it). The host needs the tool, Docker with
+Linux containers and an IDE; Java, Hadoop and gcc can stay in the course image. Ordinary
+`pytest` remains available for host debugging and needs the host's libraries/toolchain.
+See [the command options](docs/details.md#testing-your-work-in-the-course-image).
+
 ## Intended use
 
 The aim is to help students understand their course topics better: turn the lecture

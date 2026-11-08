@@ -1,3 +1,5 @@
+"""Characterize host pytest recording so the shared writer preserves existing attempts."""
+
 import json
 import os
 import shutil
@@ -70,11 +72,11 @@ def test_a_run_in_an_exercise_folder_is_recorded(tmp_path):
 def test_the_first_error_is_stored_without_terminal_colours():
     from types import SimpleNamespace
 
-    from tutor.attempts import _short_error
+    from tutor.attempt_records import short_error
     coloured = "AssertionError: assert ['\x1b[33m(age + 10)\x1b[39;49;00m'] == ['age10']"
     report = SimpleNamespace(nodeid="test_student.py::test_columns", longrepr=SimpleNamespace(
         reprcrash=SimpleNamespace(message=coloured)))
-    assert _short_error(report) == (
+    assert short_error(report) == (
         "test_columns: AssertionError: assert ['(age + 10)'] == ['age10']")
 
 

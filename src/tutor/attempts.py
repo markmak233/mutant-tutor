@@ -28,50 +28,37 @@ changes a test result: any problem becomes a warning.
 
 from __future__ import annotations
 
-import hashlib
-import json
 import os
-import re
 import time
 import warnings
-from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
 
-from tutor.config import Workspace, WorkspaceError, load_env, load_workspace
-from tutor.languages import student_path
+from tutor import attempt_records
+from tutor.attempt_records import Tally, _rebuild_report, short_error, write_attempt
+from tutor.attempt_transport import EXPORT_ENV, append_event
+from tutor.config import WorkspaceError, load_env, load_workspace
 
-ATTEMPTS_FILE = "attempts.jsonl"
-CODE_DIR = "code"  # snapshots of failing student files, inside attempts/
+# Public filename retained for existing hint, held-out and evaluation readers.
+ATTEMPTS_FILE = attempt_records.ATTEMPTS_FILE
 INTERRUPTED = 2  # pytest.ExitCode.INTERRUPTED, without importing pytest here
-_FIRST_ERROR_CHARS = 300
-# Terminal colour codes: pytest colours its assertion diffs when the terminal (or VS Code)
-# asks for colour, and they would land in the log as "[0m[33m'".
-_ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
-
-
-@dataclass
-class _Tally:
-    """What the tests of one file, or of one exercise, did in this run."""
-
-    passed: int = 0
-    failed: int = 0
-    errors: int = 0
-    skipped: int = 0
-    first_error: str | None = None
 
 
 # pytest calls the hooks below as plain functions, so one run's state lives in the module.
 _config = None
 _started = 0.0
-_tallies: dict[Path, _Tally] = {}  # test file -> results
+_tallies: dict[Path, Tally] = {}  # test file -> results
+_export = False  # export mode never resolves a workspace or loads its credentials
+_export_failed = False
 
 
 def pytest_configure(config):
     """The run starts: keep the config, whose rootpath turns a test's id into its file."""
-    global _config, _started
+    global _config, _started, _export, _export_failed
     _config, _started = config, time.monotonic()
     _tallies.clear()
+    _export, _export_failed = os.environ.get(EXPORT_ENV) == "1", False
+    if _export:
+        _emit("start")
 
 
 def pytest_collectreport(report):
@@ -96,6 +83,9 @@ def pytest_runtest_logreport(report):
 def pytest_sessionfinish(session, exitstatus):
     """The run ended: write what it did."""
     try:
+        if _export:
+            _emit("finish", exitstatus=int(exitstatus))
+            return  # critically, do not enter _write(), which loads the host .env
         _write(time.monotonic() - _started, interrupted=exitstatus == INTERRUPTED)
     except Exception as e:  # never let bookkeeping break a test run
         warnings.warn(f"could not record the attempt: {e}", stacklevel=1)
@@ -117,22 +107,25 @@ def _record(report, kind: str) -> None:
     if _config is None:
         return
     test_file = _config.rootpath / report.nodeid.split("::")[0]
-    tally = _tallies.setdefault(test_file, _Tally())
+    tally = _tallies.setdefault(test_file, Tally())
     setattr(tally, kind, getattr(tally, kind) + 1)
     if kind not in ("passed", "skipped") and tally.first_error is None:
-        tally.first_error = _short_error(report)
+        tally.first_error = short_error(report)
+    if _export:
+        error = short_error(report) if kind in ("failed", "errors") else None
+        _emit("report", kind=kind, error=error)
 
 
-def _short_error(report) -> str:
-    """'test_name: AssertionError: got 0 lines, expected 5' from a failed report."""
-    crash = getattr(getattr(report, "longrepr", None), "reprcrash", None)
-    message = crash.message if crash is not None else ""
-    if not message:
-        lines = [line for line in str(report.longrepr).splitlines() if line.strip()]
-        message = lines[-1] if lines else "error"
-    name = report.nodeid.split("::")[-1]
-    message = _ANSI.sub("", message)
-    return f"{name}: {' '.join(message.split())}"[:_FIRST_ERROR_CHARS]
+def _emit(event: str, **fields: object) -> None:
+    """Export failures warn once; bookkeeping must never change pytest's own result."""
+    global _export_failed
+    if _export_failed:
+        return
+    try:
+        append_event(event, **fields)
+    except Exception as e:
+        _export_failed = True
+        warnings.warn(f"could not export the attempt: {e}", stacklevel=1)
 
 
 def _write(duration_s: float, interrupted: bool = False) -> None:
@@ -146,12 +139,12 @@ def _write(duration_s: float, interrupted: bool = False) -> None:
     if not root:
         return
     # Add test files up per exercise: pytest started higher up may run several files of one.
-    by_exercise: dict[tuple[str, str], _Tally] = {}
+    by_exercise: dict[tuple[str, str], Tally] = {}
     for test_file, tally in _tallies.items():
         key = exercise_of(test_file, Path(root))
         if key is None:
             continue
-        total = by_exercise.setdefault(key, _Tally())
+        total = by_exercise.setdefault(key, Tally())
         total.passed += tally.passed
         total.failed += tally.failed
         total.errors += tally.errors
@@ -165,78 +158,8 @@ def _write(duration_s: float, interrupted: bool = False) -> None:
     except WorkspaceError as e:
         warnings.warn(f"attempt not recorded: {e}", stacklevel=1)
         return
-    workspace.attempts_dir.mkdir(exist_ok=True)
-    with open(workspace.attempts_dir / ATTEMPTS_FILE, "a", encoding="utf-8") as f:
-        for (batch, exercise), tally in by_exercise.items():
-            result = _result(tally, interrupted)
-            line = {
-                "time": datetime.now().isoformat(timespec="seconds"),
-                "batch": batch,
-                "exercise": exercise,
-                "mode": _mode(workspace.batches_dir / batch),
-                "result": result,
-                "passed": tally.passed,
-                "failed": tally.failed,
-                "errors": tally.errors,
-                "skipped": tally.skipped,
-                "first_error": tally.first_error,
-                "partitions": int(os.environ.get("TUTOR_PARTITIONS", "2")),
-                "duration_s": round(duration_s, 1),
-            }
-            if result in ("failed", "error"):
-                student = student_path(workspace.batches_dir / batch / "exercises" / exercise)
-                if code := _snapshot(student, workspace.attempts_dir, batch, exercise):
-                    line["code"] = code
-            f.write(json.dumps(line, ensure_ascii=False) + "\n")
-    _rebuild_report(workspace)  # after the file is closed, so the report holds this run
-
-
-def _rebuild_report(workspace: Workspace) -> None:
-    """Bring the private report up to date. Imported here as this plugin loads in every pytest
-    run of the venv and only a recorded run needs it. The attempt is already safe on disk, so a
-    failure here costs a stale report and a warning, and never the test result."""
-    try:
-        from tutor.eval.report import write_report
-
-        write_report(workspace.root, workspace.course)
-    except Exception as e:
-        warnings.warn(f"report not updated: {e}", stacklevel=1)
-
-
-def _snapshot(student: Path, attempts_dir: Path, batch: str, exercise: str) -> str | None:
-    """Copy the failing student file into attempts/code/ once per content, keeping its
-    suffix (.py, .c) so the held-out check can run it as that language; its path relative
-    to attempts/, or None (with a warning) when it cannot be copied."""
-    try:
-        data = student.read_bytes()
-        name = hashlib.sha256(data).hexdigest()[:12] + student.suffix
-        relative = Path(CODE_DIR, batch, exercise, name)
-        target = attempts_dir / relative
-        if not target.exists():  # the same mistake run again is kept once
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(data)
-        return relative.as_posix()
-    except OSError as e:
-        warnings.warn(f"failing code not kept: {e}", stacklevel=1)
-        return None
-
-
-def _mode(batch_dir: Path) -> str | None:
-    """`mode` from the batch's manifest.json ("learn" / "review"), None if not given."""
-    try:
-        return json.loads((batch_dir / "manifest.json").read_text(encoding="utf-8")).get("mode")
-    except (OSError, ValueError, AttributeError):
-        return None
-
-
-def _result(tally: _Tally, interrupted: bool) -> str:
-    """A failure the run found comes first; "passed" only if every test ran and passed."""
-    if tally.errors:
-        return "error"
-    if tally.failed:
-        return "failed"
-    if interrupted:
-        return "interrupted"
-    if tally.skipped:
-        return "incomplete"
-    return "passed"
+    for (batch, exercise), tally in by_exercise.items():
+        write_attempt(workspace, batch, exercise, tally, duration_s,
+                      interrupted=interrupted,
+                      partitions=int(os.environ.get("TUTOR_PARTITIONS", "2")), rebuild=False)
+    _rebuild_report(workspace)  # all exercise lines are durable before rebuilding once
