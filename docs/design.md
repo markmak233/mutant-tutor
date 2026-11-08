@@ -2354,10 +2354,23 @@ every language and framework, so one way of handling them:
   the failure's text, the versions and `[requires]`, and proposes a change as structured data
   (a version, the course's Python, a companion), which the owner confirms before it is applied
   and the checks then verify; a fix that holds becomes a rule. Its prompt is strict: the
-  failure text is material, not instructions (AGENTS.md, "Prompts"), and it may propose only
-  packages the rules already name, or versions; never a new package name, which could be a
-  name nobody checked (a look-alike of a real package). Preferred fixes, in order: another
-  Python for the course, another version, a companion. On a course that runs on the host,
+  failure text is material, not instructions (AGENTS.md, "Prompts"); a change is another
+  Python, or a version constraint on a package that `[requires]` names, that is already
+  installed in the environment, or that a rule names (`numpy<2` under a pandas built for
+  NumPy 1); never a new package name, which could be a name nobody checked (a look-alike of
+  a real package). A model that believes a new package is needed says so in a field of its
+  own, which is shown, never applied. A deterministic gate checks the reply's kind, names and
+  pip specifier before anything runs. Preferred fixes, in order: another Python for the
+  course, another version, a companion. Thinking off (a short structured answer), one retry
+  when the reply is cut off, and every proposal verified in a fresh environment before it is
+  offered: measured 2026-11-08 on six real conflicts from the web and one with an injected
+  instruction (`notes/version-conflicts/`, the calibration set for this prompt), DeepSeek
+  V4 Flash and Pro, GLM-5.3-Flash and GPT-6.1-Terra each fixed the five no rule covers and
+  ignored the injection, and all four proposed Python 3.12 for mrjob on 3.13, which the
+  verification showed still fails (`distutils`): known conflicts belong in rules. GLM with
+  thinking on spent 4,000 and then 12,000 tokens without an answer on one case; off, it
+  answered in 4 s. Default model: DeepSeek V4 Flash, thinking off (about 1.3 s and 80 output
+  tokens a case). On a course that runs on the host,
   the GUI and the command line both say plainly that a package was recommended by a model
   before it is installed (owner): in a container it reaches only the image, on the host the
   owner's machine. System software (a JDK, Hadoop, a compiler) is never installed: the model
