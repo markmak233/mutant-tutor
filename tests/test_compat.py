@@ -79,8 +79,9 @@ def test_the_check_reports_a_missing_companion(monkeypatch):
 def test_the_check_reports_a_conflict_with_the_running_python(monkeypatch):
     monkeypatch.setattr("tutor.envcheck.platform.python_version", lambda: "3.14.1")
     monkeypatch.setattr("tutor.envcheck.metadata.version", lambda name: "3.5.9")
-    failed = [r for r in check_workspace(_ws({"pyspark": "3.5"})) if not r.ok]
-    assert [r.name for r in failed] == ["python"]
+    # Only the python rows: on Windows the check adds its winutils row for Spark.
+    failed = [r for r in check_workspace(_ws({"pyspark": "3.5"})) if r.name == "python"]
+    assert len(failed) == 1 and not failed[0].ok
     assert "use Python 3.13 or older" in failed[0].hint
 
 

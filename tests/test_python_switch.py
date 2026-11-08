@@ -34,8 +34,9 @@ def test_find_asks_each_python_keeps_3_11_on_and_names_each_version_once(tmp_pat
                     str(names["python3.13"]): ("3.13.1", "/base/python3.13"),
                     str(names["python3"]): ("3.13.1", "/base/python3.13")})  # the same one
     found = pythons.find(which=lambda name: str(names[name]) if name in names else None, run=run)
-    assert [(f.version, str(f.path)) for f in found] == [("3.13.1", "/base/python3.13"),
-                                                          ("3.12.4", "/base/python3.12")]
+    # Paths compared as Paths: Windows writes them with backslashes.
+    assert [(f.version, f.path) for f in found] == [("3.13.1", Path("/base/python3.13")),
+                                                    ("3.12.4", Path("/base/python3.12"))]
     assert found[0].minor == "3.13"
 
 
@@ -201,9 +202,10 @@ def test_the_switch_starts_only_for_a_python_offered(page):
     client, started = page
     refused = _post(client, {"python": "/usr/bin/evil"})
     assert refused.status_code == 303 and "notice=python-not-offered" in refused.location
-    assert _post(client, {"python": "/b/python3.14"}).status_code == 303  # not suited
+    # The page posts each path as it renders it: str(Path), backslashes on Windows.
+    assert _post(client, {"python": str(Path("/b/python3.14"))}).status_code == 303  # not suited
     assert started == []
-    _post(client, {"python": "/b/python3.12"})
+    _post(client, {"python": str(Path("/b/python3.12"))})
     [task] = started
     assert task["title"] == "Make .venv with Python 3.12"
     [command] = task["commands"]
