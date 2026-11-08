@@ -36,7 +36,7 @@ from pathlib import Path
 
 import tomlkit
 
-from tutor import container, languages, workspace
+from tutor import container, image_recipe, languages, workspace
 from tutor.envcheck import NOT_PIP, pip_requirements, requires_problems, version_matches
 from tutor.gui import tasks, toml_edit
 from tutor.gui.courses import Course
@@ -50,7 +50,7 @@ KINDS = {"python": "Python version", "java": "JDK (Java)", "hadoop": "Hadoop",
          "gcc": "C compiler"}
 # The gcc the test image has (Debian bookworm's), which adding C writes in [requires].
 MODULE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")  # a top-level module, as allow_imports holds
-HADOOP_DOWNLOAD = "about 730 MB"  # measured 2026-11-05, see container.HADOOP_MIRRORS
+HADOOP_DOWNLOAD = "about 730 MB"  # measured 2026-11-05, see image_recipe.HADOOP_MIRRORS
 # What an image weighs, for scale: the two built here on 2026-11-06.
 IMAGE_SCALE = "a Python-only image is about 0.2 GB; one with Java, Hadoop and Spark about 1.7 GB"
 
@@ -136,7 +136,7 @@ def docker_view(course: Course, run: Callable = subprocess.run) -> DockerView:
     chosen = runner(course)
     requires = course.workspace.requires
     try:
-        image = container.image_name(course.workspace.course, requires)
+        image = image_recipe.image_name(course.workspace.course, requires)
     except container.ContainerError as e:
         return DockerView(chosen, None, "cannot-build", str(e))
     python = venv_python(course)
@@ -167,9 +167,9 @@ def downloads(requires: dict[str, str]) -> list[tuple[str, str]]:
         found.append((f"openjdk-{java.split('.')[0]}-jre-headless and procps",
                       "Debian's package mirrors (apt)"))
     if hadoop := requires.get("hadoop"):
-        release = container.hadoop_release(hadoop)
+        release = image_recipe.hadoop_release(hadoop)
         found.append((f"Hadoop {release}, {HADOOP_DOWNLOAD}",
-                      f"{' or '.join(container.HADOOP_MIRRORS)}, checked against a fixed "
+                      f"{' or '.join(image_recipe.HADOOP_MIRRORS)}, checked against a fixed "
                       "SHA-512"))
     packages = [name for name in ("pytest", "hypothesis") if name not in requires]
     packages += [name for name in requires if name not in NOT_PIP]
@@ -223,7 +223,7 @@ def check_requires(names: list[str], versions: list[str], chosen: str | None
     problems += requires_problems(table)
     if not problems and chosen == "container" and "hadoop" in table:
         try:
-            container.hadoop_release(table["hadoop"])
+            image_recipe.hadoop_release(table["hadoop"])
         except container.ContainerError as e:
             problems.append(f"{e}; the container's image could not be built.")
     return (None if problems else table), problems

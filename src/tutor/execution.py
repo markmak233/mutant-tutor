@@ -27,7 +27,8 @@ from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
 
-from tutor.container import ContainerError, image_for, image_problem, run_command, runner_uid
+from tutor.container import ContainerError, image_for, image_problem, run_command
+from tutor.image_recipe import runner_uid
 from tutor.processes import ContainerRun, ProcessTree, remove_run_tmp
 
 DEFAULT_TIMEOUT_S = 30.0

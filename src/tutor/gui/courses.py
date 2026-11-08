@@ -22,7 +22,7 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-from tutor import container, workspace
+from tutor import container, image_recipe, workspace
 from tutor.config import WORKSPACE_FILE, Workspace, WorkspaceError, load_workspace
 from tutor.eval import report
 
@@ -178,7 +178,7 @@ def container_problem(course: Course) -> str | None:
         return None  # the command reports it
     if runner != "container":
         return None
-    image = container.image_name(course.workspace.course, course.workspace.requires)
+    image = image_recipe.image_name(course.workspace.course, course.workspace.requires)
     if container.image_problem(image) is None:  # waits while a stopped VM wakes
         return None
     if shutil.which("docker") is None:
