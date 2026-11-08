@@ -89,7 +89,7 @@ def test_each_run_gets_its_own_temp_dir(tmp_path):
 def test_run_temp_dir_removal_retries_then_gives_up(tmp_path, monkeypatch):
     """A file a virus scan still holds is retried for a moment; one that stays locked is
     left behind instead of failing the run."""
-    from tutor import execution
+    from tutor import processes
 
     real_rmtree = shutil.rmtree
     calls = []
@@ -102,8 +102,8 @@ def test_run_temp_dir_removal_retries_then_gives_up(tmp_path, monkeypatch):
 
     run_tmp = tmp_path / "run-tmp"
     run_tmp.mkdir()
-    monkeypatch.setattr(execution.shutil, "rmtree", locked_twice)
-    execution._remove_run_tmp(run_tmp)
+    monkeypatch.setattr(processes.shutil, "rmtree", locked_twice)
+    processes.remove_run_tmp(run_tmp)
     assert len(calls) == 3 and not run_tmp.exists()
 
     def always_locked(path, ignore_errors=False):
@@ -111,8 +111,8 @@ def test_run_temp_dir_removal_retries_then_gives_up(tmp_path, monkeypatch):
             raise PermissionError("locked")
 
     run_tmp.mkdir()
-    monkeypatch.setattr(execution.shutil, "rmtree", always_locked)
-    execution._remove_run_tmp(run_tmp, wait_s=0.3)  # returns, does not raise
+    monkeypatch.setattr(processes.shutil, "rmtree", always_locked)
+    processes.remove_run_tmp(run_tmp, wait_s=0.3)  # returns, does not raise
 
 
 def test_syntax_error_is_error_not_failed(tmp_path):
