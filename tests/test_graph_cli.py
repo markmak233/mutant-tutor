@@ -154,7 +154,7 @@ def test_plan_shows_the_plan_and_pauses_for_the_owner(course, fake, capsys):
     assert "Paused. Continue with: python -m tutor.graph resume --batch w1 --approve" in out
     folder = drafts(course)
     assert folder.name.endswith("_p3-w1")
-    assert [p["id"] for p in json.loads((folder / "plan.json").read_text("utf-8"))] == [
+    assert [p["id"] for p in json.loads((folder / "plan.json").read_text(encoding="utf-8"))] == [
         "count-words", "sum-values"]
     assert (folder / "run.json").is_file() and (folder / "checkpoint.sqlite").is_file()
     assert fake.calls == [("plan", None)]
@@ -180,7 +180,7 @@ def test_feedback_makes_a_new_plan_which_waits_again(course, fake, capsys):
     assert fake.calls == [("plan", None), ("decision", {"action": "revise",
                                                          "feedback": "only one"}),
                           ("plan", "only one")]
-    assert len(json.loads((drafts(course) / "plan.json").read_text("utf-8"))) == 1
+    assert len(json.loads((drafts(course) / "plan.json").read_text(encoding="utf-8"))) == 1
 
 
 def test_approve_generates_the_plan_as_the_owner_left_it(course, fake, capsys):
@@ -222,11 +222,21 @@ def test_the_check_of_an_edited_plan_is_shown_before_approving(course, fake, cap
 def test_resume_set_changes_the_settings_for_the_rest_of_the_batch(course, fake, capsys):
     plan()
     resume("--set", "max_rounds=1")
-    saved = json.loads((drafts(course) / "run.json").read_text("utf-8"))
+    saved = json.loads((drafts(course) / "run.json").read_text(encoding="utf-8"))
     assert saved["settings"]["max_rounds"] == 1
     capsys.readouterr()
     resume()  # a later resume keeps it
     assert "settings: max_rounds=1" in capsys.readouterr().out
+
+
+def test_resume_profile_changes_the_model_for_the_rest_of_the_batch(course, fake):
+    plan()
+    resume("--profile", "other-model")
+    saved = json.loads((drafts(course) / "run.json").read_text(encoding="utf-8"))
+    assert saved["profiles"]["profile"] == "other-model"
+    resume()  # a later resume without the flag keeps it
+    saved = json.loads((drafts(course) / "run.json").read_text(encoding="utf-8"))
+    assert saved["profiles"]["profile"] == "other-model"
 
 
 def test_a_run_stopped_midway_continues_where_it_stopped(course, fake, capsys):
