@@ -2441,6 +2441,9 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
   `requires-python` lost its `<3.13`. Measured locally first, fast suite and `-m spark`
   (mrjob, PySpark 3.5.9 and Hadoop) on each. 3.15 waits until the dependencies have wheels
   for it. Only `test` runs every version; `other-os`, `docker` and `spark` stay on 3.11.
+  `test` and `other-os` install the `gen` extra too, and run `pytest -rs`: without langgraph
+  the graph's tests skipped there, 28 skips a job on the first 3.11-3.14 run (2026-11-08),
+  among them all of `tests/test_graph_cli.py`.
   No JDK: run in a clean clone with a fake `java` that logs every call, the fast suite
   started no JVM (2026-10-26).
 - `other-os` (owner, 2026-11-08, "Roadmap" 6.1): the same fast suite on `macos-latest` and
