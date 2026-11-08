@@ -164,6 +164,8 @@ smartCodingReview/                       # public repo (the `tutor/` above), cod
 │   ├── envcheck.py                      # P1 checks the workspace's [requires]; owns its rules
 │   ├── workspace.py                     # creates a course workspace: folder, .venv, terminal files
 │   ├── execution.py                     # P1 copy to temp dir -> subprocess pytest -> delete
+│   ├── processes.py                     # a run's processes, ended together (process group / Job Object)
+│   ├── container.py                     # the test image: build, run limits, status; image_recipe.py its Dockerfile
 │   ├── validation/                      # P1 the checks; P2 rule 0, P3a the safety check (internals designed before coding); C: csource.py
 │   ├── testkit.py                       # P2a run a file-level program, read part-*, compare output
 │   ├── testkit_c.py                     # C exercises' tests: compile once, run, sanitizers
@@ -174,7 +176,8 @@ smartCodingReview/                       # public repo (the `tutor/` above), cod
 │   ├── materials/                       # P3a course files -> per-file md cache (pypdfium2), vision pages; [requires] draft
 │   ├── llm.py                           # P3a thin OpenAI-compatible client, standard library only, no LangChain
 │   ├── graph/                           # P3 langgraph dependency added here; languages.py: per-language profiles;
-│   │                                    #   nodes.py an item's nodes, oracle.py, drafts.py, batch.py, build.py the wiring
+│   │                                    #   nodes.py an item's nodes, oracle.py, drafts.py, batch.py, build.py the wiring;
+│   │                                    #   prompts.py the templates, prompt_parts/ one module per language
 │   ├── gui/                             # P7 the local web GUI: app.py the request checks, routes/ one module per
 │   │                                    #   page area, the other modules what each page reads and writes
 │   ├── retrieval/                       # P4 the page corpus, labels, scores and each route
@@ -2853,9 +2856,17 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
       (`oracle.py`, `drafts.py`, `batch.py`; the prompt pins still match);
       `gui/environment.py` 663 -> 471 (`languages_page.py`); `gui/generation.py` 618 -> 455
       (`plan_items.py`: each exercise's status and Try again); `gui/lectures.py` 559 -> 432
-      (`course_setup.py`). Left whole, each one job: `graph/prompts.py` (672, mostly prompt
-      text; split by language when a third one comes), `validation/checks.py` (611, the rules
-      in order), `graph/__main__.py` (509), `eval/report.py` (505), `llm.py` (504).
+      (`course_setup.py`). Then the files that later steps would push past 500 (owner): the
+      prompts by language, as a third one is coming (`graph/prompt_parts/`, `prompts.py`
+      672 -> 396; every Python and C prompt byte for byte as before, 240 outputs compared);
+      `execution.py` 440 -> 350 (`processes.py`), with room for `tutor test`; `container.py`
+      432 -> 280 (`image_recipe.py`), with room for the build record. `graph/__main__.py`'s
+      100-line `_batch` became `_new_batch`, `_resumed_batch`, `_advance` and
+      `_owner_decision`, after tests of it were written against the old code
+      (`tests/test_graph_cli.py`; it had none). Left whole, each one job:
+      `validation/checks.py` (611, the rules in order), `graph/__main__.py` (546, the command
+      line), `eval/report.py` (505), `llm.py` (504), `testkit.py` (472: exercises import it by
+      name, and saved exercises depend on it).
    3. `tutor test`: the learner's tests in the course's image, as validation runs them, from
       the IDE's terminal: live output, attempts and snapshots written on the host from the
       result, and a time limit (an exception to "No timeout on the learner's own `pytest`
