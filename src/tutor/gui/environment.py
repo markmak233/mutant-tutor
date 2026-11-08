@@ -199,6 +199,8 @@ def build_command(course: Course) -> list[str]:
 def kind(name: str) -> str:
     if name == "languages":  # envcheck's line for a language not supported yet
         return "workspace.toml [languages]"
+    if name.endswith(" imports"):  # envcheck's probe: a package imports a removed module
+        return "removed standard-library module"
     return KINDS.get(name, "pip package")
 
 

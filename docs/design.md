@@ -2394,7 +2394,15 @@ every language and framework, so one way of handling them:
     many) and asked of a second model, never applied. Measured: for pydub on 3.13, which
     needs `audioop-lts`, both DeepSeek models named `pyaudioop` (the module in the error
     message) and GLM once `standard-audioop`; neither exists on PyPI, so anyone could
-    register them. GPT-6.1-Terra named `audioop-lts` every time. On a course that runs on the host,
+    register them. GPT-6.1-Terra named `audioop-lts` every time.
+  - Two tiers (owner, 2026-11-08): the repair rounds run with thinking off, fast and cheap;
+    when the model stops and names a new package (rare), it is asked again with thinking on,
+    and a second model is asked too. Only a name both give, which PyPI has, is shown to the
+    owner, as above. Measured with the probe's facts in the prompt: thinking changed nothing on
+    mrjob (one round either way, 4 to 13 times slower on), but DeepSeek V4 Flash and
+    GLM-5.3-Flash named `audioop-lts` with thinking on and a wrong name or none with it off;
+    DeepSeek V4 Pro, thinking on, still said `pyaudioop`. One run each, so the second model
+    is the check, not thinking alone. On a course that runs on the host,
   the GUI and the command line both say plainly that a package was recommended by a model
   before it is installed (owner): in a container it reaches only the image, on the host the
   owner's machine. System software (a JDK, Hadoop, a compiler) is never installed: the model

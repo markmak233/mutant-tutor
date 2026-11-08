@@ -789,3 +789,9 @@ def test_accepting_gcc_from_the_lectures_adds_c_with_the_version_typed(root, cou
     data = tomllib.loads(_toml(course))
     assert data["requires"]["gcc"] == "11"
     assert data["languages"] == {"c": {"flags": ["-Wall"]}}
+
+
+def test_a_removed_module_row_is_named_as_such():
+    """envcheck's probe reports "<package> imports" rows; they are not pip packages."""
+    assert environment.kind("pydub imports") == "removed standard-library module"
+    assert environment.kind("pydub") == "pip package"
