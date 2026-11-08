@@ -79,10 +79,18 @@ def test_the_form_refuses_what_the_command_would_not_take(course, changes, probl
     assert batch is None and problem in " ".join(problems)
 
 
-def test_a_taken_label_is_refused_before_anything_starts(course):
-    (course.workspace.root / "batches" / "2026-01-01_p3-w9-test").mkdir(parents=True)
+def test_a_taken_label_gets_the_first_free_suffix(course):
+    batches = course.workspace.root / "batches"
+    (batches / "2026-01-01_p3-w9-test").mkdir(parents=True)
+    assert _check(course)[0].label == "w9-test-1"
+    (batches / ".drafts" / "2026-01-02_p3-w9-test-1").mkdir(parents=True)  # a draft too
+    assert _check(course)[0].label == "w9-test-2"
 
-    assert "exists already" in _check(course)[1][0]
+
+def test_a_taken_label_with_no_room_for_a_suffix_is_refused(course):
+    label = "x" * 39
+    (course.workspace.root / "batches" / f"2026-01-01_p3-{label}").mkdir(parents=True)
+    assert "shorter label" in _check(course, label=label)[1][0]
 
 
 def test_the_plan_command_keeps_free_text_as_one_argument(course):

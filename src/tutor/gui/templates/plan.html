@@ -6,5 +6,7 @@
 {% endblock %}
 {% block content %}
 <h1>Plan {{ plan.label }}</h1>
+{# The draft folder's date (DATE_p3-LABEL), as the batch folder shows it. #}
+{% if plan.draft %}<p class="muted">Planned {{ plan.draft.name[:10] }}</p>{% endif %}
 {% include "_plan_live.html" %}
 {% endblock %}

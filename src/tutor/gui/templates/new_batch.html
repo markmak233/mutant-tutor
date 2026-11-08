@@ -38,7 +38,7 @@
     {% if unread %}<p class="muted">Not read yet, so not offered: {{ unread | join(", ") }}. Read them with <code>python -m tutor.materials</code>.</p>{% endif %}
   </fieldset>
   <label class="field">Label
-    <span class="muted">lowercase letters, digits and '-', e.g. w9-streams; the batch folder is named DATE_p3-LABEL</span>
+    <span class="muted">lowercase letters, digits and '-', e.g. w9-streams; the batch folder is named DATE_p3-LABEL; a label used before gets -1, -2, ...</span>
     <input type="text" name="label" value="{{ values.label }}" required maxlength="40" pattern="[a-z0-9][a-z0-9\-]*" autocomplete="off">
   </label>
   <fieldset>

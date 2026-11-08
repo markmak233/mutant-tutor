@@ -3430,6 +3430,10 @@ late; the adaptive review screens can be built with it.
     label was a planning one that did not finish, the page offers Continue, not Approve. A
     batch planned in a terminal has no such history. Assistant mode (exit 3) shows as
     waiting for the assistant: its requests are answered from a terminal, then Continue.
+  - A label used before (by a batch or a draft) gets the first free -1, -2, ... in the
+    form, not a refusal (owner, 2026-11-09); the plan page shows the date of its draft
+    folder (DATE_p3-LABEL), as batches show theirs. Only the GUI renames: the CLI's `plan`
+    still refuses a taken label, typed by hand. Labels made before stay as they are.
   - The new-batch form is the one page that shows what a request sent: a refused form comes
     back with the values typed, escaped like everything else.
   - How many exercises (owner, 2026-11-06): "let the plan model decide", with its limit in

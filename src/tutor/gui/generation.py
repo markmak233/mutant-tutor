@@ -232,8 +232,11 @@ def check_form(course: Course, label: str, chosen: list[str], mode: str, how: st
     if not LABEL.match(label):
         problems.append("The label takes lowercase letters, digits and '-', 40 at most, "
                         "e.g. w9-streams.")
-    elif label_taken(course, label):
-        problems.append(f"A batch labelled {label} exists already: choose another label.")
+    elif (free := free_label(course, label)) is None:
+        problems.append(f"A batch labelled {label} exists already, and adding -1, -2, ... "
+                        "would pass 40 characters: choose a shorter label.")
+    else:
+        label = free  # a taken label gets the first free -1, -2, ... (owner, 2026-11-09)
     ready, _ = lectures(course)
     if not chosen:
         problems.append("Choose at least one lecture.")
@@ -289,6 +292,21 @@ def label_taken(course: Course, label: str) -> bool:
     root = course.workspace.root / "batches"
     return any(label_of(p.name) == label
                for p in [*_dirs(root), *_dirs(root / ".drafts")])
+
+
+def free_label(course: Course, label: str) -> str | None:
+    """The label itself when no batch or draft has it, else the first of label-1, label-2,
+    ... that is free and still a valid label; None when the suffix would pass LABEL's 40
+    characters. Only the GUI's form does this: on the command line, `plan` refuses a
+    taken label, as a name typed by hand should not change silently."""
+    if not label_taken(course, label):
+        return label
+    n = 1
+    while LABEL.match(candidate := f"{label}-{n}"):
+        if not label_taken(course, candidate):
+            return candidate
+        n += 1
+    return None
 
 
 def graph_command(python: str | None) -> list[str]:
