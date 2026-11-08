@@ -12,7 +12,7 @@ import pytest
 
 pytest.importorskip("flask")  # the `gui` extra
 
-from tutor.gui import courses, generation, launch, tasks  # noqa: E402
+from tutor.gui import courses, generation, launch, plan_items, tasks  # noqa: E402
 from tutor.gui.app import create_app  # noqa: E402
 
 TOKEN = "test-token"
@@ -581,7 +581,7 @@ def _generated(course, label="w9-test", hide_answers=True):
 def test_each_exercise_of_a_generated_plan_has_its_status(course):
     _generated(course)
     view = generation.plan_view(course, "w9-test", history=[])
-    statuses = generation.item_statuses(course, view)
+    statuses = plan_items.item_statuses(course, view)
 
     assert {k: v.state for k, v in statuses.items()} == {
         "a": "valid", "b": "saved, not validated", "c": "discarded", "d": "error"}
@@ -597,7 +597,7 @@ def test_an_exercise_saved_before_the_manifest_exists_is_saved_not_discarded(cou
     _, batch = _generated(course)
     (batch / "manifest.json").unlink()
     view = generation.plan_view(course, "w9-test", history=[])
-    statuses = generation.item_statuses(course, view)
+    statuses = plan_items.item_statuses(course, view)
 
     assert {k: v.state for k, v in statuses.items()} == {
         "a": "saved, not validated", "b": "saved, not validated", "c": "discarded",
@@ -608,7 +608,7 @@ def test_an_exercise_saved_before_the_manifest_exists_is_saved_not_discarded(cou
 def test_a_plan_not_approved_yet_shows_no_status(course):
     _draft(course)
     view = generation.plan_view(course, "w9-test", history=[])
-    assert generation.item_statuses(course, view) == {}
+    assert plan_items.item_statuses(course, view) == {}
 
 
 def test_the_plan_page_shows_the_status_and_try_again_only_where_it_failed(root, course):
@@ -723,7 +723,7 @@ def _record_starts(monkeypatch):
 def test_the_last_rounds_failure_is_shown_unless_the_batch_hides_answers(root, course):
     _generated(course, hide_answers=False)
     view = generation.plan_view(course, "w9-test", history=[])
-    statuses = generation.item_statuses(course, view)
+    statuses = plan_items.item_statuses(course, view)
     assert statuses["c"].detail == "rule 1 (reference passes) FAIL: expected 42, got 41"
     assert statuses["d"].detail == ""  # an error has its reason line, and no check output
     page = get(_browser(root), "/c/demo-course/plans/w9-test/").get_data(as_text=True)
@@ -733,7 +733,7 @@ def test_the_last_rounds_failure_is_shown_unless_the_batch_hides_answers(root, c
 def test_a_batch_that_hides_answers_shows_no_check_output(root, course):
     _generated(course)  # hide_answers: hand-calculation exercises
     view = generation.plan_view(course, "w9-test", history=[])
-    assert generation.item_statuses(course, view)["c"].detail == ""
+    assert plan_items.item_statuses(course, view)["c"].detail == ""
     page = get(_browser(root), "/c/demo-course/plans/w9-test/").get_data(as_text=True)
     assert "expected 42" not in page and "this batch hides answers" in page
 
@@ -749,12 +749,12 @@ def test_a_note_is_added_to_the_items_notes_for_that_try_only(root, course, monk
 
     assert response.headers["Location"] == "/c/demo-course/plans/w9-test/"
     item = json.loads((draft / "retry-c.json").read_text(encoding="utf-8"))
-    assert item["notes"] == generation.NOTE_PREFIX + note  # the plan's item had no notes
+    assert item["notes"] == plan_items.NOTE_PREFIX + note  # the plan's item had no notes
     assert (draft / "plan.json").read_text(encoding="utf-8") == plan  # the plan as approved
     assert started[0][0] == "Generate c again with a note"
     # The next page starts the next note from this one.
     view = generation.plan_view(course, "w9-test", history=[])
-    assert generation.item_statuses(course, view)["c"].note == note
+    assert plan_items.item_statuses(course, view)["c"].note == note
     page = get(_browser(root), "/c/demo-course/plans/w9-test/").get_data(as_text=True)
     assert "Sum the list from the left." in page
 
@@ -765,9 +765,9 @@ def test_a_note_follows_the_notes_the_plan_gave(course):
     items[2]["notes"] = "check an empty list"
     _write(draft / "plan.json", json.dumps(items))
     view = generation.plan_view(course, "w9-test", history=[])
-    generation.prepare_retry(course, view, "c", note="keep the order")
+    plan_items.prepare_retry(course, view, "c", note="keep the order")
     item = json.loads((draft / "retry-c.json").read_text(encoding="utf-8"))
-    assert item["notes"] == "check an empty list\n" + generation.NOTE_PREFIX + "keep the order"
+    assert item["notes"] == "check an empty list\n" + plan_items.NOTE_PREFIX + "keep the order"
 
 
 @pytest.mark.parametrize("note", ["x" * 2001, "a\x00b", "a\x1bb"])

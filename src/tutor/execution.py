@@ -5,13 +5,15 @@ The child process is isolation from the workspace, not a sandbox: it can still r
 outside its directory and use the network. The container is the sandbox, and a course that asks
 for it never falls back to the host (docs/design.md, "Code execution safety"). Both give the
 same RunResult, so the callers do not know which one ran.
+
+This module decides what runs and what its result means; tutor.processes starts the run's
+processes, ends them all together, and removes its temp dir.
 """
 
 from __future__ import annotations
 
 import os
 import shutil
-import signal
 import stat
 import subprocess
 import sys
@@ -25,10 +27,9 @@ from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
 
-from tutor.container import ContainerError, image_for, image_problem, run_command, runner_uid
-
-if sys.platform == "win32":  # Job Objects stand in for process groups there
-    from tutor import winjob
+from tutor.container import ContainerError, image_for, image_problem, run_command
+from tutor.image_recipe import runner_uid
+from tutor.processes import ContainerRun, ProcessTree, remove_run_tmp
 
 DEFAULT_TIMEOUT_S = 30.0
 REPORT_FILE = "tutor-pytest-report.xml"  # pytest's JUnit XML, written inside the temp dir
@@ -259,7 +260,7 @@ def _run_in(workdir: Path, timeout_s: float, extra_env: Mapping[str, str],
     try:
         return _run_with_env(cmd, workdir, env, timeout_s, script)
     finally:
-        _remove_run_tmp(Path(run_tmp))
+        remove_run_tmp(Path(run_tmp))
 
 
 def _run_in_container(image: str, workdir: Path, timeout_s: float,
@@ -280,7 +281,7 @@ def _run_in_container(image: str, workdir: Path, timeout_s: float,
     # Resolved: on macOS the temp dir's path goes through a link, and Docker shares the target.
     cmd = run_command(image, name, workdir.resolve(), timeout_s, extra_env, command)
     result = _run_with_env(cmd, workdir, os.environ, timeout_s, command if script else None,
-                           make_tree=lambda *args: _ContainerRun(name, *args))
+                           make_tree=lambda *args: ContainerRun(name, *args))
     if result.returncode == _DOCKER_FAILED:
         raise ContainerError(f"docker run failed: {result.output.strip()}")
     if result.returncode == _KILLED:
@@ -289,30 +290,11 @@ def _run_in_container(image: str, workdir: Path, timeout_s: float,
     return result
 
 
-def _remove_run_tmp(path: Path, wait_s: float = 5.0) -> None:
-    """Delete a run's temp dir, retrying for a moment. On Windows the native library a JVM
-    unpacks there (liblz4-java-*.so) could not be deleted for a while after every process
-    of the run had exited (WinError 5; most likely a virus scan of the new file). What is
-    still locked after `wait_s` is left behind, as it was in the shared %TEMP% before."""
-    deadline = time.monotonic() + wait_s
-    while True:
-        try:
-            shutil.rmtree(path)
-            return
-        except FileNotFoundError:
-            return
-        except OSError:
-            if time.monotonic() >= deadline:
-                shutil.rmtree(path, ignore_errors=True)  # delete what it can
-                return
-            time.sleep(0.1)
-
-
 def _run_with_env(cmd: list[str], workdir: Path, env: Mapping[str, str], timeout_s: float,
                   script: list[str] | None, make_tree: Callable | None = None) -> RunResult:
     """Run `cmd` in `workdir` with `env` and turn the result into a RunResult."""
     start = time.monotonic()
-    with (make_tree or _ProcessTree)(cmd, workdir, env) as tree:
+    with (make_tree or ProcessTree)(cmd, workdir, env) as tree:
         proc = tree.proc
         try:
             output, _ = proc.communicate(timeout=timeout_s)
@@ -328,76 +310,6 @@ def _run_with_env(cmd: list[str], workdir: Path, env: Mapping[str, str], timeout
     counts = _read_counts(workdir / REPORT_FILE)
     return RunResult(_outcome(proc.returncode, counts), proc.returncode, duration, output,
                      counts)
-
-
-class _ProcessTree:
-    """The child and every process it starts, killed as one. PySpark starts a JVM under
-    pytest, and killing only pytest would orphan it, still running in the temp dir.
-
-    POSIX: a new session is a new process group, which the child's descendants join, so
-    one killpg reaches them all, even after their parent has exited.
-    Windows has no process groups: a Job Object does the same (tutor/winjob.py). The child
-    is assigned to the job right after it starts; a process it started in that moment
-    would stay outside, but Python takes far longer to start up and import pytest than
-    that, and only then do tests start anything."""
-
-    def __init__(self, cmd: list[str], cwd: Path, env: Mapping[str, str]) -> None:
-        self._job = winjob.Job() if sys.platform == "win32" else None
-        self.proc = subprocess.Popen(
-            # The output is decoded as UTF-8 (what PYTHONIOENCODING makes the child write);
-            # bytes a program wrote some other way are replaced, not a crash.
-            cmd, cwd=cwd, env=env, encoding="utf-8", errors="replace",
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            start_new_session=self._job is None,  # POSIX only; the job replaces it
-        )
-        if self._job is not None:
-            try:
-                self._job.add(self.proc.pid)
-            except OSError:  # not contained, so do not let it run: end it and report
-                self.proc.kill()
-                self.proc.communicate()
-                self._job.close()
-                raise
-
-    def kill(self) -> None:
-        if self._job is not None:
-            self._job.kill()  # returns once every process in the job is gone
-            return
-        try:
-            os.killpg(self.proc.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass  # the whole group has already exited
-
-    def __enter__(self) -> _ProcessTree:
-        return self
-
-    def __exit__(self, *exc: object) -> None:
-        if self._job is not None:
-            self._job.close()  # KILL_ON_JOB_CLOSE: also ends what an exception left running
-
-
-class _ContainerRun(_ProcessTree):
-    """A `docker run` client and its container. Ending the client alone leaves the code
-    running inside (measured with `docker exec`), so the container is killed by name; every
-    process in it ends with it, and `--rm` removes it."""
-
-    def __init__(self, name: str, cmd: list[str], cwd: Path, env: Mapping[str, str]) -> None:
-        self._name = name
-        super().__init__(cmd, cwd, env)
-
-    def kill(self) -> None:
-        if self.proc.poll() is None:  # a client that has exited means the container has too
-            try:
-                subprocess.run(["docker", "kill", self._name], capture_output=True, timeout=30)
-                self.proc.wait(timeout=5)  # lets the client hand over the last output
-            except (OSError, subprocess.TimeoutExpired):
-                pass  # the client is ended below, and the container's `timeout` ends it
-        super().kill()
-
-    def __exit__(self, exc_type: object, *exc: object) -> None:
-        if exc_type is not None:  # Ctrl+C or a crash here: do not leave the container running
-            self.kill()
-        super().__exit__(exc_type, *exc)
 
 
 def _read_counts(report: Path) -> TestCounts | None:

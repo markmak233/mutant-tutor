@@ -1,5 +1,6 @@
 """Generating a batch from the GUI (step 4): the new-batch form's checks, the commands it
-starts, and what a planned batch's files say about where it stands.
+starts, and what a planned batch's files say about where it stands. What each exercise
+of an approved plan came to, and trying one again, is plan_items.py.
 
 Nothing here calls a model or writes a file. The GUI runs the CLI's own commands as tasks
 (tasks.py), the way the owner would in a terminal:
@@ -33,13 +34,11 @@ from __future__ import annotations
 import json
 import re
 import sys
-import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from tutor.config import WORKSPACE_FILE
-from tutor.gui import tasks
-from tutor.gui.courses import Course, valid_verdict
+from tutor.gui import tasks, toml_edit
+from tutor.gui.courses import Course
 from tutor.materials.cache import is_lecture, lecture_caches, lecture_name
 
 # The command, a list so a test can put a stand-in script here.
@@ -274,19 +273,19 @@ def clean_text(text: str) -> str | None:
 def label_taken(course: Course, label: str) -> bool:
     """A batch or a draft has this label, which `plan` would refuse."""
     root = course.workspace.root / "batches"
-    return any(_label_of(p.name) == label
+    return any(label_of(p.name) == label
                for p in [*_dirs(root), *_dirs(root / ".drafts")])
 
 
-def _graph(python: str | None) -> list[str]:
+def graph_command(python: str | None) -> list[str]:
     """`python -m tutor.graph` with the course's interpreter (courses.task_python), whose
     test runs then use it too; GRAPH's own when none is given."""
     return [python or GRAPH[0], *GRAPH[1:]]
 
 
 def plan_command(batch: NewBatch, python: str | None = None) -> list[str]:
-    command = [*_graph(python), "plan", "--lectures", *batch.lectures, f"--batch={batch.label}",
-               f"--mode={batch.mode}", "--set",
+    command = [*graph_command(python), "plan", "--lectures", *batch.lectures,
+               f"--batch={batch.label}", f"--mode={batch.mode}", "--set",
                f"hide_answers={'true' if batch.hide_answers else 'false'}"]
     if batch.count:
         command.append(f"--count={batch.count}")
@@ -305,7 +304,7 @@ def validate_command(label: str, python: str | None = None) -> list[str]:
 
 def resume_command(label: str, approve: bool = False, feedback: str | None = None,
                    python: str | None = None) -> list[str]:
-    command = [*_graph(python), "resume", f"--batch={label}"]
+    command = [*graph_command(python), "resume", f"--batch={label}"]
     if approve:
         command.append("--approve")
     elif feedback is not None:
@@ -364,7 +363,7 @@ def open_plans(course: Course, history: list[tasks.Task] | None = None) -> list[
     without a manifest, and labels a GUI task is planning before their folder exists."""
     history = tasks.list_tasks(course.workspace.root) if history is None else history
     labels = [label for p in _dirs(course.workspace.root / "batches" / ".drafts")
-              if (label := _label_of(p.name)) and (p / "checkpoint.sqlite").is_file()]
+              if (label := label_of(p.name)) and (p / "checkpoint.sqlite").is_file()]
     labels += [t.meta["label"] for t in history
                if t.active and isinstance(t.meta.get("label"), str)]
     views = [plan_view(course, label, history) for label in dict.fromkeys(labels)]
@@ -378,170 +377,12 @@ def _running_state(task: tasks.Task) -> str:
         else CONTINUING
 
 
-# What each exercise of an approved plan came to, shown next to it on the plan page.
-ITEM_VALID, ITEM_INVALID, ITEM_SAVED = "valid", "invalid", "saved, not validated"
-ITEM_DISCARDED, ITEM_ERROR, ITEM_PENDING = "discarded", "error", "not generated yet"
-_ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,79}$")  # a plan id, safe as a file name
-DETAIL_CHARS = 1500  # of the last round's failure shown, enough for pytest's first assertion
-NOTE_PREFIX = "The owner adds, for this try: "  # how a retry's note joins the item's notes
-
-
-@dataclass(frozen=True)
-class ItemStatus:
-    state: str
-    reason: str = ""  # why it did not succeed: the rule that failed, or the error
-    # The last round's failure as the check printed it, so the owner can write a note for
-    # the next try; "" when the batch hides answers, as it can quote expected values.
-    detail: str = ""
-    note: str = ""  # the note the last "Try again with a note" used, to start the next from
-
-    @property
-    def can_retry(self) -> bool:
-        return self.state in (ITEM_DISCARDED, ITEM_ERROR)
-
-
-def item_statuses(course: Course, view: PlanView) -> dict[str, ItemStatus]:
-    """id -> what the exercise came to, once the plan is approved: saved (with its
-    validation.json verdict), discarded or failed with an error (generation.jsonl's last line
-    for it, so a later try counts), or not generated yet. {} before approval."""
-    if view.batch is None or view.state not in (GENERATING, CONTINUING, STOPPED, ASSISTANT,
-                                                GENERATED):
-        return {}
-    batch_dir = course.workspace.root / "batches" / view.batch
-    try:
-        saved = set(json.loads((batch_dir / "manifest.json").read_text(encoding="utf-8"))
-                    .get("exercises", []))
-    except (OSError, ValueError, AttributeError):
-        saved = set()
-    outcomes: dict[str, dict] = {}
-    try:
-        for line in (batch_dir / "generation.jsonl").read_text(encoding="utf-8").splitlines():
-            try:
-                data = json.loads(line)
-            except ValueError:
-                continue
-            if isinstance(data, dict) and isinstance(data.get("exercise"), str):
-                outcomes[data["exercise"]] = data  # the last line wins
-    except OSError:
-        pass
-    statuses = {}
-    for item in view.items:
-        exercise = item.get("id", "")
-        if exercise in saved:
-            valid = valid_verdict(batch_dir, exercise)
-            statuses[exercise] = ItemStatus(ITEM_SAVED if valid is None
-                                            else ITEM_VALID if valid else ITEM_INVALID)
-        elif exercise in outcomes and outcomes[exercise].get("outcome") == "saved":
-            # Saved, but the manifest is written only by `collect`, once every item has
-            # finished: until then (or for good, if the run stopped) it is not in it. Shown as
-            # discarded before, with "Try again" on a stopped run, which would pay for it twice.
-            statuses[exercise] = ItemStatus(ITEM_SAVED)
-        elif exercise in outcomes and outcomes[exercise].get("outcome") == "error":
-            error = str(outcomes[exercise].get("error", ""))
-            statuses[exercise] = ItemStatus(ITEM_ERROR, error[:200],
-                                            note=last_note(view, exercise))
-        elif exercise in outcomes:
-            detail = "" if view.hides_answers else _failure_text(outcomes[exercise])
-            statuses[exercise] = ItemStatus(ITEM_DISCARDED, _failure(outcomes[exercise]),
-                                            detail[:DETAIL_CHARS], last_note(view, exercise))
-        else:
-            statuses[exercise] = ItemStatus(ITEM_PENDING)
-    return statuses
-
-
-def _failure_text(line: dict) -> str:
-    """The last round's failure as generation.jsonl keeps it (the check and its output)."""
-    attempts = [a for a in line.get("attempts", []) if isinstance(a, dict)]
-    return str(attempts[-1].get("failure") or "") if attempts else ""
-
-
-def _failure(line: dict) -> str:
-    """Which check the last round failed, and after how many rounds, in a line; the check's
-    output, which can quote expected values, is ItemStatus.detail, shown only when asked."""
-    text = _failure_text(line)
-    rule = text.split(": ")[0] if text else "it did not pass the checks"
-    if text.startswith("format"):
-        rule = "the reply did not fit the exercise's format"
-    rounds = line.get("rounds", 0)
-    return f"{rule}, after {rounds} repair{'s' if rounds != 1 else ''}"
-
-
-def _note_file(draft: Path, exercise: str) -> Path:
-    """Where a retry's note is kept: beside the item file the retry writes."""
-    return draft / f"retry-{exercise}.note.txt"
-
-
-def last_note(view: PlanView, exercise: str) -> str:
-    """The note the last "Try again with a note" for this exercise used ("" if none)."""
-    if view.draft is None or not _ID.match(exercise):
-        return ""
-    try:
-        return _note_file(view.draft, exercise).read_text(encoding="utf-8")
-    except OSError:
-        return ""
-
-
-def not_succeeded(course: Course, batch: str) -> tuple[PlanView, list[str]] | None:
-    """For a batch page: the plan it was generated from and its exercises that did not come
-    out (discarded or failed), so the page can point to the plan's "Try again" (owner,
-    2026-11-06); None when every one came out, or the batch was not made from a plan."""
-    label = _label_of(batch)
-    view = plan_view(course, label) if label else None
-    if view is None or view.batch != batch:
-        return None
-    missing = [k for k, v in item_statuses(course, view).items() if v.can_retry]
-    return (view, missing) if missing else None
-
-
-def prepare_retry(course: Course, view: PlanView, exercise: str,
-                  python: str | None = None, note: str = "") -> list[list[str]] | None:
-    """The commands that generate one exercise of the plan again and validate it: the graph's
-    `item` command, which adds a saved exercise to the batch's manifest, run with what the
-    batch was planned with (run.json's models and settings), so it matches the others.
-    Writes the plan's item as the command reads it; None when the plan has no such item.
-
-    A note (already checked by clean_text) is added to the item's notes for this try only:
-    plan.json keeps the plan as approved. The notes are the generate prompt's last line, so
-    the cached part before them (the lecture's pages, the example) is unchanged. The note is
-    kept beside the item, so the page can start the next note from it."""
-    if view.draft is None or view.batch is None or not _ID.match(exercise):
-        return None
-    try:
-        plan = json.loads((view.draft / "plan.json").read_text(encoding="utf-8"))
-        run = json.loads((view.draft / "run.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    item = next((i for i in plan if isinstance(i, dict) and i.get("id") == exercise), None)
-    if item is None:
-        return None
-    if note:
-        notes = str(item.get("notes") or "")
-        item = {**item, "notes": (notes + "\n" if notes else "") + NOTE_PREFIX + note}
-        _note_file(view.draft, exercise).write_text(note, encoding="utf-8")
-    path = view.draft / f"retry-{exercise}.json"
-    path.write_text(json.dumps(item, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
-    flags = [f"--{name.replace('_', '-')}={value}"
-             for name, value in run.get("profiles", {}).items()
-             if name in ("profile", "oracle_profile", "repair_profile") and value]
-    for name, value in run.get("settings", {}).items():
-        if value is not None:
-            flags.append(f"--set={name}={str(value).lower() if isinstance(value, bool) else value}")
-    batch_dir = course.workspace.root / "batches" / view.batch
-    return [[*_graph(python), "item", str(path), f"--batch={view.label}", *flags],
-            validate_one_command(python, batch_dir / "exercises" / exercise,
-                                 batch_dir / "solutions" / exercise)]
-
-
-def validate_one_command(python: str | None, exercise: Path, solution: Path) -> list[str]:
-    """`python -m tutor.validation` on one exercise, which writes its validation.json."""
-    return [python or GRAPH[0], "-m", "tutor.validation", str(exercise), str(solution)]
-
 
 def _draft(course: Course, label: str) -> Path | None:
     """The label's draft folder made by `plan` (it holds checkpoint.sqlite), the newest if
     several, as `resume` picks it."""
     found = sorted(p for p in _dirs(course.workspace.root / "batches" / ".drafts")
-                   if _label_of(p.name) == label and (p / "checkpoint.sqlite").is_file())
+                   if label_of(p.name) == label and (p / "checkpoint.sqlite").is_file())
     return found[-1] if found else None
 
 
@@ -592,17 +433,13 @@ def _settings(draft: Path) -> dict:
     return {k: settings[k] for k in ("mode", "hide_answers") if k in settings}
 
 
-def _label_of(name: str) -> str | None:
+def label_of(name: str) -> str | None:
     match = _DRAFT.match(name)
     return match.group(1) if match else None
 
 
 def _toml(course: Course) -> dict:
-    try:
-        with (course.workspace.root / WORKSPACE_FILE).open("rb") as f:
-            return tomllib.load(f)
-    except (OSError, tomllib.TOMLDecodeError):
-        return {}
+    return toml_edit.read(course.workspace.root)
 
 
 def _usable(name: str) -> bool:

@@ -62,11 +62,12 @@ container for isolation is fine; deploying the tool as a service is not.
   material names more than one Spark version, and the version is pinned per workspace in
   `workspace.toml` anyway, so another course's materials can choose differently). Spark 4.x enables ANSI SQL mode by default,
   which changes DataFrame/SQL error behaviour (casts, overflow, divide by zero); RDD API is unaffected.
-  mrjob is no longer actively maintained: works on 3.11, do not move past 3.12. On 3.12 it
-  also needs setuptools installed: mrjob imports `distutils`, removed in 3.12, and only
-  setuptools' shim provides it (3.12 venvs no longer include setuptools). Found by the first
-  CI run, 2026-10-26; with setuptools, fast and spark suites (Hadoop included) pass on 3.12.10.
-  (Confirmed: on Python 3.13 mrjob tasks fail with `No module named 'pipes'`.)
+  mrjob is no longer actively maintained: it imports `distutils` (removed in 3.12) and `pipes`
+  (removed in 3.13). Found by the first CI run, 2026-10-26, and on 3.13. Since 2026-11-08 the
+  `bigdata` extra, a course's `.venv` and its image add setuptools (whose shim provides
+  `distutils`) and standard-pipes (the removed module as it was) where the Python needs them
+  (see "Version conflicts"); fast and spark suites (Hadoop included) pass on 3.12.10 and
+  3.13.3. PySpark 3.5 does not work on 3.14, and a course asking for both is refused.
 - Big data course Hadoop: 3.3.6 standalone (the 3.3 line the course uses), Apache tarball
   unpacked to `~/opt/hadoop-3.3.6`, located via `HADOOP_HOME` in `.env`. Not `brew install hadoop`:
   its `yarn` binary clashes with the JavaScript `yarn`. Runs on Java 17, so one JDK serves
@@ -154,7 +155,7 @@ smartCodingReview/                       # public repo (the `tutor/` above), cod
 ├── notes/                               # git-ignored local notes (course memory, research)
 ├── docs/setup/bigdata.md                # per-course install guide (system deps, .env, pitfalls)
 ├── pyproject.toml                       # P1, per-course extras e.g. [bigdata]
-├── .github/workflows/ci.yml             # fast tests 3.11 + gitleaks on main; spark by hand
+├── .github/workflows/ci.yml             # fast tests 3.11-3.14, macOS/Windows, docker, gitleaks; spark by hand
 ├── .gitignore                           # P1, includes *workspace*/ as a backstop
 ├── .env.example                         # P1, WORKSPACE_DIR=..., HADOOP_HOME=...
 ├── .pre-commit-config.yaml              # P1, gitleaks
@@ -164,6 +165,8 @@ smartCodingReview/                       # public repo (the `tutor/` above), cod
 │   ├── envcheck.py                      # P1 checks the workspace's [requires]; owns its rules
 │   ├── workspace.py                     # creates a course workspace: folder, .venv, terminal files
 │   ├── execution.py                     # P1 copy to temp dir -> subprocess pytest -> delete
+│   ├── processes.py                     # a run's processes, ended together (process group / Job Object)
+│   ├── container.py                     # the test image: build, run limits, status; image_recipe.py its Dockerfile
 │   ├── validation/                      # P1 the checks; P2 rule 0, P3a the safety check (internals designed before coding); C: csource.py
 │   ├── testkit.py                       # P2a run a file-level program, read part-*, compare output
 │   ├── testkit_c.py                     # C exercises' tests: compile once, run, sanitizers
@@ -173,7 +176,11 @@ smartCodingReview/                       # public repo (the `tutor/` above), cod
 │   │                                    #   P3 parses LLM output into the same models
 │   ├── materials/                       # P3a course files -> per-file md cache (pypdfium2), vision pages; [requires] draft
 │   ├── llm.py                           # P3a thin OpenAI-compatible client, standard library only, no LangChain
-│   ├── graph/                           # P3 langgraph dependency added here; languages.py: per-language profiles
+│   ├── graph/                           # P3 langgraph dependency added here; languages.py: per-language profiles;
+│   │                                    #   nodes.py an item's nodes, oracle.py, drafts.py, batch.py, build.py the wiring;
+│   │                                    #   prompts.py the templates, prompt_parts/ one module per language
+│   ├── gui/                             # P7 the local web GUI: app.py the request checks, routes/ one module per
+│   │                                    #   page area, the other modules what each page reads and writes
 │   ├── retrieval/                       # P4 the page corpus, labels, scores and each route
 │   └── eval/                            # P5 a report from the pipeline's own records, no model calls
 ├── examples/                            # P1 synthetic only, same shape as a real exercise
@@ -896,8 +903,9 @@ plan -> [interrupt: owner approves / edits, adds preferences] -> for each plan i
 ```
 
 Design approved 2026-10-28 (owner):
-- Pluggable: nodes are plain functions (state in, partial state out) in `graph/nodes.py`,
-  calling `tutor.llm`; only `graph/build.py` imports `langgraph` (optional dependency group
+- Pluggable: nodes are plain functions (state in, partial state out), calling `tutor.llm`:
+  an item's in `graph/nodes.py`, the oracle's in `oracle.py`, a round's draft and its
+  validation in `drafts.py`, the batch's in `batch.py` (one file until 2026-11-08); only `graph/build.py` imports `langgraph` (optional dependency group
   `gen`), and nothing outside `graph/` depends on it. No LangChain. LangGraph is used for
   what is tedious by hand: interrupt and resume with a SQLite checkpointer in the workspace
   (approve the plan tomorrow), conditional edges, and state history for debugging.
@@ -2216,8 +2224,9 @@ themselves, so a cheap layer comes first and a stronger one later.
       version per language). `prompts.SPEC`, `PLAN_TEMPLATE` and `ORACLE_TEMPLATE` hold
       `{slots}` where a language differs (the rules, where the question goes, the tests, the
       reference, the main rule, the misconception shown, test data, how to test the "how",
-      the code rules); `PYTHON_PARTS` and `C_PARTS` fill them, and a new language adds its
-      parts, a profile (`graph/languages.py`: its plan and draft models, their schemas, where
+      the code rules); each language's `LanguagePrompts` fills them (`graph/prompt_parts/`:
+      `python.py`, `c.py`; one module per language since 2026-11-08), and a new language adds its
+      parts module, a profile (`graph/languages.py`: its plan and draft models, their schemas, where
       the question is) and a synthetic example. This keeps the decision that calibrated
       prompts stay as they are: Python's parts are its old text cut out of it by a script, not
       retyped, and before the change 35 outputs (system prompts with every option, item, repair
@@ -2321,6 +2330,103 @@ themselves, so a cheap layer comes first and a stronger one later.
     user's machine and not published, so the GPL's terms for distributing (bash, gcc, R,
     Octave) do not arise; publishing images would bring them.
 
+## Version conflicts
+
+Decided 2026-11-08 (owner), when Python 3.12 to 3.14 came into CI: a package that installs and
+imports cleanly can still fail when a job runs, because a newer Python removed something it
+uses (mrjob: `distutils` in 3.12, `pipes` in 3.13) or changed what it relies on (PySpark 3.5
+on 3.14: every RDD job fails with a `PicklingError`). The same kind of conflict comes with
+every language and framework, so one way of handling them:
+- Ask the tool first. What a tool can tell (a compiler about its flags, a JDK about its
+  release, pip about what a package declares) is probed, never written down: a probe cannot go
+  stale. Languages' own package managers (Maven, Cargo, npm) resolve their libraries; the
+  project handles only the runtime's version.
+- Then a rule, for what only fails late: `tutor/compat.py`. A companion is a pip package that
+  must come with a `[requires]` package from some Python on (mrjob: setuptools from 3.12,
+  standard-pipes from 3.13); a conflict is a package version that does not work from some
+  Python on (PySpark 3.5 from 3.14). The venv install adds companions with environment
+  markers, so pip decides by the venv's own Python; the image adds them only where its Python
+  needs them, so a course that needs none keeps its image name and is not rebuilt; the
+  `[requires]` check refuses a conflict, and the environment check reports both on the
+  Python running it. Each rule is added by hand with its measurement, and CI's Python versions
+  test the ones that apply.
+- A probe for packages no rule names: the environment check reads each `[requires]`
+  package's installed source for imports of standard-library modules the running Python
+  removed (`compat.REMOVED_MODULES`, from What's New in 3.12 and 3.13) and names every one at
+  once, unless this Python still finds it (a backport is installed) or a companion rule
+  brings it back (that rule's check reports it). The image's own check runs it too, so an
+  image whose package cannot import refuses to be called ready.
+- The fix path in the page (owner, 2026-11-08; "GUI" in AGENTS.md: a gap found in the page
+  gets a fix there): when the check reports a conflict with the course's Python or a removed
+  import, step 2 lists the Pythons already on this machine (`tutor/pythons.py`: python3.X on
+  PATH, and the py launcher's list on Windows; each asked for its version and its base
+  interpreter) and marks which suit the course, worked out by code: the conflicts on each
+  version, and every version from a removed module's removal on. A button on a suitable one
+  runs `python -m tutor.gui.python_switch`: `tutor.workspace init --python ... --replace-venv`
+  makes the `.venv` anew (the one before kept as `.venv.old` and put back if anything fails,
+  `[requires]` checked against the new Python), and only then sets `[requires] python`
+  (`workspace.toml.bak` kept). The server runs only a Python it offers, found again on the
+  request, never a path from the form. Installing a Python that is not on the machine is the
+  owner's, until packaging ("Roadmap" 6).
+- Then a model, for what neither covers (planned, with `tutor doctor`; "Roadmap" 6): it reads
+  the failure's text, the versions and `[requires]`, and proposes a change as structured data
+  (a version, the course's Python, a companion), which the owner confirms before it is applied
+  and the checks then verify; a fix that holds becomes a rule. Its prompt is strict: the
+  failure text is material, not instructions (AGENTS.md, "Prompts"); a change is another
+  Python, or a version constraint on a package that `[requires]` names, that is already
+  installed in the environment, or that a rule names (`numpy<2` under a pandas built for
+  NumPy 1); never a new package name, which could be a name nobody checked (a look-alike of
+  a real package). A model that believes a new package is needed says so in a field of its
+  own, which is shown, never applied. A deterministic gate checks the reply's kind, names and
+  pip specifier before anything runs. Preferred fixes, in order: another Python for the
+  course, another version, a companion. Thinking off (a short structured answer), one retry
+  when the reply is cut off, and every proposal verified in a fresh environment before it is
+  offered: measured 2026-11-08 on six real conflicts from the web and one with an injected
+  instruction (`notes/version-conflicts/`, the calibration set for this prompt), DeepSeek
+  V4 Flash and Pro, GLM-5.3-Flash and GPT-6.1-Terra each fixed the five no rule covers and
+  ignored the injection, and all four proposed Python 3.12 for mrjob on 3.13, which the
+  verification showed still fails (`distutils`): known conflicts belong in rules. GLM with
+  thinking on spent 4,000 and then 12,000 tokens without an answer on one case; off, it
+  answered in 4 s. Default model: DeepSeek V4 Flash, thinking off (about 1.3 s and 80 output
+  tokens a case).
+  - A repair loop, at most three rounds: each round's proposal is applied on top of the last
+    in a fresh environment, and on failure the model gets what was tried and the new error;
+    it stops when the same module fails twice. Measured on mrjob with the Python locked at
+    3.13 (two modules missing): every model needed two rounds, one module each. Asking it to
+    recall first what the Python version changed (owner's idea) barely helped: a model does not
+    know what a package imports, and recalled some removals in the wrong version. Given the
+    probe's findings above as facts instead, every model fixed it in one round. So the prompt
+    gets facts code can find (the probe, the rules that name the course's packages, the
+    failing package's last release), never a request to recall them.
+  - The packages a change may name are the course's `[requires]`, what is installed, and the
+    companions the rules give for the course's own packages: never every name a rule holds,
+    since models reached for an unrelated one (standard-pipes against a missing `audioop`)
+    and copied its naming (`standard-audioop`).
+  - A new package name is shown with PyPI's facts (whether it exists, its first release, how
+    many) and asked of a second model, never applied. Measured: for pydub on 3.13, which
+    needs `audioop-lts`, both DeepSeek models named `pyaudioop` (the module in the error
+    message) and GLM once `standard-audioop`; neither exists on PyPI, so anyone could
+    register them. GPT-6.1-Terra named `audioop-lts` every time.
+  - Two tiers (owner, 2026-11-08): the repair rounds run with thinking off, fast and cheap;
+    when the model stops and names a new package (rare), it is asked again with thinking on,
+    and a second model is asked too. Only a name both give, which PyPI has, is shown to the
+    owner, as above. Measured with the probe's facts in the prompt: thinking changed nothing on
+    mrjob (one round either way, 4 to 13 times slower on), but DeepSeek V4 Flash and
+    GLM-5.3-Flash named `audioop-lts` with thinking on and a wrong name or none with it off;
+    DeepSeek V4 Pro, thinking on, still said `pyaudioop`. One run each, so the second model
+    is the check, not thinking alone. On a course that runs on the host,
+  the GUI and the command line both say plainly that a package was recommended by a model
+  before it is installed (owner): in a container it reaches only the image, on the host the
+  owner's machine. System software (a JDK, Hadoop, a compiler) is never installed: the model
+  only turns a failure into the steps for this platform.
+- Each language's profile brings three things for this: its step in the image recipe, its
+  probes run in the image after a build (`container._check_inside`; C: compile a small program
+  with the course's flags and run it under the sanitizers, added when C is next changed), and
+  its part of the rules, which may be empty.
+- The container keeps the problem small: an image is one Debian release with a few toolchain
+  versions, which CI can test; the host's own versions matter only to a course run on the
+  host.
+
 ## CI
 
 GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going public):
@@ -2328,10 +2434,16 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
   and by hand (`workflow_dispatch`), not on every `dev` push: each step is already checked
   locally with `pytest` and `ruff check .`, and the badge then shows the state of `main`,
   the branch visitors see.
-- `test`: Python 3.11, `ruff check .` and the fast `pytest`. The first run also had 3.12,
-  which failed on mrjob's `distutils` import (see "Environment"); the owner dropped it from
-  CI for now (2026-10-26), since 3.11 is what the project uses. To bring it back, add
-  `setuptools` to the `bigdata` extras and 3.12 to the matrix.
+- `test`: Python 3.11, 3.12, 3.13 and 3.14, `ruff check .` and the fast `pytest`. The first
+  run also had 3.12, which failed on mrjob's `distutils` import (see "Environment"), and the
+  owner dropped it (2026-10-26). Brought back with 3.13 and 3.14 (owner, 2026-11-08): the
+  `bigdata` extra now brings setuptools (`distutils`) and, from 3.13, `standard-pipes`, and
+  `requires-python` lost its `<3.13`. Measured locally first, fast suite and `-m spark`
+  (mrjob, PySpark 3.5.9 and Hadoop) on each. 3.15 waits until the dependencies have wheels
+  for it. Only `test` runs every version; `other-os`, `docker` and `spark` stay on 3.11.
+  `test` and `other-os` install the `gen` extra too, and run `pytest -rs`: without langgraph
+  the graph's tests skipped there, 28 skips a job on the first 3.11-3.14 run (2026-11-08),
+  among them all of `tests/test_graph_cli.py`.
   No JDK: run in a clean clone with a fake `java` that logs every call, the fast suite
   started no JVM (2026-10-26).
 - `other-os` (owner, 2026-11-08, "Roadmap" 6.1): the same fast suite on `macos-latest` and
@@ -2841,6 +2953,24 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
       **done 2026-11-08** (see "CI").
    2. A little refactoring of the files over 500 lines (`gui/app.py`, `graph/nodes.py`,
       `graph/prompts.py`, ...), planned and explained first; the prompt pins must still pass.
+      **Done 2026-11-08** (owner's rule since: a file past 300 lines is watched, from 500 a
+      split is considered, AGENTS.md). Code moved as it was, by line range, one commit per
+      file: `gui/app.py` 1281 -> 155 (routes into `gui/routes/`, one module per page area,
+      still registered on the app, so no endpoint name changed); `graph/nodes.py` 1060 -> 421
+      (`oracle.py`, `drafts.py`, `batch.py`; the prompt pins still match);
+      `gui/environment.py` 663 -> 471 (`languages_page.py`); `gui/generation.py` 618 -> 455
+      (`plan_items.py`: each exercise's status and Try again); `gui/lectures.py` 559 -> 432
+      (`course_setup.py`). Then the files that later steps would push past 500 (owner): the
+      prompts by language, as a third one is coming (`graph/prompt_parts/`, `prompts.py`
+      672 -> 396; every Python and C prompt byte for byte as before, 240 outputs compared);
+      `execution.py` 440 -> 350 (`processes.py`), with room for `tutor test`; `container.py`
+      432 -> 280 (`image_recipe.py`), with room for the build record. `graph/__main__.py`'s
+      100-line `_batch` became `_new_batch`, `_resumed_batch`, `_advance` and
+      `_owner_decision`, after tests of it were written against the old code
+      (`tests/test_graph_cli.py`; it had none). Left whole, each one job:
+      `validation/checks.py` (611, the rules in order), `graph/__main__.py` (546, the command
+      line), `eval/report.py` (505), `llm.py` (504), `testkit.py` (472: exercises import it by
+      name, and saved exercises depend on it).
    3. `tutor test`: the learner's tests in the course's image, as validation runs them, from
       the IDE's terminal: live output, attempts and snapshots written on the host from the
       result, and a time limit (an exception to "No timeout on the learner's own `pytest`
@@ -2862,6 +2992,14 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
    (checks the tool, that Docker runs, the course's image, then validates one example in the
    course's runner as a smoke test, and says what to do next for each failure) and a fresh
    install timed on macOS, Windows and Linux; Docker on Windows is first tested there.
+   `tutor doctor` also brings the model that turns an install failure no rule covers into a
+   proposed fix, under the limits in "Version conflicts" (owner, 2026-11-08: with doctor, not
+   before: most of its fixes need another Python or a version bound `[requires]` cannot
+   write yet, and doctor runs before any course, so it needs a model of its own). And uv
+   offers the Pythons the machine lacks in the Environment page's switch (`uv python
+   install`, into the user's folder, no administrator rights); whether that counts as
+   installing system software, which `tutor doctor` never does, is the owner's to decide
+   then.
    Later, each when its trigger comes: a JDK instead of a JRE in the image (a course that
    compiles Java in it); a separate execution backend (a third runner such as Podman; until
    then the host or container switch in `execution.py` is enough); VS Code Dev Containers on

@@ -40,16 +40,9 @@ from pydantic import ValidationError
 from tutor.config import WORKSPACE_FILE, WorkspaceError, load_env, load_workspace
 from tutor.container import ContainerError, check_course
 from tutor.exchange import AwaitingAnswer
+from tutor.graph.batch import blocking_problems, existing_ids, latest_results, write_manifest
 from tutor.graph.languages import course_language, profile_of
-from tutor.graph.nodes import (
-    Deps,
-    blocking_problems,
-    check_round,
-    existing_ids,
-    latest_results,
-    reusing_reports,
-    write_manifest,
-)
+from tutor.graph.nodes import Deps, check_round, reusing_reports
 from tutor.graph.settings import (
     DEFAULTS,
     DEPS_FIELDS,
@@ -59,7 +52,6 @@ from tutor.graph.settings import (
 )
 from tutor.llm import LLMError, config_for, roles
 
-_CONTINUE = object()  # resume a run that stopped midway (nothing new to send)
 WAITING = 3  # exit code: assistant requests wait for an answer (assistant mode)
 # Flags that choose a model for a role: kept with the batch, outside the settings.
 _PROFILE_FLAGS = ("profile", "plan_profile", "oracle_profile", "repair_profile")
@@ -284,70 +276,39 @@ def _item(args, workspace: Path, build) -> int:
 
 
 def _batch(args, workspace: Path, build) -> int:
+    """`plan` or `resume`: run the batch's graph until it ends or pauses, for the owner (the
+    plan) or for an assistant's answers (assistant mode). The graph's state is in the batch's
+    checkpoint.sqlite, so each pause ends this process and a later `resume` goes on."""
     from langgraph.checkpoint.sqlite import SqliteSaver
     from langgraph.types import Command
 
     drafts = workspace / "batches" / ".drafts"
     if args.command == "plan":
-        if list((workspace / "batches").glob(f"*_p3-{args.batch}")) or list(
-                drafts.glob(f"*_p3-{args.batch}/checkpoint.sqlite")):
-            raise ValueError(f"a batch labelled {args.batch} exists: resume it or choose "
-                             "another label")
-        batch_dir = workspace / "batches" / f"{date.today()}_p3-{args.batch}"
-        # Resolved once here and saved: the whole batch runs with the same values, even
-        # if [generation] changes before a resume.
-        profiles, settings = _profiles(args), resolve(workspace, _given(args))
-        (drafts / batch_dir.name).mkdir(parents=True)
-        _write_run(drafts / batch_dir.name / "run.json", profiles, settings)
-        pending = {"lectures": args.lectures, "preferences": args.prefs,
-                   "count": args.count, "max_count": settings.max_count}
+        batch_dir, profiles, settings, pending = _new_batch(args, workspace, drafts)
     else:
-        found = sorted(drafts.glob(f"*_p3-{args.batch}/checkpoint.sqlite"))
-        if not found:
-            raise ValueError(f"no planned batch labelled {args.batch}")
-        batch_dir = workspace / "batches" / found[-1].parent.name
-        run_file = found[-1].parent / "run.json"
-        profiles, settings = _read_run(run_file)
-        # e.g. finish a batch with another model, or with one more repair round; the
-        # changes are saved, so later resumes keep them.
-        new_profiles, given = _profiles(args), _given(args)
-        if new_profiles or given:
-            profiles.update(new_profiles)
-            settings = resolve(workspace, given, base=settings)
-            _write_run(run_file, profiles, settings)
-        pending = None  # set by the owner's decision below
+        batch_dir, profiles, settings = _resumed_batch(args, workspace, drafts)
+        pending = None  # nothing new: the graph goes on from where it is
     _show_settings(settings)
     deps = _deps(workspace, batch_dir, profiles, settings)
     parallel = settings.parallel or default_parallel()
     config = {"configurable": {"thread_id": batch_dir.name}, "max_concurrency": parallel}
     with SqliteSaver.from_conn_string(str(deps.drafts / "checkpoint.sqlite")) as saver:
         app = build.build_batch(deps, saver)
-        decision = ({"approve": True} if getattr(args, "approve", False)
-                    else {"feedback": args.feedback} if getattr(args, "feedback", None) else None)
+        # The owner's answer given as a flag; it answers the first pause at the plan only.
+        flag = ({"approve": True} if getattr(args, "approve", False)
+                else {"feedback": args.feedback} if getattr(args, "feedback", None) else None)
         # Assistant mode: a resume first tells a batch paused for answers to go on, once;
         # if it pauses again in the same run, the new requests are reported instead.
         answered = args.command != "resume"
+        # Each turn runs the graph until it stops, then sends what that stop waits for.
         while True:
             try:
-                if pending is not None and pending is not _CONTINUE:
-                    for update in app.stream(pending, config, stream_mode="updates"):
-                        if "plan" in update:
-                            print(f"plan: {len(update['plan']['plan'])} items", flush=True)
-                snapshot = app.get_state(config)
-                if snapshot.next and not any(task.interrupts for task in snapshot.tasks):
-                    # Not waiting for the owner: an earlier run stopped midway. Continue it;
-                    # items that finished keep their results and are not run again.
-                    print(f"continuing the stopped run at: {', '.join(snapshot.next)}",
-                          flush=True)
-                    pending = _CONTINUE
-                    for _ in app.stream(None, config, stream_mode="updates"):
-                        pass
-                    continue
+                snapshot = _advance(app, pending, config)
             except AwaitingAnswer as e:
                 # The plan itself waits for an assistant (items catch their own requests):
                 # the batch stops here and `resume` replays the plan call once answered.
                 return _report_waiting([e.request_id], args.batch)
-            if not snapshot.next:
+            if not snapshot.next:  # ended: every item has its result
                 return _summary(snapshot.values.get("results", []), batch_dir, workspace)
             if requests := _waiting_requests(snapshot):
                 if answered:
@@ -355,34 +316,103 @@ def _batch(args, workspace: Path, build) -> int:
                 answered = True
                 pending = Command(resume={"answered": True})
                 continue
-            plan_file = deps.drafts / "plan.json"
-            plan, edited = _owner_plan(deps.drafts, snapshot.values["plan"])
-            problems = (blocking_problems(deps.profile.batch_plan.model_validate(
-                {"items": plan}).items,
-                                          snapshot.values["lectures"], existing_ids(workspace))
-                        if edited else snapshot.values.get("plan_problems", []))
-            _show_plan(plan, problems, plan_file, workspace)
-            if edited:
-                print(f"{plan_file.name} differs from the model's latest plan; approving uses "
-                      f"{plan_file.name} (delete it to take the model's plan)", flush=True)
-            answer = decision or _ask()
-            decision = None  # a flag answers once
-            if answer is None:
+            # Paused at the plan: the owner's turn.
+            pending = _owner_decision(snapshot, deps, workspace, flag, parallel)
+            flag = None
+            if pending is None:
                 print(f"Paused. Continue with: python -m tutor.graph resume --batch "
                       f"{args.batch} --approve   (or --feedback \"...\")")
                 return 0
-            if answer.get("approve"):
-                plan = json.loads(plan_file.read_text(encoding="utf-8"))  # with the owner's edits
-                items = deps.profile.batch_plan.model_validate({"items": plan}).items
-                if found := blocking_problems(items, snapshot.values["lectures"],
-                                              existing_ids(workspace)):
-                    raise ValueError(f"{plan_file.name} cannot be approved: {'; '.join(found)}."
-                                     " Fix it, then resume with --approve again")
-                pending = Command(resume={"action": "approve", "plan": plan})
-                print(f"generating {len(plan)} items, {parallel} at a time",
-                      flush=True)
-            else:
-                pending = Command(resume={"action": "revise", "feedback": answer["feedback"]})
+
+
+def _new_batch(args, workspace: Path, drafts: Path) -> tuple[Path, dict, GenerationSettings,
+                                                              dict]:
+    """`plan`: the new batch's folder, its models and settings (saved in its run.json), and
+    the graph's first input. A label already used, by a batch or a plan, is refused."""
+    if list((workspace / "batches").glob(f"*_p3-{args.batch}")) or list(
+            drafts.glob(f"*_p3-{args.batch}/checkpoint.sqlite")):
+        raise ValueError(f"a batch labelled {args.batch} exists: resume it or choose "
+                         "another label")
+    batch_dir = workspace / "batches" / f"{date.today()}_p3-{args.batch}"
+    # Resolved once here and saved: the whole batch runs with the same values, even
+    # if [generation] changes before a resume.
+    profiles, settings = _profiles(args), resolve(workspace, _given(args))
+    (drafts / batch_dir.name).mkdir(parents=True)
+    _write_run(drafts / batch_dir.name / "run.json", profiles, settings)
+    first = {"lectures": args.lectures, "preferences": args.prefs,
+             "count": args.count, "max_count": settings.max_count}
+    return batch_dir, profiles, settings, first
+
+
+def _resumed_batch(args, workspace: Path, drafts: Path) -> tuple[Path, dict,
+                                                                  GenerationSettings]:
+    """`resume`: the planned batch's folder, and its models and settings from run.json, with
+    what this command's flags change saved there for later resumes."""
+    found = sorted(drafts.glob(f"*_p3-{args.batch}/checkpoint.sqlite"))
+    if not found:
+        raise ValueError(f"no planned batch labelled {args.batch}")
+    batch_dir = workspace / "batches" / found[-1].parent.name
+    run_file = found[-1].parent / "run.json"
+    profiles, settings = _read_run(run_file)
+    # e.g. finish a batch with another model, or with one more repair round; the
+    # changes are saved, so later resumes keep them.
+    new_profiles, given = _profiles(args), _given(args)
+    if new_profiles or given:
+        profiles.update(new_profiles)
+        settings = resolve(workspace, given, base=settings)
+        _write_run(run_file, profiles, settings)
+    return batch_dir, profiles, settings
+
+
+def _advance(app, pending, config):
+    """Run the graph with `pending` (the first input, or the answer to the pause it is at;
+    None: nothing new), and return its state once it has ended or paused. A run an earlier
+    process left midway (stopped, not paused) is continued first: items that finished keep
+    their results and are not run again. An assistant request the plan call waits for is
+    raised (AwaitingAnswer)."""
+    if pending is not None:
+        for update in app.stream(pending, config, stream_mode="updates"):
+            if "plan" in update:
+                print(f"plan: {len(update['plan']['plan'])} items", flush=True)
+    snapshot = app.get_state(config)
+    # Tasks to run with no interrupt among them: not waiting for anyone, so go on.
+    while snapshot.next and not any(task.interrupts for task in snapshot.tasks):
+        print(f"continuing the stopped run at: {', '.join(snapshot.next)}", flush=True)
+        for _ in app.stream(None, config, stream_mode="updates"):
+            pass
+        snapshot = app.get_state(config)
+    return snapshot
+
+
+def _owner_decision(snapshot, deps: Deps, workspace: Path, flag: dict | None, parallel: int):
+    """The batch waits for the owner at the plan: show it as plan.json holds it (with the
+    owner's edits), with what its check found, then take the answer: `flag`, else asked in
+    the terminal. Returns the Command that resumes the graph, or None to pause. A plan.json
+    with a blocking problem is not approved (ValueError)."""
+    from langgraph.types import Command
+
+    plan_file = deps.drafts / "plan.json"
+    plan, edited = _owner_plan(deps.drafts, snapshot.values["plan"])
+    # The model's plan was checked when it was made; an edited one is checked here.
+    problems = (blocking_problems(deps.profile.batch_plan.model_validate({"items": plan}).items,
+                                  snapshot.values["lectures"], existing_ids(workspace))
+                if edited else snapshot.values.get("plan_problems", []))
+    _show_plan(plan, problems, plan_file, workspace)
+    if edited:
+        print(f"{plan_file.name} differs from the model's latest plan; approving uses "
+              f"{plan_file.name} (delete it to take the model's plan)", flush=True)
+    answer = flag or _ask()
+    if answer is None:
+        return None
+    if not answer.get("approve"):
+        return Command(resume={"action": "revise", "feedback": answer["feedback"]})
+    plan = json.loads(plan_file.read_text(encoding="utf-8"))  # with the owner's edits
+    items = deps.profile.batch_plan.model_validate({"items": plan}).items
+    if found := blocking_problems(items, snapshot.values["lectures"], existing_ids(workspace)):
+        raise ValueError(f"{plan_file.name} cannot be approved: {'; '.join(found)}."
+                         " Fix it, then resume with --approve again")
+    print(f"generating {len(plan)} items, {parallel} at a time", flush=True)
+    return Command(resume={"action": "approve", "plan": plan})
 
 
 def _waiting_requests(snapshot) -> list[str]:

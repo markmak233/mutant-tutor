@@ -7,19 +7,15 @@ import pytest
 
 from tutor.config import Workspace
 from tutor.container import (
-    HADOOP_MIRRORS,
-    HADOOP_RELEASES,
     ContainerError,
     build,
     docker_problem,
-    dockerfile,
-    image_name,
     image_size,
     image_status,
     limits,
     main,
-    runner_uid,
 )
+from tutor.image_recipe import HADOOP_MIRRORS, HADOOP_RELEASES, dockerfile, image_name, runner_uid
 
 SPARK_COURSE = {"python": "3.11", "java": "17", "pyspark": "3.5", "mrjob": "0.7", "hadoop": "3.3"}
 PLAIN_COURSE = {"python": "3.11"}
@@ -126,7 +122,7 @@ def test_the_image_name_follows_the_recipe_and_not_this_machines_versions(monkey
     assert image_name("Demo Course_1", {**SPARK_COURSE, "pyspark": "3.4"}, uid=501) != first
     assert image_name("Demo Course_1", SPARK_COURSE, uid=1000) != first  # another user's image
     # Two venvs of one course hold different pytest versions; neither may call it out of date.
-    monkeypatch.setattr("tutor.container._installed_version", lambda name: "1.2.3")
+    monkeypatch.setattr("tutor.image_recipe.installed_version", lambda name: "1.2.3")
     assert image_name("Demo Course_1", SPARK_COURSE, uid=501) == first
 
 
@@ -223,7 +219,7 @@ def test_the_recipe_command_prints_what_a_build_would_send(monkeypatch, capsys, 
                                              encoding="utf-8")
     monkeypatch.chdir(tmp_path)  # no .env here
     monkeypatch.setenv("WORKSPACE_DIR", str(tmp_path))
-    monkeypatch.setattr("tutor.container._installed_version",
+    monkeypatch.setattr("tutor.image_recipe.installed_version",
                         {"pytest": "9.1.1"}.get)
 
     assert main(["recipe"]) == 0

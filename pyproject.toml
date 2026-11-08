@@ -10,8 +10,9 @@ description = "AI-assisted coding practice: generated exercises, deterministic v
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
-# mrjob is unmaintained and breaks on 3.13 (no `pipes` module); see docs/design.md.
-requires-python = ">=3.11,<3.13"
+# Tested in CI on 3.11 to 3.14 (docs/design.md, "CI"). No upper bound: a cap makes pip and uv
+# look for an older release instead of saying what fails; untested versions are named in CI.
+requires-python = ">=3.11"
 # pydantic: the batch format (schema.py), checked by validation rule 0. pypdfium2 + pillow:
 # reading course PDFs into the materials cache (docs/design.md, "Reading files").
 dependencies = ["pydantic>=2,<3", "pypdfium2>=5,<6", "pillow>=10"]
@@ -20,6 +21,11 @@ dependencies = ["pydantic>=2,<3", "pypdfium2>=5,<6", "pillow>=10"]
 bigdata = [
     "pyspark>=3.5,<3.6",
     "mrjob==0.7.4",
+    # mrjob is unmaintained and imports modules newer Pythons removed: `distutils` (3.12),
+    # which setuptools' shim provides, and `pipes` (3.13), which standard-pipes, the
+    # removed module as it was, brings back (docs/design.md, "Environment").
+    "setuptools",
+    "standard-pipes; python_version >= '3.13'",
 ]
 # The phase 3 generation pipeline (python -m tutor.graph) and phase 4's agent route; only
 # tutor/graph/build.py, its CLI and tutor/retrieval/agent.py import it. It pulls in

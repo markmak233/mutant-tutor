@@ -31,7 +31,7 @@ from langgraph.types import Send, interrupt
 
 from tutor.container import check_course
 from tutor.exchange import AwaitingAnswer
-from tutor.graph import nodes
+from tutor.graph import batch, drafts, nodes, oracle
 from tutor.graph.nodes import Deps
 from tutor.graph.state import BatchState, ItemState
 
@@ -41,15 +41,15 @@ def build_item(deps: Deps):
     graph = StateGraph(ItemState)
     graph.add_node("retrieve_context", lambda s: nodes.retrieve_context(s, deps))
     graph.add_node("generate", lambda s: nodes.generate(s, deps))
-    graph.add_node("oracle", lambda s: nodes.write_oracle(s, deps))
-    graph.add_node("validate", lambda s: nodes.validate_draft(s, deps))
+    graph.add_node("oracle", lambda s: oracle.write_oracle(s, deps))
+    graph.add_node("validate", lambda s: drafts.validate_draft(s, deps))
     graph.add_node("repair", lambda s: nodes.repair(s, deps))
     graph.add_node("save", lambda s: nodes.save(s, deps))
     graph.add_node("discard", lambda s: nodes.discard(s, deps))
     graph.add_edge(START, "retrieve_context")
     graph.add_edge("retrieve_context", "generate")
     graph.add_edge("generate", "oracle")
-    graph.add_conditional_edges("oracle", lambda s: nodes.after_oracle(s, deps),
+    graph.add_conditional_edges("oracle", lambda s: oracle.after_oracle(s, deps),
                                 ["validate", "repair", "discard"])
     graph.add_conditional_edges("validate", lambda s: nodes.route(s, deps),
                                 ["save", "repair", "discard"])
@@ -71,7 +71,7 @@ def build_batch(deps: Deps, checkpointer):
     def approve(state: BatchState) -> BatchState:
         # Pauses the graph; `Command(resume=decision)` continues it, also in a new process.
         decision = interrupt({"plan": state["plan"], "problems": state.get("plan_problems", [])})
-        return nodes.apply_decision(state, decision, nodes.existing_ids(deps.workspace),
+        return batch.apply_decision(state, decision, batch.existing_ids(deps.workspace),
                                     deps.profile)
 
     def after_approve(state: BatchState):
@@ -98,17 +98,17 @@ def build_batch(deps: Deps, checkpointer):
                         deps.on_update(plan_item.id, node, change or {})
         except AwaitingAnswer as e:
             # Not an error: an assistant has a request to answer; the item runs again then.
-            return {"results": [nodes.item_summary(plan_item, final, waiting=e.request_id)]}
+            return {"results": [batch.item_summary(plan_item, final, waiting=e.request_id)]}
         except Exception as e:  # noqa: BLE001 - one item must never stop the others
             # The model unreachable, a name clash, a reply that breaks the client: this
             # item is reported as an error, the others run on and collect still runs.
             error = f"{type(e).__name__}: {e}"
             nodes.log_error(final, deps, error)
-            return {"results": [nodes.item_summary(plan_item, final, error)]}
-        return {"results": [nodes.item_summary(plan_item, final)]}
+            return {"results": [batch.item_summary(plan_item, final, error)]}
+        return {"results": [batch.item_summary(plan_item, final)]}
 
     def waiting(state: BatchState) -> list[dict]:
-        return [r for r in nodes.latest_results(state.get("results", []))
+        return [r for r in batch.latest_results(state.get("results", []))
                 if r["outcome"] == "waiting"]
 
     def answers(state: BatchState) -> BatchState:
@@ -125,11 +125,11 @@ def build_batch(deps: Deps, checkpointer):
         return "collect"
 
     graph = StateGraph(BatchState)
-    graph.add_node("plan", lambda s: nodes.plan_batch(s, deps))
+    graph.add_node("plan", lambda s: batch.plan_batch(s, deps))
     graph.add_node("approve", approve)
     graph.add_node("item", item)
     graph.add_node("answers", answers)
-    graph.add_node("collect", lambda s: nodes.collect(s, deps))
+    graph.add_node("collect", lambda s: batch.collect(s, deps))
     graph.add_edge(START, "plan")
     graph.add_edge("plan", "approve")
     graph.add_conditional_edges("approve", after_approve, ["plan", "item"])

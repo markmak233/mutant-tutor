@@ -7,12 +7,13 @@ the interpreter that runs it, so that is the one the learner's tests use.
 
 This module also owns what a [requires] entry may be (requires_problems) and pip's form of
 its packages (pip_requirements), so the venv install (tutor.workspace), the image
-(tutor.container) and the GUI agree.
+(tutor.container) and the GUI agree. Both apply the known version conflicts (tutor.compat).
 """
 
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import platform
@@ -24,7 +25,7 @@ from dataclasses import asdict, dataclass
 from importlib import metadata
 from pathlib import Path
 
-from tutor import languages
+from tutor import compat, languages
 from tutor.config import Workspace, WorkspaceError, load_env, load_workspace
 
 # The names checked by their own rule below; any other name is a pip package.
@@ -69,13 +70,19 @@ def requires_problems(requires: Mapping[str, str]) -> list[str]:
                             '"3.5"')
     problems += [f"[requires] has {name} but no java, and {name} needs a JVM"
                  for name in NEEDS_JAVA if name in requires and "java" not in requires]
+    # A package version known not to work on the course's Python (tutor.compat).
+    if VERSION.match(requires.get("python", "")):
+        problems += compat.conflicts(requires, requires["python"])
     return problems
 
 
 def pip_requirements(requires: Mapping[str, str]) -> list[str]:
     """The table's pip packages as pip takes them: pyspark = "3.5" is `pyspark==3.5.*`,
-    which is what version_matches accepts. Call requires_problems first."""
-    return [f"{name}=={prefix}.*" for name, prefix in requires.items() if name not in NOT_PIP]
+    which is what version_matches accepts; then each one's companion packages, with a marker
+    so pip adds them only on the Pythons that need them (tutor.compat). Call
+    requires_problems first."""
+    return ([f"{name}=={prefix}.*" for name, prefix in requires.items() if name not in NOT_PIP]
+            + compat.companions(requires))
 
 
 def parse_java_version(output: str) -> str | None:
@@ -108,7 +115,48 @@ def check_workspace(ws: Workspace) -> list[CheckResult]:
     # requirement, so the command line and the GUI both say so.
     results += [CheckResult("languages", "supported", None, problem)
                 for problem in languages.problems({"languages": ws.languages})]
+    # Known version conflicts on the Python running this (tutor.compat): a companion that
+    # must be there (it installs and imports cleanly without, then a job fails), and a
+    # package version that does not work on it at all.
+    python = platform.python_version()
+    for rule in compat.needed(ws.requires, python):
+        try:
+            found = metadata.version(rule.needs)
+        except metadata.PackageNotFoundError:
+            found = None
+        results.append(CheckResult(rule.needs, "present", found and "present",
+                                   f"{rule.why}: install it into the course's .venv: "
+                                   f"python -m tutor.workspace init {ws.root}"))
+    results += [CheckResult("python", f"not {python}", None, problem)
+                for problem in compat.conflicts(ws.requires, python)]
+    results += _removed_imports(ws, python)
     return results
+
+
+def _removed_imports(ws: Workspace, python: str) -> list[CheckResult]:
+    """The probe for packages no rule names (tutor.compat.removed_imports): each [requires]
+    package's installed source, read for imports of modules this Python removed. A module
+    this interpreter still finds (a companion or a backport brings it back) is fine, and so
+    is one a companion rule provides: the companion's own check reports it missing."""
+    found = []
+    for name in ws.requires:
+        if name in NOT_PIP:
+            continue
+        try:
+            files = metadata.files(name) or []
+        except metadata.PackageNotFoundError:
+            continue  # reported as not installed by its own check
+        sources = [Path(f.locate()) for f in files if f.suffix == ".py"]
+        provided = {rule.provides for rule in compat.COMPANIONS if rule.package == name}
+        for module, version in compat.removed_imports(sources, python).items():
+            if module in provided or importlib.util.find_spec(module) is not None:
+                continue
+            found.append(CheckResult(
+                f"{name} imports", module, None,
+                f"{name} imports `{module}`, which Python {version} removed, and nothing here "
+                f"provides it: use a Python before {version} for this course, or a release of "
+                f"{name} that does not import it (docs/design.md, \"Version conflicts\")"))
+    return found
 
 
 def check_winutils(hadoop_home: str | None, path: str) -> CheckResult:

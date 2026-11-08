@@ -10,9 +10,10 @@ from pathlib import Path
 
 import pytest
 
-from tutor.graph import nodes, prompts
+from tutor.graph import batch, prompts
+from tutor.graph.drafts import DraftError, apply_mutant, write_draft
 from tutor.graph.languages import PYTHON, C, course_language
-from tutor.graph.nodes import Deps, DraftError, apply_mutant, write_draft
+from tutor.graph.nodes import Deps
 from tutor.graph.state import CExerciseDraft, CPlanItem, MutantDraft
 from tutor.llm import LLMConfig, Reply
 from tutor.materials import cache
@@ -194,7 +195,7 @@ def test_a_c_course_plans_c_items_with_cs_prompt_and_schema(workspace):
     model = FakeModel(json.dumps(plan))
     d = c_deps(workspace, model)
 
-    update = nodes.plan_batch({"lectures": ["L1"], "count": 1}, d)
+    update = batch.plan_batch({"lectures": ["L1"], "count": 1}, d)
 
     assert update["plan"][0]["framework"] == "c" and update["plan_problems"] == []
     purpose, messages, schema = model.calls[0]

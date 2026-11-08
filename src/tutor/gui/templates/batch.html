@@ -15,7 +15,7 @@
 </div>
 <p class="muted">Mode: {{ batch.mode }}</p>
 {# Exercises of the plan that did not come out: they are on the plan page, with "Try again"
-   (generation.not_succeeded; owner, 2026-11-06). #}
+   (plan_items.not_succeeded; owner, 2026-11-06). #}
 {% if missing %}{% set plan, ids = missing %}
 <p class="notice notice-bad">{{ ids | length }} exercise{{ "s" if ids | length != 1 }} of the plan did not come out: {{ ids | join(", ") }}.
   <a href="{{ url_for('plan', name=course.folder, label=plan.label) }}">Open the plan</a> to see why and try {{ "them" if ids | length != 1 else "it" }} again.</p>

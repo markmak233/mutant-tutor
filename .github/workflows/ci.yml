@@ -18,9 +18,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 3.12 is left out for now: mrjob 0.7.4 imports distutils, which 3.12 removed
-        # (see docs/design.md, "CI"). mrjob breaks on 3.13.
-        python-version: ["3.11"]
+        # Every version pyproject.toml allows that has been released long enough for the
+        # dependencies' wheels (owner, 2026-11-08; 3.15 waits). The `bigdata` extra brings
+        # what mrjob 0.7.4 needs on 3.12 and later (see docs/design.md, "CI"). The ruleset
+        # requires `test (3.11)` by name; the other versions report next to it.
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -28,11 +30,13 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
           cache-dependency-path: pyproject.toml
-      # gui: tests/test_gui.py skips without Flask, and CI should run it.
-      - run: pip install -e ".[bigdata,dev,gui]"
+      # gui: tests/test_gui.py skips without Flask, and CI should run it. gen: the graph's
+      # tests (test_graph*.py, test_retrieval.py) skip without langgraph; until 2026-11-08 they
+      # did here, unnoticed. -rs lists every skip with its reason, as a skip is not a pass.
+      - run: pip install -e ".[bigdata,dev,gen,gui]"
       - run: ruff check .
       # No JDK on purpose: the fast suite starts no JVM (the `spark` marker is deselected).
-      - run: pytest
+      - run: pytest -rs
 
   # The same fast suite on macOS and Windows. A job of its own, so the `test (3.11)` check
   # that main's ruleset requires keeps its name. No Docker here: the macOS runner has none,
@@ -50,9 +54,9 @@ jobs:
           python-version: "3.11"
           cache: pip
           cache-dependency-path: pyproject.toml
-      - run: pip install -e ".[bigdata,dev,gui]"
+      - run: pip install -e ".[bigdata,dev,gen,gui]"
       - run: ruff check .
-      - run: pytest
+      - run: pytest -rs
 
   # Exercise code in real containers: the isolation itself, the examples (C included)
   # validated in the course's image, and a generated C item end to end. The tests skip
