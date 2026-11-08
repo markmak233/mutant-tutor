@@ -84,3 +84,57 @@ deliberate, not gaps to report.
   that failed) gets a fix path in the page, not a fix made by hand outside it.
 - The server listens on 127.0.0.1 only, with a token per launch, and never loads `.env` into its
   environment: VS Code and its terminals, started from it, would inherit the keys.
+
+## Lessons from past mistakes
+
+Each rule below comes from a mistake an agent made here (the dated record is in the owner's
+local notes). The rules above are not repeated.
+
+Evidence before claims:
+
+- Read the code before saying how something behaves, a workaround included; measure instead of
+  assuming a library's behaviour (e.g. that a runner sorts values).
+- Find the failing test before blaming load, a model or the machine; a local bug (a stray
+  `.DS_Store` read as text) once got blamed on a model.
+- Compute a number before writing it. Costs come from the provider's bill or call log, not a
+  console that lags. Token counts come from the text, not the file size.
+- Progress comes from the files (`attempts.jsonl`, `ratings.jsonl`, `student.py` times, a test
+  run in a temp copy), re-read before each report: the owner may work in another session, and an
+  empty log says only that nothing was logged.
+- A background command's exit status must be the program's own, not a trailing `echo`'s; read
+  its log before saying it finished.
+- Say what the evidence does not show instead of guessing. Times: the owner is in GMT+11.
+- Check a provider's docs before calling a model name wrong, and check which models the owner
+  can use before recommending one.
+- Check what uses a file, image or folder before calling it a leftover.
+
+Reviewing before the owner approves:
+
+- Show a plan's notes in full, never cut, and read them against the source material: a cut note
+  once hid a definition that contradicted the slides, and a wrong exercise was paid for twice.
+- Check a recommendation against design.md's goals, not only the roadmap's order.
+- Re-read written text for claims about other text ("see below", a status line that goes stale).
+
+Commits and searches:
+
+- A course-code grep misses course details: also grep the staged diff for version numbers and
+  package names taken from slides. Search commits, not only the worktree (`git grep` skipped a
+  deny-listed `.env*` file).
+- Never source or read `.env` in a shell; use the tools that load it.
+- Do not stage part of a file with `git apply --cached --unidiff-zero` (it misplaces hunks).
+- Remove an unused import; do not hide it with `__all__`.
+
+Code and tests:
+
+- Look up a function used as a default at call time (`find=None`), so a test's stand-in reaches
+  it.
+- Split data by a hash of each row alone, never by its position, so adding rows moves nothing.
+- Normalise compiler output a hint quotes (quotes and wording vary with compiler and locale);
+  test C with gcc under a UTF-8 locale too.
+- Check a version-dependent step against the version being switched to, not the current one.
+- Stop the agent's own background servers with SIGTERM (background jobs ignore SIGINT). In zsh,
+  do not name a variable `status`; run a new script's first lines before backgrounding it.
+- In a click check's stand-in script, put stand-ins above its final `sys.exit`, and read the
+  task log before trusting the check.
+- A green CI run can hide skipped tests: read the skip list (`pytest -rs`) when a job or extra
+  changes.

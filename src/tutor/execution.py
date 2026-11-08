@@ -27,9 +27,10 @@ from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
 
+from tutor.attempt_transport import EVENT_FILE, EXPORT_ENV, LearnerData, read_events
 from tutor.container import ContainerError, image_for, image_problem, run_command
 from tutor.image_recipe import runner_uid
-from tutor.processes import ContainerRun, ProcessTree, remove_run_tmp
+from tutor.processes import ContainerRun, ProcessTree, remove_run_tmp, stream_output
 
 DEFAULT_TIMEOUT_S = 30.0
 REPORT_FILE = "tutor-pytest-report.xml"  # pytest's JUnit XML, written inside the temp dir
@@ -119,6 +120,24 @@ class RunResult:
     duration_s: float
     output: str  # pytest's stdout and stderr, interleaved
     counts: TestCounts | None = None  # None when pytest wrote no report (timeout, crash)
+    stop_reason: str | None = None  # learner Ctrl+C/timeout; old validation semantics stay
+    learner: LearnerData | None = None
+
+
+@dataclass(frozen=True)
+class LearnerOptions:
+    """Only supported learner options, not unrestricted pytest or shell arguments."""
+
+    student_file: str
+    selection: str | None = None
+    verbosity: int = 0
+
+    def arguments(self) -> list[str]:
+        args = ["-p", "tutor.attempts", "--capture=tee-sys", "test_student.py"]
+        if self.selection:
+            args += ["-k", self.selection]
+        args += ["-q"] if self.verbosity < 0 else ["-v"] * self.verbosity
+        return args
 
 
 def run_pytest(
@@ -126,6 +145,9 @@ def run_pytest(
     timeout_s: float = DEFAULT_TIMEOUT_S,
     env: Mapping[str, str] | None = None,
     heavy: bool = True,
+    *,
+    learner: LearnerOptions | None = None,
+    on_output: Callable[[str], None] | None = None,
 ) -> RunResult:
     """Copy `files` into a fresh temp dir and run pytest there.
 
@@ -140,11 +162,28 @@ def run_pytest(
     a verdict on the code, so it must not come back as a failed run.
     """
     image = image_for(files.values())
+    if learner and (not image or learner.student_file not in ("student.py", "student.c")):
+        raise ContainerError("learner runs require a container course and a student file")
     with _slot(heavy), tempfile.TemporaryDirectory(prefix="tutor-run-") as tmp:
         workdir = _copy_in(files, Path(tmp))
+        # Read staged bytes before untrusted code can rewrite them or the editor can change.
+        source = (workdir / learner.student_file).read_bytes() if learner else None
         if image:
-            return _run_in_container(image, workdir, timeout_s, env or {})
-        return _run_in(workdir, timeout_s, env or {})
+            result = _run_in_container(image, workdir, timeout_s, env or {},
+                                       learner=learner, on_output=on_output)
+        else:
+            result = _run_in(workdir, timeout_s, env or {}, on_output=on_output)
+        if learner:
+            try:
+                events = read_events(workdir / EVENT_FILE, partial=bool(result.stop_reason))
+                if (not result.stop_reason and events.exitstatus is not None
+                        and events.exitstatus != result.returncode):
+                    raise ValueError("attempt exit status disagrees with pytest")
+                data = LearnerData(source, Path(learner.student_file).suffix, events)
+            except (OSError, ValueError) as e:
+                data = LearnerData(source, Path(learner.student_file).suffix, problem=str(e))
+            result = replace(result, learner=data)
+        return result
 
 
 def run_script(
@@ -228,7 +267,8 @@ def _is_link(path: Path) -> bool:
 
 
 def _run_in(workdir: Path, timeout_s: float, extra_env: Mapping[str, str],
-            script: list[str] | None = None) -> RunResult:
+            script: list[str] | None = None, *,
+            on_output: Callable[[str], None] | None = None) -> RunResult:
     """Run pytest in `workdir`, or the command `script` (a Python file run directly).
     `timeout_s` is scaled by timeout_factor() here, so every caller (validation, hints,
     held-out checks) keeps stating the limit an exercise needs on macOS or Linux."""
@@ -258,16 +298,19 @@ def _run_in(workdir: Path, timeout_s: float, extra_env: Mapping[str, str],
         **extra_env,
     }
     try:
-        return _run_with_env(cmd, workdir, env, timeout_s, script)
+        return _run_with_env(cmd, workdir, env, timeout_s, script, on_output=on_output)
     finally:
         remove_run_tmp(Path(run_tmp))
 
 
 def _run_in_container(image: str, workdir: Path, timeout_s: float,
-                      extra_env: Mapping[str, str], script: str | None = None) -> RunResult:
+                      extra_env: Mapping[str, str], script: str | None = None, *,
+                      learner: LearnerOptions | None = None,
+                      on_output: Callable[[str], None] | None = None) -> RunResult:
     """The same run in a fresh container of its own, so that one run's processes, memory and
     /tmp cannot touch another's. `workdir` is the only folder of this machine it can write."""
-    timeout_s *= timeout_factor()
+    if learner is None:
+        timeout_s *= timeout_factor()  # learner --timeout is already actual wall-clock time
     # Here, before the time limit starts: this waits while a stopped VM wakes, and those
     # seconds must not count against the code. Every run asks, so that Docker going away in the
     # middle of a batch stops the batch with the reason, and not as failed runs.
@@ -278,11 +321,15 @@ def _run_in_container(image: str, workdir: Path, timeout_s: float,
         workdir.chmod(0o777)
     name = f"tutor-run-{uuid.uuid4().hex[:12]}"
     command = ["python", script] if script else ["python", *_PYTEST_ARGS]
+    if learner:
+        command = ["python", "-u", "-m", "pytest", "-p", "no:cacheprovider",
+                   f"--junitxml={REPORT_FILE}", *learner.arguments()]
+        extra_env = {**extra_env, EXPORT_ENV: "1"}
     # Resolved: on macOS the temp dir's path goes through a link, and Docker shares the target.
     cmd = run_command(image, name, workdir.resolve(), timeout_s, extra_env, command)
     result = _run_with_env(cmd, workdir, os.environ, timeout_s, command if script else None,
-                           make_tree=lambda *args: ContainerRun(name, *args))
-    if result.returncode == _DOCKER_FAILED:
+                           make_tree=lambda *args: ContainerRun(name, *args), on_output=on_output)
+    if result.returncode == _DOCKER_FAILED or (learner and result.returncode in (126, 127)):
         raise ContainerError(f"docker run failed: {result.output.strip()}")
     if result.returncode == _KILLED:
         return replace(result, output=f"{result.output}\n(the run was killed, exit {_KILLED}: "
@@ -291,19 +338,27 @@ def _run_in_container(image: str, workdir: Path, timeout_s: float,
 
 
 def _run_with_env(cmd: list[str], workdir: Path, env: Mapping[str, str], timeout_s: float,
-                  script: list[str] | None, make_tree: Callable | None = None) -> RunResult:
+                  script: list[str] | None, make_tree: Callable | None = None, *,
+                  on_output: Callable[[str], None] | None = None) -> RunResult:
     """Run `cmd` in `workdir` with `env` and turn the result into a RunResult."""
     start = time.monotonic()
     with (make_tree or ProcessTree)(cmd, workdir, env) as tree:
         proc = tree.proc
+        reason = None
         try:
-            output, _ = proc.communicate(timeout=timeout_s)
+            if on_output is None:
+                output, _ = proc.communicate(timeout=timeout_s)
+            else:
+                output, reason = stream_output(tree, on_output, start + timeout_s)
         except subprocess.TimeoutExpired:
             tree.kill()
             output, _ = proc.communicate()  # what it printed before the kill
             return RunResult(Outcome.TIMEOUT, None, time.monotonic() - start, output)
         duration = time.monotonic() - start
-        tree.kill()  # leftovers such as a JVM that was never stopped
+        tree.kill()  # streaming owns exceptional cleanup; default container exit does too
+    if reason:
+        outcome = Outcome.TIMEOUT if reason == "timeout" else Outcome.ERROR
+        return RunResult(outcome, None, duration, output, stop_reason=reason)
     if script:  # no test report: the exit code is the whole answer
         outcome = Outcome.PASSED if proc.returncode == 0 else Outcome.ERROR
         return RunResult(outcome, proc.returncode, duration, output)

@@ -233,14 +233,41 @@ The GUI's Environment page sets this for a course, and builds its image after sh
 recipe and what it downloads. `python -m tutor.workspace init DIR`, run again after changing
 `[requires]`, installs its pip packages into the course's own `.venv`.
 
-A course that has not chosen runs on the host and prints a warning. Your own `pytest` runs
-while solving stay on the host either way. The container is tested on macOS with Docker
-Desktop; Linux and Windows are not tested yet, so use the host there.
+A course that has not chosen runs on the host and prints a warning. For container courses,
+`tutor test` also runs the learner's tests in that image; ordinary `pytest` stays on the
+host for debugging. Docker Desktop on macOS and the Linux CI exercise the container path;
+native Windows Docker Desktop still needs checking. There is no fallback to host execution.
 
-Before anything runs, in either mode, a static check reads every exercise file and rejects
+Before generated exercises are published, a static check reads every exercise file and rejects
 code outside an allowlist (modules, `os` / `sys` attributes, `eval` / `exec`, paths outside
 the exercise, shell commands through Spark or MRJob). It stops the obvious, but Python is too
 dynamic for a static check to prove code safe; the container is the boundary.
+
+### Testing your work in the course image
+
+From one course exercise folder, run `tutor test`, or pass its directory explicitly:
+`tutor test EXERCISE_DIR -k example -vv --timeout 600`. The module form is
+`python -m tutor test`. Refresh an existing editable install once (`pip install -e .`)
+to create the new console script. No new host dependency is required.
+
+The command uses a temporary copy and shows pytest output as it arrives. It needs an
+explicitly configured container course and an already built image; it neither builds an
+image nor installs a toolchain. It reads no model credentials. The 300-second default is
+actual wall-clock time after image readiness; Ctrl+C or expiry ends the whole container.
+Timeout exits 124, terminal Ctrl+C exits 130, and normal runs keep pytest's exit code.
+
+The host appends the same attempts format as the pytest plugin and keeps the code actually
+tested for failed/error runs. A skipped test is incomplete, and a timeout is interrupted
+unless an observed error/failure takes precedence. Selected tests (`-k`) are recorded with
+their selection; success describes those tests, not proof of solving the whole exercise.
+Recording errors warn without changing the test result. Test output from subprocesses
+may still be buffered by those subprocesses.
+
+Daily container practice needs only the installed tool, Docker running Linux containers
+and an IDE on the host; the image contains pytest, course libraries, Java, Hadoop or gcc
+as required. Host `pytest` debugging still needs its own pytest/plugin and those libraries
+and tools installed locally. Native Windows C host debugging requires WSL. Ordinary
+pytest does not gain an overall timeout. Existing answers and saved questions are untouched.
 
 ## Private course material stays out of the repo
 
@@ -303,6 +330,9 @@ src/tutor/
   workspace.py     create a course workspace: folder, its own venv, terminal activation
   execution.py     run pytest in a temp dir with a timeout: in a fresh container if the course
                    asks for one, else a subprocess whose whole process group is killed
+  test_command.py  tutor test: live learner tests in the image, host-owned attempts
+  attempt_records.py / attempt_transport.py
+                   shared attempt writer and bounded run-local pytest events
   container.py     the course's Docker image from [requires] and the limits each run gets;
                    `python -m tutor.container build | status`
   llm.py           a small client for OpenAI-compatible APIs (LM Studio, GLM, OpenAI,

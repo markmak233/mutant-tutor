@@ -171,7 +171,10 @@ smartCodingReview/                       # public repo (the `tutor/` above), cod
 │   ├── testkit.py                       # P2a run a file-level program, read part-*, compare output
 │   ├── testkit_c.py                     # C exercises' tests: compile once, run, sanitizers
 │   ├── languages.py                     # a course's languages: [languages.c], not-yet-supported ones, flags in lectures
-│   ├── attempts.py                      # P2a pytest plugin: one attempts.jsonl line per exercise run
+│   ├── attempts.py                      # pytest hooks: host records or run-local event export
+│   ├── attempt_records.py               # shared host attempt writer and failing-code snapshots
+│   ├── attempt_transport.py             # bounded, versioned run-local pytest events
+│   ├── test_command.py                  # tutor test: learner tests in the course image
 │   ├── schema.py                        # P2 Pydantic models of metadata.json / manifest.json (rule 0),
 │   │                                    #   P3 parses LLM output into the same models
 │   ├── materials/                       # P3a course files -> per-file md cache (pypdfium2), vision pages; [requires] draft
@@ -2067,12 +2070,12 @@ themselves, so a cheap layer comes first and a stronger one later.
   - Accepted gaps. A run can write to its own throwaway folder until its time limit, since a bind
     mount has no quota; it is deleted afterwards. What it prints is held in memory on the host, as
     it already is for a run on the host. The heavy-run cap still counts the host's cores, so a VM
-    given far fewer needs `TUTOR_MAX_HEAVY_RUNS`. The learner's `pytest test_student.py` stays on
-    the host for now (owner, 2026-11-05: debugging in the IDE), so a Spark or Hadoop course still
-    needs Java and Hadoop there too, and generated tests that passed in the container can still
+    given far fewer needs `TUTOR_MAX_HEAVY_RUNS`. The learner's ordinary `pytest test_student.py`
+    stays available on the host (owner, 2026-11-05: debugging in the IDE), which needs Java or
+    Hadoop locally for that debugging path. Generated tests that passed in the container can still
     behave differently on the host, since code can tell where it runs; only layer A covers that. The
     command that runs a learner's tests in the container, with attempts written on the host from its
-    result, is scheduled (`tutor test`, "Roadmap", 6, owner, 2026-11-07); the risk tiers below come
+    result, is now `tutor test` (Roadmap 6.3, approved 2026-11-08); the risk tiers below come
     when a course needs them. A container has no Mac GPU, so
     torch exercises run on the CPU. The Docker VM takes memory next to a local LLM. Windows and
     native Linux are not tested, and Windows stays on the host until they are. Podman is not tried.
@@ -2430,6 +2433,14 @@ every language and framework, so one way of handling them:
 ## CI
 
 GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going public):
+- Node 24 action runtime (owner approved, 2026-11-08): checkout v5, setup-python v6 and
+  setup-java v5, the first Node 24 majors in their official release notes
+  ([checkout](https://github.com/actions/checkout/releases/tag/v5.0.0),
+  [setup-python](https://github.com/actions/setup-python/releases/tag/v6.0.0),
+  [setup-java](https://github.com/actions/setup-java/releases/tag/v5.0.0)). All require
+  runner >= 2.327.1; workflows use GitHub-hosted latest images. Job names and matrices stay
+  unchanged, particularly the required `test (3.11)`. Local tests cannot establish whether
+  a GitHub job runs; that is checked on the owner's next push/PR run.
 - Runs when work reaches `main` (a push after merging `dev`, or a pull request into `main`)
   and by hand (`workflow_dispatch`), not on every `dev` push: each step is already checked
   locally with `pytest` and `ruff check .`, and the badge then shows the state of `main`,
@@ -2634,6 +2645,13 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
   the entry point needed one `pip install -e .`. A pytest from another environment has no plugin, so
   it leaves no line and no warning: an empty log does not mean no work was done (see "Public repo vs
   private data" for how a workspace's terminals avoid this).
+  Since 2026-11-08, `tutor test` shares the host writer in `attempt_records.py`. The same
+  pytest hooks explicitly loaded in the image export bounded JSONL observations, without
+  loading .env or writing workspace records there. The host records those observations,
+  freezes staged code before launch for snapshots, and rebuilds the report. Timeout/Ctrl+C
+  preserves completed observations and adds `stop_reason`; existing failure/error precedence
+  stays. A selected run adds `selection`. Missing/malformed bookkeeping warns and cannot
+  create a false passed attempt; pytest's test result itself is unaffected.
 
 ## Roadmap (in priority order)
 
@@ -2971,12 +2989,15 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
       `validation/checks.py` (611, the rules in order), `graph/__main__.py` (546, the command
       line), `eval/report.py` (505), `llm.py` (504), `testkit.py` (472: exercises import it by
       name, and saved exercises depend on it).
-   3. `tutor test`: the learner's tests in the course's image, as validation runs them, from
+   3. `tutor test` (built 2026-11-08 after owner approval): the learner's tests in the course's image, as validation runs them, from
       the IDE's terminal: live output, attempts and snapshots written on the host from the
-      result, and a time limit (an exception to "No timeout on the learner's own `pytest`
-      runs", set when built). It reuses `execution.run_pytest`'s container path; the part of
+      result, and a 300-second wall-clock time limit (`--timeout SECONDS`, positive and
+      finite; an exception to "No timeout on the learner's own `pytest` runs"). It reuses
+      `execution.run_pytest`'s container path; the part of
       `attempts.py` that writes a line is shared by both ways. The host's `pytest` stays, for
-      debugging in the IDE; which way is the default is decided when built. With it, a
+      debugging in the IDE; `tutor test` is recommended for daily container-course practice.
+      V1 requires an explicit container course, accepts an exercise directory, -k and
+      verbosity, and never changes the runner or builds an image. With it, a
       container course needs on the host only Docker, the tool and an IDE: the image already
       holds Java, Hadoop and gcc. Done when a C and a Spark exercise give the same outcomes
       both ways and their attempts lines match.
@@ -3062,6 +3083,8 @@ gaps. Each was decided by the owner; change one only with the owner.
   exercises (see "Interface extensions").
 - No timeout on the learner's own `pytest` runs: the isolated runner protects validation of
   generated code; in the terminal Ctrl+C stops a loop (see "Code execution safety").
+  Exception approved 2026-11-08: `tutor test` uses the course image with a 300-second outer
+  limit, configurable per call with --timeout. Ordinary host pytest remains unchanged.
 - No wall-clock performance scoring: efficiency is judged as algorithm design, not seconds
   on a laptop (see "Correctness vs algorithm quality").
 - No `aggregateByKey` in the first golden exercises: listed but not taught yet.
@@ -3463,8 +3486,8 @@ late; the adaptive review screens can be built with it.
   the course folder and not the exercise's, since the course's `.vscode` settings put its venv
   in the terminal; VS Code reuses a window that has the folder open. `code` is looked up on
   PATH, then inside the macOS app (not on PATH here). JetBrains has its own launcher, later.
-  The GUI never runs the learner's tests; the IDE's `pytest` and the attempts plugin stay the
-  one record of attempts.
+  The GUI never runs the learner's tests; the IDE terminal's `tutor test` and ordinary host
+  `pytest` both use the shared attempts writer.
 - An "Open folder" button next to it (owner, 2026-11-05) on course, batch and exercise pages
   shows the folder in Finder or Explorer. Only paths inside the workspace, and never a way
   into `solutions/`: a batch's button opens its `exercises/`, not the batch folder beside

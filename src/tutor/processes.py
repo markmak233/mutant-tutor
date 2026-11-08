@@ -8,13 +8,16 @@ it started, which ending the client alone would leave running.
 
 from __future__ import annotations
 
+import codecs
 import os
+import queue
 import shutil
 import signal
 import subprocess
 import sys
+import threading
 import time
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 if sys.platform == "win32":  # Job Objects stand in for process groups there
@@ -108,3 +111,87 @@ class ContainerRun(ProcessTree):
         if exc_type is not None:  # Ctrl+C or a crash here: do not leave the container running
             self.kill()
         super().__exit__(exc_type, *exc)
+
+
+def stream_output(tree: ProcessTree, say: Callable[[str], None],
+                  deadline: float) -> tuple[str, str | None]:
+    """Deliver chunks while monitoring a silent child too; always end its whole tree.
+
+    No text reads have occurred on Popen's stdout yet, so its binary buffer can be read
+    directly. The decoder lives in one reader thread; callbacks run only on the main thread.
+    This works with Windows pipes as well as POSIX and does not wait for newline characters.
+    """
+    chunks: queue.Queue[str | BaseException | None] = queue.Queue()
+    output, reason = [], None
+
+    def read() -> None:
+        decoder = codecs.getincrementaldecoder("utf-8")("replace")
+        try:
+            while data := tree.proc.stdout.buffer.read1(4096):
+                if text := decoder.decode(data):
+                    chunks.put(text)
+            if text := decoder.decode(b"", final=True):
+                chunks.put(text)
+        except BaseException as e:
+            chunks.put(e)
+        finally:
+            chunks.put(None)
+
+    reader = threading.Thread(target=read, name="tutor-output", daemon=True)
+    reader.start()
+    ended = False
+    try:
+        while not ended:
+            if time.monotonic() >= deadline:
+                reason = "timeout"
+                break
+            if tree.proc.poll() is not None:
+                break  # kill leftover children before waiting for their inherited pipe
+            try:
+                chunk = chunks.get(timeout=min(0.1, max(0, deadline - time.monotonic())))
+            except queue.Empty:
+                continue
+            if chunk is None:
+                ended = True
+            elif isinstance(chunk, BaseException):
+                raise chunk
+            else:
+                output.append(chunk)
+                say(chunk)
+        # EOF need not mean the process exited: it may close stdout then loop forever.
+        if ended:
+            try:
+                tree.proc.wait(timeout=max(0, deadline - time.monotonic()))
+            except subprocess.TimeoutExpired:
+                reason = "timeout"
+    except KeyboardInterrupt:
+        reason = "keyboard_interrupt"
+    finally:
+        tree.kill()
+        try:
+            tree.proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass  # the tree was killed; never let a slow exit replace the run's result
+        # Once the tree is gone EOF should follow immediately. Bound the wait anyway;
+        # a deliberately detached host descendant can outlive a POSIX process group.
+        reader.join(timeout=2)
+        if not reader.is_alive():
+            tree.proc.stdout.close()
+    # Drain the last output without printing it twice; preserve it after timeout/Ctrl+C.
+    try:
+        while not chunks.empty():
+            chunk = chunks.get_nowait()
+            if isinstance(chunk, str):
+                output.append(chunk)
+                say(chunk)
+            elif isinstance(chunk, BaseException):
+                raise chunk
+    except KeyboardInterrupt:
+        # Fast processes may finish before the first callback. Ctrl+C while draining
+        # their final output still returns an interrupted result to the host recorder.
+        reason = "keyboard_interrupt"
+        while not chunks.empty():
+            chunk = chunks.get_nowait()
+            if isinstance(chunk, str):
+                output.append(chunk)
+    return "".join(output), reason

@@ -12,6 +12,8 @@ on:
 permissions:
   contents: read
 
+# First Node 24 majors (official release notes): checkout v5, setup-python v6,
+# setup-java v5. They require Actions runner >= 2.327.1. Job names/matrices stay stable.
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -24,8 +26,8 @@ jobs:
         # requires `test (3.11)` by name; the other versions report next to it.
         python-version: ["3.11", "3.12", "3.13", "3.14"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -48,8 +50,8 @@ jobs:
       matrix:
         os: [macos-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: pip
@@ -65,8 +67,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: pip
@@ -103,12 +105,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: pip
@@ -119,11 +121,22 @@ jobs:
   secrets:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0  # scan the whole history, not just the last commit
-      # Same gitleaks version and .gitleaks.toml as the local pre-commit hook.
+      # Same gitleaks version and .gitleaks.toml as the local pre-commit hook. The release
+      # download failed with GitHub 504s on 2026-11-08, retries included, while the same file
+      # downloaded elsewhere; so on failure the same version runs from its Docker Hub image
+      # (the runner has Docker), with a warning in the run's summary. No pipe after either
+      # scan: its exit status is the step's.
       - run: |
-          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.30.1/gitleaks_8.30.1_linux_x64.tar.gz \
-            | tar xz gitleaks
-          ./gitleaks git --redact --no-banner --verbose
+          VERSION=8.30.1
+          URL=https://github.com/gitleaks/gitleaks/releases/download/v$VERSION/gitleaks_${VERSION}_linux_x64.tar.gz
+          if curl -sSfL --retry 3 --retry-all-errors --retry-delay 5 -o gitleaks.tar.gz "$URL"; then
+            tar xzf gitleaks.tar.gz gitleaks
+            ./gitleaks git --redact --no-banner --verbose
+          else
+            echo "::warning::gitleaks release download failed; running v$VERSION from Docker Hub"
+            docker run --rm -v "$PWD:/repo" -w /repo "zricethezav/gitleaks:v$VERSION" \
+              git --redact --no-banner --verbose
+          fi
