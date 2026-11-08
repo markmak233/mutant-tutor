@@ -23,6 +23,7 @@ from tutor.gui.generation import ASSISTANT, CONTINUING, GENERATED, GENERATING, S
 # What each exercise of an approved plan came to, shown next to it on the plan page.
 ITEM_VALID, ITEM_INVALID, ITEM_SAVED = "valid", "invalid", "saved, not validated"
 ITEM_DISCARDED, ITEM_ERROR, ITEM_PENDING = "discarded", "error", "not generated yet"
+ITEM_LEFT_OUT = "Left out by you"
 _ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,79}$")  # a plan id, safe as a file name
 DETAIL_CHARS = 1500  # of the last round's failure shown, enough for pytest's first assertion
 NOTE_PREFIX = "The owner adds, for this try: "  # how a retry's note joins the item's notes
@@ -40,6 +41,10 @@ class ItemStatus:
     @property
     def can_retry(self) -> bool:
         return self.state in (ITEM_DISCARDED, ITEM_ERROR)
+
+    @property
+    def can_generate(self) -> bool:
+        return self.state == ITEM_LEFT_OUT and not self.reason
 
 
 def item_statuses(course: Course, view: PlanView) -> dict[str, ItemStatus]:
@@ -86,6 +91,11 @@ def item_statuses(course: Course, view: PlanView) -> dict[str, ItemStatus]:
             detail = "" if view.hides_answers else _failure_text(outcomes[exercise])
             statuses[exercise] = ItemStatus(ITEM_DISCARDED, _failure(outcomes[exercise]),
                                             detail[:DETAIL_CHARS], last_note(view, exercise))
+        elif view.selected_ids is not None and exercise not in view.selected_ids:
+            from tutor.gui.plan_selection import deferred_problem
+
+            statuses[exercise] = ItemStatus(ITEM_LEFT_OUT,
+                                            deferred_problem(course, view, exercise))
         else:
             statuses[exercise] = ItemStatus(ITEM_PENDING)
     return statuses
@@ -149,7 +159,9 @@ def prepare_retry(course: Course, view: PlanView, exercise: str,
     if view.draft is None or view.batch is None or not _ID.match(exercise):
         return None
     try:
-        plan = json.loads((view.draft / "plan.json").read_text(encoding="utf-8"))
+        # New approvals own a frozen full snapshot; later file edits cannot replace it.
+        plan = (view.approved_plan if view.approved_plan is not None else
+                json.loads((view.draft / "plan.json").read_text(encoding="utf-8")))
         run = json.loads((view.draft / "run.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None

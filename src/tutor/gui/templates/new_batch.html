@@ -50,9 +50,9 @@
     <legend>How many exercises</legend>
     <label class="check"><input type="radio" name="how" value="auto"{% if values.how == "auto" %} checked{% endif %}>
       Let the plan model decide: one per knowledge point it finds in the chosen lectures' gaps, leaving out what existing exercises practise, at most
-      <input type="number" name="max_count" min="1" max="20" value="{{ values.max_count }}" aria-label="At most"></label>
+      <input type="number" name="max_count" min="1" max="40" value="{{ values.max_count }}" aria-label="At most"></label>
     <label class="check"><input type="radio" name="how" value="exact"{% if values.how == "exact" %} checked{% endif %}>
-      Exactly <input type="number" name="count" min="1" max="20" value="{{ values.count }}" aria-label="Exactly"></label>
+      Exactly <input type="number" name="count" min="1" max="40" value="{{ values.count }}" aria-label="Exactly"></label>
     <p class="muted">The limit is fixed once the plan is made: sending the plan back cannot go past it.</p>
   </fieldset>
   <label class="field">Your preferences

@@ -17,6 +17,7 @@ from pydantic import ValidationError
 from tutor.graph import prompts
 from tutor.graph.languages import PYTHON, Profile
 from tutor.graph.nodes import Deps, describe_error, model_label
+from tutor.graph.plan_selection import validate_selection
 from tutor.graph.state import BatchState, ItemState, PlanItem
 from tutor.materials import cache
 from tutor.schema import Manifest, SourceRef
@@ -136,7 +137,8 @@ def plan_batch(state: BatchState, deps: Deps) -> BatchState:
         if not problems:
             break
         inputs["previous"] = json.dumps(plan, indent=1)
-    return {"plan": plan, "plan_problems": problems, "feedback": "", "approved": False}
+    return {"plan": plan, "plan_problems": problems, "feedback": "", "approved": False,
+            "selected_ids": None, "plan_digest": None, "generation_complete": False}
 
 
 def plan_problems(items: list[PlanItem], lectures: list[str], count: int | None,
@@ -173,11 +175,13 @@ def apply_decision(state: BatchState, decision: dict, existing: list[str],
     this check is for any other caller."""
     if decision.get("action") == "approve":
         plan = decision.get("plan", state["plan"])
-        items = profile.batch_plan.model_validate({"items": plan}).items  # an edited plan must fit
-        if found := blocking_problems(items, state["lectures"], existing):
-            raise ValueError("the approved plan cannot run: " + "; ".join(found))
-        return {"plan": plan, "approved": True}
-    return {"feedback": decision.get("feedback", ""), "approved": False}
+        # Retain every proposed row; only the selected subset is eligible for dispatch.
+        selected = validate_selection(plan, decision.get("selected_ids"),
+                                      state["lectures"], existing, profile)
+        return {"plan": plan, "approved": True, "selected_ids": selected,
+                "plan_digest": decision.get("plan_digest"), "generation_complete": False}
+    return {"feedback": decision.get("feedback", ""), "approved": False,
+            "selected_ids": None, "plan_digest": None, "generation_complete": False}
 
 
 def collect(state: BatchState, deps: Deps) -> BatchState:
@@ -196,7 +200,8 @@ def collect(state: BatchState, deps: Deps) -> BatchState:
                   f"ex:{i.id} ({label})" for i in saved]
         (deps.batch_dir / "coverage-proposal.md").write_text("\n".join(lines) + "\n",
                                                              encoding="utf-8")
-    return {}
+    # A manifest is absent when every selected item failed; completion is still durable.
+    return {"generation_complete": True}
 
 
 def _models_of(deps: Deps, ids: set[str]) -> str | None:

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from flask import Flask, abort, redirect, render_template, request, url_for
 
-from tutor.gui import courses, environment, generation, plan_items, tasks
+from tutor.gui import courses, environment, generation, plan_items, plan_selection, tasks
 from tutor.gui.routes.common import (
     C_NEEDS_CONTAINER,
     NOTICES,
@@ -37,12 +37,14 @@ def plan_or_404(name: str, label: str) -> tuple[courses.Course, generation.PlanV
     return course, view
 
 
-def plan_page(template: str, name: str, label: str):
+def plan_page(template: str, name: str, label: str, error: str = "", checked=None):
     course, view = plan_or_404(name, label)
     log, cut = tasks.tail(view.task) if view.task else ("", False)
     quiet = tasks.quiet_s(view.task) if view.task else None
     return render_template(template, course=course, plan=view, log=log, cut=cut,
-                           models=generation.models(course), explain=generation.EXPLAIN,
+                           models=plan_selection.effective_models(course, view),
+                           explain=generation.EXPLAIN, selection_error=error,
+                           checked=checked, course_busy=tasks.running(course.workspace.root),
                            statuses=plan_items.item_statuses(course, view), quiet=quiet,
                            waiting_for=waiting_for(course, view.task) if quiet else "")
 
@@ -111,7 +113,18 @@ def register(app: Flask) -> None:
     def approve_plan(name: str, label: str):
         """Generate the batch from plan.json as it is now; this is what spends money."""
         course, view = plan_or_404(name, label)
-        command = generation.resume_command(label, approve=True,
+        if not view.can_review:
+            return redirect(url_for("plan", name=name, label=label) + "?notice=plan-moved",
+                            code=303)
+        try:
+            selected = plan_selection.posted_selection(course, view, request.form)
+        except (ValueError, OSError) as exc:
+            # Stale pages require a fresh all-checked review; other errors keep the ticks.
+            checked = (None if request.form.get("plan_digest") != view.plan_digest
+                       else request.form.getlist("item"))
+            return plan_page("plan.html", name, label, str(exc), checked), 400
+        command = generation.resume_command(label, approve=True, selected=selected,
+                                            plan_digest=view.plan_digest,
                                             python=courses.task_python(course))
         return plan_task(name, label, view.can_approve, f"Generate {label}", command,
                          generation.APPROVE, course, validate=True)
@@ -123,7 +136,7 @@ def register(app: Flask) -> None:
         if not feedback:
             return redirect(url_for("plan", name=name, label=label) + "?notice=feedback-empty",
                             code=303)
-        return plan_task(name, label, view.can_approve, f"Revise plan {label}",
+        return plan_task(name, label, view.can_review, f"Revise plan {label}",
                          generation.resume_command(label, feedback=feedback,
                                                   python=courses.task_python(course)),
                          generation.FEEDBACK, course)
@@ -149,8 +162,8 @@ def register(app: Flask) -> None:
         if note is None:
             return redirect(f"{back}?notice=note-bad", code=303)
         status = plan_items.item_statuses(course, view).get(exercise)
-        running = view.task is not None and view.task.active
-        if status is None or not status.can_retry or running:
+        running = tasks.running(course.workspace.root)
+        if status is None or not status.can_retry or running or view.selection_error:
             return redirect(f"{back}?notice=plan-moved", code=303)
         if problem := courses.container_problem(course):
             return redirect(f"{back}?notice={problem}", code=303)
@@ -170,7 +183,7 @@ def register(app: Flask) -> None:
         course, view = plan_or_404(name, label)
         back = url_for("plan", name=name, label=label)
         failed = [k for k, v in plan_items.item_statuses(course, view).items() if v.can_retry]
-        if not failed or (view.task is not None and view.task.active):
+        if not failed or tasks.running(course.workspace.root) or view.selection_error:
             return redirect(f"{back}?notice=plan-moved", code=303)
         if problem := courses.container_problem(course):
             return redirect(f"{back}?notice={problem}", code=303)
@@ -184,10 +197,33 @@ def register(app: Flask) -> None:
                           meta={"kind": generation.RETRY, "label": label, "items": failed},
                           then=back)
 
+    @app.post("/c/<name>/plans/<label>/generate-item")
+    def generate_left_out(name: str, label: str):
+        """Explicitly authorize one deferred row, only after the selected run completes."""
+        course, view = plan_or_404(name, label)
+        back = url_for("plan", name=name, label=label)
+        exercise = request.form.get("item", "")
+        status = plan_items.item_statuses(course, view).get(exercise)
+        if (view.selection_error or not view.generation_complete or status is None
+                or not status.can_generate or tasks.running(course.workspace.root)):
+            return redirect(f"{back}?notice=plan-moved", code=303)
+        if problem := courses.container_problem(course):
+            return redirect(f"{back}?notice={problem}", code=303)
+        # Status revalidates current schema/source/collisions against the approved snapshot.
+        commands = plan_items.prepare_retry(course, view, exercise, courses.task_python(course))
+        if commands is None:
+            abort(404, "The approved plan has no such item.")
+        return start_task(course, f"Generate {exercise}", commands,
+                          meta={"kind": generation.RETRY, "label": label, "item": exercise},
+                          then=back)
+
     @app.post("/c/<name>/plans/<label>/edit")
     def edit_plan(name: str, label: str):
         """plan.json in VS Code: the CLI approves the file as the owner left it."""
         course, view = plan_or_404(name, label)
+        if not view.can_review:
+            return redirect(url_for("plan", name=name, label=label) + "?notice=plan-moved",
+                            code=303)
         if view.draft is None or not (view.draft / "plan.json").is_file():
             abort(404, "This plan has no plan.json yet.")
         return act(lambda: launcher.open_in_vscode(course.workspace.root,

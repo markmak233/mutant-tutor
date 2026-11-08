@@ -11,6 +11,8 @@
   <div class="actions">
     {{ action(url_for('validate_batch', name=course.folder, batch=batch.name), "Validate all") }}
     {{ action(url_for('open_batch_folder', name=course.folder, batch=batch.name), "Open exercises folder") }}
+    {# Back to the plan this batch was made from: its notes, ticks and left-out items. #}
+    {% if plan_label %}<a class="button" href="{{ url_for('plan', name=course.folder, label=plan_label) }}">Open the plan</a>{% endif %}
   </div>
 </div>
 <p class="muted">Mode: {{ batch.mode }}</p>

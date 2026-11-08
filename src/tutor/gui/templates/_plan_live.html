@@ -4,6 +4,7 @@
    log is escaped like any other. #}
 {% from "_macros.html" import action, chip, log_box %}
 {% set running = plan.task is not none and plan.task.active %}
+{% set busy = course_busy or running %}
 <div id="plan-live"{% if running %} hx-get="{{ url_for('plan_live', name=course.folder, label=plan.label) }}" hx-trigger="every 1s" hx-swap="outerHTML"{% endif %}>
   <div class="facts-line">
     {{ chip(plan.state) }}
@@ -15,13 +16,15 @@
   </div>
   <p>{{ explain[plan.state] }}</p>
   {% include "_quiet.html" %}
-  {% if plan.generated %}<p><a href="{{ url_for('batch', name=course.folder, batch=plan.batch) }}">Open the batch</a></p>{% endif %}
+  {% if plan.generated and plan.has_manifest %}<p><a href="{{ url_for('batch', name=course.folder, batch=plan.batch) }}">Open the batch</a></p>{% endif %}
+  {% if plan.selection_error %}<p class="notice notice-bad">{{ plan.selection_error }}</p><p><a href="{{ url_for('plan', name=course.folder, label=plan.label) }}">Refresh plan</a></p>{% endif %}
+  {% if selection_error %}<p class="notice notice-bad">{{ selection_error }}</p>{% endif %}
   {% if plan.plan_error %}<p class="notice notice-bad">{{ plan.plan_error }}</p>{% endif %}
 
   {% if plan.shows_plan and plan.items %}
   {% if plan.edited %}<p class="notice notice-ok">plan.json was edited: it differs from the model's plan, and approving uses it.</p>{% endif %}
   <table class="plan">
-    <thead><tr><th class="num">#</th><th>Exercise</th>{% if statuses %}<th>Status</th>{% endif %}<th>Source</th><th>What it practises</th></tr></thead>
+    <thead><tr><th class="num">#</th>{% if plan.can_approve %}<th>Generate</th>{% endif %}<th>Exercise</th>{% if statuses %}<th>Status</th>{% endif %}<th>Source</th><th>What it practises</th></tr></thead>
     <tbody>
     {% for item in plan.items %}
       {# Once approved, each exercise's status next to it (plan_items.item_statuses), and a
@@ -29,11 +32,15 @@
       {% set status = statuses.get(item.id) %}
       <tr>
         <td class="num">{{ loop.index }}</td>
+        {# Native form association keeps selection usable without JavaScript or nested forms. #}
+        {% if plan.can_approve %}<td><input type="checkbox" name="item" value="{{ item.id }}" form="approve-selection" aria-label="Generate {{ item.id }}"{% if checked is none or item.id in checked %} checked{% endif %}></td>{% endif %}
         <td><strong>{% if status and status.state in ("valid", "invalid", "saved, not validated") %}<a href="{{ url_for('exercise', name=course.folder, batch=plan.batch, exercise=item.id) }}">{{ item.id }}</a>{% else %}{{ item.id }}{% endif %}</strong>
           <div class="muted">{{ item.type }} · {{ item.interface }} · {{ item.framework }}</div></td>
         {% if statuses %}<td class="item-status">{% if status %}{{ chip(status.state) }}
           {% if status.reason %}<div class="muted">{{ status.reason }}</div>{% endif %}
-          {% if status.can_retry and not running %}<form method="post" action="{{ url_for('retry_item', name=course.folder, label=plan.label) }}" class="action"><input type="hidden" name="item" value="{{ item.id }}"><button type="submit">Try again</button></form>
+          {% if status.state == "Left out by you" and status.reason %}<a href="{{ url_for('new_batch', name=course.folder) }}">New batch with a valid source and unused ID</a> · <a href="{{ url_for('course', name=course.folder) }}">Course and existing exercises</a>{% endif %}
+          {% if status.can_generate and plan.generation_complete and not busy and not plan.selection_error %}<form method="post" action="{{ url_for('generate_left_out', name=course.folder, label=plan.label) }}" class="action"><input type="hidden" name="item" value="{{ item.id }}"><button type="submit">Generate</button></form>{% endif %}
+          {% if status.can_retry and not busy and not plan.selection_error %}<form method="post" action="{{ url_for('retry_item', name=course.folder, label=plan.label) }}" class="action"><input type="hidden" name="item" value="{{ item.id }}"><button type="submit">Try again</button></form>
           {% elif status.can_retry %}<div class="muted">"Try again" comes back when the running task ends: a course runs one task at a time.</div>{% endif %}{% endif %}</td>{% endif %}
         <td>{{ item.lecture }}<div class="muted">slides {{ item.slides }}</div></td>
         <td>{{ item.knowledge_point }}
@@ -42,7 +49,7 @@
       </tr>
       {# A try with nothing changed tends to fail the same way, so the owner can read what the
          last round failed on and add a note for the next try (owner, 2026-11-07). #}
-      {% if status and status.can_retry and not running %}
+      {% if status and status.can_retry and not busy and not plan.selection_error %}
       <tr class="retry-note"><td></td><td colspan="4">
         <details{% if status.note %} open{% endif %}>
           <summary>Try again with a note{% if status.detail %}, and what the last round failed on{% endif %}</summary>
@@ -66,28 +73,35 @@
   {% endif %}
 
   {% set failed = statuses.values() | selectattr("can_retry") | list if statuses else [] %}
-  {% if failed and not running %}
+  {% if failed and not busy and not plan.selection_error %}
   {% if failed | length > 1 %}<div class="actions">{{ action(url_for('retry_all', name=course.folder, label=plan.label), "Try all " ~ (failed | length) ~ " again", primary=True) }}</div>{% endif %}
   <p class="muted">"Try again" generates an exercise once more with this batch's models and settings, then validates it{% if failed | length > 1 %}; "Try all" does so for each that did not come out, one after another, with no notes{% endif %}. Like approving, it costs money.</p>
   {% endif %}
 
   {% if plan.shows_plan and plan.at_limit %}
-  <p class="notice notice-bad">The model planned as many exercises as the limit ({{ plan.how_many.max_count }}), so some knowledge points may have been merged or left out. The limit is fixed once the plan is made, so sending it back cannot go past it. For more, add items to plan.json, or start a new batch with a higher limit.</p>
+  <p class="notice notice-bad">The model planned as many exercises as the limit ({{ plan.how_many.max_count }}), so some knowledge points may have been merged or left out. The limit is fixed once the plan is made, so sending it back cannot go past it. For more, {% if plan.can_review %}add items to plan.json, or {% endif %}start a new batch with a higher limit.</p>
   {% endif %}
 
   {% if plan.can_approve and plan.problems %}
   <div class="notice notice-bad">Problems the check found when the plan was shown:
     <ul>{% for line in plan.problems %}<li>{{ line }}</li>{% endfor %}</ul>
-    Approving refuses a plan with an id used twice or taken, a lecture not chosen, or a slide range that is not one; edit plan.json or send it back.</div>
+    Approval requires unique, identifiable IDs throughout the plan. Only checked rows need valid schemas, unused IDs, chosen sources and valid slide ranges; edit plan.json or send it back to fix them.</div>
   {% endif %}
 
-  {% if not running and plan.can_approve %}
+  {% if statuses.values() | selectattr("can_generate") | list %}
+  <p class="muted">Generate starts one left-out item as a new paid generation after the selected run finishes and the course is idle. It uses the approved notes and saved settings; current course model definitions resolve the saved profile choices.</p>
+  <table class="compact"><tbody>{% for role, text in models if role != "plan" %}<tr><th>{{ role }}</th><td>{{ text }}</td></tr>{% endfor %}</tbody></table>
+  {% endif %}
+
+  {% if not running and plan.can_review %}
   <div class="actions">
-    {{ action(url_for('approve_plan', name=course.folder, label=plan.label), "Approve and generate", primary=True) }}
+    {% if plan.can_approve %}<form method="post" id="approve-selection" action="{{ url_for('approve_plan', name=course.folder, label=plan.label) }}" class="action">
+      <input type="hidden" name="selection_form" value="1"><input type="hidden" name="plan_digest" value="{{ plan.plan_digest }}">
+      <button type="submit" class="primary">Approve and generate selected</button>
+    </form>{% endif %}
     {{ action(url_for('edit_plan', name=course.folder, label=plan.label), "Edit plan.json in VS Code") }}
   </div>
-  <p class="muted">Approving generates every exercise of plan.json as it is saved now, with the
-    models below, and validates each in a container: Docker Desktop must be running.</p>
+  <p class="muted">Only checked items are generated. Unchecked items stay on this plan as Left out by you. Approving costs money and uses the models below; container courses need Docker running.</p>
   <table class="compact"><tbody>
     {% for role, text in models if role != "plan" %}<tr><th>{{ role }}</th><td>{{ text }}</td></tr>{% endfor %}
   </tbody></table>

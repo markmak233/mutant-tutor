@@ -11,12 +11,13 @@ Nothing here calls a model or writes a file. The GUI runs the CLI's own commands
     python -m tutor.graph resume --batch=LABEL                    continues a stopped run
 
 A command started without a terminal pauses at the plan instead of asking, and exits 0
-(`_ask` in graph/__main__.py), so graph/ needed no change. Free text (preferences, feedback)
+(`_ask` in graph/plan_review.py). Selection is checkpointed by the graph. Free text
+(preferences, feedback)
 goes in as one argument in `--name=value` form, so text starting with "-" cannot pass for an
 option; no shell is involved.
 
-Where a batch stands is read from files, since the plan's state proper sits in LangGraph's
-checkpoint, which only the `gen` extra can read:
+File evidence supports legacy batches; plan_selection.py reads approval and selection
+from the checkpoint without constructing clients or loading credentials:
 - a task of this GUI running for the label: making the plan, or generating;
 - `batches/<batch>/manifest.json`: generated (the CLI writes it once every item has finished);
 - a draft folder for one of the plan's ids, or the batch's generation.jsonl: generation began
@@ -49,9 +50,10 @@ LABEL = re.compile(r"^[a-z0-9][a-z0-9-]{0,39}$")
 # came from the command line, so any word characters; never a leading "-".
 _DRAFT = re.compile(r"^\d{4}-\d{2}-\d{2}_p3-(\w[\w.-]*)$")
 _ANY_LABEL = re.compile(r"^\w[\w.-]*$")
-MAX_COUNT = 20  # GenerationSettings.max_count's bound
+MAX_COUNT = 40  # GenerationSettings.max_count's bound (see there why 40)
 # The form's limit when the model decides, unless [generation] max_count sets one: the
-# highest, as some lectures hold far more than 6 knowledge points (owner, 2026-11-06). The
+# highest, as some lectures hold far more than 6 knowledge points (owner, 2026-11-06), and
+# only ticked items are generated, so a longer plan costs no more (owner, 2026-11-09). The
 # CLI's default stays GenerationSettings.max_count (6); the owner reads every plan anyway.
 DEFAULT_MAX_COUNT = MAX_COUNT
 MAX_TEXT = 2000  # characters of preferences or feedback
@@ -91,7 +93,7 @@ EXPLAIN = {
              "stopped, and it waits for you again.",
     ASSISTANT: "The batch waits for answers from the coding assistant (assistant mode, "
                "docs/assistant-mode.md). Answer them from a terminal, then Continue.",
-    GENERATED: "Generated: the batch is on the course page.",
+    GENERATED: "The run has finished. Saved exercises, if any, are on the course page.",
     NOT_STARTED: "The command stopped before it made the batch's folder; its output below "
                  "says why (Docker not running, for example). Fix that, then start a new "
                  "batch; the label is free.",
@@ -126,10 +128,22 @@ class PlanView:
     # How the number was set, from the GUI task that made the plan: {"count": N} or
     # {"max_count": M}; empty when unknown (planned in a terminal, or the task pruned).
     how_many: dict = field(default_factory=dict)
+    # Checkpoint metadata separates proposed material, authorized work and completion.
+    approved_plan: list[dict] | None = None
+    selected_ids: list[str] | None = None
+    plan_digest: str = ""
+    selection_error: str = ""
+    generation_complete: bool = False
+    has_manifest: bool = False
+    source_lectures: list[str] = field(default_factory=list)
+
+    @property
+    def can_review(self) -> bool:
+        return self.state == WAITING and not self.selection_error
 
     @property
     def can_approve(self) -> bool:
-        return self.state == WAITING and bool(self.items)
+        return self.can_review and bool(self.items) and not self.plan_error
 
     @property
     def hides_answers(self) -> bool:
@@ -139,12 +153,11 @@ class PlanView:
 
     @property
     def can_continue(self) -> bool:
-        return self.state in (STOPPED, NO_PLAN, ASSISTANT)
+        return self.state in (STOPPED, NO_PLAN, ASSISTANT) and not self.selection_error
 
     @property
     def shows_plan(self) -> bool:
-        """plan.json is the plan in force: not while one is being made, when it may be the
-        old one."""
+        """Show the full review/approved material, but hide an old plan during replanning."""
         return self.state in (WAITING, GENERATING, STOPPED, ASSISTANT, GENERATED)
 
     @property
@@ -184,16 +197,17 @@ def defaults(course: Course) -> dict:
             else DEFAULT_MAX_COUNT}
 
 
-def models(course: Course) -> list[tuple[str, str]]:
+def models(course: Course, overrides: dict | None = None) -> list[tuple[str, str]]:
     """(role, what does it) for each role a batch uses, from [llm.roles] and [llm.profiles];
     names only, never a key."""
     llm = _toml(course).get("llm", {})
-    if not llm:
+    if not llm and not overrides:
         return [("all roles", "the LLM_* variables in .env")]
     roles, profiles = llm.get("roles", {}), llm.get("profiles", {})
     shown = []
     for role in ROLES:
-        name = roles.get(role)
+        name = (overrides or {}).get("profile" if role == "generate" else role + "_profile")
+        name = name or roles.get(role)
         if not name:
             text = {"plan": "the generate model", "generate": "none set: generation stops",
                     "oracle": "none: the generate model writes the oracle",
@@ -303,10 +317,15 @@ def validate_command(label: str, python: str | None = None) -> list[str]:
 
 
 def resume_command(label: str, approve: bool = False, feedback: str | None = None,
-                   python: str | None = None) -> list[str]:
+                   python: str | None = None, selected: list[str] | None = None,
+                   plan_digest: str | None = None) -> list[str]:
     command = [*graph_command(python), "resume", f"--batch={label}"]
     if approve:
         command.append("--approve")
+        if selected is not None:
+            command.append("--only=" + ",".join(selected))
+        if plan_digest is not None:
+            command.append("--plan-digest=" + plan_digest)
     elif feedback is not None:
         command.append(f"--feedback={feedback}")
     return command
@@ -353,9 +372,12 @@ def plan_view(course: Course, label: str, history: list[tasks.Task] | None = Non
                  and t.meta.get("kind") == PLAN), None)
     how_many = {k: v for k, v in (made.meta if made else {}).items()
                 if k in ("count", "max_count") and isinstance(v, int)}
-    return PlanView(label, state, draft, draft.name, items, plan_error, edited,
-                    _problems(task) if task is not None else [], _settings(draft), task,
-                    how_many)
+    # Imported here to keep the optional checkpoint reader away from new-batch setup.
+    from tutor.gui.plan_selection import adapt
+
+    return adapt(PlanView(label, state, draft, draft.name, items, plan_error, edited,
+                          _problems(task) if task is not None else [], _settings(draft), task,
+                          how_many))
 
 
 def open_plans(course: Course, history: list[tasks.Task] | None = None) -> list[PlanView]:
@@ -431,6 +453,15 @@ def _settings(draft: Path) -> dict:
     if not isinstance(settings, dict):
         return {}
     return {k: settings[k] for k in ("mode", "hide_answers") if k in settings}
+
+
+def plan_label(course: Course, batch: str) -> str | None:
+    """The label of the plan a batch came from, for the batch page's link back to it; None
+    when its draft is gone, or when a newer draft took the label, as the plan page would
+    then show that one and not the plan this batch was made from."""
+    label = label_of(batch)
+    draft = _draft(course, label) if label else None
+    return label if draft is not None and draft.name == batch else None
 
 
 def label_of(name: str) -> str | None:

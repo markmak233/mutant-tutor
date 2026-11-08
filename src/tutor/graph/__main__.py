@@ -40,9 +40,10 @@ from pydantic import ValidationError
 from tutor.config import WORKSPACE_FILE, WorkspaceError, load_env, load_workspace
 from tutor.container import ContainerError, check_course
 from tutor.exchange import AwaitingAnswer
-from tutor.graph.batch import blocking_problems, existing_ids, latest_results, write_manifest
+from tutor.graph.batch import latest_results, write_manifest
 from tutor.graph.languages import course_language, profile_of
 from tutor.graph.nodes import Deps, check_round, reusing_reports
+from tutor.graph.plan_review import _owner_decision, approval_decision
 from tutor.graph.settings import (
     DEFAULTS,
     DEPS_FIELDS,
@@ -80,6 +81,8 @@ def main(argv: list[str] | None = None) -> int:
     resume = sub.add_parser("resume", help="continue a planned batch")
     resume.add_argument("--approve", action="store_true")
     resume.add_argument("--feedback")
+    resume.add_argument("--only", help="comma-separated plan IDs; requires --approve")
+    resume.add_argument("--plan-digest", help="fingerprint of reviewed plan; requires --approve")
     resume.add_argument("--profile", help="generate the remaining items with this profile")
     resume.add_argument("--oracle-profile", help="write their oracles with this profile")
     resume.add_argument("--repair-profile", help="repair them with this profile")
@@ -110,6 +113,12 @@ def main(argv: list[str] | None = None) -> int:
     plan.add_argument("--plan-thinking", choices=["low", "on"],
                       help="whether the planning model reasons first (default: on)")
     args = parser.parse_args(argv)
+    # Reject incompatible authorization flags before configuration or unfinished work runs.
+    if args.command == "resume":
+        if (args.only is not None or args.plan_digest is not None) and not args.approve:
+            parser.error("--only and --plan-digest require --approve")
+        if args.approve and args.feedback is not None:
+            parser.error("--approve and --feedback cannot be combined")
     try:
         from tutor.graph import build
     except ImportError:
@@ -297,6 +306,25 @@ def _batch(args, workspace: Path, build) -> int:
         # The owner's answer given as a flag; it answers the first pause at the plan only.
         flag = ({"approve": True} if getattr(args, "approve", False)
                 else {"feedback": args.feedback} if getattr(args, "feedback", None) else None)
+        if flag and flag.get("approve"):
+            if args.only is not None:
+                flag["selected_ids"] = args.only.split(",") if args.only else []
+            if args.plan_digest is not None:
+                flag["plan_digest"] = args.plan_digest
+        if flag:
+            # _advance can dispatch a stopped item. An approval must target the approval
+            # interrupt itself, not implicitly approve a newly finished, unseen plan.
+            snapshot = app.get_state(config)
+            at_approval = any(isinstance(p.value, dict) and "plan" in p.value
+                              for task in snapshot.tasks for p in task.interrupts)
+            if not at_approval or snapshot.values.get("approved"):
+                raise ValueError("This batch is not waiting for plan approval. Continue it "
+                                 "without approval/selection flags.")
+            if flag.get("approve"):
+                approval_decision(snapshot, deps, workspace, flag)
+        if args.command == "resume":
+            # Invalid approvals must not change the settings of an existing run.
+            _write_run(deps.drafts / "run.json", profiles, settings)
         # Assistant mode: a resume first tells a batch paused for answers to go on, once;
         # if it pauses again in the same run, the new requests are reported instead.
         answered = args.command != "resume"
@@ -360,7 +388,6 @@ def _resumed_batch(args, workspace: Path, drafts: Path) -> tuple[Path, dict,
     if new_profiles or given:
         profiles.update(new_profiles)
         settings = resolve(workspace, given, base=settings)
-        _write_run(run_file, profiles, settings)
     return batch_dir, profiles, settings
 
 
@@ -384,37 +411,6 @@ def _advance(app, pending, config):
     return snapshot
 
 
-def _owner_decision(snapshot, deps: Deps, workspace: Path, flag: dict | None, parallel: int):
-    """The batch waits for the owner at the plan: show it as plan.json holds it (with the
-    owner's edits), with what its check found, then take the answer: `flag`, else asked in
-    the terminal. Returns the Command that resumes the graph, or None to pause. A plan.json
-    with a blocking problem is not approved (ValueError)."""
-    from langgraph.types import Command
-
-    plan_file = deps.drafts / "plan.json"
-    plan, edited = _owner_plan(deps.drafts, snapshot.values["plan"])
-    # The model's plan was checked when it was made; an edited one is checked here.
-    problems = (blocking_problems(deps.profile.batch_plan.model_validate({"items": plan}).items,
-                                  snapshot.values["lectures"], existing_ids(workspace))
-                if edited else snapshot.values.get("plan_problems", []))
-    _show_plan(plan, problems, plan_file, workspace)
-    if edited:
-        print(f"{plan_file.name} differs from the model's latest plan; approving uses "
-              f"{plan_file.name} (delete it to take the model's plan)", flush=True)
-    answer = flag or _ask()
-    if answer is None:
-        return None
-    if not answer.get("approve"):
-        return Command(resume={"action": "revise", "feedback": answer["feedback"]})
-    plan = json.loads(plan_file.read_text(encoding="utf-8"))  # with the owner's edits
-    items = deps.profile.batch_plan.model_validate({"items": plan}).items
-    if found := blocking_problems(items, snapshot.values["lectures"], existing_ids(workspace)):
-        raise ValueError(f"{plan_file.name} cannot be approved: {'; '.join(found)}."
-                         " Fix it, then resume with --approve again")
-    print(f"generating {len(plan)} items, {parallel} at a time", flush=True)
-    return Command(resume={"action": "approve", "plan": plan})
-
-
 def _waiting_requests(snapshot) -> list[str]:
     """The request ids a batch paused for in assistant mode (the `answers` node's
     interrupt), or [] when it paused for something else (the plan approval)."""
@@ -427,56 +423,6 @@ def _report_waiting(requests: list[str], batch: str) -> int:
           f"Answer them (python -m tutor.exchange list; docs/assistant-mode.md), then run "
           f"python -m tutor.graph resume --batch {batch}")
     return WAITING
-
-
-def _ask() -> dict | None:
-    if not sys.stdin.isatty():
-        return None
-    try:
-        answer = input("Approve? [y] / type feedback to send it back / Enter to pause: ").strip()
-    except EOFError:
-        # Windows counts NUL (stdin closed) as a terminal, so isatty() lets it through.
-        return None
-    if not answer:
-        return None
-    return {"approve": True} if answer.lower() in ("y", "yes") else {"feedback": answer}
-
-
-def _owner_plan(drafts: Path, model_plan: list[dict]) -> tuple[list[dict], bool]:
-    """The plan to show and approve, and whether the owner edited it. plan.json is written
-    when the model's plan is new (the first pause, or a plan made again after feedback);
-    otherwise it is kept, so a resume does not undo the owner's edits. plan.model.json
-    holds the model's plan last written, to tell the two apart."""
-    plan_file, model_file = drafts / "plan.json", drafts / "plan.model.json"
-    text = json.dumps(model_plan, indent=1) + "\n"
-    if plan_file.is_file() and not model_file.is_file():
-        # Paused before plan.model.json existed: plan.json may hold the owner's edits (or
-        # the plan before their feedback), so it is kept; the caller says it differs.
-        model_file.write_text(text, encoding="utf-8")
-        plan = json.loads(plan_file.read_text(encoding="utf-8"))
-        return plan, plan != model_plan
-    if not plan_file.is_file() or model_file.read_text(encoding="utf-8") != text:
-        plan_file.write_text(text, encoding="utf-8")
-        model_file.write_text(text, encoding="utf-8")
-        return model_plan, False
-    plan = json.loads(plan_file.read_text(encoding="utf-8"))
-    return plan, plan != model_plan
-
-
-def _show_plan(plan: list[dict], problems: list[str], plan_file: Path, workspace: Path) -> None:
-    print()
-    for n, p in enumerate(plan, 1):
-        print(f"{n}. {p['id']}  [{p['type']}, {p['interface']}, {p['framework']}]  "
-              f"{p['lecture']} slides {p['slides']}")
-        print(f"   {p['knowledge_point']}")
-        if p.get("notes"):
-            print(f"   checks: {p['notes']}")
-        if p.get("reason"):
-            print(f"   why: {p['reason']}")
-    for problem in problems:
-        print(f"   ! {problem}")
-    print(f"\nThe plan is in {plan_file.relative_to(workspace)}; edit it before approving "
-          "if you like.", flush=True)
 
 
 def _progress(exercise: str, node: str, change: dict) -> None:

@@ -73,8 +73,8 @@ two).
 ## How exercises are generated
 
 ```
-plan (reads the course's coverage table) -> the owner approves or sends it back
-  -> for each exercise, in parallel:
+plan (reads the course's coverage table) -> the owner selects items and approves, or sends back
+  -> for each selected exercise, in parallel:
      generate -> oracle (a second model) -> validate --VALID--> save
         ^                                     |
         +------------ repair <---- failed ----+   (up to 3 rounds, then discard)
@@ -301,6 +301,23 @@ python -m tutor.gui             # every course folder next to WORKSPACE_DIR's, o
 
 It listens on 127.0.0.1 only and opens a link with a token for this launch; other pages
 in the browser cannot use it.
+
+On the Plan page all proposed items start checked. Uncheck anything to defer, then use
+**Approve and generate selected**; at least one item is required. Every note stays visible.
+The selection is saved with the full approved plan, so Stop/Continue and assistant resumes
+keep that subset. A changed plan requires a fresh review. Deferred rows say **Left out by
+you**. After the run finishes and the course is idle, **Generate** starts one deferred item
+as a new paid generation, using its approved notes and the saved settings. The page shows
+the effective models from current course settings. **Try all again** includes failures only.
+
+From a terminal, choose IDs with:
+
+```bash
+python -m tutor.graph resume --batch demo --approve --only=alpha,charlie
+```
+
+Omit --only to approve all items. Supply it only at the approval pause, never on Continue;
+an empty, repeated or unknown ID list is refused. plan.json remains the full plan.
 
 A gitleaks pre-commit hook blocks secrets and absolute home-directory paths
 (`pre-commit install` once per clone; needs `gitleaks` installed).

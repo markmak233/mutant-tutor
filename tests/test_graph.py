@@ -432,9 +432,11 @@ def test_the_owner_may_edit_the_plan_before_approving():
     state = {"plan": plan, "lectures": ["L1"]}
     edited = [{**plan[0], "id": "a-better-name"}]
     assert batch.apply_decision(state, {"action": "approve", "plan": edited}, []) == {
-        "plan": edited, "approved": True}
+        "plan": edited, "approved": True, "selected_ids": ["a-better-name"],
+        "plan_digest": None, "generation_complete": False}
     assert batch.apply_decision(state, {"action": "revise", "feedback": "harder"}, []) == {
-        "feedback": "harder", "approved": False}
+        "feedback": "harder", "approved": False, "selected_ids": None,
+        "plan_digest": None, "generation_complete": False}
 
 
 def test_a_plan_with_a_repeated_or_taken_id_is_never_approved():
@@ -451,7 +453,7 @@ def test_a_plan_with_a_repeated_or_taken_id_is_never_approved():
 
 
 def test_a_resume_keeps_the_owners_edits_to_the_plan_until_the_model_plans_again(tmp_path):
-    from tutor.graph.__main__ import _owner_plan
+    from tutor.graph.plan_review import _owner_plan
 
     model_plan = json.loads(plan_json("a"))["items"]
     assert _owner_plan(tmp_path, model_plan) == (model_plan, False)  # first pause: written
@@ -465,21 +467,21 @@ def test_a_resume_keeps_the_owners_edits_to_the_plan_until_the_model_plans_again
 
 def test_the_approval_prompt_pauses_when_stdin_is_closed(monkeypatch):
     """On Windows stdin from NUL passes isatty(), then input() meets end of file."""
-    from tutor.graph import __main__ as cli
+    from tutor.graph import plan_review
 
-    monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: True, raising=False)
+    monkeypatch.setattr(plan_review.sys.stdin, "isatty", lambda: True, raising=False)
 
     def closed(prompt):
         raise EOFError
 
     monkeypatch.setattr("builtins.input", closed)
-    assert cli._ask() is None  # None: pause, as Enter does
+    assert plan_review._ask() is None  # None: pause, as Enter does
     monkeypatch.setattr("builtins.input", lambda prompt: "y")
-    assert cli._ask() == {"approve": True}
+    assert plan_review._ask() == {"approve": True}
 
 
 def test_a_batch_paused_before_the_model_plan_was_kept_keeps_the_owners_plan(tmp_path):
-    from tutor.graph.__main__ import _owner_plan
+    from tutor.graph.plan_review import _owner_plan
 
     model_plan = json.loads(plan_json("a"))["items"]
     edited = [{**model_plan[0], "id": "a-better-name"}]

@@ -1171,9 +1171,10 @@ Design approved 2026-10-28 (owner):
   sends it back with feedback, which goes to `plan`. A resume rewrites plan.json only when
   the model has planned again (`plan.model.json` keeps its last plan), so the owner's
   edits survive a pause; a batch paused before that file existed keeps its plan.json, and
-  the CLI says when plan.json differs from the model's latest plan. The approved plan, edited or not, must pass the blocking checks
-  (unique and new ids, since two items with one id would share a drafts folder; known
-  lectures; slide ranges), in the CLI and again in `approve`; a count other than the one
+  the CLI says when plan.json differs from the model's latest plan. Every row must have a
+  unique, identifiable ID; selected rows, edited or not, must pass the schema and blocking
+  checks (new ids, since two items with one id would share a drafts folder; known lectures;
+  slide ranges), in the CLI and again in `approve`; a count other than the one
   asked for is the owner's choice (both found in an outside review, 2026-10-29). A SQLite checkpointer in
   `.drafts/<batch>/` keeps the paused batch, so `python -m tutor.graph resume` continues it
   in another terminal or another day. Approved items fan out with `Send` and run the item
@@ -3345,6 +3346,39 @@ late; the adaptive review screens can be built with it.
   plan's exercises that did not come out and links to the plan to try them again (owner).
   With two or more, "Try all N again" runs each one's commands one after another in one
   task.
+- Select items on the Plan page (owner approved 2026-11-08): native checkboxes start all
+  checked. Approve and generate selected starts only checked rows; an empty selection is
+  refused with its ticks preserved, before a task or model call. Full notes and reasons
+  remain visible. Unchecked rows say "Left out by you", not failed; Try all includes only
+  actual failures. No custom JavaScript or nested forms: checkboxes use HTML's form
+  association. The CLI equivalent is `resume --approve --only=alpha,charlie`; omitting
+  --only preserves all-items approval, while an explicit empty list is refused.
+  - Unlike the earlier status/retry addition, selection changes graph state and dispatch.
+    The checkpoint keeps the full approved plan, selected_ids in plan order, the exact
+    reviewed file's SHA-256, and generation_complete after collect, even with zero saved.
+    plan.json is never filtered. Dispatch and assistant-answer resumes use only selected
+    IDs; Continue cannot broaden them. Legacy checkpoints without selected_ids mean all.
+    A new plan clears selection metadata; the model-facing schemas and prompts stay intact.
+  - Identity must be unambiguous throughout the plan. Schema, unused ID, source and slide
+    checks apply only to selected rows; an invalid deferred row need not block a valid one.
+    A GUI approval submits IDs and the reviewed digest; both the server and queued CLI
+    compare the digest before work. A stale page shows the current full plan for review.
+    Selection/approval flags are rejected outside the approval interrupt, before stopped
+    work can run or run.json settings can change.
+  - The GUI reads the root SQLite checkpoint lazily, with a read-only connection and short
+    busy timeout, without loading .env or models. A read failure disables paid controls and
+    offers Refresh/repair instructions rather than guessing the authorized subset. Once
+    approved, the page and retries use the full checkpoint snapshot, even if plan.json is
+    changed externally. Edit plan.json is offered only before approval. Approval before
+    the first item log still means Continue; completion without a manifest has no Open
+    batch link.
+  - After the selected run finishes and the whole course is idle, each deferred row has
+    Generate, an explicit new paid item/validation task. It uses the approved notes and
+    saved settings/profile overrides, resolved against current course model definitions
+    shown on the page. Current schema, source and ID collisions are checked again. A
+    blocked row links to the course/existing exercises and New batch as its fix path.
+    A later saved/error/discarded result replaces left-out status and follows the ordinary
+    retry workflow. No bulk Generate all left out action in this version.
 - "Try again with a note" (owner, 2026-11-07, after a real retry failed rule 1 the same way
   twice: the reference and the tests read an ambiguous question differently, and nothing
   about the retry had changed). Under an exercise that did not come out, a folded section
@@ -3399,7 +3433,7 @@ late; the adaptive review screens can be built with it.
   - The new-batch form is the one page that shows what a request sent: a refused form comes
     back with the values typed, escaped like everything else.
   - How many exercises (owner, 2026-11-06): "let the plan model decide", with its limit in
-    view (`--max-count`: `[generation] max_count`, else 20, since some lectures hold far
+    view (`--max-count`: `[generation] max_count`, else 40, since some lectures hold far
     more than 6 points; the CLI's default stays 6), or "exactly N" (`--count`).
     The plan model already counts the knowledge points that deserve an exercise, so no
     separate call counts them first: it would read the same pages for a second fee, and the
@@ -3407,6 +3441,11 @@ late; the adaptive review screens can be built with it.
     stopped at the limit now says so on the plan page, since points may have been merged or
     left out. The limit is kept in the batch's state when the plan is made, so a plan sent
     back cannot go past it; more means adding items to `plan.json` or a new batch.
+    The bound rose from 20 to 40 (owner, 2026-11-09): only ticked items are generated, so a
+    longer plan costs no more, and the plan model's reply bounds it instead. Measured on the
+    saved plans, an item is 650 to 1,130 characters (about 300 tokens), so 40 items fit
+    `max_tokens_no_thinking` (16k) with room; 100, or a limit of PDF pages / 5 (about 48
+    for four 60-page lectures), would be cut off.
 - Lectures and new courses (step 5, owner, 2026-11-06). A course's Lectures page lists each
   PDF with what the cache holds (not read, read, image pages waiting). Uploads: PDFs only,
   checked by their first bytes; 100 MB each and 500 MB a request; the name kept as given

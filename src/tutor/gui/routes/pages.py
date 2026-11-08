@@ -50,7 +50,8 @@ def register(app: Flask) -> None:
     def batch(name: str, batch: str):
         course, view = batch_or_404(name, batch)
         return render_template("batch.html", course=course, batch=view, labels=STATUS_LABELS,
-                               missing=plan_items.not_succeeded(course, batch))
+                               missing=plan_items.not_succeeded(course, batch),
+                               plan_label=generation.plan_label(course, batch))
 
     @app.get("/c/<name>/b/<batch>/e/<exercise>/")
     def exercise(name: str, batch: str, exercise: str):

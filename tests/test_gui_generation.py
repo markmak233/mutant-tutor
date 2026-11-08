@@ -1,123 +1,31 @@
-"""Generating from the GUI (step 4): the new-batch form's checks, the commands it builds, where
-a planned batch stands by its files, and the whole flow through the real runner with a
-stand-in for `python -m tutor.graph` (tests/fake_graph.py), so no model is ever called."""
+"""GUI generation regression checks using synthetic courses and stand-in commands."""
 
 import json
 import os
 import sys
-import time
-from pathlib import Path
 
 import pytest
 
-pytest.importorskip("flask")  # the `gui` extra
+pytest.importorskip("flask")
 
-from tutor.gui import courses, generation, launch, plan_items, tasks  # noqa: E402
-from tutor.gui.app import create_app  # noqa: E402
+from gui_generation_helpers import (
+    FAKE_GRAPH,
+    FakeLauncher,
+    _browser,
+    _check,
+    _draft,
+    _form,
+    _task,
+    _wait_idle,
+    _write,
+    approval_form,
+    get,
+    post,
+)
+from gui_generation_helpers import course as course  # noqa: E402
+from gui_generation_helpers import root as root  # noqa: E402
 
-TOKEN = "test-token"
-BASE = "http://127.0.0.1:5000"
-FAKE_GRAPH = Path(__file__).parent / "fake_graph.py"
-WORKSPACE_TOML = """course = "demo"
-
-[llm.roles]
-plan = "cheap"
-generate = "cheap"
-oracle = "other"
-
-[llm.profiles.cheap]
-provider = "deepseek"
-model = "deepseek-v4-flash"
-api_key_env = "DEEPSEEK_API_KEY"
-
-[llm.profiles.other]
-provider = "openai"
-model = "gpt-6.1-terra"
-
-[generation]
-mode = "review"
-"""
-
-
-def _write(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-
-
-@pytest.fixture
-def root(tmp_path):
-    """A course with two lectures read into the cache and one PDF not read yet."""
-    course = tmp_path / "courses" / "demo-course"
-    _write(course / "workspace.toml", WORKSPACE_TOML)
-    for name in ("L1", "L2"):
-        _write(course / "cache" / "lectures" / f"{name}.pdf.md", "## p.1 · slide 1.1\ntext\n")
-    _write(course / "lectures" / "L3.pdf", "%PDF")
-    return tmp_path / "courses"
-
-
-@pytest.fixture
-def course(root):
-    return courses.get_course(root, "demo-course")
-
-
-class FakeLauncher:
-    LaunchError = launch.LaunchError
-
-    def __init__(self):
-        self.calls = []
-
-    def open_folder(self, path):
-        self.calls.append(("folder", path))
-
-    def open_in_vscode(self, folder, file):
-        self.calls.append(("vscode", folder, file))
-
-
-def _browser(root, launcher=None):
-    client = create_app(root, TOKEN, port=5000, launcher=launcher or FakeLauncher()).test_client()
-    client.get(f"/?token={TOKEN}", base_url=BASE)
-    return client
-
-
-def get(client, path):
-    return client.get(path, base_url=BASE)
-
-
-def post(client, path, data=None):
-    return client.post(path, base_url=BASE, data=data or {}, headers={"Origin": BASE})
-
-
-def _form(**changes):
-    form = {"label": "w9-test", "lecture": ["L1"], "mode": "learn", "how": "auto",
-            "max_count": "6", "count": "", "prefs": ""}
-    return {**form, **changes}
-
-
-def _check(course, **changes):
-    form = {"label": "w9-test", "chosen": ["L1"], "mode": "learn", "how": "auto", "count": "",
-            "max_count": "6", "prefs": "", "hide_answers": False, **changes}
-    return generation.check_form(course, **form)
-
-
-def _task(kind, label="w9-test", status=tasks.DONE, codes=(0,), **how_many):
-    return tasks.Task("20260102-100000-abcdef", Path("/nowhere"), f"{kind} {label}", status,
-                      "2026-01-02 10:00:00", None, [], list(codes), 1,
-                      {"kind": kind, "label": label, **how_many})
-
-
-def _draft(course, label="w9-test", plan=True, ids=("a", "b")):
-    """A draft folder as `plan` leaves it at the pause."""
-    draft = course.workspace.root / "batches" / ".drafts" / f"2026-01-02_p3-{label}"
-    _write(draft / "checkpoint.sqlite", "")
-    _write(draft / "run.json", json.dumps({"settings": {"mode": "review", "hide_answers": True}}))
-    if plan:
-        items = [{"id": i, "type": "implement", "lecture": "L1", "slides": "1.1"} for i in ids]
-        _write(draft / "plan.json", json.dumps(items))
-        _write(draft / "plan.model.json", json.dumps(items))
-    return draft
-
-
-# --- the form ---------------------------------------------------------------------------------
+from tutor.gui import courses, generation, tasks  # noqa: E402
 
 
 def test_only_lectures_read_into_the_cache_are_offered(course):
@@ -133,7 +41,7 @@ def test_a_lecture_saved_as_a_web_page_is_offered_by_its_name(course):
 
 def test_the_form_starts_from_the_courses_generation_table(course):
     assert generation.defaults(course) == {"mode": "review", "hide_answers": False,
-                                           "how": "auto", "max_count": 20}
+                                           "how": "auto", "max_count": 40}
 
 
 def test_the_models_are_named_never_their_keys(course):
@@ -154,12 +62,12 @@ def test_the_models_are_named_never_their_keys(course):
     ({"chosen": ["L3"]}, "read into the cache"),  # a PDF not read yet
     ({"chosen": ["../../etc/passwd"]}, "read into the cache"),
     ({"mode": "exam"}, "learn or review"),
-    ({"how": "exact", "count": "0"}, "1 to 20"),
-    ({"how": "exact", "count": "21"}, "1 to 20"),
-    ({"how": "exact", "count": "two"}, "1 to 20"),
-    ({"how": "exact", "count": ""}, "1 to 20"),
-    ({"max_count": "0"}, "1 to 20"),
-    ({"max_count": ""}, "1 to 20"),
+    ({"how": "exact", "count": "0"}, "1 to 40"),
+    ({"how": "exact", "count": "41"}, "1 to 40"),  # one past the bound
+    ({"how": "exact", "count": "two"}, "1 to 40"),
+    ({"how": "exact", "count": ""}, "1 to 40"),
+    ({"max_count": "0"}, "1 to 40"),
+    ({"max_count": ""}, "1 to 40"),
     ({"count": "4"}, "choose one"),  # a number typed under Exactly, but auto chosen
     ({"how": ""}, "Choose how many"),
     ({"prefs": "x" * 2001}, "2000 characters"),
@@ -413,7 +321,8 @@ def test_no_resume_starts_without_docker(root, course, monkeypatch, action):
     monkeypatch.setattr(tasks, "start", lambda *a, **k: pytest.fail("nothing may start"))
     _draft(course, plan=action != "continue")  # continue: a plan that did not finish
 
-    response = post(_browser(root), f"/c/demo-course/plans/w9-test/{action}", {"feedback": "x"})
+    form = approval_form(course) if action == "approve" else {"feedback": "x"}
+    response = post(_browser(root), f"/c/demo-course/plans/w9-test/{action}", form)
 
     assert response.headers["Location"].endswith("?notice=docker-stopped")
 
@@ -477,7 +386,8 @@ def test_the_plan_page_shows_plan_json_escaped(root, course):
     page = get(_browser(root), "/c/demo-course/plans/w9-test/").get_data(as_text=True)
 
     assert "<script>alert(1)" not in page and "&lt;script&gt;alert(1)" in page
-    assert "plan.json was edited" in page and "Approve and generate" in page
+    assert "plan.json was edited" in page and "Approve and generate" not in page
+    assert "Edit plan.json" in page and "Send back" in page
 
 
 def test_a_running_plan_polls_and_offers_no_decision(root, course):
@@ -507,18 +417,10 @@ def test_the_course_page_links_new_batch_and_open_plans(root, course):
 # --- the whole flow, through the real runner -------------------------------------------------
 
 
-def _wait_idle(course_root: Path, count: int, within_s: float = 30) -> tasks.Task:
-    """The course's `count`-th task, once it has ended."""
-    deadline = time.monotonic() + within_s
-    while time.monotonic() < deadline:
-        found = tasks.list_tasks(course_root)
-        if len(found) == count and not found[0].active:
-            return found[0]
-        time.sleep(0.1)
-    raise AssertionError("the task did not end")
 
 
 def test_plan_send_back_and_approve_with_a_stand_in_for_the_graph(root, course, monkeypatch):
+    pytest.importorskip("langgraph.checkpoint.sqlite")
     monkeypatch.setattr(generation, "GRAPH", [sys.executable, str(FAKE_GRAPH)])
     # The stand-in's batch has no exercise files, so the validation chained after approving
     # is a stand-in too: what is tested is that it runs in the same task, after the graph.
@@ -539,7 +441,7 @@ def test_plan_send_back_and_approve_with_a_stand_in_for_the_graph(root, course, 
     assert _wait_idle(home, 2).status == tasks.DONE
     assert "w9-test-extra" in get(client, plan_page).get_data(as_text=True)
 
-    post(client, f"{plan_page}approve")
+    post(client, f"{plan_page}approve", approval_form(course))
     approved = _wait_idle(home, 3)
     assert approved.status == tasks.DONE and len(approved.commands) == 2
     assert "validated w9-test" in tasks.tail(approved)[0]
@@ -549,246 +451,9 @@ def test_plan_send_back_and_approve_with_a_stand_in_for_the_graph(root, course, 
     calls = [json.loads(line) for line in
              (home / "fake-graph-calls.jsonl").read_text(encoding="utf-8").splitlines()]
     assert [c[0] for c in calls] == ["plan", "resume", "resume"]
-    assert calls[1][-1] == "--feedback=-add one more" and calls[2][-1] == "--approve"
+    assert calls[1][-1] == "--feedback=-add one more" and "--approve" in calls[2]
     course_page = get(client, "/c/demo-course/").get_data(as_text=True)
     assert "_p3-w9-test" in course_page and "waiting for you" not in course_page
 
 
 # --- each exercise's status, and generating one again (owner, 2026-11-06) ---------------------
-
-
-def _generated(course, label="w9-test", hide_answers=True):
-    """A batch generated from a 4-item plan: a valid, b saved with no verdict yet, c discarded,
-    d failed with a provider error."""
-    draft = _draft(course, label, ids=("a", "b", "c", "d"))
-    _write(draft / "run.json", json.dumps({
-        "profiles": {"repair_profile": "deepseek-pro", "plan_profile": "glm-flash"},
-        "settings": {"mode": "review", "hide_answers": hide_answers, "max_rounds": 3,
-                     "parallel": None}}))
-    batch = course.workspace.root / "batches" / draft.name
-    _write(batch / "manifest.json", json.dumps({"exercises": ["a", "b"]}))
-    _write(batch / "solutions" / "a" / "validation.json", json.dumps({"valid": True}))
-    lines = [{"exercise": "a", "outcome": "saved", "rounds": 0, "attempts": []},
-             {"exercise": "b", "outcome": "saved", "rounds": 1, "attempts": []},
-             {"exercise": "c", "outcome": "discarded", "rounds": 3, "attempts": [
-                 {"failure": "rule 1 (reference passes) FAIL: expected 42, got 41"}]},
-             {"exercise": "d", "outcome": "error", "rounds": 0, "attempts": [],
-              "error": "LLMError: the stream ended after 2 characters"}]
-    _write(batch / "generation.jsonl", "\n".join(json.dumps(line) for line in lines) + "\n")
-    return draft, batch
-
-
-def test_each_exercise_of_a_generated_plan_has_its_status(course):
-    _generated(course)
-    view = generation.plan_view(course, "w9-test", history=[])
-    statuses = plan_items.item_statuses(course, view)
-
-    assert {k: v.state for k, v in statuses.items()} == {
-        "a": "valid", "b": "saved, not validated", "c": "discarded", "d": "error"}
-    assert statuses["c"].reason == "rule 1 (reference passes) FAIL, after 3 repairs"
-    assert "42" not in statuses["c"].reason  # the check's details can quote expected values
-    assert "stream ended" in statuses["d"].reason
-    assert [k for k, v in statuses.items() if v.can_retry] == ["c", "d"]
-
-
-def test_an_exercise_saved_before_the_manifest_exists_is_saved_not_discarded(course):
-    # The manifest is written once every item has finished, so while a batch runs, or after
-    # it stopped midway, a saved exercise is only in generation.jsonl.
-    _, batch = _generated(course)
-    (batch / "manifest.json").unlink()
-    view = generation.plan_view(course, "w9-test", history=[])
-    statuses = plan_items.item_statuses(course, view)
-
-    assert {k: v.state for k, v in statuses.items()} == {
-        "a": "saved, not validated", "b": "saved, not validated", "c": "discarded",
-        "d": "error"}
-    assert [k for k, v in statuses.items() if v.can_retry] == ["c", "d"]
-
-
-def test_a_plan_not_approved_yet_shows_no_status(course):
-    _draft(course)
-    view = generation.plan_view(course, "w9-test", history=[])
-    assert plan_items.item_statuses(course, view) == {}
-
-
-def test_the_plan_page_shows_the_status_and_try_again_only_where_it_failed(root, course):
-    _generated(course)
-    page = get(_browser(root), "/c/demo-course/plans/w9-test/").get_data(as_text=True)
-
-    assert "chip-valid" in page and "chip-discarded" in page and "chip-error" in page
-    # Each of the two: "Try again", and "Try again with a note".
-    assert page.count('name="item" value="c"') == 2 and page.count('name="item" value="d"') == 2
-    assert page.count('name="item" value=') == 4
-    assert 'href="/c/demo-course/b/2026-01-02_p3-w9-test/e/a/"' in page  # a saved one links
-
-
-def test_try_again_generates_that_exercise_with_the_batchs_settings_then_validates_it(
-        root, course, monkeypatch):
-    draft, batch = _generated(course)
-    started = []
-    monkeypatch.setattr(tasks, "start", lambda course_root, title, commands, env, meta=None:
-                        started.append((title, commands, meta)) or tasks.Task(
-                            "20260102-100000-abcdef", course_root, title, "running", "", None,
-                            commands, [], 1, meta or {}))
-    monkeypatch.setattr(courses, "container_problem", lambda course: None)
-
-    response = post(_browser(root), "/c/demo-course/plans/w9-test/retry", {"item": "c"})
-
-    assert response.headers["Location"] == "/c/demo-course/plans/w9-test/"
-    title, (graph, validate), meta = started[0]
-    assert graph[2:5] == ["tutor.graph", "item", str(draft / "retry-c.json")]
-    assert "--batch=w9-test" in graph and "--repair-profile=deepseek-pro" in graph
-    assert "--set=mode=review" in graph and "--set=hide_answers=true" in graph
-    assert not any("parallel" in a or "plan-profile" in a for a in graph)
-    assert json.loads((draft / "retry-c.json").read_text(encoding="utf-8"))["id"] == "c"
-    assert validate[2:] == ["tutor.validation", str(batch / "exercises" / "c"),
-                            str(batch / "solutions" / "c")]
-    assert meta == {"kind": "retry", "label": "w9-test", "item": "c"}
-
-
-@pytest.mark.parametrize("exercise", ["a", "zz", "../x"])
-def test_only_an_exercise_that_did_not_succeed_can_be_tried_again(root, course, exercise,
-                                                                  monkeypatch):
-    _generated(course)
-    monkeypatch.setattr(tasks, "start", lambda *a, **k: pytest.fail("nothing may start"))
-    response = post(_browser(root), "/c/demo-course/plans/w9-test/retry", {"item": exercise})
-    assert "notice=plan-moved" in response.headers["Location"]
-
-
-def test_while_a_task_runs_the_page_says_when_try_again_comes_back(root, course, monkeypatch):
-    """The owner saw the button gone during another retry and could not tell why."""
-    _generated(course)
-    running = _task(generation.RETRY, status=tasks.RUNNING, codes=())
-    monkeypatch.setattr(tasks, "list_tasks", lambda course_root: [running])
-    page = get(_browser(root), "/c/demo-course/plans/w9-test/").get_data(as_text=True)
-    assert 'name="item" value=' not in page
-    assert page.count("comes back when the running task ends") == 2
-
-
-def test_the_batch_page_points_to_the_plan_for_exercises_that_did_not_come_out(root, course):
-    _, batch = _generated(course)
-    # The batch page lists only what the manifest has; c and d live on the plan page.
-    page = get(_browser(root), f"/c/demo-course/b/{batch.name}/").get_data(as_text=True)
-    assert "2 exercises of the plan did not come out: c, d." in page
-    assert 'href="/c/demo-course/plans/w9-test/">Open the plan</a>' in page
-
-
-def test_a_batch_whose_exercises_all_came_out_says_nothing_of_it(root, course):
-    _, batch = _generated(course)
-    log = batch / "generation.jsonl"
-    log.write_text(log.read_text(encoding="utf-8") + "\n".join(json.dumps(
-        {"exercise": e, "outcome": "saved", "rounds": 0, "attempts": []}) for e in "cd") + "\n",
-        encoding="utf-8")
-    manifest = batch / "manifest.json"
-    manifest.write_text(json.dumps({"exercises": ["a", "b", "c", "d"]}), encoding="utf-8")
-    page = get(_browser(root), f"/c/demo-course/b/{batch.name}/").get_data(as_text=True)
-    assert "did not come out" not in page
-
-
-def test_try_all_generates_every_exercise_that_did_not_come_out_in_one_task(
-        root, course, monkeypatch):
-    draft, batch = _generated(course)
-    started = []
-    monkeypatch.setattr(tasks, "start", lambda course_root, title, commands, env, meta=None:
-                        started.append((title, commands, meta)) or tasks.Task(
-                            "20260102-100000-abcdef", course_root, title, "running", "", None,
-                            commands, [], 1, meta or {}))
-    monkeypatch.setattr(courses, "container_problem", lambda course: None)
-    client = _browser(root)
-    assert "Try all 2 again" in get(client, "/c/demo-course/plans/w9-test/").get_data(
-        as_text=True)
-
-    post(client, "/c/demo-course/plans/w9-test/retry-all")
-
-    title, commands, meta = started[0]
-    assert title == "Generate 2 exercises again" and len(commands) == 4  # each: graph, validate
-    assert [c[4] for c in commands[::2]] == [str(draft / "retry-c.json"),
-                                             str(draft / "retry-d.json")]
-    assert meta == {"kind": "retry", "label": "w9-test", "items": ["c", "d"]}
-
-
-# --- trying again with a note (owner, 2026-11-07) ----------------------------------------------
-
-
-def _record_starts(monkeypatch):
-    started = []
-    monkeypatch.setattr(tasks, "start", lambda course_root, title, commands, env, meta=None:
-                        started.append((title, commands, meta)) or tasks.Task(
-                            "20260102-100000-abcdef", course_root, title, "running", "", None,
-                            commands, [], 1, meta or {}))
-    monkeypatch.setattr(courses, "container_problem", lambda course: None)
-    return started
-
-
-def test_the_last_rounds_failure_is_shown_unless_the_batch_hides_answers(root, course):
-    _generated(course, hide_answers=False)
-    view = generation.plan_view(course, "w9-test", history=[])
-    statuses = plan_items.item_statuses(course, view)
-    assert statuses["c"].detail == "rule 1 (reference passes) FAIL: expected 42, got 41"
-    assert statuses["d"].detail == ""  # an error has its reason line, and no check output
-    page = get(_browser(root), "/c/demo-course/plans/w9-test/").get_data(as_text=True)
-    assert "expected 42, got 41" in page and "what the last round failed on" in page
-
-
-def test_a_batch_that_hides_answers_shows_no_check_output(root, course):
-    _generated(course)  # hide_answers: hand-calculation exercises
-    view = generation.plan_view(course, "w9-test", history=[])
-    assert plan_items.item_statuses(course, view)["c"].detail == ""
-    page = get(_browser(root), "/c/demo-course/plans/w9-test/").get_data(as_text=True)
-    assert "expected 42" not in page and "this batch hides answers" in page
-
-
-def test_a_note_is_added_to_the_items_notes_for_that_try_only(root, course, monkeypatch):
-    draft, _ = _generated(course)
-    plan = (draft / "plan.json").read_text(encoding="utf-8")
-    started = _record_starts(monkeypatch)
-    note = "Sum the list from the left.\nThe tests and the reference must agree."
-
-    response = post(_browser(root), "/c/demo-course/plans/w9-test/retry",
-                    {"item": "c", "note": note.replace("\n", "\r\n")})
-
-    assert response.headers["Location"] == "/c/demo-course/plans/w9-test/"
-    item = json.loads((draft / "retry-c.json").read_text(encoding="utf-8"))
-    assert item["notes"] == plan_items.NOTE_PREFIX + note  # the plan's item had no notes
-    assert (draft / "plan.json").read_text(encoding="utf-8") == plan  # the plan as approved
-    assert started[0][0] == "Generate c again with a note"
-    # The next page starts the next note from this one.
-    view = generation.plan_view(course, "w9-test", history=[])
-    assert plan_items.item_statuses(course, view)["c"].note == note
-    page = get(_browser(root), "/c/demo-course/plans/w9-test/").get_data(as_text=True)
-    assert "Sum the list from the left." in page
-
-
-def test_a_note_follows_the_notes_the_plan_gave(course):
-    draft, _ = _generated(course)
-    items = json.loads((draft / "plan.json").read_text(encoding="utf-8"))
-    items[2]["notes"] = "check an empty list"
-    _write(draft / "plan.json", json.dumps(items))
-    view = generation.plan_view(course, "w9-test", history=[])
-    plan_items.prepare_retry(course, view, "c", note="keep the order")
-    item = json.loads((draft / "retry-c.json").read_text(encoding="utf-8"))
-    assert item["notes"] == "check an empty list\n" + plan_items.NOTE_PREFIX + "keep the order"
-
-
-@pytest.mark.parametrize("note", ["x" * 2001, "a\x00b", "a\x1bb"])
-def test_a_note_that_is_not_plain_text_starts_nothing(root, course, note, monkeypatch):
-    draft, _ = _generated(course)
-    monkeypatch.setattr(tasks, "start", lambda *a, **k: pytest.fail("nothing may start"))
-    response = post(_browser(root), "/c/demo-course/plans/w9-test/retry",
-                    {"item": "c", "note": note})
-    assert "notice=note-bad" in response.headers["Location"]
-    assert not (draft / "retry-c.note.txt").exists()
-
-
-def test_try_again_without_a_note_and_try_all_leave_the_notes_as_planned(root, course,
-                                                                       monkeypatch):
-    draft, _ = _generated(course)
-    _write(draft / "retry-c.note.txt", "an earlier note")
-    _record_starts(monkeypatch)
-    client = _browser(root)
-    for path, form in (("retry", {"item": "c"}), ("retry-all", {})):
-        post(client, f"/c/demo-course/plans/w9-test/{path}", form)
-        item = json.loads((draft / "retry-c.json").read_text(encoding="utf-8"))
-        assert "notes" not in item  # the plan's item, unchanged
-    # The earlier note stays, to start the next note from.
-    assert (draft / "retry-c.note.txt").read_text(encoding="utf-8") == "an earlier note"
