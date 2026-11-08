@@ -36,7 +36,7 @@ from pathlib import Path
 
 import tomlkit
 
-from tutor import container, image_recipe, languages, workspace
+from tutor import compat, container, image_recipe, languages, workspace
 from tutor.envcheck import NOT_PIP, pip_requirements, requires_problems, version_matches
 from tutor.gui import tasks, toml_edit
 from tutor.gui.courses import Course
@@ -173,6 +173,7 @@ def downloads(requires: dict[str, str]) -> list[tuple[str, str]]:
                       "SHA-512"))
     packages = [name for name in ("pytest", "hypothesis") if name not in requires]
     packages += [name for name in requires if name not in NOT_PIP]
+    packages += compat.companions(requires, python)  # as the recipe adds them
     found.append((", ".join(packages), "PyPI (pip)"))
     return found
 

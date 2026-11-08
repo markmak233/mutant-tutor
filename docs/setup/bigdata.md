@@ -8,7 +8,7 @@ Linux / WSL commands are the standard equivalents and have not been tested yet.
 
 | Tool | Version | Needed for | Required? |
 |---|---|---|---|
-| Python | 3.11 (3.12: see below) | everything | yes. Not 3.13: mrjob imports the removed `pipes` module |
+| Python | 3.11 to 3.13 (see below) | everything | yes. Not 3.14: PySpark 3.5 does not run on it |
 | Java (JDK) | 17 | Spark, and Hadoop if installed; one JDK serves both | yes |
 | Hadoop | 3.3.x, standalone | MRJob exercises with a custom partitioner or sort order (e.g. `examples/station-condition-share`) | no. Without it those tests are skipped. On Windows they are always skipped (below) |
 | winutils | for Hadoop 3.3.x | Windows only: Spark reading and writing files | yes, on Windows |
@@ -105,10 +105,11 @@ cp .env.example .env
 On Windows (PowerShell): `py -3.11 -m venv .venv`, then `.venv\Scripts\Activate.ps1`
 (the other commands are the same; use `copy` for `cp`).
 
-Python 3.12 works too, with one extra step: run `pip install setuptools` in the venv.
-mrjob 0.7.4 imports `distutils`, which 3.12 removed, and 3.12 venvs no longer come with
-setuptools, whose `distutils` shim fills the gap. Without it the mrjob tests fail with
-`No module named 'distutils'`. CI tests 3.11 only.
+Python 3.12 and 3.13 work too. mrjob 0.7.4 imports `distutils`, which 3.12 removed, and
+`pipes`, which 3.13 removed; the `bigdata` extra installs setuptools (whose shim provides
+`distutils`) and standard-pipes (the removed module as it was) on the Pythons that need them,
+and so does a course's `.venv` and test image when `[requires]` has mrjob. CI tests 3.11 to
+3.14; Python 3.14 is refused for a course with PySpark 3.5, which fails there.
 
 To run a PySpark program directly (`python student.py <input> <output>`), also tell Spark
 which Python its workers use; otherwise they start the first `python3` on PATH, which may
@@ -352,8 +353,9 @@ specific hint (three levels; a review batch never gets code). `--no-llm` skips t
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| `No module named 'pipes'` | the venv or Hadoop task runs Python 3.13 | recreate the venv with `python3.11` (or 3.12) |
-| `No module named 'distutils'` | Python 3.12 venv without setuptools | `pip install setuptools` |
+| `No module named 'pipes'` | a Python 3.13 venv made before the `bigdata` extra brought standard-pipes, or a Hadoop task running another Python | run `pip install -e ".[bigdata,dev]"` again (a course: `python -m tutor.workspace init <course>`); for Hadoop, `--python-bin` |
+| `No module named 'distutils'` | a Python 3.12 venv made before the `bigdata` extra brought setuptools | the same |
+| `PicklingError: Could not serialize object: RecursionError` | PySpark 3.5 on Python 3.14 | recreate the venv with Python 3.13 or older |
 | `Java gateway process exited` / `JAVA_HOME is not set` | Spark cannot find the JDK | set `JAVA_HOME` in `.env` to a JDK 17 |
 | `PYTHON_VERSION_MISMATCH` when running a PySpark program directly | Spark workers start another `python3` than the venv's | `export PYSPARK_PYTHON="$(which python)"` (step 3) |
 | `test_env` fails with `/path/to/...` | a placeholder left in `.env` | set the real path or comment the line out |

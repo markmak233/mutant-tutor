@@ -46,8 +46,8 @@ in C, are in [`examples/`](examples/).
 
 ## Quick start
 
-Requirements: Python 3.11 (tested in CI; mrjob breaks on 3.13) and, for the big-data
-examples, Java 17. Setting up from scratch: [`docs/setup/bigdata.md`](docs/setup/bigdata.md).
+Requirements: Python 3.11 to 3.14 (each tested in CI; the big-data examples need 3.13 or
+older, as PySpark 3.5 does not run on 3.14) and, for the big-data examples, Java 17. Setting up from scratch: [`docs/setup/bigdata.md`](docs/setup/bigdata.md).
 
 ```bash
 python3.11 -m venv .venv && source .venv/bin/activate

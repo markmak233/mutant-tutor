@@ -17,6 +17,7 @@ from collections.abc import Callable, Mapping
 from importlib import metadata
 from pathlib import Path
 
+from tutor import compat
 from tutor.envcheck import NOT_PIP, requires_problems, version_matches
 
 IMAGE_PREFIX = "tutor-run-"
@@ -69,6 +70,9 @@ def dockerfile(requires: Mapping[str, str], uid: int | None = None,
     """
     _check_requires(requires)
     python = requires.get("python") or f"{sys.version_info.major}.{sys.version_info.minor}"
+    # requires_problems checks this only when [requires] names python; the image's own does.
+    if found := compat.conflicts(requires, python):
+        raise ContainerError(found[0])
     steps = [f"FROM python:{python}-slim-bookworm"]
     env = {
         # The root file system is read-only and /tmp is the only writable place besides a
@@ -109,6 +113,10 @@ def dockerfile(requires: Mapping[str, str], uid: int | None = None,
                 if name not in requires]
     packages += [_pip_spec(name, prefix, installed) for name, prefix in requires.items()
                  if name not in NOT_PIP]
+    # Companions only where the image's Python needs them (tutor.compat), so the recipe, and
+    # the image name, of a course that needs none stays as it was.
+    packages += [_pip_spec(name, None, installed) for name in compat.companions(requires, python)
+                 if name not in requires]
     steps.append("RUN pip install --no-cache-dir " + " ".join(shlex.quote(p) for p in packages))
     # --no-log-init: useradd's log file grows with the uid, and a large one fills the disk.
     steps.append(f"RUN useradd --create-home --no-log-init --uid {_uid(uid)} runner")

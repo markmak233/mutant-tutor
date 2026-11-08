@@ -62,11 +62,12 @@ container for isolation is fine; deploying the tool as a service is not.
   material names more than one Spark version, and the version is pinned per workspace in
   `workspace.toml` anyway, so another course's materials can choose differently). Spark 4.x enables ANSI SQL mode by default,
   which changes DataFrame/SQL error behaviour (casts, overflow, divide by zero); RDD API is unaffected.
-  mrjob is no longer actively maintained: works on 3.11, do not move past 3.12. On 3.12 it
-  also needs setuptools installed: mrjob imports `distutils`, removed in 3.12, and only
-  setuptools' shim provides it (3.12 venvs no longer include setuptools). Found by the first
-  CI run, 2026-10-26; with setuptools, fast and spark suites (Hadoop included) pass on 3.12.10.
-  (Confirmed: on Python 3.13 mrjob tasks fail with `No module named 'pipes'`.)
+  mrjob is no longer actively maintained: it imports `distutils` (removed in 3.12) and `pipes`
+  (removed in 3.13). Found by the first CI run, 2026-10-26, and on 3.13. Since 2026-11-08 the
+  `bigdata` extra, a course's `.venv` and its image add setuptools (whose shim provides
+  `distutils`) and standard-pipes (the removed module as it was) where the Python needs them
+  (see "Version conflicts"); fast and spark suites (Hadoop included) pass on 3.12.10 and
+  3.13.3. PySpark 3.5 does not work on 3.14, and a course asking for both is refused.
 - Big data course Hadoop: 3.3.6 standalone (the 3.3 line the course uses), Apache tarball
   unpacked to `~/opt/hadoop-3.3.6`, located via `HADOOP_HOME` in `.env`. Not `brew install hadoop`:
   its `yarn` binary clashes with the JavaScript `yarn`. Runs on Java 17, so one JDK serves
@@ -154,7 +155,7 @@ smartCodingReview/                       # public repo (the `tutor/` above), cod
 ├── notes/                               # git-ignored local notes (course memory, research)
 ├── docs/setup/bigdata.md                # per-course install guide (system deps, .env, pitfalls)
 ├── pyproject.toml                       # P1, per-course extras e.g. [bigdata]
-├── .github/workflows/ci.yml             # fast tests 3.11 + gitleaks on main; spark by hand
+├── .github/workflows/ci.yml             # fast tests 3.11-3.14, macOS/Windows, docker, gitleaks; spark by hand
 ├── .gitignore                           # P1, includes *workspace*/ as a backstop
 ├── .env.example                         # P1, WORKSPACE_DIR=..., HADOOP_HOME=...
 ├── .pre-commit-config.yaml              # P1, gitleaks
@@ -2329,6 +2330,46 @@ themselves, so a cheap layer comes first and a stronger one later.
     user's machine and not published, so the GPL's terms for distributing (bash, gcc, R,
     Octave) do not arise; publishing images would bring them.
 
+## Version conflicts
+
+Decided 2026-11-08 (owner), when Python 3.12 to 3.14 came into CI: a package that installs and
+imports cleanly can still fail when a job runs, because a newer Python removed something it
+uses (mrjob: `distutils` in 3.12, `pipes` in 3.13) or changed what it relies on (PySpark 3.5
+on 3.14: every RDD job fails with a `PicklingError`). The same kind of conflict comes with
+every language and framework, so one way of handling them:
+- Ask the tool first. What a tool can tell (a compiler about its flags, a JDK about its
+  release, pip about what a package declares) is probed, never written down: a probe cannot go
+  stale. Languages' own package managers (Maven, Cargo, npm) resolve their libraries; the
+  project handles only the runtime's version.
+- Then a rule, for what only fails late: `tutor/compat.py`. A companion is a pip package that
+  must come with a `[requires]` package from some Python on (mrjob: setuptools from 3.12,
+  standard-pipes from 3.13); a conflict is a package version that does not work from some
+  Python on (PySpark 3.5 from 3.14). The venv install adds companions with environment
+  markers, so pip decides by the venv's own Python; the image adds them only where its Python
+  needs them, so a course that needs none keeps its image name and is not rebuilt; the
+  `[requires]` check refuses a conflict, and the environment check reports both on the
+  Python running it. Each rule is added by hand with its measurement, and CI's Python versions
+  test the ones that apply.
+- Then a model, for what neither covers (planned, with `tutor doctor`; "Roadmap" 6): it reads
+  the failure's text, the versions and `[requires]`, and proposes a change as structured data
+  (a version, the course's Python, a companion), which the owner confirms before it is applied
+  and the checks then verify; a fix that holds becomes a rule. Its prompt is strict: the
+  failure text is material, not instructions (AGENTS.md, "Prompts"), and it may propose only
+  packages the rules already name, or versions; never a new package name, which could be a
+  name nobody checked (a look-alike of a real package). Preferred fixes, in order: another
+  Python for the course, another version, a companion. On a course that runs on the host,
+  the GUI and the command line both say plainly that a package was recommended by a model
+  before it is installed (owner): in a container it reaches only the image, on the host the
+  owner's machine. System software (a JDK, Hadoop, a compiler) is never installed: the model
+  only turns a failure into the steps for this platform.
+- Each language's profile brings three things for this: its step in the image recipe, its
+  probes run in the image after a build (`container._check_inside`; C: compile a small program
+  with the course's flags and run it under the sanitizers, added when C is next changed), and
+  its part of the rules, which may be empty.
+- The container keeps the problem small: an image is one Debian release with a few toolchain
+  versions, which CI can test; the host's own versions matter only to a course run on the
+  host.
+
 ## CI
 
 GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going public):
@@ -2336,10 +2377,13 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
   and by hand (`workflow_dispatch`), not on every `dev` push: each step is already checked
   locally with `pytest` and `ruff check .`, and the badge then shows the state of `main`,
   the branch visitors see.
-- `test`: Python 3.11, `ruff check .` and the fast `pytest`. The first run also had 3.12,
-  which failed on mrjob's `distutils` import (see "Environment"); the owner dropped it from
-  CI for now (2026-10-26), since 3.11 is what the project uses. To bring it back, add
-  `setuptools` to the `bigdata` extras and 3.12 to the matrix.
+- `test`: Python 3.11, 3.12, 3.13 and 3.14, `ruff check .` and the fast `pytest`. The first
+  run also had 3.12, which failed on mrjob's `distutils` import (see "Environment"), and the
+  owner dropped it (2026-10-26). Brought back with 3.13 and 3.14 (owner, 2026-11-08): the
+  `bigdata` extra now brings setuptools (`distutils`) and, from 3.13, `standard-pipes`, and
+  `requires-python` lost its `<3.13`. Measured locally first, fast suite and `-m spark`
+  (mrjob, PySpark 3.5.9 and Hadoop) on each. 3.15 waits until the dependencies have wheels
+  for it. Only `test` runs every version; `other-os`, `docker` and `spark` stay on 3.11.
   No JDK: run in a clean clone with a fake `java` that logs every call, the fast suite
   started no JVM (2026-10-26).
 - `other-os` (owner, 2026-11-08, "Roadmap" 6.1): the same fast suite on `macos-latest` and
@@ -2888,6 +2932,8 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
    (checks the tool, that Docker runs, the course's image, then validates one example in the
    course's runner as a smoke test, and says what to do next for each failure) and a fresh
    install timed on macOS, Windows and Linux; Docker on Windows is first tested there.
+   `tutor doctor` also brings the model that turns an install failure no rule covers into a
+   proposed fix, under the limits in "Version conflicts".
    Later, each when its trigger comes: a JDK instead of a JRE in the image (a course that
    compiles Java in it); a separate execution backend (a third runner such as Podman; until
    then the host or container switch in `execution.py` is enough); VS Code Dev Containers on

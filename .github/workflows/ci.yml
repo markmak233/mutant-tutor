@@ -18,9 +18,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 3.12 is left out for now: mrjob 0.7.4 imports distutils, which 3.12 removed
-        # (see docs/design.md, "CI"). mrjob breaks on 3.13.
-        python-version: ["3.11"]
+        # Every version pyproject.toml allows that has been released long enough for the
+        # dependencies' wheels (owner, 2026-11-08; 3.15 waits). The `bigdata` extra brings
+        # what mrjob 0.7.4 needs on 3.12 and later (see docs/design.md, "CI"). The ruleset
+        # requires `test (3.11)` by name; the other versions report next to it.
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
