@@ -2350,6 +2350,12 @@ every language and framework, so one way of handling them:
   `[requires]` check refuses a conflict, and the environment check reports both on the
   Python running it. Each rule is added by hand with its measurement, and CI's Python versions
   test the ones that apply.
+- A probe for packages no rule names: the environment check reads each `[requires]`
+  package's installed source for imports of standard-library modules the running Python
+  removed (`compat.REMOVED_MODULES`, from What's New in 3.12 and 3.13) and names every one at
+  once, unless this Python still finds it (a backport is installed) or a companion rule
+  brings it back (that rule's check reports it). The image's own check runs it too, so an
+  image whose package cannot import refuses to be called ready.
 - Then a model, for what neither covers (planned, with `tutor doctor`; "Roadmap" 6): it reads
   the failure's text, the versions and `[requires]`, and proposes a change as structured data
   (a version, the course's Python, a companion), which the owner confirms before it is applied
@@ -2370,7 +2376,25 @@ every language and framework, so one way of handling them:
   verification showed still fails (`distutils`): known conflicts belong in rules. GLM with
   thinking on spent 4,000 and then 12,000 tokens without an answer on one case; off, it
   answered in 4 s. Default model: DeepSeek V4 Flash, thinking off (about 1.3 s and 80 output
-  tokens a case). On a course that runs on the host,
+  tokens a case).
+  - A repair loop, at most three rounds: each round's proposal is applied on top of the last
+    in a fresh environment, and on failure the model gets what was tried and the new error;
+    it stops when the same module fails twice. Measured on mrjob with the Python locked at
+    3.13 (two modules missing): every model needed two rounds, one module each. Asking it to
+    recall first what the Python version changed (owner's idea) barely helped: a model does not
+    know what a package imports, and recalled some removals in the wrong version. Given the
+    probe's findings above as facts instead, every model fixed it in one round. So the prompt
+    gets facts code can find (the probe, the rules that name the course's packages, the
+    failing package's last release), never a request to recall them.
+  - The packages a change may name are the course's `[requires]`, what is installed, and the
+    companions the rules give for the course's own packages: never every name a rule holds,
+    since models reached for an unrelated one (standard-pipes against a missing `audioop`)
+    and copied its naming (`standard-audioop`).
+  - A new package name is shown with PyPI's facts (whether it exists, its first release, how
+    many) and asked of a second model, never applied. Measured: for pydub on 3.13, which
+    needs `audioop-lts`, both DeepSeek models named `pyaudioop` (the module in the error
+    message) and GLM once `standard-audioop`; neither exists on PyPI, so anyone could
+    register them. GPT-6.1-Terra named `audioop-lts` every time. On a course that runs on the host,
   the GUI and the command line both say plainly that a package was recommended by a model
   before it is installed (owner): in a container it reaches only the image, on the host the
   owner's machine. System software (a JDK, Hadoop, a compiler) is never installed: the model

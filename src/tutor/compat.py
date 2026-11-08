@@ -12,14 +12,20 @@ Two kinds:
 - a conflict: a [requires] package version that does not work from some Python on; the
   [requires] check refuses it, and the check reports it.
 
+And one probe, for packages no rule names yet: removed_imports reads a package's source for
+imports of standard-library modules the running Python removed (REMOVED_MODULES), so the
+check names every one at once instead of the first that fails.
+
 A rule is added by hand, with its measurement, never by a model: a name a model suggests may
 be a package nobody checked (docs/design.md, "Version conflicts").
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+import re
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+from pathlib import Path
 
 
 @dataclass(frozen=True)
@@ -29,6 +35,7 @@ class Companion:
     package: str  # a [requires] name
     python: str  # the first Python minor version that needs it, e.g. "3.12"
     needs: str  # a pip package name
+    provides: str  # the removed module it brings back, if any ("" otherwise)
     why: str
 
 
@@ -45,10 +52,10 @@ class Conflict:
 
 COMPANIONS = (
     # mrjob 0.7.4 is its last release and is not maintained; its tasks import these.
-    Companion("mrjob", "3.12", "setuptools",
+    Companion("mrjob", "3.12", "setuptools", "distutils",
               "mrjob imports `distutils`, which Python 3.12 removed; setuptools' shim provides "
               "it (measured 2026-10-26)"),
-    Companion("mrjob", "3.13", "standard-pipes",
+    Companion("mrjob", "3.13", "standard-pipes", "pipes",
               "mrjob imports `pipes`, which Python 3.13 removed; standard-pipes is the removed "
               "module as it was (measured 2026-11-08)"),
 )
@@ -98,3 +105,35 @@ def conflicts(requires: Mapping[str, str], python: str) -> list[str]:
             and requires[rule.package].split(".")[:len(rule.version.split("."))]
             == rule.version.split(".")
             and _minor(python) >= _minor(rule.python)]
+
+
+# Standard-library modules each Python removed, by the version that removed them (What's New
+# in Python 3.12: PEP 632 and the long-deprecated ones; 3.13: PEP 594 and lib2to3). 3.14
+# removed no whole module. Facts for the scan, never package suggestions.
+REMOVED_MODULES = {
+    **dict.fromkeys(("distutils", "imp", "asynchat", "asyncore", "smtpd"), "3.12"),
+    **dict.fromkeys(("aifc", "audioop", "cgi", "cgitb", "chunk", "crypt", "imghdr", "mailcap",
+                     "msilib", "nis", "nntplib", "ossaudiodev", "pipes", "sndhdr", "spwd",
+                     "sunau", "telnetlib", "uu", "xdrlib", "lib2to3"), "3.13"),
+}
+# A line that imports a module by its top-level name: `import pipes`, `import distutils.x`,
+# `from distutils.version import ...`, indented too (inside a try or a function). Not
+# `import foo.pipes` nor `from . import pipes`: those are a package's own modules.
+_IMPORT = re.compile(r"^[ \t]*(?:import|from)[ \t]+([A-Za-z_][A-Za-z0-9_]*)(?=[.\s,;]|$)",
+                     re.MULTILINE)
+
+
+def removed_imports(sources: Iterable[Path], python: str) -> dict[str, str]:
+    """The standard-library modules that `python` (or an earlier version) removed and these
+    source files import: module -> the version that removed it. A file that cannot be read
+    is skipped: this names what it can, and the run itself remains the proof."""
+    gone = {module: version for module, version in REMOVED_MODULES.items()
+            if _minor(python) >= _minor(version)}
+    found = {}
+    for path in sources:
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        found.update({m: gone[m] for m in _IMPORT.findall(text) if m in gone})
+    return dict(sorted(found.items()))

@@ -13,6 +13,7 @@ its packages (pip_requirements), so the venv install (tutor.workspace), the imag
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import platform
@@ -128,7 +129,34 @@ def check_workspace(ws: Workspace) -> list[CheckResult]:
                                    f"python -m tutor.workspace init {ws.root}"))
     results += [CheckResult("python", f"not {python}", None, problem)
                 for problem in compat.conflicts(ws.requires, python)]
+    results += _removed_imports(ws, python)
     return results
+
+
+def _removed_imports(ws: Workspace, python: str) -> list[CheckResult]:
+    """The probe for packages no rule names (tutor.compat.removed_imports): each [requires]
+    package's installed source, read for imports of modules this Python removed. A module
+    this interpreter still finds (a companion or a backport brings it back) is fine, and so
+    is one a companion rule provides: the companion's own check reports it missing."""
+    found = []
+    for name in ws.requires:
+        if name in NOT_PIP:
+            continue
+        try:
+            files = metadata.files(name) or []
+        except metadata.PackageNotFoundError:
+            continue  # reported as not installed by its own check
+        sources = [Path(f.locate()) for f in files if f.suffix == ".py"]
+        provided = {rule.provides for rule in compat.COMPANIONS if rule.package == name}
+        for module, version in compat.removed_imports(sources, python).items():
+            if module in provided or importlib.util.find_spec(module) is not None:
+                continue
+            found.append(CheckResult(
+                f"{name} imports", module, None,
+                f"{name} imports `{module}`, which Python {version} removed, and nothing here "
+                f"provides it: use a Python before {version} for this course, or a release of "
+                f"{name} that does not import it (docs/design.md, \"Version conflicts\")"))
+    return found
 
 
 def check_winutils(hadoop_home: str | None, path: str) -> CheckResult:
