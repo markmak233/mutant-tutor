@@ -2220,8 +2220,9 @@ themselves, so a cheap layer comes first and a stronger one later.
       version per language). `prompts.SPEC`, `PLAN_TEMPLATE` and `ORACLE_TEMPLATE` hold
       `{slots}` where a language differs (the rules, where the question goes, the tests, the
       reference, the main rule, the misconception shown, test data, how to test the "how",
-      the code rules); `PYTHON_PARTS` and `C_PARTS` fill them, and a new language adds its
-      parts, a profile (`graph/languages.py`: its plan and draft models, their schemas, where
+      the code rules); each language's `LanguagePrompts` fills them (`graph/prompt_parts/`:
+      `python.py`, `c.py`; one module per language since 2026-11-08), and a new language adds its
+      parts module, a profile (`graph/languages.py`: its plan and draft models, their schemas, where
       the question is) and a synthetic example. This keeps the decision that calibrated
       prompts stay as they are: Python's parts are its old text cut out of it by a script, not
       retyped, and before the change 35 outputs (system prompts with every option, item, repair

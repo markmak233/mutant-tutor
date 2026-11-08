@@ -2,7 +2,7 @@
 
 One profile per language: the plan and draft models the plan and generate models answer in,
 their JSON Schemas, and where a draft's question is. The prompts are one template filled per
-language (graph/prompts.py, LANGUAGE_PARTS). Python's profile is the pipeline as it was,
+language (graph/prompts.py, from graph/prompt_parts/). Python's profile is the pipeline as it was,
 calibrated, and stays byte for byte as it was (tests/test_prompt_pins.py); a new language
 adds a profile and its prompt parts, not a new version of the prompts.
 
@@ -35,7 +35,7 @@ from tutor.question import question_source
 class Profile:
     """What the graph needs to know of one language."""
 
-    name: str  # "python" or "c", as prompts.LANGUAGE_PARTS names it
+    name: str  # "python" or "c", as prompts.LANGUAGES names it
     plan_item: type[PlanItem]
     batch_plan: type[BaseModel]
     draft: type[BaseModel]
