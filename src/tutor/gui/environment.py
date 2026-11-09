@@ -36,7 +36,7 @@ from pathlib import Path
 
 import tomlkit
 
-from tutor import compat, container, image_recipe, languages, workspace
+from tutor import compat, container, image_recipe, languages, package_bounds, workspace
 from tutor.envcheck import NOT_PIP, pip_requirements, requires_problems, version_matches
 from tutor.gui import tasks, toml_edit
 from tutor.gui.courses import Course
@@ -134,7 +134,7 @@ def docker_view(course: Course, run: Callable = subprocess.run) -> DockerView:
     """Where the image stands, with Build's recipe and what it downloads. Asking Docker
     waits while a stopped VM wakes (container.image_problem), hence its own htmx part."""
     chosen = runner(course)
-    requires = course.workspace.requires
+    requires = course.workspace.effective_requires
     try:
         image = image_recipe.image_name(course.workspace.course, requires)
     except container.ContainerError as e:
@@ -182,7 +182,7 @@ def install_shown(course: Course) -> str:
     """The pip command `init` runs, as the page shows it before its button."""
     command = workspace.install_command(course.workspace.root / ".venv",
                                         workspace.DEFAULT_EXTRAS,
-                                        pip_requirements(course.workspace.requires))
+                                        pip_requirements(course.workspace.effective_requires))
     return shlex.join(command)
 
 
@@ -302,6 +302,11 @@ def save_requires(course: Course, table: dict[str, str], allow: list[str] | None
     """Write [requires] as `table`: changed values, new names after the last one, removed
     names gone, comments kept. Versions are written as strings, as they are read. With
     `allow`, [safety] allow_imports too, in the same checked write."""
+    try:
+        package_bounds.merge(table, course.workspace.bounds)
+    except ValueError:
+        return ["A package is already in package-bounds; edit that bound separately "
+                "instead of adding a conflicting prefix."]
     expected: dict[str, dict] = {"requires": table}
     safety = _data(course).get("safety", {})
     if allow is not None and allow != safety.get("allow_imports", []):
@@ -378,7 +383,7 @@ class DraftView:
 def draft_view(course: Course) -> DraftView:
     """The stored answers, checked and merged, against [requires] as it is."""
     found = requires_draft.draft(course.workspace.root)
-    current = course.workspace.requires
+    current = course.workspace.effective_requires
     rows, others = [], []
     for candidate in found.candidates:
         if candidate.kind == "other":

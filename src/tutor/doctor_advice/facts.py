@@ -149,7 +149,7 @@ def collect(course: Course | None, *, run: Callable | None = None, find: Callabl
     except (ValueError, TypeError, RecursionError):
         raise FactsError("metadata probe returned invalid/ambiguous facts; repair the environment"
                          ) from None
-    requires = course.ws.requires if course else {}
+    requires = course.ws.effective_requires if course else {}
     offered = frozenset() if is_image else frozenset(
         f.version for f in (find or pythons.find)(run=probe)
         if f.version != python and not compat.conflicts(requires, f.minor))

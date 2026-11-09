@@ -7,7 +7,7 @@ resolve packages, generate commands or decide whether a proposed environment wil
 
 from __future__ import annotations
 
-import re
+import json
 from dataclasses import replace
 
 from tutor import compat, languages
@@ -21,27 +21,15 @@ from tutor.doctor_advice.models import (
     release,
 )
 from tutor.envcheck import NOT_PIP, version_matches
-
-# Allow plain numeric comparisons joined by commas, with horizontal whitespace only.
-# No wildcard, pre/post/dev/local release, epoch, URL, marker or pip option syntax.
-# https://packaging.python.org/en/latest/specifications/version-specifiers/
-_CLAUSE = re.compile(r"(==|!=|>=|<=|~=|<|>)[ \t]*([0-9]+(?:\.[0-9]+)*)")
+from tutor.package_bounds import numeric_specifier as _numeric_specifier
 
 
 def numeric_specifier(spec: str) -> str:
     """Normalize only syntax we support; do not present this as a dependency solver."""
-    if "\n" in spec or "\r" in spec:
-        raise AdviceError("multiline version specifiers are not allowed")
-    clauses = []
-    for raw in spec.split(","):
-        match = _CLAUSE.fullmatch(raw.strip(" \t"))
-        if match is None:
-            raise AdviceError("expected a plain numeric version constraint")
-        operator, version = match.groups()
-        if operator == "~=" and "." not in version:
-            raise AdviceError("compatible-release constraints need at least two components")
-        clauses.append(operator + version)
-    return ",".join(clauses)
+    try:
+        return _numeric_specifier(spec)
+    except ValueError as exc:
+        raise AdviceError(str(exc)) from None
 
 
 def _pip_package(name: str) -> bool:
@@ -113,3 +101,25 @@ def review_reply(raw: str, context: AdviceContext) -> GateResult:
     except AdviceError as exc:
         # Errors are static messages, not copies of untrusted commands, credentials or prose.
         return GateResult("rejected", str(exc))
+
+
+def review_cumulative(changes: tuple[Change, ...], context: AdviceContext) -> GateResult:
+    """Gate up to three rounds together at their final target, releasing no partial batch."""
+    python = [c for c in changes if c.kind == "python"]
+    if not changes or len(changes) > 9 or len(python) > 1:
+        return GateResult("rejected", "invalid cumulative repair size/Python changes")
+    normalized, seen = [], set()
+    for change in changes:
+        batch = python + ([] if change.kind == "python" else [change])
+        raw = json.dumps({"cause": "cumulative review", "version_changes": [],
+                          "changes": [c.__dict__ for c in batch], "needs_new_package": None})
+        result = review_reply(raw, context)
+        if result.status != "accepted":
+            return result
+        item = result.changes[-1]
+        identity = (item.kind == "python", item.package)
+        if identity in seen:
+            return GateResult("rejected", "duplicate cumulative package/Python identity")
+        seen.add(identity)
+        normalized.append(item)
+    return GateResult("accepted", "cumulative permissions only", tuple(normalized))

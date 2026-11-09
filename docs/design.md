@@ -2392,6 +2392,25 @@ only agreement plus release evidence is displayed, never automatically installed
 profile label cannot prove the underlying model identity; owners select independent
 models. Application/rollback, GUI integration and image records remain separate steps.
 
+Doctor application (2026-11-09): optional [package-bounds] holds the same restricted
+numeric comparisons; [requires] retains numeric prefixes. A package identity occurs in
+only one table, and repair preview explicitly moves an affected package. Workspace's
+effective_requires feeds checks, installs, image identities/recipes, doctor facts and GUI
+environment consumers; empty bounds preserve legacy recipes. Known bad release families
+are conservatively intersected with bounds; nonnumeric installed versions cannot pass a
+numeric bound check. Pip, not this grammar, resolves dependencies. The doctor extra adds
+tomlkit only for explicit application/preview, preserving comments/unrelated tables.
+--save-repair writes exclusive private structured artifacts with workspace/environment
+hashes, no failure text/paths. --preview-repair prints the full diff; --apply-repair with
+--confirm re-gates, rejects stale facts and repeats before/after verification. Host
+replacement retains the original venv, builds at its final path, checks and rolls back
+on failure/interrupt. Container application uses a temporary proposed workspace and
+keep_older=True so existing images survive, promoting configuration only after checks.
+A per-course lock serializes transactions. Successful backups remain for --undo-repair
+or explicit --finish-repair --confirm; edits to saved/current config refuse undo. No
+student/lecture/model/runner edit, system install or new-package auto-application occurs.
+GUI integration, image records and final machine actions remain later milestones.
+
 Decided 2026-11-08 (owner), when Python 3.12 to 3.14 came into CI: a package that installs and
 imports cleanly can still fail when a job runs, because a newer Python removed something it
 uses (mrjob: `distutils` in 3.12, `pipes` in 3.13) or changed what it relies on (PySpark 3.5

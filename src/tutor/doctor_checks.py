@@ -92,7 +92,7 @@ def course_load(course: Course) -> list[Row]:
 def declarations(course: Course) -> list[Row]:
     """Reuse both validators and deduplicate identical messages, not language lists."""
     problems = [*languages.problems(course.data),
-                *envcheck.requires_problems(course.ws.requires)]
+                *envcheck.requires_problems(course.ws.effective_requires, allow_bounds=True)]
     return [Row("FAIL", problem,
                 "this tool generates Python and C exercises only; remove it from "
                 "workspace.toml or wait for support" if "not supported yet" in problem else

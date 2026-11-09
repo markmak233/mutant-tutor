@@ -25,14 +25,13 @@ from dataclasses import asdict, dataclass
 from importlib import metadata
 from pathlib import Path
 
-from tutor import compat, languages
+from tutor import compat, languages, package_bounds
 from tutor.config import Workspace, WorkspaceError, load_env, load_workspace
+from tutor.package_bounds import NOT_PIP, VERSION
 
 # The names checked by their own rule below; any other name is a pip package.
-NOT_PIP = ("python", "java", "hadoop", "gcc")
 NEEDS_JAVA = ("pyspark", "hadoop")
 PACKAGE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
-VERSION = re.compile(r"^\d+(\.\d+)*$")  # a prefix of dotted numbers: "3.5" means 3.5.x
 
 
 @dataclass(frozen=True)
@@ -52,11 +51,13 @@ class CheckResult:
 
 def version_matches(found: str, required: str) -> bool:
     """`required` is a prefix of dotted parts: "3.5" matches "3.5.9" but not "3.50.1"."""
+    if required.startswith(("=", "!", "<", ">", "~")):
+        return package_bounds.matches(found, required)
     want = required.split(".")
     return found.split(".")[: len(want)] == want
 
 
-def requires_problems(requires: Mapping[str, str]) -> list[str]:
+def requires_problems(requires: Mapping[str, str], *, allow_bounds: bool = False) -> list[str]:
     """What is wrong with a [requires] table, one line each; [] when nothing. A name or a
     version goes into a pip command and an image recipe, so only plain ones pass."""
     problems = []
@@ -66,8 +67,13 @@ def requires_problems(requires: Mapping[str, str]) -> list[str]:
         elif not PACKAGE.match(name):
             problems.append(f"[requires] {name!r} is not a package name")
         elif not VERSION.match(version):
-            problems.append(f"[requires] {name} = {version!r}: use a version prefix such as "
-                            '"3.5"')
+            try:
+                if not allow_bounds or name in NOT_PIP:
+                    raise ValueError
+                package_bounds.numeric_specifier(version)
+            except ValueError:
+                problems.append(f"[requires] {name} = {version!r}: use a version prefix such as "
+                                '"3.5" or a numeric package bound')
     problems += [f"[requires] has {name} but no java, and {name} needs a JVM"
                  for name in NEEDS_JAVA if name in requires and "java" not in requires]
     # A package version known not to work on the course's Python (tutor.compat).
@@ -81,7 +87,8 @@ def pip_requirements(requires: Mapping[str, str]) -> list[str]:
     which is what version_matches accepts; then each one's companion packages, with a marker
     so pip adds them only on the Pythons that need them (tutor.compat). Call
     requires_problems first."""
-    return ([f"{name}=={prefix}.*" for name, prefix in requires.items() if name not in NOT_PIP]
+    return ([name + (f"=={prefix}.*" if VERSION.fullmatch(prefix) else prefix)
+             for name, prefix in requires.items() if name not in NOT_PIP]
             + compat.companions(requires))
 
 
@@ -111,8 +118,9 @@ def check_workspace(ws: Workspace, *, run: Callable | None = None) -> list[Check
     # Resolve at call time so doctor can inject bounded stand-in probes without changing
     # the existing CLI/GUI callers, which still use subprocess.run.
     run = subprocess.run if run is None else run
-    results = [_check(name, required, ws, run) for name, required in ws.requires.items()]
-    if sys.platform == "win32" and ({"pyspark", "hadoop"} & set(ws.requires)):
+    effective = ws.effective_requires
+    results = [_check(name, required, ws, run) for name, required in effective.items()]
+    if sys.platform == "win32" and ({"pyspark", "hadoop"} & set(effective)):
         results.append(check_winutils(os.environ.get("HADOOP_HOME"), os.environ.get("PATH", "")))
     # A language not supported yet, or a malformed [languages.c], fails here like a missing
     # requirement, so the command line and the GUI both say so.
@@ -122,7 +130,7 @@ def check_workspace(ws: Workspace, *, run: Callable | None = None) -> list[Check
     # must be there (it installs and imports cleanly without, then a job fails), and a
     # package version that does not work on it at all.
     python = platform.python_version()
-    for rule in compat.needed(ws.requires, python):
+    for rule in compat.needed(effective, python):
         try:
             found = metadata.version(rule.needs)
         except metadata.PackageNotFoundError:
@@ -131,7 +139,7 @@ def check_workspace(ws: Workspace, *, run: Callable | None = None) -> list[Check
                                    f"{rule.why}: install it into the course's .venv: "
                                    f"python -m tutor.workspace init {ws.root}"))
     results += [CheckResult("python", f"not {python}", None, problem)
-                for problem in compat.conflicts(ws.requires, python)]
+                for problem in compat.conflicts(effective, python)]
     results += _removed_imports(ws, python)
     return results
 
@@ -142,7 +150,7 @@ def _removed_imports(ws: Workspace, python: str) -> list[CheckResult]:
     this interpreter still finds (a companion or a backport brings it back) is fine, and so
     is one a companion rule provides: the companion's own check reports it missing."""
     found = []
-    for name in ws.requires:
+    for name in ws.effective_requires:
         if name in NOT_PIP:
             continue
         try:

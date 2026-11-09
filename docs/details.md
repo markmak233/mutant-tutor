@@ -345,6 +345,42 @@ first upload. Agreement/existence is not a security endorsement; no new name is 
 Tests replace model, HTTP, environment installer and probe callbacks. Original course
 files/venv/runner are unchanged by verification or independent review.
 
+To retain a verified proposal, add `--save-repair repair.json` to verification. The new
+private file contains structured changes and freshness hashes, without failure text or
+paths. It cannot overwrite an existing file or live inside a git repository. Then:
+
+```bash
+tutor doctor --preview-repair repair.json
+tutor doctor --apply-repair repair.json --confirm
+tutor doctor --undo-repair
+# After accepting the result, explicitly discard the retained backups instead:
+tutor doctor --finish-repair --confirm
+```
+
+Application requires the `doctor` extra (TOML comment preservation), gates the saved
+changes against current facts, rejects stale hashes and repeats verification before
+mutating anything. Host replacement keeps the previous `.venv` and builds at the actual
+path (venvs are not relocatable). A failed install/check or interruption restores it.
+Container application builds/checks the new image while retaining the old one, then
+promotes configuration. Answers, lectures, model settings and runner policy are not edited.
+The single retained repair can be undone or finished before another one is applied.
+Undo refuses configuration/backup text changed after application. Diagnostics printed
+before an apply are retained; run doctor again to check the resulting live environment.
+
+Package comparisons live in a separate optional table:
+
+```toml
+[package-bounds]
+demo = ">=1,<2"
+```
+
+`[requires]` keeps numeric version prefixes. A package identity may occur in only one
+table: repair preview moves that package into `package-bounds`. Runtimes/toolchains keep
+prefixes. Bounds use only numeric `== != >= <= > < ~=` comparisons and comma intersections;
+no URLs, wildcard, markers, extras or options. Checks fail conservatively on nonnumeric
+installed releases for a bound; pip remains the resolver. Venv installs, image recipes,
+doctor and environment checks use both tables. Empty bounds preserve existing image names.
+
 ### Testing your work in the course image
 
 From one course exercise folder, run `tutor test`, or pass its directory explicitly:

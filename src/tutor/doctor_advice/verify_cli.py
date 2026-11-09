@@ -4,14 +4,14 @@ import json
 
 from tutor import llm
 from tutor.doctor_advice import service, verification
-from tutor.doctor_advice.gate import review_reply
+from tutor.doctor_advice.gate import review_cumulative, review_reply
 from tutor.doctor_advice.models import reply_schema
 from tutor.doctor_advice.sandbox import Disposable
 from tutor.doctor_rows import Row
 from tutor.graph.prompts import material
 
 
-def perform(prepared, course, module: str) -> list[Row]:
+def perform(prepared, course, module: str, *, save=None) -> list[Row]:
     """Check baseline first; no paid request if the selected check already passes."""
     trial = Disposable(prepared.facts, course, module)
     print("Verification: fresh temporary environments, public PyPI wheels only. "
@@ -41,20 +41,18 @@ def perform(prepared, course, module: str) -> list[Row]:
     def verify(changes):
         # Recheck cumulative permissions at the effective target Python. A later reply
         # cannot retain a companion granted only by the original interpreter's rules.
-        python = [c for c in changes if c.kind == "python"]
-        for change in changes:
-            batch = python + ([] if change.kind == "python" else [change])
-            raw = json.dumps({"cause": "cumulative review", "version_changes": [],
-                              "changes": [c.__dict__ for c in batch], "needs_new_package": None})
-            if review_reply(raw, prepared.facts.context).status != "accepted":
-                raise service.AdviceSetupError("cumulative repair is outside "
-                                               "target-Python permissions")
+        if review_cumulative(changes, prepared.facts.context).status != "accepted":
+            raise service.AdviceSetupError("cumulative repair is outside target-Python permissions")
         check = trial.verify(changes)
         print("Temporary check: " + prepared.redactor.clean(check.detail), flush=True)
         return check
 
     outcome = verification.repair(baseline, propose=propose, verify=verify)
     if outcome.status == "verified":
+        if save is not None:
+            from tutor.doctor_advice import records
+
+            records.save(save, records.capture(prepared.facts, course, module, outcome.changes))
         proposed = "; ".join("Python " + c.python if c.kind == "python" else
                              c.package + (c.spec or "") for c in outcome.changes)
         return [Row("WARN", f"verified in temporary environment: import {module} and pip check; "

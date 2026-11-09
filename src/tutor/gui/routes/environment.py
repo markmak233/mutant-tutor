@@ -71,7 +71,7 @@ def register(app: Flask) -> None:
         if check.problem or not python_switch.related(check.results):
             return []
         current = pythons.ask(environment.venv_python(course))
-        return python_switch.options(course.workspace.requires, check.results,
+        return python_switch.options(course.workspace.effective_requires, check.results,
                                      current.version if current else None)
 
     @app.post("/c/<name>/environment/python")

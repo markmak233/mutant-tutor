@@ -14,6 +14,7 @@ from types import MappingProxyType
 from typing import Literal
 
 from tutor.envcheck import VERSION
+from tutor.package_bounds import NOT_PIP, numeric_specifier
 
 # PyPA names: ASCII alphanumerics at both ends; runs of separators share an identity.
 # https://packaging.python.org/en/latest/specifications/name-normalization/
@@ -127,7 +128,13 @@ class AdviceContext:
             name = package_name(name)
             if name in declared:
                 raise AdviceError("duplicate requirement identities")
-            declared[name] = release(version)
+            try:
+                declared[name] = (release(version) if VERSION.fullmatch(version) else
+                                  numeric_specifier(version))
+                if name in NOT_PIP:
+                    declared[name] = release(version)
+            except (ValueError, TypeError):
+                raise AdviceError("expected a numeric prefix or package bound") from None
         object.__setattr__(self, "requires", MappingProxyType(declared))
         for name, normalize in (("installed", package_name), ("available_pythons", release)):
             values = getattr(self, name)

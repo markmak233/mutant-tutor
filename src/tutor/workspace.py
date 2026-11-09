@@ -32,6 +32,7 @@ from pathlib import Path
 
 from tutor.config import WORKSPACE_FILE, WorkspaceError, _enclosing_git_repo
 from tutor.envcheck import pip_requirements, requires_problems
+from tutor.package_bounds import merge
 
 DEFAULT_EXTRAS = "gen,dev"  # generating exercises, and pytest + hypothesis to validate them
 REPO = Path(__file__).resolve().parents[2]
@@ -295,8 +296,12 @@ def _requires(root: Path, python_version: str | None = None) -> dict[str, str]:
         raise WorkspaceError(f"{path}: {e}") from e
     # str(), as load_workspace does: a version written unquoted would load as a number.
     requires = {name: str(version) for name, version in data.get("requires", {}).items()}
+    try:
+        requires = merge(requires, data.get("package-bounds", {}))
+    except ValueError as exc:
+        raise WorkspaceError(str(exc)) from None
     checked = {**requires, "python": python_version} if python_version else requires
-    if problems := requires_problems(checked):
+    if problems := requires_problems(checked, allow_bounds=True):
         raise WorkspaceError(f"{path}: {problems[0]}; fix it, then run this again")
     return requires
 

@@ -19,6 +19,7 @@ from pathlib import Path
 
 from tutor import compat
 from tutor.envcheck import NOT_PIP, requires_problems, version_matches
+from tutor.package_bounds import VERSION
 
 IMAGE_PREFIX = "tutor-run-"
 # This package, mounted read-only: exercise tests import tutor.testkit. PYTHONPATH in the image
@@ -133,7 +134,7 @@ def _check_requires(requires: Mapping[str, str]) -> None:
     """Refuse what would fail late, or change the recipe's meaning, inside a build. [requires]
     is the owner's and generation never writes it, so this catches typing errors. The rules
     are envcheck's, shared with the venv install and the GUI; a build adds a known Hadoop."""
-    if problems := requires_problems(requires):
+    if problems := requires_problems(requires, allow_bounds=True):
         raise ContainerError(problems[0])
     if "hadoop" in requires:
         hadoop_release(requires["hadoop"])
@@ -168,7 +169,9 @@ def _pip_spec(name: str, prefix: str | None, installed: Callable[[str], str | No
     found = installed(name)
     if found and (prefix is None or version_matches(found, prefix)):
         return f"{name}=={found}"
-    return f"{name}=={prefix}.*" if prefix else name
+    if prefix:
+        return f"{name}=={prefix}.*" if VERSION.fullmatch(prefix) else name + prefix
+    return name
 
 
 def installed_version(name: str) -> str | None:

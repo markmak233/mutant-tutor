@@ -25,6 +25,13 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
                        help="verify gated model repairs in fresh temporary environments")
     modes.add_argument("--review-new-package", action="store_true",
                        help="independent two-provider/PyPI new-name review; never install")
+    modes.add_argument("--preview-repair", type=Path, help="preview saved repair's workspace diff")
+    modes.add_argument("--apply-repair", type=Path, help="reverify and apply a saved repair")
+    modes.add_argument("--undo-repair", action="store_true", help="restore retained repair backups")
+    modes.add_argument("--finish-repair", action="store_true",
+                       help="discard retained repair backups")
+    parser.add_argument("--confirm", action="store_true", help="confirm apply or backup discard")
+    parser.add_argument("--save-repair", type=Path, help="save verified changes as private JSON")
     parser.add_argument("--second-profile", help="independent provider profile for new-name review")
     parser.add_argument("--module", help="dotted import to reproduce for --verify-advice")
     parser.add_argument("--failure", type=Path, help="reviewed UTF-8 failure record for advice")
@@ -53,6 +60,12 @@ def argument_problem(args: argparse.Namespace) -> str | None:
         return "--review-new-package requires --second-profile NAME"
     if args.second_profile is not None and not args.review_new_package:
         return "--second-profile requires --review-new-package"
+    if args.save_repair is not None and not args.verify_advice:
+        return "--save-repair requires --verify-advice"
+    if (args.apply_repair or args.finish_repair) and not args.confirm:
+        return "--apply-repair/--finish-repair requires explicit --confirm"
+    if args.confirm and not (args.apply_repair or args.finish_repair):
+        return "--confirm is only for --apply-repair or --finish-repair"
     return None
 
 
@@ -63,6 +76,12 @@ def perform(args, course, failure: str, *, run, docker_ready: bool,
     from tutor.doctor_advice import facts, service
 
     try:
+        if args.save_repair is not None:
+            from tutor.doctor_advice import records
+
+            records.check_target(args.save_repair)
+            if course is None:
+                raise service.AdviceInputError("saving an applicable repair requires a course")
         found = facts.collect(course, run=run, docker_ready=docker_ready, image_ready=image_ready)
         prepared = service.prepare(found, failure, course=course.root if course else None,
                                    profile=args.profile, env_file=args.env_file)
@@ -77,7 +96,7 @@ def perform(args, course, failure: str, *, run, docker_ready: bool,
         if args.verify_advice:
             from tutor.doctor_advice import verify_cli
 
-            return verify_cli.perform(prepared, course, args.module)
+            return verify_cli.perform(prepared, course, args.module, save=args.save_repair)
         if args.review_new_package:
             from tutor.doctor_advice import independent
 

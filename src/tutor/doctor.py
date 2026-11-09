@@ -1,4 +1,4 @@
-"""Read-only setup diagnosis, with explicit opt-in preview/model advice.
+"""Setup diagnosis with explicit advice, verification and repair actions.
 
 Default checks never load .env or call a model. Advice requires a selected failure log;
 only an explicit --env-file is read into a private map. Advice alone installs or fixes nothing.
@@ -168,6 +168,17 @@ def main(argv: list[str] | None = None, *, run: Callable | None = None, validato
                 advice = advice_cli.perform(args, course, failure, run=run,
                                             docker_ready=docker_ready, image_ready=image_ready)
                 for row in advice:
+                    emit(row)
+            except AdviceInputError as exc:
+                print(f"doctor: {exc}", file=sys.stderr, flush=True)
+                return 2
+        if args.preview_repair or args.apply_repair or args.undo_repair or args.finish_repair:
+            from tutor.doctor_advice import repair_cli
+            from tutor.doctor_advice.service import AdviceInputError
+
+            try:
+                for row in repair_cli.perform(args, course, run=run, docker_ready=docker_ready,
+                                              image_ready=image_ready):
                     emit(row)
             except AdviceInputError as exc:
                 print(f"doctor: {exc}", file=sys.stderr, flush=True)

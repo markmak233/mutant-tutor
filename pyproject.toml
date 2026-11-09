@@ -22,6 +22,8 @@ dependencies = ["pydantic>=2,<3", "pypdfium2>=5,<6", "pillow>=10"]
 tutor = "tutor.__main__:main"
 
 [project.optional-dependencies]
+# Explicit repair application preserves workspace comments; ordinary doctor stays stdlib.
+doctor = ["tomlkit>=0.13,<1"]
 bigdata = [
     "pyspark>=3.5,<3.6",
     "mrjob==0.7.4",

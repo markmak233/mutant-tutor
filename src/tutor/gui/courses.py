@@ -178,7 +178,7 @@ def container_problem(course: Course) -> str | None:
         return None  # the command reports it
     if runner != "container":
         return None
-    image = image_recipe.image_name(course.workspace.course, course.workspace.requires)
+    image = image_recipe.image_name(course.workspace.course, course.workspace.effective_requires)
     if container.image_problem(image) is None:  # waits while a stopped VM wakes
         return None
     if shutil.which("docker") is None:
