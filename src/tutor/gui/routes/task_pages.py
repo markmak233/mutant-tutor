@@ -5,6 +5,8 @@ Routes are registered on the app by `register` (see gui/routes/__init__.py)."""
 
 from __future__ import annotations
 
+import re
+
 from flask import (
     Flask,
     abort,
@@ -46,7 +48,16 @@ def return_to(course: courses.Course, task: tasks.Task) -> tuple[str, str, str |
     if kind == "check":
         return url_for("models", name=name), "Models", "models-checked"
     if kind == "doctor":
-        return url_for("doctor_view", name=name), "Doctor", None
+        identifier = task.meta.get("doctor_input", "")
+        if isinstance(identifier, str) and re.fullmatch(r"[0-9a-f]{32}", identifier):
+            action = task.meta.get("action")
+            step = {"advice": 2, "independent": 2, "verify": 3, "repair-preview": 4,
+                    "apply": 4, "undo": 4, "finish": 4}.get(action, 1)
+            if action == "preview" and task.meta.get("fix_step") == 2:
+                step = 2
+            return (url_for("environment_fix", name=name, identifier=identifier, step=step),
+                    "Setup fix", None)
+        return url_for("environment_view", name=name) + "#host-install", "Environment", None
     if kind == "python-download":
         # Retry returns to a fresh catalog/confirmation form, never silently repeats a download.
         return url_for("python_downloads", name=name), "Optional Python", None

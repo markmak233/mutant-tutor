@@ -32,6 +32,15 @@ def _write(path: Path, data: dict) -> None:
     transaction._atomic(path, json.dumps(data).encode("utf-8"))
 
 
+def _text(path: Path, value: str, limit=512 * 1024):
+    """Persist the complete sanitized approval text; refuse rather than cut a preview."""
+    raw = value.encode("utf-8")
+    if len(raw) > limit:
+        raise service.AdviceInputError("full preview is too large for this page; use the CLI")
+    transaction._plain(path)
+    transaction._atomic(path, raw)
+
+
 def _matches(path: Path, expected: str) -> bool:
     transaction._plain(path)
     try:
@@ -67,15 +76,18 @@ def execute(course, identifier, action, *, env_file=None, confirm=False):
         environment = records.environment_digest(found).encode("utf-8")
         identity = records.digest(plan.before + plan.after + environment)
         if action == "repair-preview":
-            print(Redactor.from_environment(os.environ).clean(diff), flush=True)
+            shown = Redactor.from_environment(os.environ).clean(diff)
+            print(shown, flush=True)
+            _text(folder / "diff.txt", shown, 256 * 1024)
             _write(folder / "apply.json", {"digest": identity})
             return 0
         if not confirm or not _matches(folder / "apply.json", identity):
             raise service.AdviceSetupError("review the current complete repair diff "
                                            "before applying")
         transaction.apply(plan, selected)
-        print("Repair applied and checked; backups retained. "
-              "Recheck Doctor or use Undo.", flush=True)
+        _write(folder / "applied.json", {"digest": identity})
+        print("Repair applied and checked. Your original setup is kept until you choose Keep it.",
+              flush=True)
         return 0
     failure = service.read_failure(folder / "failure.log")
     prepared = service.prepare(found, failure, course=selected.root, profile=data["profile"],
@@ -86,12 +98,17 @@ def execute(course, identifier, action, *, env_file=None, confirm=False):
         prepared, second = service.shared_redaction(prepared, second)
     identity = _identity(course, folder, prepared, second)
     print("Advice destination: " + prepared.destination, flush=True)
-    print("Data: this selected sanitized failure record and measured Python/distribution facts.",
+    print("Data: this selected sanitized failure record and Python/distribution facts.",
           flush=True)
     if second:
         print("Independent review destination: " + second.destination, flush=True)
     if action == "preview":
         print(prepared.preview(), flush=True)
+        shown = "Destination: " + prepared.destination + "\n\n" + prepared.preview()
+        if second:
+            shown += ("\n\nIndependent destination: " + second.destination
+                      + "\n\n" + second.preview())
+        _text(folder / "preview.txt", shown)
         _write(folder / "preview.json", {"digest": identity})
         print("Preview only. No model request or install.", flush=True)
         return 0
@@ -99,22 +116,35 @@ def execute(course, identifier, action, *, env_file=None, confirm=False):
         raise service.AdviceSetupError("input, destination or facts changed; "
                                        "preview again before sending")
     if action == "advice":
-        rows = [service.result_row(service.request(prepared), prepared.redactor)]
+        result = service.request(prepared)
+        rows = [service.result_row(result, prepared.redactor)]
+        # Store structured UI data, not a log parser or an executable model proposal.
+        clean = prepared.redactor.clean
+        _write(folder / "advice.json", {"status": result.status, "text": rows[0].text,
+                "cause": clean(result.cause), "changes": [clean(s) for s in result.version_changes],
+                "needs_new_package": clean(result.needs_new_package)
+                if result.needs_new_package else None})
     elif action == "verify":
         if not data["module"]:
             raise service.AdviceInputError("choose the module to reproduce before verification")
         records.check_target(folder / "repair.json")
         rows = verify_cli.perform(prepared, selected, data["module"], save=folder / "repair.json")
+        _write(folder / "verification.json", {
+            "passed": (folder / "repair.json").is_file() and all(r.status != "FAIL" for r in rows),
+            "text": "\n".join(r.text for r in rows)})
     elif action == "independent":
         if second is None:
             raise service.AdviceInputError("select an independent second provider before review")
         candidate = independent.review(prepared, second)
         if candidate:
-            print(f"Owner-review candidate: {candidate.name}; {candidate.releases} PyPI releases "
-                  f"with files; first upload {candidate.first_upload}. "
-                  "Not a security endorsement; nothing installed.", flush=True)
+            shown = (f"Candidate for your review: {candidate.name}; {candidate.releases} PyPI "
+                     f"releases with files; first upload {candidate.first_upload}. "
+                     "Agreement does not prove a package is safe; nothing installed.")
         else:
-            print("No independent agreement on a new package; nothing installed.", flush=True)
+            shown = "No independent agreement on a new package; nothing installed."
+        shown = prepared.redactor.clean(shown)
+        print(shown, flush=True)
+        _write(folder / "independent.json", {"text": shown})
         return 0
     else:
         raise service.AdviceInputError("unsupported doctor action")

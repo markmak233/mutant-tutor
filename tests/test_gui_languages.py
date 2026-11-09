@@ -11,7 +11,8 @@ import pytest
 
 pytest.importorskip("flask")  # the `gui` extra
 
-from tutor.gui import courses, environment, languages_page, tasks  # noqa: E402
+from tutor.doctor_rows import Row  # noqa: E402
+from tutor.gui import courses, doctor_page, environment, languages_page, tasks  # noqa: E402
 from tutor.gui.app import create_app  # noqa: E402
 from tutor.gui.routes.common import C_NEEDS_CONTAINER  # noqa: E402
 from tutor.materials import cache  # noqa: E402
@@ -209,17 +210,15 @@ def test_a_language_not_supported_is_said_on_the_page_and_the_course_page(root, 
     assert "rust is not supported yet" in _page(client, "/c/cdemo/")
 
 
-def test_a_c_compiler_that_differs_here_is_not_counted_missing(root, monkeypatch):
-    results = [{"name": "python", "required": "3.11", "found": "3.11.9", "hint": "", "ok": True},
-               {"name": "gcc", "required": "12", "found": "clang-21.0.0", "hint": "", "ok": False}]
-    monkeypatch.setattr(environment, "check",
-                        lambda course: environment.Check("/v/python", results))
-
+def test_container_course_uses_doctor_skip_for_host_compiler(root, monkeypatch):
+    monkeypatch.setattr(doctor_page, "report", lambda course: [
+        Row("SKIP", "tools on this machine: not needed, tests run in the course image "
+            "(`tutor test`)")])
     text = _page(_browser(root), "/c/cdemo/environment/check")
-
-    assert "chip-differs" in text and "validation uses gcc 12 in the container" in text
+    assert "Skipped" in text and "tutor test" in text and "chip-differs" not in text
     assert "chip-done" in text and "not met yet" not in text
-    missing = {**results[1], "found": None}
+    # The legacy Check utility still treats an absent compiler as missing for its other callers.
+    missing = {"name": "gcc", "required": "12", "found": None, "ok": False}
     assert environment.Check("/v/python", [missing]).missing == [missing]
 
 

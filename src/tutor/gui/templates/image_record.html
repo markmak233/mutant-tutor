@@ -2,12 +2,13 @@
 {# Stored facts are displayed only under an explicit current/stale/unknown label.
    Comparison uses the course venv's envcheck data, never the GUI's interpreter. #}
 {% block title %}Image build record · {{ course.workspace.course }}{% endblock %}
-{% block crumbs %}<a href="{{ url_for('course', name=course.folder) }}">{{ course.workspace.course }}</a><a href="{{ url_for('environment_view', name=course.folder) }}">Environment</a><span>Image build record</span>{% endblock %}
+{% block crumbs %}<a href="{{ url_for('course', name=course.folder) }}">{{ course.workspace.course }}</a><a href="{{ url_for('environment_view', name=course.folder) }}#test-image">Environment</a><span>Image build record</span>{% endblock %}
 {% block content %}
 <h1>Image build record</h1>
 <p><strong>{{ view.status }}</strong> · {{ view.detail }}</p>
-<p><a href="{{ url_for('environment_view', name=course.folder) }}#test-image">Build or rebuild the image</a> · <a href="{{ url_for('environment_view', name=course.folder) }}#host-install">Install/check the course venv</a> · <a href="{{ url_for('doctor_view', name=course.folder) }}">Doctor</a></p>
-<form method="post" action="{{ url_for('refresh_image_record', name=course.folder) }}"><p>Read versions from the current existing image. This starts a temporary network-disabled container and writes a private course record; it does not build, pull, install or change course settings.</p><button type="submit">Refresh current image record</button></form>
+{% if history_problem %}<p>{{ history_problem }} <a href="{{ url_for('environment_view', name=course.folder) }}#course-needs">Review the course requirements in step 1</a>.</p>{% endif %}
+<p><a href="{{ url_for('environment_view', name=course.folder) }}#test-image">Build or rebuild the image</a> · <a href="{{ url_for('environment_view', name=course.folder) }}#host-install">Check or fix the setup</a></p>
+<form method="post" action="{{ url_for('refresh_image_record', name=course.folder) }}"><p>Read versions from the current existing image. This starts a temporary network-disabled container and writes a private course record; it does not build, pull, install or change course settings.</p><button type="submit"{% if running %} disabled{% endif %}>Refresh current image record</button></form>
 {% if view.data %}
 {% set data = view.data %}
 <h2>Stored snapshot{% if view.status != 'current' %} ({{ view.status }}, not a current comparison){% endif %}</h2>

@@ -20,33 +20,27 @@ def client(root):
     return client
 
 
-def test_page_does_no_probe_or_paid_task_until_requested(client, monkeypatch):
+@pytest.mark.parametrize("suffix", ["", "/", "/?check=1"])
+def test_old_doctor_address_redirects_without_probes_or_paid_tasks(client, monkeypatch, suffix):
     monkeypatch.setattr(doctor_page, "report", lambda c: pytest.fail("initial GET probed"))
     monkeypatch.setattr(tasks, "start", lambda *a, **kw: pytest.fail("initial GET started a task"))
-    text = client.get("/c/demo-course/doctor/", base_url=BASE).get_data(as_text=True)
-    assert "Check this course now" in text and "No machine check has run" in text
-    assert "Preview selected data only" in text and "Package version bounds" in text
+    response = client.get("/c/demo-course/doctor" + suffix, base_url=BASE)
+    assert response.status_code == 302
+    assert response.location == "/c/demo-course/environment/#host-install"
 
 
-def test_checks_show_structured_results_and_existing_fix_paths(client, monkeypatch):
-    monkeypatch.setattr(doctor_page, "report", lambda c: [Row("FAIL", "synthetic missing venv",
-                                                             "install course venv")])
-    text = client.get("/c/demo-course/doctor/?check=1", base_url=BASE).get_data(as_text=True)
-    assert "synthetic missing venv" in text and "install course venv" in text
-    assert "/c/demo-course/environment/#host-install" in text
+def test_environment_has_one_version_editor_without_a_separate_doctor_link(client):
+    text = client.get("/c/demo-course/environment/", base_url=BASE).get_data(as_text=True)
+    assert "Package version bounds" not in text and 'href="/c/demo-course/doctor/' not in text
+    assert 'action="/c/demo-course/environment/requires"' in text
 
 
-def test_bounds_editor_saves_only_its_explicit_table(client, root):
+def test_removed_bounds_route_cannot_write_a_second_version_table(client, root):
     path = root / "demo-course" / "workspace.toml"
     before = path.read_text(encoding="utf-8")
     response = support.post(client, "/c/demo-course/doctor/bounds", {"name": "demo", "spec": "<2"})
-    assert response.status_code == 303
-    text = path.read_text(encoding="utf-8")
-    assert "# the course id" in text and "package-bounds" in text
-    assert before.split("[generation]")[1] in text
-    response = support.post(client, "/c/demo-course/doctor/bounds",
-                            {"name": "pyspark", "spec": "<2"})
-    assert response.status_code == 400 and "pyspark" in response.get_data(as_text=True)
+    assert response.status_code == 404 and path.read_text(encoding="utf-8") == before
+    assert not path.with_name("workspace.toml.bak").exists()
 
 
 def test_selected_failure_is_saved_then_only_a_fixed_preview_command_starts(client, root, started):
@@ -74,8 +68,8 @@ def test_unknown_profiles_and_cross_origin_actions_do_not_start_tasks(client, st
     response = support.post(client, "/c/demo-course/doctor/input", {
         "failure": "synthetic", "profile": "unknown"})
     assert response.status_code == 400 and not started
-    response = client.post("/c/demo-course/doctor/bounds", base_url=BASE,
-                           data={"name": "demo", "spec": "<2"})
+    response = client.post("/c/demo-course/environment/requires", base_url=BASE,
+                           data={"name": "demo", "version": "<2"})
     assert response.status_code == 403
 
 
@@ -83,5 +77,7 @@ def test_broken_or_missing_venv_has_a_page_recreation_path(client, root, monkeyp
     # Reuse the existing guarded Python-switch action, never a path supplied by a model.
     offered = pythons.Found("3.12.3", root / "synthetic-python")
     monkeypatch.setattr(pythons, "find", lambda: [offered])
+    monkeypatch.setattr(doctor_page, "report", lambda course: [
+        Row("FAIL", "course .venv is missing", "install it", "install-venv")])
     text = client.get("/c/demo-course/environment/check", base_url=BASE).get_data(as_text=True)
     assert "Make .venv with Python 3.12" in text

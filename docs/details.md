@@ -229,9 +229,28 @@ runner = "container"   # or "host"
   **not a sandbox**: the code runs with your user's permissions and can read or write other
   files and use the network. Use it only for exercises you wrote or reviewed.
 
-The GUI's Environment page sets this for a course, and builds its image after showing the
-recipe and what it downloads. `python -m tutor.workspace init DIR`, run again after changing
-`[requires]`, installs its pip packages into the course's own `.venv`.
+The GUI's Environment page groups course setup into four numbered steps:
+
+1. **What the course needs.** Set the language versions and packages. Each package has one
+   version cell: a prefix such as `3.5`, or a numeric comparison such as `>=1,<2`. Saving
+   stores prefixes in `[requires]` and comparisons in `[package-bounds]`, moving an entry
+   when its form changes. Python, Java, Hadoop and gcc accept prefixes only. Invalid package
+   entries stay in the form for correction; unrelated comments and a previous-file backup
+   are kept. The separate language list holds Python/C versions.
+2. **Install on this machine and check.** The same deterministic Doctor rows as the CLI
+   load automatically, with OK, Needs attention, Problem or Skipped results and a fix on
+   each row where one is known. Install, image build, Python switch, runner selection and
+   host-guide actions reuse the existing controls. A running task disables fix controls.
+3. **Where tests run.** Choose the course's runner with its existing confirmation for host
+   execution. Selecting a runner does not install its requirements or build an image.
+4. **Test image.** Inspect Docker/image readiness and the recipe before building. The
+   image record below shows build time and version differences, with Refresh and full history.
+
+`python -m tutor.workspace init DIR`, run again after changing requirements, installs the
+declared pip packages into the course's own `.venv`. A missing or broken venv also has a
+Python recreation path in step 2. If recovery finds no compatible installed Python, it
+shows **No suitable Python here. Download one with uv**. That page keeps its explicit
+download consent; choosing the downloaded interpreter for a venv is a separate action.
 
 Environment step 2 also links to **Run tests on this machine**, an optional manual setup
 guide. Choose macOS, Linux, Windows or WSL; the page shows the course's declared versions,
@@ -241,29 +260,36 @@ the existing check. Recipes not covered are marked explicitly; Linux/WSL fresh i
 remain untested. Container practice through `tutor test` does not require host JVM/compiler
 installation. The longer big-data walkthrough remains in [setup/bigdata.md](setup/bigdata.md).
 
-The **Doctor** link in Environment provides explicit measured checks, a package-bound
-editor and model/repair workflows. Opening it runs no probes or models. “Check this
-course now” uses the same structured doctor rows, with environment/configuration links.
-A missing or broken venv can be recreated through the existing guarded Python switch.
-The host guide starts on the current system's platform and allows an explicit alternative.
+Doctor is now step 2's check; old Doctor bookmarks return there. For a Problem without a
+known rule-based fix, **Ask a model for a fix** opens a four-step page:
 
-For advice, choose profiles and paste only the selected failure record. “Preview selected
-data only” stores that input privately under the course's logs/doctor and shows the full
-sanitized request/destination in its task log. Sending, independent review, temporary
-verification and application are distinct actions. Current input/configuration/facts must
-match the preview fingerprint before a send; stale data requires another preview. A
-verified artifact requires a separate complete diff preview and confirmation before apply.
-Oversized GUI diffs are refused for CLI review, never silently cut. Task controls remain
-available; successful doctor tasks return to Doctor. Undo preserves later edits by refusing
-to overwrite changed configuration; finishing explicitly discards original backups while
-keeping the current environment/configuration. No real provider/package install is used
-in automated tests. Native browser click acceptance is recorded separately from Flask tests.
+1. Review the pre-filled failure (the row and latest failed install/build log tail, at most
+   64 KiB) and its module, edit as needed, and choose a model profile. **Preview what will
+   be sent** shows the complete sanitized data and destination. Only **Send to the model**
+   makes the advice request.
+2. Read the advice. A newly proposed package alone offers the independent second-provider
+   and PyPI review. For a permitted repair, confirm **Test it in a temporary environment**;
+   the consent covers up to three model-assisted rounds and temporary public-PyPI installs.
+3. Read the verification result. A passed check enables **Show the exact changes**; a failed
+   check offers **Back to step 1**. This check does not prove every course exercise works.
+4. Review the complete diff and confirm **Apply**. Afterwards, **Undo** restores the original
+   setup, or **Keep it** explicitly discards its backups. Both require confirmation.
 
-**Image build record and host/image version comparison** in Environment shows the exact
-image ID, actual base content ID, available registry digests, build/record times, Python,
-tool versions and distributions. Differences against the course venv are informational.
-Builds keep private historical snapshots under `logs/image-builds`; refreshing does not
-erase prior builds. A record whose image ID or recipe changed is not presented as current.
+Selected inputs are kept privately under `logs/doctor`. Current input, destination,
+configuration and facts must match the preview before sending/applying; changed data needs
+a new preview. New packages are never automatically installed. Oversized previews/diffs
+are refused rather than silently cut. Successful worker tasks return to the appropriate
+wizard step. Model credentials stay in the worker's private mapping, never the GUI server's
+environment. Undo refuses changed configuration; Keep it preserves later owner edits while
+discarding originals. Automated tests use model/installer stand-ins.
+
+Environment step 4's **Image build record** shows build time and packages/tools whose
+versions differ between the course's venv and image. Differences are informational; missing
+measurements stay unknown. **Full image record and history** shows exact image/base content
+IDs, available registry digests, build/record times and all recorded distributions. Builds
+keep private historical snapshots under `logs/image-builds`; refreshing does not erase
+prior builds. A changed image ID or recipe makes the record old, with no current comparison.
+Missing or old records retain the **Refresh current image record** action.
 
 New builds capture their actual base through a temporary local snapshot tag; it is removed
 afterwards and does not permanently pin course configuration. Old images without provenance
@@ -420,9 +446,11 @@ Package comparisons live in a separate optional table:
 demo = ">=1,<2"
 ```
 
-`[requires]` keeps numeric version prefixes. A package identity may occur in only one
-table: repair preview moves that package into `package-bounds`. Runtimes/toolchains keep
-prefixes. Bounds use only numeric `== != >= <= > < ~=` comparisons and comma intersections;
+`[requires]` keeps numeric version prefixes. Environment step 1 shows both declarations
+in one version table: changing a cell between prefix and comparison moves its entry on Save.
+A package identity may occur in only one declaration table; repair preview likewise moves
+an affected package into `package-bounds`. Runtimes/toolchains keep prefixes. Bounds use
+only numeric `== != >= <= > < ~=` comparisons and comma intersections;
 no URLs, wildcard, markers, extras or options. Checks fail conservatively on nonnumeric
 installed releases for a bound; pip remains the resolver. Venv installs, image recipes,
 doctor and environment checks use both tables. Empty bounds preserve existing image names.

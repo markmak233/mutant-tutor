@@ -13,10 +13,7 @@
 {% endblock %}
 {% block content %}
 <h1>Environment</h1>
-<p><a href="{{ url_for('python_downloads', name=course.folder) }}">Optional: download another Python with uv</a></p>
-<p><a href="{{ url_for('image_record_view', name=course.folder) }}">Image build record and host/image version comparison</a></p>
-<p><a href="{{ url_for('doctor_view', name=course.folder) }}">Doctor: diagnose setup, edit package bounds or review a repair</a></p>
-<p class="muted">Four steps, in this order. This page installs Python packages into the course's own <code>.venv</code>, and builds the test image. For another Python, use the optional download page or install it yourself, then check again in step 2. Java and Hadoop use the host setup guide.</p>
+<p class="muted">Four steps: what the course needs, install on this machine and check, choose where tests run, then prepare the test image.</p>
 {% if running %}
 <p class="notice notice-bad">A task is running in this course:
   <a href="{{ url_for('task', name=course.folder, task_id=running.id) }}">{{ running.title }}</a>.
@@ -130,13 +127,14 @@
 
 <h3>Python: packages and tools</h3>
 <form method="post" action="{{ url_for('save_requires', name=course.folder) }}" class="form">
-  <p class="muted">A version is a prefix: 3.5 means any 3.5.x. <code>java</code> and <code>hadoop</code> are checked on this machine; any other name is a pip package. Python's own version is in the language list. Adding or removing rows changes nothing until you save.</p>
+  <p class="muted"><code>java</code> and <code>hadoop</code> are checked on this machine; any other name is a pip package. Python's own version is in the language list. Adding or removing rows changes nothing until you save.</p>
   <table class="requires">
     <thead><tr><th>Name</th><th>Version</th><th>What it is</th><th>Exercises may import</th><th></th></tr></thead>
     <tbody id="requires-rows">
     {% for row in rows %}{% include "_requires_row.html" %}{% endfor %}
     </tbody>
   </table>
+  <p class="muted">Use a version prefix, such as <code>3.5</code> for any 3.5.x, or a numeric comparison for a pip package, such as <code>&gt;=1,&lt;2</code>. <code>python</code>, <code>java</code>, <code>hadoop</code> and <code>gcc</code> accept prefixes only.</p>
   <p class="muted">"Exercises may import": the generated exercises may use the package, as the module named in its box ([safety] allow_imports); untick it and they may not. Without a tick they use only Python's core modules. Widening what exercise code may import is your call, package by package.{% if others_allowed %} Also allowed, though not in the list: {{ others_allowed | join(", ") }}.{% endif %}</p>
   <div class="actions">
     <button type="button" class="small" hx-get="{{ url_for('requires_row', name=course.folder) }}" hx-target="#requires-rows" hx-swap="beforeend">+ Add a row</button>
@@ -150,10 +148,15 @@
 
 <section class="step">
 <h2 id="host-install"><span class="step-no">2</span>Install on this machine</h2>
+{% if setup_fixes %}<p>Previous setup fixes: {% for fix in setup_fixes %}<a href="{{ url_for('environment_fix', name=course.folder, identifier=fix.id, step=4) }}">Continue {{ fix.module or fix.profile }}</a>{% if not loop.last %} · {% endif %}{% endfor %}</p>{% endif %}
+{% if original_kept %}
+<p>Your original setup is kept until you choose Keep it.</p>
+<div class="actions">{% for action, label in [('undo', 'Undo'), ('finish', 'Keep it')] %}<form class="action" method="post" action="{{ url_for('doctor_retained', name=course.folder, action=action) }}"><label><input type="checkbox" name="confirmed" required> {{ 'Restore my original setup' if action == 'undo' else 'Permanently discard the original backups' }}</label><button type="submit"{% if running %} disabled{% endif %}>{{ label }}</button></form>{% endfor %}</div>
+{% endif %}
 {# A normal link: installation instructions remain available without htmx/JavaScript. #}
 <p><a href="{{ url_for('host_setup', name=course.folder) }}">Run tests on this machine: installation guide</a> (optional).</p>
 <p class="muted">The Python packages of step 1 go into the course's own <code>.venv</code>, where your tests run in the IDE; the check below says what this machine still lacks.</p>
-<div class="actions">{{ action(url_for('install_packages', name=course.folder), "Install into .venv", primary=True) }}</div>
+<div class="actions"><form method="post" class="action" action="{{ url_for('install_packages', name=course.folder) }}"><button type="submit" class="primary"{% if running %} disabled{% endif %}>Install into .venv</button></form></div>
 <details class="review">
   <summary>What "Install into .venv" runs</summary>
   <dl>
@@ -166,12 +169,12 @@
   </dl>
 </details>
 <div id="env-check" hx-get="{{ url_for('environment_check', name=course.folder) }}" hx-trigger="load" hx-swap="outerHTML">
-  <p class="muted"><span class="spinner-inline" aria-hidden="true"></span>Checking with the course's <code>.venv</code> …</p>
+  <p class="muted"><span class="spinner-inline" aria-hidden="true"></span>Checking this course with Doctor …</p>
 </div>
 </section>
 
 <section class="step">
-<h2><span class="step-no">3</span>Where tests run {{ chip("done") if runner else chip("to do") }}</h2>
+<h2 id="runner-choice"><span class="step-no">3</span>Where tests run {{ chip("done") if runner else chip("to do") }}</h2>
 <form method="post" action="{{ url_for('save_runner', name=course.folder) }}" class="form">
   <p class="muted">For validation and generation; your own test runs in the IDE stay on this machine. Now: {% if runner %}<strong>{{ runner }}</strong>{% else %}not chosen (they run on this machine, with a warning){% endif %}.</p>
   <label class="check"><input type="radio" name="runner" value="container"{% if runner == "container" %} checked{% endif %}>
@@ -189,5 +192,12 @@
 <div id="env-docker" hx-get="{{ url_for('environment_docker', name=course.folder) }}" hx-trigger="load" hx-swap="outerHTML">
   <p class="muted"><span class="spinner-inline" aria-hidden="true"></span>Asking Docker …</p>
 </div>
+{# Inventory reads have their own request so neither the page nor image controls wait.
+   Not for a course that tests on this machine: it has no image to record. #}
+{% if runner != 'host' %}
+<div id="env-image-record" hx-get="{{ url_for('environment_image_record', name=course.folder) }}" hx-trigger="load" hx-swap="outerHTML">
+  <p class="muted"><span class="spinner-inline" aria-hidden="true"></span>Checking the image build record …</p>
+</div>
+{% endif %}
 </section>
 {% endblock %}

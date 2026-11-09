@@ -2419,23 +2419,48 @@ keep_older=True so existing images survive, promoting configuration only after c
 A per-course lock serializes transactions. Successful backups remain for --undo-repair
 or explicit --finish-repair --confirm; edits to saved/current config refuse undo. No
 student/lecture/model/runner edit, system install or new-package auto-application occurs.
-GUI integration follows below; image records and final machine actions remain later milestones.
+The Environment integration follows below; image inventories are described under its step 4.
 
-Doctor GUI integration (2026-11-09; browser acceptance still pending): Environment links
-to Doctor and the restored optional host guide. Default page loads run no probe/model.
-Explicit checks receive structured, redacted rows from doctor.main's output/row callbacks,
-with existing Environment fix paths; missing/broken venv checks offer compatible base
-Pythons through the guarded switch action. The page edits package-bounds separately.
-Explicit selected failure text/profiles are kept under private logs/doctor; fixed worker
-tasks prepare sanitized previews, advice, independent review, disposable verification and
-full repair diffs using the CLI services. Destination/input/config/fact fingerprints bind
-send/apply to current previews. Model credentials stay in the worker's private mapping,
-never the server environment. Two selected credential values are removed from both
-previews. Doctor task log bounds show the entire bounded preview/diff; an oversized GUI
-diff is refused for CLI review, never silently truncated. Separate confirmation controls
-temporary installs/apply/undo/backup discard. Finishing preserves later owner edits while
-discarding originals; undo refuses edited configuration. Scratch-course browser clicks
-must pass independently of Flask/worker regression tests before acceptance is complete.
+Doctor GUI integration (2026-11-09; the clicks made are listed below): Doctor is the
+automatic check in Environment step 2. The initial render defers read-only probes to htmx
+fragments; these receive structured, redacted doctor rows without parsing CLI text. Known
+problems link to existing install/build, Python switch, runner or host-guide actions on
+their own rows. A running course task disables fix controls. Old `/c/<course>/doctor`
+bookmarks redirect to Environment step 2; there is no separate Doctor page or bounds editor.
+
+An uncovered Problem offers "Ask a model for a fix", opening a four-screen wizard:
+selected data/profile and full sanitized preview, advice, temporary verification result,
+then complete diff and application. The failure is pre-filled from the row and latest
+failed install/build log tail, at most 64 KiB of UTF-8, and remains editable. An imports
+row also supplies its module when recognized. Selected inputs stay in private logs/doctor.
+Preview and Send are separate POST actions. Only new-package advice exposes independent
+second-provider/PyPI review; a changed destination requires a new preview. Failed
+verification offers a return to step 1. A verified proposal still needs a full diff preview
+and confirmation before Apply; afterwards Undo restores the original setup and Keep it
+explicitly discards its backups. Finish preserves later owner edits; undo refuses edited
+configuration. Each action retains the existing CLI service's gates and checks.
+
+Destination/input/config/fact fingerprints bind send/apply to current previews. Model
+credentials stay in the worker's private mapping, never the server environment; both
+profiles' credential values are removed from shared previews. The wizard displays complete
+bounded results, not parsed log tails; oversized previews/diffs are refused rather than
+silently cut. Temporary installs, apply, undo and backup discard have explicit consent.
+Step 1 has one version cell per package, with prefix/comparison storage described below.
+Clicked in headless Chrome on scratch courses, with stand-ins for the model and the
+installer (2026-11-09): a missing `.venv` row's Install (the fix buttons disabled while
+it ran, then every row OK); the four fix screens (preview, send, test, the diff, Apply,
+Undo); an old Doctor bookmark's redirect; a version moved between prefix and comparison
+with its comments and the `.bak` kept, and `java >=17` refused; every step's links.
+Not clicked yet, so covered by Flask and worker tests only: Build for a missing image,
+the Python-conflict switch, a stopped Docker, step 4's differing packages, the uv
+download entry, and the new-package review.
+
+Doctor's own output (the CLI's lines and the rows the page receives) hides the values of
+environment variables named like a credential (KEY, TOKEN, SECRET, PASSWORD and the
+like: the advice redactor's name rule) and any text shaped like an API key. It does not
+hide every environment value (owner, 2026-11-09): hiding HOME or TMPDIR cut the paths
+out of the commands a row advises. What is sent to a model still goes through the
+advice redactor, which is stricter.
 
 Decided 2026-11-08 (owner), when Python 3.12 to 3.14 came into CI: a package that installs and
 imports cleanly can still fail when a job runs, because a newer Python removed something it
@@ -2471,9 +2496,9 @@ every language and framework, so one way of handling them:
   makes the `.venv` anew (the one before kept as `.venv.old` and put back if anything fails,
   `[requires]` checked against the new Python), and only then sets `[requires] python`
   (`workspace.toml.bak` kept). The server runs only a Python it offers, found again on the
-  request, never a path from the form. Installing a Python that is not on the machine is the
-  owner's, until packaging ("Roadmap" 6).
-- Then a model, for what neither covers (planned, with `tutor doctor`; "Roadmap" 6): it reads
+  request, never a path from the form. Additional interpreters now use the explicit uv
+  download page reached from Environment's Python recovery (described under "Local GUI").
+- Original model-fix design (2026-11-08; implementation recorded above): it reads
   the failure's text, the versions and `[requires]`, and proposes a change as structured data
   (a version, the course's Python, a companion), which the owner confirms before it is applied
   and the checks then verify; a fix that holds becomes a rule. Its prompt is strict: the
@@ -3115,9 +3140,10 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
       local tag captures the actual base ID, then the build records provenance labels.
       Post-check inventory uses the immutable image ID in a bounded, read-only/network-off
       container, no course mount. Private versioned snapshots are kept per image content,
-      with a current recipe pointer and drift/staleness checks. Environment links to actual
-      course-venv versus image versions and metadata-only refresh; legacy base provenance
-      stays unknown. A build snapshot is not a permanent base pin. Browser acceptance is pending.
+      with a current recipe pointer and drift/staleness checks. Environment step 4 shows
+      build time and actual course-venv/image differences inline, with metadata-only refresh
+      and a link to full history; legacy base provenance stays unknown. A build snapshot is
+      not a permanent base pin. Browser acceptance is pending.
    Then packaging and release (see "Deferred", "Packaging and release"), with `tutor doctor`
    (checks the tool, that Docker runs, the course's image, then validates one example in the
    course's runner as a smoke test, and says what to do next for each failure) and a fresh
@@ -3132,17 +3158,16 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
      the smoke example, machine_checks, platform_problem and validation_needs_container;
      DOCTORS matches tutor.languages.LANGUAGES. A new language adds a module, its registry
      entry, a shipped example and machine/platform tests; doctor.py does not change.
-     Framework dependencies stay in envcheck. Step 2A's structured advice permission gate
-     is built (2026-11-09; "Version conflicts"). 2B adds explicit unverified model advice
-     and preview. Disposable verification, fixes and the host guide in stash are pending.
-   `tutor doctor` also brings the model that turns an install failure no rule covers into a
-   proposed fix, under the limits in "Version conflicts" (owner, 2026-11-08: with doctor, not
-   before: most of its fixes need another Python or a version bound `[requires]` cannot
-   write yet, and doctor runs before any course, so it needs a model of its own). And uv
-   offers the Pythons the machine lacks in the Environment page's switch (`uv python
-   install`, into the user's folder, no administrator rights); whether that counts as
-   installing system software, which `tutor doctor` never does, is the owner's to decide
-   then.
+     Framework dependencies stay in envcheck. The structured advice gate, preview/send,
+     disposable verification and explicit application/undo are implemented (2026-11-09;
+     "Version conflicts"). Environment integrates the check, host guide and four-screen
+     repair wizard; its main paths are clicked, the rest listed in "Version conflicts".
+   An optional doctor profile handles failures no rule covers; proposals use the existing
+   permission gate and temporary verification. Numeric comparisons are stored in the
+   separate `[package-bounds]` table and shown in Environment's one version table. uv can
+   download an additional Python with explicit consent when recovery finds none compatible,
+   into the user's directory without changing PATH or a course venv. Selecting it for a
+   course remains a separate action; default `tutor doctor` installs nothing.
    Later, each when its trigger comes: a JDK instead of a JRE in the image (a course that
    compiles Java in it); a separate execution backend (a third runner such as Podman; until
    then the host or container switch in `execution.py` is enough); VS Code Dev Containers on
@@ -3793,16 +3818,22 @@ late; the adaptive review screens can be built with it.
     model's draft then the list; (2) install on this machine, the check below its button;
     (3) where tests run; (4) the test image, dimmed and "not needed" on the host. Each says
     whether it is done; steps 2 and 4 say so in their htmx parts.
-  - Built in step 7a (owner, 2026-11-06), no model involved, one page per course:
-    - The check is `python -m tutor.envcheck --json` run with the course's own `.venv`:
-      envcheck checks the interpreter that runs it, and the learner's tests use that venv.
-      It runs from the repository, as tasks do, so it reads `.env` itself (JAVA_HOME,
-      HADOOP_HOME) and the GUI still never loads it. 0.2 s warm; the check and the image's
-      state load into the page with htmx, since Docker can take seconds while its VM wakes.
+  - Environment controls (started in step 7a, 2026-11-06; integrated 2026-11-09), one page
+    per course, with deterministic checks and explicit optional model repair:
+    - Step 2 automatically loads the same deterministic Doctor rows as `tutor doctor`,
+      without smoke or model calls. Check / Result / What to do columns use OK, Needs
+      attention, Problem and Skipped, with duplicate rows removed. Doctor's host requirement
+      probe uses the course's `.venv`; a missing/broken venv produces one failure and skips
+      those requirements. Known failures have their existing fix buttons on the row:
+      install, build, Python switch, host guide or runner choice. An uncovered Problem
+      alone offers the four-screen model-fix wizard described in "Version conflicts".
+      Running tasks disable fix actions. The initial page loads probes through htmx;
+      read-only checks never start a model, install or worker task. The GUI server never
+      loads credentials into its environment.
     - "Exercises may import" (owner, 2026-11-06): each pip row of the list has a tick and the
       module it is imported as; the ticked ones go into `[safety] allow_imports` in the same
-      checked write as `[requires]`, an unticked one comes out, and modules no row names (an
-      OS course's `subprocess`) stay, listed under the table. Unticked by default: widening
+      checked write as the version declarations, an unticked one comes out, and modules no
+      row names (an OS course's `subprocess`) stay, listed under the table. Unticked by default: widening
       the static check is the owner's call, package by package. The module box starts with
       what the lectures' code imports it as when the draft saw it (scikit-learn is sklearn),
       else the name with `-` as `_`. The generate and repair prompt names them as importable
@@ -3811,16 +3842,20 @@ late; the adaptive review screens can be built with it.
       (checked by its hash), so its prompt cache holds. The oracle's prompt keeps the core
       modules only, to stay independent of the exercise; an exercise whose answer needs the
       library itself may then get no oracle, to decide when one does.
-    - `[requires]` is a table in the page (owner, 2026-11-06): "+ Add a row" appends a blank
-      row fetched by htmx, "−" removes its row with htmx's `delete` swap, so no script of
-      ours; nothing is written until Save, and a cleared name is dropped too. The rules
-      are envcheck's (`requires_problems`, now shared by the venv install and the image: a
-      plain package name, a version prefix of dotted numbers, a JVM for pyspark and hadoop),
-      plus a Hadoop release the image can build when tests run in the container. Each pip
-      name links to its PyPI page, for the owner to check a name before installing it.
+    - Step 1 has one version cell per package, accepting a prefix such as `3.5` or a
+      restricted numeric comparison such as `>=1,<2`. Prefixes stay in `[requires]`,
+      comparisons in `[package-bounds]`; changing form moves the entry in one checked
+      toml_edit write with a `.bak`, preserving unrelated tables/comments. Package identities
+      cannot appear twice across spelling variants or declaration tables. Python, java,
+      hadoop and gcc accept prefixes only; Python/C versions remain in the language list.
+      Language-version and draft-accept saves preserve unrelated bounds. Import consent is
+      saved in that same transaction. "+ Add a row" and "−" change the form using htmx;
+      Save applies it. Empty rows are ignored, incomplete/invalid rows return as typed.
+      The shared envcheck rules still require a JVM for pyspark/hadoop, and container
+      courses require a supported Hadoop recipe. Each pip name links to its PyPI page.
     - "Install into .venv" runs `tutor.workspace init` again as a task, which makes the
-      `.venv` if missing and installs this package and `[requires]` (the same command a
-      command-line user runs). The page shows first the pip command, where it installs,
+      `.venv` if missing and installs this package and its declared dependencies (the same
+      command a command-line user runs). The page shows first the pip command, where it installs,
       that it needs no admin rights and changes nothing outside the course folder, that it
       downloads from PyPI, and how to undo it.
     - Where tests run: container or host, written to `[isolation] runner` only when chosen;
@@ -3831,13 +3866,23 @@ late; the adaptive review screens can be built with it.
       image takes its package versions; before it, the page shows the recipe
       (`python -m tutor.container recipe`, in that venv), each download and its source, the
       sizes measured so far for scale, and how to remove the image.
-    - Not in 7a: the per-platform recipes for system software below (only Java and Hadoop
-      exist so far, both in `docs/setup/bigdata.md`, and each recipe needs checking on each
-      platform, while only macOS is at hand); the page points to `docs/setup/` instead. A
-      broken venv being rebuilt, and a venv on another Python, are not handled either.
-    - Checked by a click in Chrome on a scratch course: a row added, host refused without
-      the tick, container saved, the install (2 s) and the build (8 s, cached layers, 0.18
-      GB) run as tasks, the check then ok; the three real courses only opened.
+    - Step 4 loads build time and course-venv/image version differences in a separate
+      read-only fragment; a course tested on this machine has no image, so none is shown. Differences are information; unmeasured versions stay unknown.
+      Old records never produce a current comparison. Missing/old/invalid/unavailable records
+      offer the existing metadata-only Refresh action; the full record/history page is
+      linked here only. An unbuildable recipe keeps a GUI path back to step 1 instead of
+      failing the history page. Legacy images keep unknown build/base facts until rebuilt.
+    - Python recovery offers installed compatible interpreters through the existing guarded
+      switch. Only when none is compatible does it show "No suitable Python here. Download
+      one with uv", linking to the existing explicit-consent download page. A compatible
+      current interpreter counts; a package-only repair does not imply a Python search.
+      The host guide stays inside step 2. No setup links sit above the four steps, whose
+      intro states their order only. System-tool installation remains manual.
+    - Original step-7a Chrome check (2026-11-06) on a scratch course: a row added, host refused
+      without the tick, container saved, the install (2 s) and the build (8 s, cached layers, 0.18
+      GB) run as tasks, the check then ok; the three real courses only opened. The clicks
+      made on the Environment/Doctor integration, and those still owed, are listed in
+      "Version conflicts".
   - Built in step 7b (owner, 2026-11-06): a model drafts `[requires]` from the lectures
     (`python -m tutor.materials.requires`, a task from the page's button, which names the
     model and the input tokens; only on that click, as it may cost money).

@@ -1,7 +1,7 @@
 {# Step 4's test image, loaded by htmx (environment.docker_view); its first line says
    whether the step is done, or not needed when tests run on this machine. Build shows its
    recipe and every download first; the recipe is ours, never a model's. #}
-{% from "_macros.html" import action, chip %}
+{% from "_macros.html" import chip %}
 {% set labels = {"ready": "ready", "image-missing": "image missing or out of date",
                  "docker-missing": "Docker not installed", "docker-stopped": "Docker not running",
                  "cannot-build": "cannot be built"} %}
@@ -34,7 +34,8 @@
   </details>
   {% endif %}
   <div class="actions">
-    {% if view.recipe and view.state in ("image-missing", "ready") %}{{ action(url_for('build_image', name=course.folder), "Rebuild image" if view.state == "ready" else "Build image", primary=view.state != "ready") }}{% endif %}
+    {# Match step 2's fix controls while another course task owns the environment. #}
+    {% if view.recipe and view.state in ("image-missing", "ready") %}<form method="post" class="action" action="{{ url_for('build_image', name=course.folder) }}"><button type="submit"{% if view.state != 'ready' %} class="primary"{% endif %}{% if running %} disabled{% endif %}>{{ 'Rebuild image' if view.state == 'ready' else 'Build image' }}</button></form>{% endif %}
     <button type="button" class="small" hx-get="{{ url_for('environment_docker', name=course.folder) }}" hx-target="#env-docker" hx-swap="outerHTML">Check again</button>
   </div>
 </div>

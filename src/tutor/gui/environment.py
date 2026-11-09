@@ -4,8 +4,9 @@ and the two installs the GUI may start (docs/design.md, "Local GUI", Environment
 - The shared course_requirements probe uses the course's .venv, rather than the GUI/tool
   interpreter. This GUI keeps its existing child-only .env lookup for JAVA_HOME/HADOOP_HOME;
   doctor's default worker does not load .env. JSON decoding and errors are shared.
-- [requires] is edited here as a table, by envcheck's rules (plus a Hadoop release the
-  image can build when tests run in the container), and written through toml_edit.
+- Prefixes and numeric package comparisons share one table, checked by envcheck's rules
+  (plus a Hadoop release the image can build). requirement_versions writes the existing
+  [requires]/[package-bounds] tables together through toml_edit.
 - Installs (owner, 2026-11-06): Python packages into the course's .venv, by running
   `tutor.workspace init` again, which installs [requires] too; and the test image, by
   `tutor.container build` with the course's venv, so the image's packages match the venv's.
@@ -45,7 +46,7 @@ from tutor import (
     workspace,
 )
 from tutor.envcheck import NOT_PIP, pip_requirements, requires_problems, version_matches
-from tutor.gui import tasks, toml_edit
+from tutor.gui import requirement_versions, tasks, toml_edit
 from tutor.gui.courses import Course
 from tutor.gui.toml_edit import put
 from tutor.materials import requires as requires_draft
@@ -203,24 +204,30 @@ def kind(name: str) -> str:
 
 def check_requires(names: list[str], versions: list[str], chosen: str | None
                    ) -> tuple[dict[str, str] | None, list[str]]:
-    """The table from the form's rows (blank rows skipped), or the problems."""
+    """The complete version list, accepting the existing prefix/comparison grammars."""
     table: dict[str, str] = {}
     problems = []
     for raw_name, raw_version in zip(names, versions, strict=False):
         name, version = raw_name.strip(), raw_version.strip()
         if not name and not version:
             continue
-        # python, java and hadoop are special only in lower case; pip ignores case.
+        # Toolchain names are lower case; pip identities also ignore -_. separators.
         name = name.lower() if name.lower() in NOT_PIP else name
         if not name:
             problems.append(f"The version {version} has no name.")
         elif not version:
             problems.append(f"{name}: give a version prefix, such as 3.5 for any 3.5.x.")
-        elif name.lower() in {n.lower() for n in table}:
+        elif requires_draft.pip_key(name) in {requires_draft.pip_key(n) for n in table}:
             problems.append(f"{name} is listed twice.")
         else:
             table[name] = version
-    problems += requires_problems(table)
+    problems += requires_problems(table, allow_bounds=True)
+    if not problems:
+        try:
+            prefixes, bounds = requirement_versions.partition(table)
+            table = package_bounds.merge(prefixes, bounds)
+        except ValueError as exc:
+            problems.append(str(exc))
     if not problems and chosen == "container" and "hadoop" in table:
         try:
             image_recipe.hadoop_release(table["hadoop"])
@@ -296,42 +303,8 @@ def check_imports(rows: list[tuple[str, str]], ticked: set[str], modules: dict[s
 
 def save_requires(course: Course, table: dict[str, str], allow: list[str] | None = None
                   ) -> list[str]:
-    """Write [requires] as `table`: changed values, new names after the last one, removed
-    names gone, comments kept. Versions are written as strings, as they are read. With
-    `allow`, [safety] allow_imports too, in the same checked write."""
-    try:
-        package_bounds.merge(table, course.workspace.bounds)
-    except ValueError:
-        return ["A package is already in package-bounds; edit that bound separately "
-                "instead of adding a conflicting prefix."]
-    expected: dict[str, dict] = {"requires": table}
-    safety = _data(course).get("safety", {})
-    if allow is not None and allow != safety.get("allow_imports", []):
-        expected["safety"] = {**{k: v for k, v in safety.items() if k != "allow_imports"},
-                              **({"allow_imports": allow} if allow else {})}
-
-    def change(doc) -> None:
-        if "requires" not in doc and table:
-            doc["requires"] = tomlkit.table()
-        if "requires" in doc:
-            section = doc["requires"]
-            for name in list(section.keys()):
-                if name not in table:
-                    del section[name]
-            for name, version in table.items():
-                if section.get(name) != version:
-                    put(section, name, version)
-        if "safety" in expected:
-            if "safety" not in doc:
-                new = tomlkit.table()
-                new.comment("modules exercises may import besides the core ones")
-                doc["safety"] = new
-            if allow:
-                put(doc["safety"], "allow_imports", allow)
-            elif "allow_imports" in doc["safety"]:
-                del doc["safety"]["allow_imports"]
-
-    return toml_edit.edit_tables(course.workspace.root, change, expected)
+    """Save the complete list in the two existing tables, with optional import consent."""
+    return requirement_versions.save(course, table, allow)
 
 
 def save_runner(course: Course, chosen: str, understood: bool) -> list[str]:
@@ -437,7 +410,8 @@ def accept(course: Course, chosen: dict[str, str]) -> list[str]:
     version of one listed already, by the same rules as the table's rows."""
     if not chosen:
         return ["Tick the entries to add first."]
-    table = dict(course.workspace.requires)
+    # A draft changes only its selected entries; existing comparisons must stay visible.
+    table = dict(course.workspace.effective_requires)
     for name, version in chosen.items():
         table[_listed(table, name) or name] = version
     checked, problems = check_requires(list(table), list(table.values()), runner(course))

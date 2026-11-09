@@ -101,7 +101,7 @@ NOTICES.update({
     "installed": ("ok", "Installed into .venv: step 2's check below is fresh."),
     "image-built": ("ok", "The test image is built and checked: step 4 below."),
     "image-recorded": ("ok", "Current image versions recorded; "
-                             "open the image record for comparison."),
+                             "see step 4 below for the version comparison."),
     "draft-ready": ("ok", "The lectures were looked at: tick what to add in step 1."),
     "coverage-drafted": ("ok", "The draft is ready below: check it against the slides."),
     "coverage-used": ("ok", "coverage.md is written from the draft. Edit it as batches are made."),

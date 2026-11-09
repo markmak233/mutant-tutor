@@ -165,9 +165,9 @@ def toolchains(course: Course) -> set[str]:
 
 
 def package_rows(course: Course) -> list[tuple[str, str]]:
-    """[requires] without the language list's rows: Python's packages and tools."""
+    """Both declaration tables, without toolchains already shown in the language list."""
     shown = toolchains(course)
-    return [(n, v) for n, v in course.workspace.requires.items() if n not in shown]
+    return [(n, v) for n, v in course.workspace.effective_requires.items() if n not in shown]
 
 
 def with_toolchains(course: Course, names: list[str], versions: list[str]
@@ -186,7 +186,8 @@ def with_toolchains(course: Course, names: list[str], versions: list[str]
 def save_language_versions(course: Course, versions: dict[str, str]) -> list[str]:
     """The language list's versions ({toolchain: version as typed}) into [requires], by the
     same rules as the packages list."""
-    table = dict(course.workspace.requires)
+    # Editing a toolchain cannot remove bounds in the packages-and-tools list.
+    table = dict(course.workspace.effective_requires)
     for toolchain, version in versions.items():
         if toolchain in toolchains(course):
             table[toolchain] = version.strip()

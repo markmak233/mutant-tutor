@@ -13,7 +13,8 @@ import pytest
 pytest.importorskip("flask")  # the `gui` extra
 
 from tutor import workspace  # noqa: E402
-from tutor.gui import courses, environment, llm_settings, tasks  # noqa: E402
+from tutor.doctor_rows import Row  # noqa: E402
+from tutor.gui import courses, doctor_page, environment, llm_settings, tasks  # noqa: E402
 from tutor.gui.app import create_app  # noqa: E402
 from tutor.materials import cache  # noqa: E402
 from tutor.materials import requires as requires_draft  # noqa: E402
@@ -153,7 +154,7 @@ def test_blank_rows_are_skipped_and_special_names_take_lower_case():
     (["torch"], [""], "give a version prefix"),
     ([""], ["2"], "has no name"),
     (["pyspark"], ["3.5"], "needs a JVM"),
-    (["torch"], [">=2"], "version prefix"),
+    (["torch"], [">=2rc1"], "version prefix"),
     (["<b>x</b>"], ["1"], "not a package name"),
 ])
 def test_a_table_that_would_not_install_is_refused(names, versions, says):
@@ -262,7 +263,9 @@ def test_rows_are_added_and_removed_in_the_page_with_htmx(root):
     text = client.get("/c/demo-course/environment/", base_url=BASE).get_data(as_text=True)
 
     # One row per entry but python, which the language list holds; no blank ones.
-    assert text.count('name="name"') == 2 and 'name="version:python" value="3.11"' in text
+    package_rows = text.split('id="requires-rows"', 1)[1].split("</tbody>", 1)[0]
+    assert package_rows.count('name="name"') == 2
+    assert 'name="version:python" value="3.11"' in text
     assert text.count('hx-swap="delete"') == 2 and 'hx-target="closest tr"' in text
     assert 'hx-target="#requires-rows" hx-swap="beforeend"' in text
 
@@ -277,7 +280,8 @@ def test_an_empty_table_starts_with_one_blank_row(root):
     _write(root / "demo-course" / "workspace.toml", 'course = "demo"\n')
     text = _browser(root).get("/c/demo-course/environment/", base_url=BASE).get_data(
         as_text=True)
-    assert text.count('name="name" value=""') == 1
+    package_rows = text.split('id="requires-rows"', 1)[1].split("</tbody>", 1)[0]
+    assert package_rows.count('name="name" value=""') == 1
 
 
 def test_the_course_page_links_to_it_and_the_gap_links_where_to_choose(root):
@@ -287,15 +291,15 @@ def test_the_course_page_links_to_it_and_the_gap_links_where_to_choose(root):
 
 
 def test_the_check_part_shows_each_result(root, monkeypatch):
-    monkeypatch.setattr(environment, "check", lambda course: environment.Check("/v/python", [
-        {"name": "java", "required": "17", "found": "21.0.1", "hint": "set JAVA_HOME",
-         "ok": False},
-        {"name": "pyspark", "required": "3.5", "found": "3.5.9", "hint": "", "ok": True}]))
+    monkeypatch.setattr(doctor_page, "report", lambda course: [
+        Row("FAIL", "host java: required 17, found 21.0.1", "set JAVA_HOME", "host-guide"),
+        Row("OK", "host pyspark: required 3.5, found 3.5.9")])
 
     text = _browser(root).get("/c/demo-course/environment/check",
                               base_url=BASE).get_data(as_text=True)
 
-    assert "chip-wrong-version" in text and "set JAVA_HOME" in text and "chip-ok" in text
+    assert "Problem" in text and "set JAVA_HOME" in text and "chip-ok" in text
+    assert "/environment/host-setup#java" in text
     assert 'hx-target="#env-check"' in text  # Check again
 
 
@@ -629,17 +633,16 @@ def test_the_steps_come_in_the_order_they_are_done(root):
     assert 'Where tests run <span class="chip chip-to-do">' in text  # not chosen yet
 
 
-def test_step_two_says_done_only_when_every_requirement_is_met(root, monkeypatch):
+def test_step_two_says_done_only_without_doctor_problems(root, monkeypatch):
     def check(results):
-        monkeypatch.setattr(environment, "check",
-                            lambda course: environment.Check("/v/python", results))
+        monkeypatch.setattr(doctor_page, "report", lambda course: results)
         return _browser(root).get("/c/demo-course/environment/check",
                                   base_url=BASE).get_data(as_text=True)
 
-    ok = {"name": "python", "required": "3.11", "found": "3.11.9", "hint": "", "ok": True}
-    bad = {"name": "java", "required": "17", "found": None, "hint": "set JAVA_HOME", "ok": False}
+    ok = Row("OK", "host python: required 3.11, found 3.11.9")
+    bad = Row("FAIL", "host java: required 17, found not found", "set JAVA_HOME", "host-guide")
     assert "chip-done" in check([ok]) and "chip-to-do" not in check([ok])
-    assert "chip-to-do" in check([ok, bad]) and "1 of 2 not met yet" in check([ok, bad])
+    assert "chip-to-do" in check([ok, bad]) and "1 check needs attention" in check([ok, bad])
 
 
 @pytest.mark.parametrize("runner, state, says", [

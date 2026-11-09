@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{# One screen per step; only explicit native POST forms start preview/send/install tasks. #}
+{% block title %}Setup fix · {{ course.workspace.course }}{% endblock %}
+{% block crumbs %}<a href="{{ url_for('course', name=course.folder) }}">{{ course.workspace.course }}</a><a href="{{ url_for('environment_view', name=course.folder) }}#host-install">Environment</a><span>Setup fix</span>{% endblock %}
+{% block content %}
+<h1>Setup fix</h1>
+<p><strong>Step {{ step }} of 4</strong> · {% if step > 1 %}<a href="{{ url_for('environment_fix', name=course.folder, identifier=view.identifier, step=step-1) }}">Back</a>{% else %}<a href="{{ url_for('environment_view', name=course.folder) }}#host-install">Back to Environment</a>{% endif %}</p>
+{% if problems %}<div class="notice notice-bad">{% for problem in problems %}<p>{{ problem }}</p>{% endfor %}</div>{% endif %}
+{% if running %}<p class="notice">A task is running: <a href="{{ url_for('task', name=course.folder, task_id=running.id) }}">{{ running.title }}</a>. Wait for it before another setup action.</p>{% endif %}
+
+{% if step == 1 %}
+<h2>What will be sent</h2>
+<p>Review the selected failure and choose the model. Preview first; only pressing Send below makes a model request. Logs may contain private snippets: edit them before previewing.</p>
+<form class="form" method="post" action="{{ url_for('doctor_input', name=course.folder) }}">
+  <label class="field">Model profile<select name="profile" required><option value="">Choose a profile</option>{% for p in profiles %}<option value="{{ p.name }}"{% if form.profile == p.name %} selected{% endif %}>{{ p.name }} · {{ p.data.get('provider', '') }} · {{ p.data.get('model', '') }}</option>{% endfor %}</select></label>
+  <label class="field">Module to reproduce <span class="muted">Optional for advice; needed to test the fix.</span><input type="text" name="module" value="{{ form.module }}" autocomplete="off" spellcheck="false"></label>
+  <label class="field">Failure record <span class="muted">At most 64 KiB. The last failed setup log may be included; review it.</span><textarea name="failure" rows="9" required maxlength="65536" spellcheck="false">{{ form.failure }}</textarea></label>
+  <div class="actions"><button type="submit"{% if running or not profiles %} disabled{% endif %}>Preview what will be sent</button></div>
+</form>
+{% if not profiles %}<p><a href="{{ url_for('models', name=course.folder) }}">Configure a model profile</a>, then return here. No model is silently chosen.</p>{% endif %}
+{% if view and view.preview %}<h3>Destination and sanitized data</h3><pre class="recipe">{{ view.preview }}</pre><p>The preview is shown in full. Redaction cannot prove every private snippet was removed.</p>{% endif %}
+{% if view %}<form class="form" method="post" action="{{ url_for('doctor_action', name=course.folder, identifier=view.identifier, action='advice') }}"><div class="actions"><button class="primary" type="submit"{% if running or not view.preview_ready %} disabled{% endif %}>Send to the model</button></div></form>{% else %}<button type="button" class="small" disabled>Send to the model</button>{% endif %}
+
+{% elif step == 2 %}
+<h2>The model's advice</h2>
+{% if view.advice.cause %}<p>{{ view.advice.cause }}</p>{% endif %}
+{% if view.advice.changes %}<ul>{% for line in view.advice.changes %}<li>{{ line }}</li>{% endfor %}</ul>{% endif %}
+<pre class="recipe">{{ view.advice.get('text', 'No completed advice yet.') }}</pre>
+<p>These suggestions have not changed the course.</p>
+{% if view.advice.get('status') == 'new-package-review' %}
+<h3>Independent review of a new package</h3>
+<p>The model proposed <code>{{ view.advice.needs_new_package }}</code>, which is new to the course. A second provider and PyPI check can inform your review; agreement does not prove safety. A new package is never installed automatically.</p>
+<form class="form" method="post" action="{{ url_for('doctor_action', name=course.folder, identifier=view.identifier, action='prepare-independent') }}">
+  <label class="field">Independent second profile<select name="second" required><option value="">Choose a different profile</option>{% for p in profiles if p.name != form.profile %}<option value="{{ p.name }}"{% if form.second == p.name %} selected{% endif %}>{{ p.name }} · {{ p.data.get('provider', '') }} · {{ p.data.get('model', '') }}</option>{% endfor %}</select></label>
+  <div class="actions"><button type="submit"{% if running %} disabled{% endif %}>Preview both destinations</button></div>
+</form>
+{% if form.second and view.preview %}<pre class="recipe">{{ view.preview }}</pre>{% endif %}
+<form class="form" method="post" action="{{ url_for('doctor_action', name=course.folder, identifier=view.identifier, action='independent') }}"><div class="actions"><button type="submit"{% if running or not form.second or not view.preview_ready %} disabled{% endif %}>Send to both providers and check PyPI</button></div></form>
+{% if view.independent %}<p>{{ view.independent.text }}</p>{% endif %}
+{% endif %}
+<form class="form" method="post" action="{{ url_for('doctor_action', name=course.folder, identifier=view.identifier, action='verify') }}">
+  <label class="check"><input type="checkbox" name="confirmed" required> Allow up to three model-assisted repair rounds and temporary public-PyPI wheel installs. Host package code runs with my user rights; containers stay isolated. My course is unchanged.</label>
+  <div class="actions"><button type="submit"{% if running or not view.advice_ready or view.advice.get('status') != 'accepted' or not view.preview_ready or not form.module or view.verified %} disabled{% endif %}>Test it in a temporary environment</button></div>
+</form>
+{% if not form.module %}<p>Use Back to fill the module that reproduces the failure, then preview again.</p>{% endif %}
+{% if view.advice.get('status') != 'accepted' %}<p>There is no permitted repair to test yet. Return to step 1 to review the failure and request new advice.</p>{% endif %}
+
+{% elif step == 3 %}
+<h2>Temporary test result</h2>
+<pre class="recipe">{{ view.verification.get('text', 'No completed test yet.') }}</pre>
+{% if view.verified %}<p>The selected import and dependency check passed in a temporary environment. This does not prove every exercise passes. The course is unchanged.</p>{% else %}<p>The fix was not verified. <a href="{{ url_for('environment_fix', name=course.folder, identifier=view.identifier, step=1) }}">Back to step 1</a> to review the failure and module.</p>{% endif %}
+<form class="form" method="post" action="{{ url_for('doctor_action', name=course.folder, identifier=view.identifier, action='repair-preview') }}"><div class="actions"><button type="submit"{% if running or not view.verified or view.applied %} disabled{% endif %}>Show the exact changes</button></div></form>
+
+{% elif step == 4 %}
+<h2>The exact changes</h2>
+{% if view.diff %}<pre class="recipe">{{ view.diff }}</pre>{% endif %}
+{% if not view.applied %}
+<form class="form" method="post" action="{{ url_for('doctor_action', name=course.folder, identifier=view.identifier, action='apply') }}">
+  <label class="check"><input type="checkbox" name="confirmed" required> Apply these reviewed changes to this course. Recheck them first and keep my original setup for Undo.</label>
+  <div class="actions"><button type="submit" class="primary"{% if running or not view.diff_ready or view.retained %} disabled{% endif %}>Apply</button></div>
+</form>
+{% endif %}
+{% if view.retained %}
+<p>Your original setup is kept until you choose Keep it.</p>
+{% for action, label, consent in [('undo', 'Undo', 'Restore my original setup.'), ('finish', 'Keep it', 'Keep this setup and permanently discard its original backups.')] %}
+<form class="form" method="post" action="{{ url_for('doctor_retained', name=course.folder, action=action) }}"><input type="hidden" name="input" value="{{ view.identifier }}"><label class="check"><input type="checkbox" name="confirmed" required> {{ consent }}</label><div class="actions"><button type="submit"{% if running %} disabled{% endif %}>{{ label }}</button></div></form>
+{% endfor %}
+{% elif view.applied %}<p>This repair no longer has an original backup here. <a href="{{ url_for('environment_view', name=course.folder) }}#host-install">Return to Environment and check your setup.</a></p>{% endif %}
+{% endif %}
+
+{% if view and view.history %}<details><summary>Task results</summary><ul>{% for task in view.history %}<li><a href="{{ url_for('task', name=course.folder, task_id=task.id) }}">{{ task.title }}</a> · {{ task.status }}</li>{% endfor %}</ul></details>{% endif %}
+{% endblock %}

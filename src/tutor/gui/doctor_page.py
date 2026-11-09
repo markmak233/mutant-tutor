@@ -8,9 +8,9 @@ import sys
 import uuid
 from pathlib import Path
 
-from tutor import doctor, execution, package_bounds
+from tutor import doctor, execution
 from tutor.doctor_advice import verification
-from tutor.gui import llm_settings, tasks, toml_edit
+from tutor.gui import llm_settings, tasks
 
 _ID = re.compile(r"[0-9a-f]{32}")
 ACTIONS = {"preview", "advice", "verify", "independent", "repair-preview", "apply"}
@@ -109,26 +109,3 @@ def inputs(course):
         except (ValueError, OSError, TypeError):
             continue
     return rows
-
-
-def save_bounds(course, names: list[str], specs: list[str]) -> list[str]:
-    """The explicit bound table editor preserves prefixes and every other TOML table."""
-    if len(names) != len(specs) or len(names) > 50:
-        return ["Use at most 50 complete package/bound rows."]
-    bounds = {}
-    try:
-        for name, spec in zip(names, specs, strict=True):
-            if not name.strip() and not spec.strip():
-                continue
-            name = package_bounds.identity(name.strip())
-            if name in bounds:
-                raise ValueError("a package is listed twice")
-            bounds[name] = package_bounds.numeric_specifier(spec.strip())
-        package_bounds.merge(course.workspace.requires, bounds)
-    except ValueError as exc:
-        return [str(exc)]
-
-    def change(doc):
-        doc["package-bounds"] = bounds
-
-    return toml_edit.edit(course.workspace.root, "package-bounds", change, bounds)

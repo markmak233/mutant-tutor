@@ -15,7 +15,7 @@
 Java and Hadoop are optional for debugging with ordinary host pytest; keep the image ready in
 <a href="{{ back }}#test-image">Environment step 4</a>.
 {% else %}Host tests need the tools below on this machine. Choose the runner in Environment.{% endif %}</p>
-<p>This page gives manual instructions and installs nothing. <a href="{{ url_for('doctor_view', name=course.folder) }}">Open Doctor</a> for this course's measured checks, package bounds and explicit repair steps.</p>
+<p>This page gives manual instructions and installs nothing. <a href="{{ back }}#host-install">Check this course in Environment step 2</a>.</p>
 <nav aria-label="Installation platform">
 {% for value, label in platforms.items() %}
 <a href="{{ url_for('host_setup', name=course.folder, platform=value) }}"{% if platform == value %} aria-current="page"{% endif %}>{{ label }}</a>{% if not loop.last %} · {% endif %}
@@ -30,7 +30,7 @@ Linux distributions differ; WSL instructions apply inside the Linux terminal, no
 <tbody>{% for name, version in requires.items() %}<tr><td>{{ name }}</td><td>{{ version }}</td></tr>{% endfor %}</tbody></table>
 {% else %}<p>No versions declared. Set them in <a href="{{ back }}#course-needs">Environment step 1</a> first.</p>{% endif %}
 
-<section>
+<section id="python">
 <h2>Python and course packages</h2>
 <ol>
 <li>Install a Python matching the declared version from <a href="https://www.python.org/downloads/">Python downloads</a>
@@ -49,7 +49,7 @@ review its options. Undo through that installer's uninstall instructions. The GU
 {# Only declared system tools get sections. Java 17 and Hadoop 3.3.6 are the existing
    setup guide's examples, not defaults substituted for other requested versions. #}
 {% if 'java' in requires %}
-<section><h2>Java (JDK)</h2>
+<section id="java"><h2>Java (JDK)</h2>
 <p>Required version prefix: <strong>{{ requires.java }}</strong>.</p>
 {% if requires.java == '17' %}
 {% if platform == 'macos' %}
@@ -80,7 +80,7 @@ then check again. This page does not edit it or load it into the GUI process.</p
 {% endif %}
 
 {% if 'hadoop' in requires %}
-<section><h2>Hadoop</h2>
+<section id="hadoop"><h2>Hadoop</h2>
 <p>Required version prefix: <strong>{{ requires.hadoop }}</strong>.</p>
 {% if platform == 'windows' %}
 <p>MRJob's Hadoop runner is unsupported on native Windows: those tests are skipped, and validation
@@ -105,7 +105,7 @@ installation steps have not been fresh-install tested here.</p>
 {% endif %}
 
 {% if platform == 'windows' and 'pyspark' in requires %}
-<section><h2>Spark on native Windows</h2>
+<section id="windows-spark"><h2>Spark on native Windows</h2>
 <p>Spark file access also needs matching <code>winutils.exe</code> and <code>hadoop.dll</code> in
 <code>HADOOP_HOME\bin</code>, with that folder on PATH. Restart the terminal and VS Code after
 changing PATH; a local .env value alone does not make Windows find the DLL.</p>
@@ -117,13 +117,21 @@ other versions need their matching documentation. This does not enable MRJob's H
 {% endif %}
 
 {% for language in languages if language.key == 'c' %}
-<section><h2>C: existing setup</h2>
+<section id="c"><h2>C: existing setup</h2>
 <p>Use <a href="{{ back }}#course-needs">the existing C compiler settings</a> for versions, flags and headers.
 C validation stays in a container. Native Windows C tests are unsupported; use WSL or the container.</p>
 <p>The environment check reports <code>gcc</code>; host C tests use <code>CC</code> or <code>cc</code>.
 A found compiler version does not prove sanitizer support. This page adds no compiler installer.</p></section>
 {% endfor %}
 
+{# Doctor's Docker row links here; this is guidance, never an installer/start command. #}
+<section id="docker"><h2>Docker</h2>
+<p>A container course needs Docker with Linux containers. Install it using
+<a href="https://docs.docker.com/get-started/get-docker/">Docker's official instructions</a>.
+On macOS or Windows, start Docker Desktop and wait for its engine to be ready; on Linux,
+follow your installation's engine-start instructions. Then return to Environment and check again.</p>
+<p>A host course does not require Docker. This page never installs or starts it, changes
+the runner, or falls back from a container to host execution.</p></section>
 <p><a href="{{ back }}#host-install">Return to Environment and check again</a>.</p>
 <p class="muted">Instructions are based on the repository's docs/setup/bigdata.md and linked official documentation.
 Viewing them does not verify installation or change the selected runner.</p>

@@ -1,0 +1,30 @@
+{# Step 4's asynchronous, read-only summary. Currency is checked by image_records;
+   only current inventories are compared. Missing/old facts have an explicit fix action. #}
+<div id="env-image-record">
+  <h3>Image build record</h3>
+  {% set view = record.view %}
+  {% set labels = {'current': 'Current image record', 'missing': 'No image record yet', 'stale': 'Old image record', 'unavailable': 'Image record unavailable', 'invalid': 'Image record unreadable'} %}
+  <p><strong>{{ labels.get(view.status, view.status) }}</strong>. {{ view.detail }}</p>
+  {% if view.data %}
+    {% if view.status != 'current' %}<p>This stored snapshot is old or unavailable for comparison; it does not describe the current image.</p>{% endif %}
+    <dl>
+      <dt>{{ 'Built at' if view.status == 'current' else 'Stored build time' }}</dt><dd>{% if view.data.provenance %}{{ view.data.provenance.built_at }}{% else %}Unknown for this older image. Rebuild to record the build time.{% endif %}</dd>
+      <dt>Recorded at</dt><dd>{{ view.data.recorded_at }}</dd>
+    </dl>
+  {% endif %}
+  {% if view.status == 'current' %}
+    <p>Different versions are information, not a setup failure. The host column uses this course's <code>.venv</code>.</p>
+    {% if record.host.problem %}<p>{{ record.host.problem }} <a href="#host-install">Check or create the course venv in step 2</a>.</p>{% endif %}
+    {% if record.differences %}
+    <table><thead><tr><th>Requirement</th><th>Course venv/host tool</th><th>Image</th></tr></thead><tbody>
+      {% for row in record.differences %}<tr><td>{{ row.name }}</td><td>{{ row.host }}</td><td>{{ row.image }}</td></tr>{% endfor %}
+    </tbody></table>
+    {% elif not record.unknown %}<p>No version differences found in declared requirements.</p>{% endif %}
+    {% if record.unknown %}<p>Versions unavailable for comparison: {{ record.unknown | map(attribute='name') | join(', ') }}. Check step 2 and refresh the image record.</p>{% endif %}
+  {% endif %}
+  <form method="post" class="form" action="{{ url_for('refresh_image_record', name=course.folder) }}">
+    <p>Refresh reads the existing image in a temporary network-disabled container and writes a private record. It does not build, pull or install packages.</p>
+    <div class="actions"><button type="submit"{% if running %} disabled{% endif %}>Refresh current image record</button></div>
+  </form>
+  <p><a href="{{ url_for('image_record_view', name=course.folder) }}">Full image record and history</a></p>
+</div>
