@@ -95,7 +95,9 @@ def test_current_summary_shows_build_time_and_only_differences_as_information(in
     before = {p.relative_to(course.workspace.root): p.read_bytes()
               for p in course.workspace.root.rglob("*") if p.is_file()}
     text = summary(inventory)
-    assert inventory[1]["provenance"]["built_at"] in text and "Built at" in text
+    # Shown as every other page shows a time: local, to the second, not the stored UTC text.
+    built = inventory[1]["provenance"]["built_at"]
+    assert tasks.local_time(built) in text and built not in text and "Built at" in text
     assert "<td>pyspark</td>" in text and "3.5.1" in text and "3.5.2" in text
     assert "<td>python</td>" not in text and "<td>java</td>" not in text
     assert "information, not a setup failure" in text and "notice-bad" not in text

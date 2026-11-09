@@ -8,8 +8,8 @@
   {% if view.data %}
     {% if view.status != 'current' %}<p>This stored snapshot is old or unavailable for comparison; it does not describe the current image.</p>{% endif %}
     <dl>
-      <dt>{{ 'Built at' if view.status == 'current' else 'Stored build time' }}</dt><dd>{% if view.data.provenance %}{{ view.data.provenance.built_at }}{% else %}Unknown for this older image. Rebuild to record the build time.{% endif %}</dd>
-      <dt>Recorded at</dt><dd>{{ view.data.recorded_at }}</dd>
+      <dt>{{ 'Built at' if view.status == 'current' else 'Stored build time' }}</dt><dd>{% if view.data.provenance %}{{ view.data.provenance.built_at | local_time }}{% else %}Unknown for this older image. Rebuild to record the build time.{% endif %}</dd>
+      <dt>Recorded at</dt><dd>{{ view.data.recorded_at | local_time }}</dd>
     </dl>
   {% endif %}
   {% if view.status == 'current' %}

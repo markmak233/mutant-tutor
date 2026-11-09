@@ -114,6 +114,9 @@ def create_app(root: Path, token: str, port: int | None = None,
             abort(403, "An action must come from this GUI's own pages.")
         return None
 
+    # One form for every time a page shows (tasks.TIME_FORMAT, local): `| local_time`.
+    app.add_template_filter(tasks.local_time, "local_time")
+
     @app.context_processor
     def notice():
         found = NOTICES.get(request.args.get("notice", ""))

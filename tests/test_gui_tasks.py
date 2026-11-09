@@ -246,3 +246,15 @@ def test_the_log_shows_course_paths_relative_to_the_course(tmp_path):
     # makes shlex quote it).
     shown = shlex.join([os.path.join("batches", "b1"), "."])
     assert f" {shown}" in log and str(tmp_path) not in log
+
+
+def test_a_stored_time_is_shown_local_to_the_second_like_a_task_time():
+    from datetime import datetime
+
+    stored = "2026-01-02T03:04:05.678901+00:00"  # as an image record keeps it
+    shown = tasks.local_time(stored)
+    assert shown == datetime.fromisoformat(stored).astimezone().strftime(tasks.TIME_FORMAT)
+    assert datetime.strptime(shown, tasks.TIME_FORMAT)  # the form a task's "started" has
+    assert tasks.local_time("2026-01-02T03:04:05") == "2026-01-02 03:04:05"  # no zone: local
+    # Not a time: shown as it is, never an error on the page.
+    assert tasks.local_time("unknown") == "unknown" and tasks.local_time(None) == "None"

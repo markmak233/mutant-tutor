@@ -12,9 +12,9 @@
 {% if view.data %}
 {% set data = view.data %}
 <h2>Stored snapshot{% if view.status != 'current' %} ({{ view.status }}, not a current comparison){% endif %}</h2>
-<dl><dt>Recorded at</dt><dd>{{ data.recorded_at }}</dd><dt>Image</dt><dd><code>{{ data.image }}</code></dd><dt>Actual image ID</dt><dd><code>{{ data.image_id }}</code></dd><dt>Canonical recipe digest</dt><dd><code>{{ data.recipe }}</code></dd></dl>
+<dl><dt>Recorded at</dt><dd>{{ data.recorded_at | local_time }}</dd><dt>Image</dt><dd><code>{{ data.image }}</code></dd><dt>Actual image ID</dt><dd><code>{{ data.image_id }}</code></dd><dt>Canonical recipe digest</dt><dd><code>{{ data.recipe }}</code></dd></dl>
 {% if data.provenance %}
-<dl><dt>Build time</dt><dd>{{ data.provenance.built_at }}</dd><dt>Base selected for this build</dt><dd>{{ data.provenance.base.name }}</dd><dt>Actual base image ID (configuration digest)</dt><dd><code>{{ data.provenance.base.id }}</code></dd><dt>Base registry manifest digests</dt><dd>{% for digest in data.provenance.base.repo_digests %}<code>{{ digest }}</code>{% if not loop.last %}<br>{% endif %}{% else %}Unavailable; the actual base content ID above is recorded.{% endfor %}</dd></dl>
+<dl><dt>Build time</dt><dd>{{ data.provenance.built_at | local_time }}</dd><dt>Base selected for this build</dt><dd>{{ data.provenance.base.name }}</dd><dt>Actual base image ID (configuration digest)</dt><dd><code>{{ data.provenance.base.id }}</code></dd><dt>Base registry manifest digests</dt><dd>{% for digest in data.provenance.base.repo_digests %}<code>{{ digest }}</code>{% if not loop.last %}<br>{% endif %}{% else %}Unavailable; the actual base content ID above is recorded.{% endfor %}</dd></dl>
 {% else %}<p>Base/build provenance is unknown for this older image. Refresh cannot infer it from a mutable base tag. Rebuild to capture it.</p>{% endif %}
 {% if view.status == 'current' %}
 <h2>Course venv versus image</h2>
@@ -26,5 +26,5 @@
 <details><summary>All recorded distributions</summary><table><tbody>{% for name, version in data.inventory.packages.items() %}<tr><td>{{ name }}</td><td>{{ version }}</td></tr>{% endfor %}</tbody></table></details>
 {% endif %}
 {% endif %}
-{% if history %}<h2>Recent stored build snapshots</h2><p>Up to 20 snapshots, including older recipes. These are historical records, not claims about the current image.</p><table><thead><tr><th>Recorded/build time</th><th>Image ID</th><th>Actual base ID</th></tr></thead><tbody>{% for old in history %}<tr><td>{{ old.provenance.built_at if old.provenance else old.recorded_at }}</td><td><code>{{ old.image_id }}</code></td><td><code>{{ old.provenance.base.id if old.provenance else 'unknown' }}</code></td></tr>{% endfor %}</tbody></table>{% endif %}
+{% if history %}<h2>Recent stored build snapshots</h2><p>Up to 20 snapshots, including older recipes. These are historical records, not claims about the current image.</p><table><thead><tr><th>Recorded/build time</th><th>Image ID</th><th>Actual base ID</th></tr></thead><tbody>{% for old in history %}<tr><td>{{ (old.provenance.built_at if old.provenance else old.recorded_at) | local_time }}</td><td><code>{{ old.image_id }}</code></td><td><code>{{ old.provenance.base.id if old.provenance else 'unknown' }}</code></td></tr>{% endfor %}</tbody></table>{% endif %}
 {% endblock %}

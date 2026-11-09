@@ -206,13 +206,29 @@ def _alive(pid: int) -> bool:
     return True
 
 
+# How every page writes a time: this machine's clock, to the second.
+TIME_FORMAT = "%Y-%m-%d %H:%M:%S"
+
+
 def _now() -> str:
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return datetime.now().strftime(TIME_FORMAT)
+
+
+def local_time(stamp) -> str:
+    """A stored ISO time as the pages show times (TIME_FORMAT, this machine's clock). The
+    image records keep theirs in UTC with microseconds, which read as another time of day
+    next to a task's; a time without a zone is taken as local already. Anything that is
+    not a time is shown as it is, never hidden."""
+    try:
+        moment = datetime.fromisoformat(stamp)
+    except (TypeError, ValueError):
+        return str(stamp)
+    return (moment.astimezone() if moment.tzinfo else moment).strftime(TIME_FORMAT)
 
 
 def _age_s(started: str) -> float:
     try:
-        return (datetime.now() - datetime.strptime(started, "%Y-%m-%d %H:%M:%S")).total_seconds()
+        return (datetime.now() - datetime.strptime(started, TIME_FORMAT)).total_seconds()
     except ValueError:
         return float("inf")
 

@@ -3887,7 +3887,9 @@ late; the adaptive review screens can be built with it.
       (`python -m tutor.container recipe`, in that venv), each download and its source, the
       sizes measured so far for scale, and how to remove the image.
     - Step 4 loads build time and course-venv/image version differences in a separate
-      read-only fragment; a course tested on this machine has no image, so none is shown. Differences are information; unmeasured versions stay unknown.
+      read-only fragment; a course tested on this machine has no image, so none is shown.
+      Its times are stored in UTC and shown like every other time on the pages: this
+      machine's clock, to the second (`tasks.local_time`; owner, 2026-11-10). Differences are information; unmeasured versions stay unknown.
       Old records never produce a current comparison. Missing/old/invalid/unavailable records
       offer the existing metadata-only Refresh action; the full record/history page is
       linked here only. An unbuildable recipe keeps a GUI path back to step 1 instead of
