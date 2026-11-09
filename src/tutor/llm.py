@@ -208,7 +208,8 @@ def chat(config: LLMConfig, messages: list[dict], *, purpose: str,
          log_path: Path | None = None, max_tokens: int | None = None,
          temperature: float = 0.0, thinking: bool = True,
          response_schema: dict | None = None, stream: bool = False,
-         on_progress: Callable[[int], None] | None = None) -> Reply:
+         on_progress: Callable[[int], None] | None = None,
+         schema_first: bool = False) -> Reply:
     """One chat completion. `purpose` names the caller in the call log (e.g. "vision").
     An assistant profile answers from its request files instead (tutor/exchange.py): the
     stored answer, or AwaitingAnswer after writing the request.
@@ -218,6 +219,8 @@ def chat(config: LLMConfig, messages: list[dict], *, purpose: str,
     JSON fitting the schema. GLM-5.3-Flash and LM Studio enforce it (tested 2026-10-28: keys
     the prompt asked for but the schema forbids were left out); the caller still parses and
     validates it, since a cut-off reply is not valid JSON.
+    `schema_first=True` places DeepSeek's shared schema before variable messages. Existing
+    callers keep the original layout; doctor uses the pure payload builder for preview.
     `stream=True` receives the reply in pieces: `timeout_s` then bounds each pause, not the
     whole reply, and `on_progress` is called with the characters received so far."""
     if config.provider == "assistant":
@@ -227,31 +230,8 @@ def chat(config: LLMConfig, messages: list[dict], *, purpose: str,
         reply = exchange.ask(config, messages, purpose, response_schema)  # or AwaitingAnswer
         _log(log_path, purpose, config, reply, time.monotonic() - start, None)
         return reply
-    openai = config.provider == "openai"
-    body = {"model": config.model, "messages": messages}
-    if not openai:
-        # OpenAI reasoning models accept only their default temperature.
-        body["temperature"] = temperature
-    if max_tokens is not None:
-        # OpenAI reasoning models refuse max_tokens; the limit there includes reasoning.
-        body["max_completion_tokens" if openai else "max_tokens"] = max_tokens
-    if response_schema is not None and config.provider == "deepseek":
-        # DeepSeek's chat API documents only JSON mode, and only with thinking off: the
-        # schema goes into the prompt instead, and the caller's validation still decides.
-        body["response_format"] = {"type": "json_object"}
-        body["messages"] = [*messages, {"role": "user", "content": (
-            "Reply with one JSON object that fits this JSON Schema:\n"
-            + json.dumps(response_schema))}]
-    elif response_schema is not None:
-        # OpenAI's strict mode needs every field required, which a schema with defaults
-        # (optional fields) is not; without it the schema still guides the reply, and the
-        # caller's validation catches what does not fit.
-        body["response_format"] = {"type": "json_schema", "json_schema": {
-            "name": "output", "schema": response_schema, "strict": not openai}}
-    if stream:
-        body["stream"] = True
-        if config.provider in STREAM_USAGE:
-            body["stream_options"] = {"include_usage": True}
+    body = chat_payload(config, messages, max_tokens=max_tokens, temperature=temperature,
+                        response_schema=response_schema, stream=stream, schema_first=schema_first)
     key = (config.provider, config.base_url, config.model)
     if thinking:
         variants, first = [config.thinking_on], 0
@@ -269,6 +249,48 @@ def chat(config: LLMConfig, messages: list[dict], *, purpose: str,
             _ACCEPTED[key] = number
         return reply
     raise AssertionError("unreachable")
+
+
+def chat_payload(config: LLMConfig, messages: list[dict], *, max_tokens: int | None = None,
+                 temperature: float = 0.0, response_schema: dict | None = None,
+                 stream: bool = False, schema_first: bool = False) -> dict:
+    """Pure provider payload layout, shared by sending and doctor preview/size checks.
+
+    The default is the original chat payload byte for byte. Provider compatibility
+    variants are added by chat; no credential headers, network or file access happens here.
+    """
+    openai = config.provider == "openai"
+    body = {"model": config.model, "messages": messages}
+    if not openai:
+        # OpenAI reasoning models accept only their default temperature.
+        body["temperature"] = temperature
+    if max_tokens is not None:
+        # OpenAI reasoning models refuse max_tokens; the limit there includes reasoning.
+        body["max_completion_tokens" if openai else "max_tokens"] = max_tokens
+    if response_schema is not None and config.provider == "deepseek":
+        # DeepSeek's chat API documents only JSON mode, and only with thinking off: the
+        # schema goes into the prompt instead, and the caller's validation still decides.
+        body["response_format"] = {"type": "json_object"}
+        schema_message = {"role": "system" if schema_first else "user", "content": (
+            "Reply with one JSON object that fits this JSON Schema:\n"
+            + json.dumps(response_schema))}
+        # Put shared instructions and schema ahead of dynamic facts only when requested.
+        if schema_first:
+            at = next((i for i, m in enumerate(messages) if m["role"] != "system"), len(messages))
+            body["messages"] = [*messages[:at], schema_message, *messages[at:]]
+        else:
+            body["messages"] = [*messages, schema_message]
+    elif response_schema is not None:
+        # OpenAI's strict mode needs every field required, which a schema with defaults
+        # (optional fields) is not; without it the schema still guides the reply, and the
+        # caller's validation catches what does not fit.
+        body["response_format"] = {"type": "json_schema", "json_schema": {
+            "name": "output", "schema": response_schema, "strict": not openai}}
+    if stream:
+        body["stream"] = True
+        if config.provider in STREAM_USAGE:
+            body["stream_options"] = {"include_usage": True}
+    return body
 
 
 def embed(config: LLMConfig, texts: list[str], *, purpose: str, log_path: Path | None = None,

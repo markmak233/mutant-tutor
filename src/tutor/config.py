@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import os
 import tomllib
-from collections.abc import Mapping
+from collections.abc import Mapping, MutableMapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -49,11 +49,14 @@ class Workspace:
         return self.root / "attempts"
 
 
-def load_env(path: Path | None = None) -> None:
+def load_env(path: Path | None = None, *, environ: MutableMapping[str, str] | None = None) -> None:
     """Load KEY=VALUE lines from `.env` (default: current directory) into os.environ.
 
     Variables already set in the environment win, so a shell export overrides `.env`.
+    An explicit target mapping lets an opt-in caller read credentials without changing
+    the process environment inherited by tools it launches.
     """
+    target = os.environ if environ is None else environ
     path = Path(".env") if path is None else path
     if not path.is_file():
         return
@@ -63,7 +66,7 @@ def load_env(path: Path | None = None) -> None:
             continue
         key, value = line.split("=", 1)
         # setdefault: only fill in variables the shell has not set already.
-        os.environ.setdefault(key.strip(), value.strip().strip("'\""))
+        target.setdefault(key.strip(), value.strip().strip("'\""))
 
 
 def load_workspace(environ: Mapping[str, str] | None = None) -> Workspace:

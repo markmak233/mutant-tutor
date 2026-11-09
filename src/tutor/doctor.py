@@ -1,5 +1,7 @@
-"""Read-only setup diagnosis: no installs, model requests, .env loading or course writes.
+"""Read-only setup diagnosis, with explicit opt-in preview/model advice.
 
+Default checks never load .env or call a model. Advice requires a selected failure log;
+only an explicit --env-file is read into a private map. No advice installs or fixes.
 Only --smoke writes, in a temporary copy cleaned even on interruption. Subprocess probes
 are bounded and injectable. Every check is isolated: a failure never hides later checks.
 Language-specific policy lives in doctor_languages; this module only orchestrates rows.
@@ -36,8 +38,12 @@ def main(argv: list[str] | None = None, *, run: Callable | None = None, validato
     parser = argparse.ArgumentParser(prog="tutor doctor", description=__doc__.split("\n")[0])
     parser.add_argument("folder", nargs="?", type=Path,
                         help="course folder or any folder inside it")
-    parser.add_argument("--smoke", action="store_true", help="validate one shipped example (slow)")
+    from tutor.doctor_advice import cli as advice_cli
+
+    advice_cli.add_arguments(parser)
     args = parser.parse_args(argv)
+    if problem := advice_cli.argument_problem(args):
+        parser.error(problem)
     run = subprocess.run if run is None else run
     rows: list[Row] = []
 
@@ -81,6 +87,15 @@ def main(argv: list[str] | None = None, *, run: Callable | None = None, validato
             emit(Row("SKIP", "remaining checks need Python 3.11+"))
             print("1 failed, 0 warnings", flush=True)
             return 1
+        failure = None
+        if args.advise or args.preview_advice:
+            from tutor.doctor_advice.service import AdviceInputError, read_failure
+
+            try:
+                failure = read_failure(args.failure)
+            except AdviceInputError as exc:
+                print(f"doctor: {exc}", file=sys.stderr, flush=True)
+                return 2
         # Older interpreters must reach T1 without importing tomllib or the validator.
         from tutor import doctor_checks as checks
 
@@ -93,6 +108,7 @@ def main(argv: list[str] | None = None, *, run: Callable | None = None, validato
         check("gui extra", lambda: checks.extra("gui", "flask", "the browser pages"))
         docker_rows = check("Docker", lambda: checks.docker(run, required))
         docker_ready = all(row.status == "OK" for row in docker_rows)
+        image_ready = None
         selected = []
 
         def machine_checks():
@@ -129,6 +145,7 @@ def main(argv: list[str] | None = None, *, run: Callable | None = None, validato
                         check(f"{part.key} platform", platform_check)
                 check("host tools", lambda: checks.requirements(course, run, reported))
                 images = check("test image", lambda: checks.image(course, run, docker_ready))
+                image_ready = all(row.status == "OK" for row in images)
                 if args.smoke:
                     if course.runner not in (None, "host", "container"):
                         emit(Row("SKIP", "smoke: choose a valid runner first"))
@@ -145,6 +162,15 @@ def main(argv: list[str] | None = None, *, run: Callable | None = None, validato
 
                         check("smoke", lambda: doctor_smoke.smoke(
                             course, selected[-1], validator=validator, say=say))
+        if failure is not None:
+            try:
+                advice = advice_cli.perform(args, course, failure, run=run,
+                                            docker_ready=docker_ready, image_ready=image_ready)
+                for row in advice:
+                    emit(row)
+            except AdviceInputError as exc:
+                print(f"doctor: {exc}", file=sys.stderr, flush=True)
+                return 2
         failed = sum(row.status == "FAIL" for row in rows)
         warnings = sum(row.status == "WARN" for row in rows)
         summary = (f"{failed} failed, {warnings} warnings" if failed or warnings

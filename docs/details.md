@@ -275,9 +275,44 @@ Checks run in this order:
 Rows are OK, WARN, FAIL or SKIP, followed by a concrete `next:` for each warning/failure.
 Checks flush their output and continue past individual errors. Exit codes: **0** no failures
 (warnings allowed), **1** at least one failure, **2** usage/nonexistent folder, **130** Ctrl+C.
-Doctor does not load `.env` or check API credentials; export required runtime settings in
+Default doctor does not load `.env` or check API credentials; export runtime settings in
 the calling terminal. It neither installs nor applies fixes. Model-proposed installation
 repairs and the optional host setup page belong to doctor step 2.
+
+Optional model advice is now available as an explicitly requested, unverified step:
+
+```bash
+tutor doctor --preview-advice --failure failure.log
+tutor doctor --advise --failure failure.log
+```
+
+Select and review a UTF-8 failure record yourself. Preview displays the sanitized request
+without contacting a model; `--advise` sends that record and distribution/Python facts to
+the displayed provider/model. Redaction removes known credentials, common auth/URL data,
+paths and controls, but cannot prove arbitrary logs are free of private material. No
+lectures, student answers or neighbouring files are discovered or added to the request.
+The record is limited to 64 KiB, the complete request to 128 KiB; input is never silently
+truncated. These advice modes cannot be combined with `--smoke`.
+
+For a course, configure `[llm.roles] doctor = "your-profile"`, or pass `--profile NAME`.
+Outside a course, use the existing exported `LLM_*` settings. Only an explicit
+`--env-file FILE` reads credentials, into a private mapping where exported values win;
+it does not change the process environment or pass keys to child programs. Default checks
+still do not read it. Assistant exchange profiles are refused in this read-only mode.
+
+Facts come from the host course's own venv, the container course's ready image, or the
+tool interpreter when there is no course. Missing course environments never fall back to
+the tool. The image probe uses no course mount, network, build or pull. Image Python is
+locked for advice until disposable image/Python verification is implemented. Advice facts
+are distinct from the ordinary host check's interpreter, labelled above.
+
+The doctor prompt is new; calibrated generation/judge prompts are unchanged. Requests use
+`thinking=False`; a truncated reply gets one retry (2048 then 4096 output tokens). Compatibility
+retries may add HTTP calls. Every reply passes the deterministic permission gate. Permitted
+changes are WARN, model-proposed and unverified, and never clear earlier FAILs. Unknown
+package candidates are withheld pending independent review. No repair is installed,
+applied or verified, and no call log or assistant request file is written. Provider/gate
+errors are FAIL; invalid inputs exit 2, Ctrl+C 130. The same normal exit/summary rules apply.
 
 ### Testing your work in the course image
 

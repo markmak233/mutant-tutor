@@ -2357,8 +2357,25 @@ PEP 440 parser or dependency solver (no wildcards, pre/post/local/epoch syntax, 
 markers, extras or pip options). Syntax approval proves neither satisfiability nor that
 a matching release exists. Gate results are accepted/rejected/stopped/new-package-review,
 always unverified. Rejection or new-package review releases no changes; a new name stays
-in its separate review field. Empty changes stop rather than claim success. Models,
-disposable verification and owner-approved application remain later increments.
+in its separate review field. Empty changes stop rather than claim success. Disposable
+verification and owner-approved application remain later increments.
+
+Doctor step 2B (2026-11-09): explicit --preview-advice/--advise modes require a selected
+UTF-8 failure record. The first previews only; the second sends sanitized material and
+measured distribution/Python facts to an explicit doctor role/--profile (LLM_* outside
+course configuration). Only --env-file reads credentials, through config.load_env's new
+optional target mapping; os.environ and subprocess environments are not populated with
+those values. Probe the course venv/image, never substitute tool facts for a missing one;
+image metadata uses existing container limits, no mount/network/pull/build, and its Python
+is locked until 2C. Static probes have captured text, deadlines and owned-container cleanup.
+The new prompt marks every external section with graph.prompts.material. llm.chat_payload
+is a pure shared preview/request layout; schema_first is opt-in for doctor, leaving old
+payloads and calibrated prompts unchanged. llm.py stays whole as one provider-client job.
+Thinking is off; retry once for truncation only. Input/request bounds are 64/128 KiB,
+never a token estimate. No log or assistant request file is written; exchange profiles
+are refused. Every reply passes 2A, all suggestions remain unverified warnings, and unknown
+names are withheld pending the independent review path. No fix or original file is changed.
+Redaction is best effort; owners must review their selected log before requesting a send.
 
 Decided 2026-11-08 (owner), when Python 3.12 to 3.14 came into CI: a package that installs and
 imports cleanly can still fail when a job runs, because a newer Python removed something it
@@ -3049,8 +3066,8 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
      DOCTORS matches tutor.languages.LANGUAGES. A new language adds a module, its registry
      entry, a shipped example and machine/platform tests; doctor.py does not change.
      Framework dependencies stay in envcheck. Step 2A's structured advice permission gate
-     is built (2026-11-09; "Version conflicts"). Model calls, disposable verification,
-     fixes and the optional host-setup guide saved in git stash are still pending.
+     is built (2026-11-09; "Version conflicts"). 2B adds explicit unverified model advice
+     and preview. Disposable verification, fixes and the host guide in stash are pending.
    `tutor doctor` also brings the model that turns an install failure no rule covers into a
    proposed fix, under the limits in "Version conflicts" (owner, 2026-11-08: with doctor, not
    before: most of its fixes need another Python or a version bound `[requires]` cannot

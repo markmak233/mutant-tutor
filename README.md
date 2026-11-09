@@ -80,8 +80,13 @@ See [the command options](docs/details.md#testing-your-work-in-the-course-image)
 Run `tutor doctor` (or `python -m tutor doctor`) in a course or pass its folder. It checks
 the tool, Docker, the course venv, host requirements or its test image, and gives a next
 step for each problem. Add `--smoke` to validate one shipped example on a temporary copy.
-It never installs, loads `.env`, calls a model or changes the course.
+Default checks never install, load `.env`, call a model or change the course.
 See [checks and exit codes](docs/details.md#checking-your-setup).
+
+For optional model advice, first review `tutor doctor --preview-advice --failure failure.log`,
+then use `--advise` instead of `--preview-advice` to send that selected record and environment
+facts to your doctor profile. Suggestions remain unverified. See the same guide for model
+configuration and explicit `--env-file` credentials; no fix is installed or applied.
 
 ## Intended use
 
