@@ -243,6 +243,42 @@ code outside an allowlist (modules, `os` / `sys` attributes, `eval` / `exec`, pa
 the exercise, shell commands through Spark or MRJob). It stops the obvious, but Python is too
 dynamic for a static check to prove code safe; the container is the boundary.
 
+### Checking your setup
+
+`tutor doctor [FOLDER] [--smoke]` and `python -m tutor doctor` use the same command.
+FOLDER defaults to the current directory; the nearest ancestor containing workspace.toml
+is the course. Outside a course, only tool checks run; finding no course is not a failure.
+
+Checks run in this order:
+
+1. Tool Python (3.11+), installed tutor version, and optional gen/gui extras (without
+   importing those heavy packages).
+2. Docker availability/version. A problem is a warning for host practice or no course,
+   a failure for a container course. No Docker build or pull is started.
+3. Registered languages' machine checks: currently C's Linux mmap randomisation warning
+   for AddressSanitizer. Python-only courses have no C checks.
+4. Course loading and declarations, including unsupported languages/toolchains, then the
+   runner choice. A broken workspace skips all remaining course checks.
+5. Course venv interpreter/import and sibling tutor command. A broken venv suggests
+   replacement; an older venv missing only the script gets a warning.
+6. Host platform support and requirements, reusing envcheck and its compatibility rules.
+   These check the interpreter running doctor, not a different course venv's packages;
+   run doctor from the course venv to check that environment. Container courses skip host
+   tool requirements because `tutor test` uses the image.
+7. Container image readiness (host courses skip it); Docker failure skips another probe.
+8. With `--smoke`, validate a shipped synthetic example on a temporary course copy, then
+   remove it, including on failure/interruption. Python uses station-longest-rise; C uses
+   station-above-average-c. C smoke needs a container even when host student tests can run.
+   Missing packaged examples skip smoke. Validator output appears above its result; no
+   report file is written. The current runner is never changed.
+
+Rows are OK, WARN, FAIL or SKIP, followed by a concrete `next:` for each warning/failure.
+Checks flush their output and continue past individual errors. Exit codes: **0** no failures
+(warnings allowed), **1** at least one failure, **2** usage/nonexistent folder, **130** Ctrl+C.
+Doctor does not load `.env` or check API credentials; export required runtime settings in
+the calling terminal. It neither installs nor applies fixes. Model-proposed installation
+repairs and the optional host setup page belong to doctor step 2.
+
 ### Testing your work in the course image
 
 From one course exercise folder, run `tutor test`, or pass its directory explicitly:

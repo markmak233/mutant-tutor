@@ -75,6 +75,14 @@ Linux containers and an IDE; Java, Hadoop and gcc can stay in the course image. 
 `pytest` remains available for host debugging and needs the host's libraries/toolchain.
 See [the command options](docs/details.md#testing-your-work-in-the-course-image).
 
+## Check your setup
+
+Run `tutor doctor` (or `python -m tutor doctor`) in a course or pass its folder. It checks
+the tool, Docker, the course venv, host requirements or its test image, and gives a next
+step for each problem. Add `--smoke` to validate one shipped example on a temporary copy.
+It never installs, loads `.env`, calls a model or changes the course.
+See [checks and exit codes](docs/details.md#checking-your-setup).
+
 ## Intended use
 
 The aim is to help students understand their course topics better: turn the lecture

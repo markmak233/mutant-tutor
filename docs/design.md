@@ -2184,8 +2184,9 @@ themselves, so a cheap layer comes first and a stronger one later.
     runner (2026-11-07): one C run in each example timed out at 5 s, with no output kept to
     prove the cause; Docker Desktop's VM on the owner's Mac uses 18 bits, and 32 bits there
     (arm64) did not reproduce it in 40 runs. CI prints the value and sets 28 (see "CI"); for a
-    user on such a Linux host, `tutor doctor` ("Roadmap" 6) is to check the value and give the
-    `sysctl` command. With 28 set, the next CI run (2026-11-08) passed every C test, and
+    user on such a Linux host, `tutor doctor` ("Roadmap" 6) now checks the value in C's
+    registered machine check and prints the `sysctl` command (2026-11-09); it never runs it.
+    With 28 set, the next CI run (2026-11-08) passed every C test, and
     nothing else about C had changed; as the hang is intermittent, one run is strong evidence,
     not proof.
   - Step 2, a course's language (owner, 2026-11-07; `tutor/languages.py`, the Environment
@@ -2215,6 +2216,10 @@ themselves, so a cheap layer comes first and a stronger one later.
       of [requires] too, as it is C's row (it used to stay); accepting gcc from the lectures'
       candidates adds C, with the version typed (an explicit click, so C is still declared,
       not inferred). A pure Python course shows no C settings at all.
+    - Doctor's registry (2026-11-09) follows the same language membership/order. Each new
+      language also adds a doctor_languages module and DOCTORS entry, a shipped smoke
+      example and machine/platform tests. LanguageDoctor keeps machine_checks,
+      platform_problem and validation_needs_container separate; doctor.py is unchanged.
     - "On this machine" is greyed for a C course and refused by the server: C runs only in
       the container. A `gcc` here of another make or version (macOS's clang) is shown as
       "differs", not as missing: the learner's own runs compile with it, validation with the
@@ -3014,6 +3019,18 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
    (checks the tool, that Docker runs, the course's image, then validates one example in the
    course's runner as a smoke test, and says what to do next for each failure) and a fresh
    install timed on macOS, Windows and Linux; Docker on Windows is first tested there.
+   - `tutor doctor` step 1 (deterministic checks, no model, no installs): done 2026-11-09.
+     Tool checks always run; a nearest-ancestor workspace adds course checks. No .env load,
+     course writes or repair actions. Optional --smoke copies a shipped example into a
+     disposable course and calls load_exercise/validate/format_report directly, without
+     changing validation/ or writing a report. C validation needs a container independently
+     of host student-test support. Each check fails independently with an actionable row.
+     Per-language parts mirror graph/prompt_parts: doctor_languages.LanguageDoctor holds
+     the smoke example, machine_checks, platform_problem and validation_needs_container;
+     DOCTORS matches tutor.languages.LANGUAGES. A new language adds a module, its registry
+     entry, a shipped example and machine/platform tests; doctor.py does not change.
+     Framework dependencies stay in envcheck. Step 2 (model-proposed install fixes under
+     "Version conflicts", and the optional host-setup guide saved in git stash) is pending.
    `tutor doctor` also brings the model that turns an install failure no rule covers into a
    proposed fix, under the limits in "Version conflicts" (owner, 2026-11-08: with doctor, not
    before: most of its fixes need another Python or a version bound `[requires]` cannot

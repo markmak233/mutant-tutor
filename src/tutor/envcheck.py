@@ -20,7 +20,7 @@ import platform
 import re
 import subprocess
 import sys
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 from importlib import metadata
 from pathlib import Path
@@ -105,10 +105,13 @@ def parse_hadoop_version(jar_names: list[str]) -> str | None:
     return None
 
 
-def check_workspace(ws: Workspace) -> list[CheckResult]:
+def check_workspace(ws: Workspace, *, run: Callable | None = None) -> list[CheckResult]:
     """Check every [requires] entry of the workspace, in the order they are written, plus
     Hadoop's native files on Windows when the course needs Spark or Hadoop."""
-    results = [_check(name, required, ws) for name, required in ws.requires.items()]
+    # Resolve at call time so doctor can inject bounded stand-in probes without changing
+    # the existing CLI/GUI callers, which still use subprocess.run.
+    run = subprocess.run if run is None else run
+    results = [_check(name, required, ws, run) for name, required in ws.requires.items()]
     if sys.platform == "win32" and ({"pyspark", "hadoop"} & set(ws.requires)):
         results.append(check_winutils(os.environ.get("HADOOP_HOME"), os.environ.get("PATH", "")))
     # A language not supported yet, or a malformed [languages.c], fails here like a missing
@@ -178,7 +181,7 @@ def check_winutils(hadoop_home: str | None, path: str) -> CheckResult:
     return CheckResult(name, required, "present")
 
 
-def _check(name: str, required: str, ws: Workspace) -> CheckResult:
+def _check(name: str, required: str, ws: Workspace, run: Callable) -> CheckResult:
     """Dispatch on the requirement name.
 
     python, java and hadoop are special; any other name is a pip package, so a new
@@ -195,7 +198,7 @@ def _check(name: str, required: str, ws: Workspace) -> CheckResult:
         )
     if name == "java":
         return CheckResult(
-            name, required, _java_version(), f"set JAVA_HOME in .env to a JDK {required}"
+            name, required, _java_version(run), f"set JAVA_HOME in .env to a JDK {required}"
         )
     if name == "hadoop":
         return CheckResult(
@@ -204,7 +207,7 @@ def _check(name: str, required: str, ws: Workspace) -> CheckResult:
         )
     if name == "gcc":
         return CheckResult(
-            name, required, _gcc_version(),
+            name, required, _gcc_version(run),
             f"install gcc {required}; C exercises are validated in the course's container, "
             "where it is, and a learner's own runs here compile with this machine's `cc`",
         )
@@ -217,14 +220,15 @@ def _check(name: str, required: str, ws: Workspace) -> CheckResult:
                        f"{ws.root}")
 
 
-def _java_version() -> str | None:
+def _java_version(run: Callable | None = None) -> str | None:
     """Ask $JAVA_HOME/bin/java for its version. JAVA_HOME, not PATH, because that is
     the JDK Spark and Hadoop will actually use."""
+    run = subprocess.run if run is None else run
     java_home = os.environ.get("JAVA_HOME")
     if not java_home:
         return None
     try:
-        proc = subprocess.run(
+        proc = run(
             [str(Path(java_home) / "bin" / "java"), "-version"],
             capture_output=True, text=True, timeout=10,
         )
@@ -234,15 +238,16 @@ def _java_version() -> str | None:
     return parse_java_version(proc.stderr + proc.stdout)
 
 
-def _gcc_version() -> str | None:
+def _gcc_version(run: Callable | None = None) -> str | None:
     """`gcc`'s version, e.g. "12.2.0"; "clang-21.0.0" where `gcc` is clang (macOS), which
     then does not match a gcc version; None when there is none."""
+    run = subprocess.run if run is None else run
     try:
-        first = subprocess.run(["gcc", "--version"], capture_output=True, text=True,
+        first = run(["gcc", "--version"], capture_output=True, text=True,
                                timeout=10).stdout.splitlines()[:1]
         # -dumpfullversion: gcc 7 and later print the whole version; clang does not know it.
         flag = "-dumpversion" if first and "clang" in first[0] else "-dumpfullversion"
-        version = subprocess.run(["gcc", flag], capture_output=True, text=True,
+        version = run(["gcc", flag], capture_output=True, text=True,
                                  timeout=10).stdout.strip()
     except (OSError, subprocess.TimeoutExpired):
         return None
