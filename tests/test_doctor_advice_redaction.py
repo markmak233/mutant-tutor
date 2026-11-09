@@ -45,3 +45,19 @@ def test_paths_controls_and_prompt_closing_tags_are_separate():
     assert cleaned == "red </failure> intact"
     assert Redactor.url("https://example.invalid/v1?token=not-real", origin=True) == (
         "https://example.invalid")
+
+
+def test_a_profile_line_naming_a_variable_stays_readable_but_a_pasted_value_is_hidden():
+    # The changes shown before a repair include workspace.toml's profile lines; the
+    # variable's name is no secret, and hiding it made the preview unreadable.
+    redactor = Redactor()
+    for line in ('api_key_env = "DEEPSEEK_API_KEY"', "+api_key_env = 'ZHIPU_API_KEY'"):
+        assert redactor.clean(line) == line
+    # Anything that is not plainly a credential variable's name is still hidden: a value
+    # pasted where the name belongs, one word of capitals, a name that is no credential's,
+    # and the same value under any other field.
+    for line in ('api_key_env = "sk-test-not-a-real-key"', 'api_key_env = "NOTAREALVALUE0000"',
+                 'api_key_env = "HOME_DIR"', 'api_key = "DEEPSEEK_API_KEY"',
+                 "OPENAI_API_KEY=sk-test-not-a-real-key"):
+        cleaned = redactor.clean(line)
+        assert cleaned.endswith("[credential redacted]"), line

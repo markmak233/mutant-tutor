@@ -57,3 +57,26 @@ def test_timed_out_course_probe_reports_unavailable_without_fallback(course):
 
     found = course_requirements.check(course.workspace, run=run)
     assert found.problem and len(calls) == 1 and calls[0][0] == str(python)
+
+
+def test_a_failing_requirement_is_an_answer_on_the_page_not_a_broken_check(course):
+    # `python -m tutor.envcheck --json` exits 1 when any row fails, with its rows printed.
+    # The page must keep them: the Python switch reads the current version from them.
+    support._venv(course)
+    row = {"name": "python", "required": "3.12", "found": "3.11.9",
+           "hint": "recreate .venv with Python 3.12", "ok": False}
+
+    def run(command, **kwargs):
+        code = 1 if command[1:] == ["-m", "tutor.envcheck", "--json"] else 3
+        return subprocess.CompletedProcess(command, code, json.dumps({"results": [row]}), "")
+
+    gui = environment.check(course, run)
+    assert gui.results == [row] and gui.problem is None and not gui.ok
+    # Doctor's probe script exits 0 unless it crashed, so there a non-zero exit stays broken;
+    # and the command's exit 1 without rows (workspace.toml did not load) is broken too.
+    assert course_requirements.check(course.workspace, run=run).problem
+
+    def failed(command, **kwargs):
+        return subprocess.CompletedProcess(command, 1, "", "workspace: synthetic")
+
+    assert environment.check(course, failed).problem

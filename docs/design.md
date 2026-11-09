@@ -2386,6 +2386,9 @@ never a token estimate. No log or assistant request file is written; exchange pr
 are refused. Every reply passes 2A, all suggestions remain unverified warnings, and unknown
 names are withheld pending the independent review path. No fix or original file is changed.
 Redaction is best effort; owners must review their selected log before requesting a send.
+One assignment keeps its value: a model profile's `api_key_env = "NAME_OF_A_KEY"`, whose
+value is a variable's name (upper-case words joined by underscores, named like a
+credential); any other value on that line is hidden (owner, 2026-11-09).
 
 Doctor 2C verification (2026-11-09): --verify-advice adds fixed import/dependency-check
 evidence, never executes failure text or model-written code. A passing baseline stops
@@ -2451,9 +2454,17 @@ installer (2026-11-09): a missing `.venv` row's Install (the fix buttons disable
 it ran, then every row OK); the four fix screens (preview, send, test, the diff, Apply,
 Undo); an old Doctor bookmark's redirect; a version moved between prefix and comparison
 with its comments and the `.bak` kept, and `java >=17` refused; every step's links.
-Not clicked yet, so covered by Flask and worker tests only: Build for a missing image,
-the Python-conflict switch, a stopped Docker, step 4's differing packages, the uv
-download entry, and the new-package review.
+A second round the same day, the container ones with the real Docker: a Docker that
+does not answer (its row a Problem, the image row skipped); Build on the image's row
+(disabled while it ran, then OK); step 4's record with a package the .venv had moved
+away from the image; a .venv on a Python the course no longer declares, switched with
+"Make .venv with Python 3.12"; with only an unsuitable Python on the machine (a
+stand-in list), "Download one with uv" opened; and a new package's independent review.
+Not clicked: the uv download itself (uv is not installed on the owner's machine).
+That round found two faults no test had: the page took envcheck's exit status 1 (a
+requirement fails) for a check that could not run and dropped its rows, so the switch
+did not mark the .venv's own Python nor apply the probe's removed-module rows; and the
+plan page showed its date only after a reload. Both are fixed, each with a test.
 
 Doctor's own output (the CLI's lines and the rows the page receives) hides the values of
 environment variables named like a credential (KEY, TOKEN, SECRET, PASSWORD and the
@@ -3161,7 +3172,7 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
      Framework dependencies stay in envcheck. The structured advice gate, preview/send,
      disposable verification and explicit application/undo are implemented (2026-11-09;
      "Version conflicts"). Environment integrates the check, host guide and four-screen
-     repair wizard; its main paths are clicked, the rest listed in "Version conflicts".
+     repair wizard; the clicks made are listed in "Version conflicts".
    An optional doctor profile handles failures no rule covers; proposals use the existing
    permission gate and temporary verification. Numeric comparisons are stored in the
    separate `[package-bounds]` table and shown in Environment's one version table. uv can

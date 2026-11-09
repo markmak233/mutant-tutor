@@ -6,6 +6,10 @@
 {% set running = plan.task is not none and plan.task.active %}
 {% set busy = course_busy or running %}
 <div id="plan-live"{% if running %} hx-get="{{ url_for('plan_live', name=course.folder, label=plan.label) }}" hx-trigger="every 1s" hx-swap="outerHTML"{% endif %}>
+  {# The draft folder's date (DATE_p3-LABEL), as the batch folder shows it. In this part,
+     not above it: right after the form is sent the draft does not exist yet, and only this
+     part is fetched again once it does (found by a click, 2026-11-09). #}
+  {% if plan.draft %}<p class="muted">Planned {{ plan.draft.name[:10] }}</p>{% endif %}
   <div class="facts-line">
     {{ chip(plan.state) }}
     {% if plan.batch %}<span class="muted">{{ plan.batch }}</span>{% endif %}

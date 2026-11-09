@@ -60,8 +60,13 @@ def check(course, *, run=None, settings_dir=None) -> Probe:
                                       env=environment(course))
     except (OSError, subprocess.TimeoutExpired):
         return Probe(str(python), problem="The check did not finish in this course's .venv.")
+    # envcheck's command exits 1 when a requirement fails and still prints its rows: that
+    # is an answer, not a broken check. Treating it as broken dropped every row, so the
+    # Python switch lost the current interpreter and the probe's removed-module rows, and
+    # step 4 could not compare versions. The probe script exits 0 unless it crashed.
+    answered = (0, 1) if settings_dir is not None else (0,)
     try:
-        if done.returncode or len(done.stdout) > 1024 * 1024:
+        if done.returncode not in answered or len(done.stdout) > 1024 * 1024:
             raise ValueError
         data = json.loads(done.stdout)
         rows = data["results"]

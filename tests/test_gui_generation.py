@@ -411,6 +411,8 @@ def test_a_running_plan_polls_and_offers_no_decision(root, course):
 
     assert 'hx-trigger="every 1s"' in page and "Stop" in page
     assert "Approve" not in page and "Send back" not in page
+    # The date is in the part fetched again: the page opens before the draft exists.
+    assert "Planned 20" in page
 
 
 def test_the_course_page_links_new_batch_and_open_plans(root, course):

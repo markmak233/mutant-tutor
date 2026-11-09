@@ -17,6 +17,7 @@ from urllib.parse import quote, quote_plus, urlsplit, urlunsplit
 _SECRET = re.compile(r"(?:^|_)(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIALS?|APIKEY)(?:_|$)"
                      r"|^(?:AUTHORIZATION|DOCKER_AUTH_CONFIG)$", re.IGNORECASE)
 
+
 def secret_name(name: str) -> bool:
     """Whether a variable is named like a credential (the rule the redactor uses)."""
     return bool(_SECRET.search(name))
@@ -29,12 +30,31 @@ _ASSIGN = re.compile(
     r'''(?i)(["']?\b(?:[A-Z_][A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL)'''
     r'''[A-Z0-9_]*|authorization|password|passwd|key|token|secret)["']?\s*[:=]\s*)'''
     r'''(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s,;]+)''')
+# The one assignment whose value is a variable's NAME, not a credential: a model profile's
+# `api_key_env = "DEEPSEEK_API_KEY"`. Its shape is upper-case words joined by underscores,
+# which no provider's key has; anything else on that line is hidden like any other.
+_ENV_NAME = re.compile(r"[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+")
 _URL = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
 # Quoted paths keep spaces; unquoted forms stop at prose delimiters. Do not treat tag
 # closing slashes or URL slashes as paths; graph.material must still mark injected tags.
 _QUOTED_PATH = re.compile(r'''(["'])(?:/(?!/)|[A-Za-z]:[\\/]|\\\\)[^"'\r\n]+\1''')
 _PATH = re.compile(r'''(?<![\w:/<])/(?!/)[^\s"'<>:,;]+|'''
                    r'''\b[A-Za-z]:[\\/][^\s"'<>;,]+|\\\\[^\s"'<>;,]+''')
+
+
+def _assignment(match: re.Match) -> str:
+    """Hide an assignment's value, except a profile's `api_key_env` naming a variable.
+
+    Without the exception the changes shown before a repair read
+    `api_key_env = [credential redacted]`, hiding nothing secret. The name must also look
+    like a credential's variable (secret_name), so a pasted key never passes as a name.
+    """
+    head = match.group(1)
+    name = head.rstrip().rstrip(":=").strip().strip("\"'")
+    value = match.group(0)[len(head):].strip("\"'")
+    if name == "api_key_env" and _ENV_NAME.fullmatch(value) and secret_name(value):
+        return match.group(0)
+    return head + "[credential redacted]"
 
 
 def _variants(value: str) -> set[str]:
@@ -70,7 +90,7 @@ class Redactor:
                 for variant in sorted(_variants(clean), key=len, reverse=True):
                     value = value.replace(variant, "[credential redacted]")
         value = _BEARER.sub(r"\1 [credential redacted]", value)
-        value = _ASSIGN.sub(r"\1[credential redacted]", value)
+        value = _ASSIGN.sub(_assignment, value)
         value = _URL.sub(lambda match: self.url(match.group()), value)
         for path in sorted(self.paths, key=len, reverse=True):
             if path:
