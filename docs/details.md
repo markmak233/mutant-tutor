@@ -259,6 +259,19 @@ to overwrite changed configuration; finishing explicitly discards original backu
 keeping the current environment/configuration. No real provider/package install is used
 in automated tests. Native browser click acceptance is recorded separately from Flask tests.
 
+**Image build record and host/image version comparison** in Environment shows the exact
+image ID, actual base content ID, available registry digests, build/record times, Python,
+tool versions and distributions. Differences against the course venv are informational.
+Builds keep private historical snapshots under `logs/image-builds`; refreshing does not
+erase prior builds. A record whose image ID or recipe changed is not presented as current.
+
+New builds capture their actual base through a temporary local snapshot tag; it is removed
+afterwards and does not permanently pin course configuration. Old images without provenance
+labels have unknown base/build facts; refresh does not infer them from a mutable tag.
+The page's refresh action, or `python -m tutor.image_records "$WORKSPACE_DIR"`, reads the
+existing image in a network-disabled/read-only temporary container and writes a record.
+It never builds, pulls, installs or reads the GUI interpreter's packages as course facts.
+
 A course that has not chosen runs on the host and prints a warning. For container courses,
 `tutor test` also runs the learner's tests in that image; ordinary `pytest` stays on the
 host for debugging. Docker Desktop on macOS and the Linux CI exercise the container path;

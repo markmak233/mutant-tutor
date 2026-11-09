@@ -100,6 +100,8 @@ NOTICES.update({
     "models-checked": ("ok", "Every model answered the check."),
     "installed": ("ok", "Installed into .venv: step 2's check below is fresh."),
     "image-built": ("ok", "The test image is built and checked: step 4 below."),
+    "image-recorded": ("ok", "Current image versions recorded; "
+                             "open the image record for comparison."),
     "draft-ready": ("ok", "The lectures were looked at: tick what to add in step 1."),
     "coverage-drafted": ("ok", "The draft is ready below: check it against the slides."),
     "coverage-used": ("ok", "coverage.md is written from the draft. Edit it as batches are made."),
@@ -108,7 +110,7 @@ NOTICES.update({
                              "else in it changed (the file before is coverage.md.bak)."),
 })
 ENVIRONMENT_NOTICES = {"install": "installed", "build": "image-built",
-                       "requires-draft": "draft-ready"}
+                       "requires-draft": "draft-ready", "image-record": "image-recorded"}
 RECENT_TASKS = 5
 C_NEEDS_CONTAINER = ("A C course's exercises are validated only in a container, so a batch "
                      "starts once the course runs its tests in one: choose it on the "

@@ -13,6 +13,7 @@
 {% endblock %}
 {% block content %}
 <h1>Environment</h1>
+<p><a href="{{ url_for('image_record_view', name=course.folder) }}">Image build record and host/image version comparison</a></p>
 <p><a href="{{ url_for('doctor_view', name=course.folder) }}">Doctor: diagnose setup, edit package bounds or review a repair</a></p>
 <p class="muted">Four steps, in this order. This page installs only Python packages into the course's own <code>.venv</code>, and builds the test image. Java, Hadoop or another Python you install in your own terminal, then check again in step 2.</p>
 {% if running %}

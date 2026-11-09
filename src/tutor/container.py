@@ -224,11 +224,19 @@ def build(workspace: Workspace, run: Callable = subprocess.run,
     lookup = image_recipe.installed_version if installed is None else installed
     recipe = dockerfile(workspace.effective_requires, installed=lookup)
     say(f"building {image}\n{recipe}")
-    # "-": the recipe comes from stdin with no build context, so no file of this machine
-    # reaches the image. Docker's output is not captured: a first build takes minutes.
-    if run(["docker", "build", "--tag", image, "-"], input=recipe, text=True).returncode != 0:
-        raise ContainerError("docker build failed, see its output above")
-    _check_inside(workspace, image, run)
+    from tutor import image_build, image_records
+
+    # A FROM-only temporary tag captures actual base content. Both builds use stdin and
+    # no context/course files. The normal build still streams Docker's progress output.
+    say("resolving the base image and recording this build's actual identity")
+    canonical = dockerfile(workspace.effective_requires)
+    with image_build.snapshot(recipe, run, canonical=canonical) as (actual, provenance):
+        argv = ["docker", "build", "--pull=false", "--tag", image,
+                *image_build.labels(provenance), "-"]
+        if run(argv, input=actual, text=True).returncode != 0:
+            raise ContainerError("docker build failed, see its output above")
+        _check_inside(workspace, image, run)
+        image_records.record(workspace, run)
     if not keep_older:  # doctor retains the previous image for explicit rollback
         _remove_older(image, run)
     say(f"ready: {image}")

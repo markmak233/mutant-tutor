@@ -9,7 +9,6 @@ not inherited, and container probes have their own deadline and cleanup name.
 from __future__ import annotations
 
 import json
-import os
 import secrets
 import subprocess
 import sys
@@ -21,6 +20,7 @@ from types import MappingProxyType
 from tutor import compat, container, pythons, workspace
 from tutor.doctor_advice.models import AdviceContext, package_name, release
 from tutor.doctor_checks import Course
+from tutor.runtime_env import environment as runtime_environment
 
 # ASCII JSON avoids the child's native Windows code page; -I/-B exclude user site and
 # current-directory imports, ignore PYTHONPATH and suppress bytecode writes.
@@ -35,24 +35,10 @@ direct = [d.metadata["Name"] for d in distributions
 print(json.dumps({"python": ".".join(map(str, sys.version_info[:3])),
                   "installed": installed, "direct": direct}))
 """
-_RUNTIME = {"PATH", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "TEMP", "TMP", "TMPDIR",
-            "LANG", "LC_ALL", "LC_CTYPE"}
-# Docker Desktop selects its daemon through the user's CLI context. Keep its config
-# locations/transport settings for Docker only; do not forward them to Python probes.
-# Registry auth blobs and model/API credential variables are intentionally absent.
-_DOCKER_RUNTIME = {"HOME", "USERPROFILE", "APPDATA", "LOCALAPPDATA", "XDG_CONFIG_HOME",
-                   "DOCKER_CONFIG", "DOCKER_CONTEXT", "DOCKER_HOST", "DOCKER_TLS_VERIFY",
-                   "DOCKER_CERT_PATH", "SSH_AUTH_SOCK"}
 
 
 class FactsError(ValueError):
     """No trusted facts are available; raw probe output must not reach the user/model."""
-
-
-def runtime_environment(*, docker: bool = False) -> dict[str, str]:
-    """Explicit child allowlist; Docker alone needs CLI context/transport locations."""
-    allowed = _RUNTIME | (_DOCKER_RUNTIME if docker else set())
-    return {k: v for k, v in os.environ.items() if k.upper() in allowed}
 
 
 @dataclass(frozen=True)

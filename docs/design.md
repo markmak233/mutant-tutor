@@ -3101,6 +3101,13 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
       image's digest, shown on the Environment page with the `[requires]` packages whose
       versions differ between the course's `.venv` and the image. Recorded, not pinned: a
       pinned base image misses security updates; pin it once drift is seen.
+      Built 2026-11-09: canonical recipe/image names remain unchanged; a FROM-only temporary
+      local tag captures the actual base ID, then the build records provenance labels.
+      Post-check inventory uses the immutable image ID in a bounded, read-only/network-off
+      container, no course mount. Private versioned snapshots are kept per image content,
+      with a current recipe pointer and drift/staleness checks. Environment links to actual
+      course-venv versus image versions and metadata-only refresh; legacy base provenance
+      stays unknown. A build snapshot is not a permanent base pin. Browser acceptance is pending.
    Then packaging and release (see "Deferred", "Packaging and release"), with `tutor doctor`
    (checks the tool, that Docker runs, the course's image, then validates one example in the
    course's runner as a smoke test, and says what to do next for each failure) and a fresh
