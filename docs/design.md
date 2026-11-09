@@ -2377,6 +2377,21 @@ are refused. Every reply passes 2A, all suggestions remain unverified warnings, 
 names are withheld pending the independent review path. No fix or original file is changed.
 Redaction is best effort; owners must review their selected log before requesting a send.
 
+Doctor 2C verification (2026-11-09): --verify-advice adds fixed import/dependency-check
+evidence, never executes failure text or model-written code. A passing baseline stops
+without a model call. A failing baseline is followed by at most three cumulative trials
+in fresh disposable venvs/images, with repeated-proposal/missing-module stop rules. Every
+reply and cumulative target-Python batch passes the permission gate. Public PyPI wheels
+only; inherited pip configuration/credentials are excluded. Host package execution has
+user rights; container trials derive an owned image and use tutor.execution's limits,
+without host fallback. Temporary resources are cleaned, and unavailable cleanup is
+reported. Only the same check failing then passing is verified, not a whole course.
+Container Python remains locked. --review-new-package independently asks distinct
+provider/endpoint profiles with thinking on, then checks bounded PyPI release-file JSON;
+only agreement plus release evidence is displayed, never automatically installed. A
+profile label cannot prove the underlying model identity; owners select independent
+models. Application/rollback, GUI integration and image records remain separate steps.
+
 Decided 2026-11-08 (owner), when Python 3.12 to 3.14 came into CI: a package that installs and
 imports cleanly can still fail when a job runs, because a newer Python removed something it
 uses (mrjob: `distutils` in 3.12, `pipes` in 3.13) or changed what it relies on (PySpark 3.5

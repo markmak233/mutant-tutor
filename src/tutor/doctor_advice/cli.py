@@ -21,6 +21,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
                        help="send selected failure/facts for model advice")
     modes.add_argument("--preview-advice", action="store_true",
                        help="preview sanitized advice data only")
+    modes.add_argument("--verify-advice", action="store_true",
+                       help="verify gated model repairs in fresh temporary environments")
+    modes.add_argument("--review-new-package", action="store_true",
+                       help="independent two-provider/PyPI new-name review; never install")
+    parser.add_argument("--second-profile", help="independent provider profile for new-name review")
+    parser.add_argument("--module", help="dotted import to reproduce for --verify-advice")
     parser.add_argument("--failure", type=Path, help="reviewed UTF-8 failure record for advice")
     parser.add_argument("--profile", help="explicit doctor model profile")
     parser.add_argument("--env-file", type=Path,
@@ -29,13 +35,24 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 
 def argument_problem(args: argparse.Namespace) -> str | None:
     """Validate flag grammar without importing environment/probe/model modules."""
-    enabled = args.advise or args.preview_advice
+    enabled = args.advise or args.preview_advice or args.verify_advice or args.review_new_package
     if enabled and args.failure is None:
-        return "--advise/--preview-advice requires --failure FILE"
+        return "advice modes require --failure FILE"
     if not enabled and any(x is not None for x in (args.failure, args.profile, args.env_file)):
         return "--failure/--profile/--env-file requires --advise or --preview-advice"
     if args.profile is not None and not args.profile.strip():
         return "--profile must name a model profile"
+    if args.verify_advice:
+        if (not args.module or not re.fullmatch(
+                r"[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*", args.module)
+                or any(p.startswith("__") for p in args.module.split("."))):
+            return "--verify-advice requires --module with a plain dotted Python import name"
+    elif args.module is not None:
+        return "--module requires --verify-advice"
+    if args.review_new_package and not args.second_profile:
+        return "--review-new-package requires --second-profile NAME"
+    if args.second_profile is not None and not args.review_new_package:
+        return "--second-profile requires --review-new-package"
     return None
 
 
@@ -57,6 +74,24 @@ def perform(args, course, failure: str, *, run, docker_ready: bool,
         if args.preview_advice:
             print(prepared.preview(), flush=True)
             return [Row("OK", "advice preview only; no model request, install or verification")]
+        if args.verify_advice:
+            from tutor.doctor_advice import verify_cli
+
+            return verify_cli.perform(prepared, course, args.module)
+        if args.review_new_package:
+            from tutor.doctor_advice import independent
+
+            second = service.prepare(found, failure, course=course.root if course else None,
+                                     profile=args.second_profile, env_file=args.env_file)
+            print(f"Independent review destination: {second.destination}", flush=True)
+            reviewed = independent.review(prepared, second)
+            if reviewed is None:
+                return [Row("WARN", "independent models did not agree on a new package",
+                            "review the failure; no new package is offered or installed")]
+            return [Row("WARN", f"candidate for owner review: {reviewed.name}; "
+                        f"PyPI releases with files: {reviewed.releases}; "
+                        f"first upload: {reviewed.first_upload} (not a security endorsement)",
+                        "review the project independently; no candidate has been installed")]
         return [service.result_row(service.request(prepared), prepared.redactor)]
     except service.AdviceInputError:
         raise  # input errors keep exit 2, not a diagnostic failure status

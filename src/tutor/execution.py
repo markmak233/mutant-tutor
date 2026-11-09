@@ -22,7 +22,7 @@ import threading
 import time
 import uuid
 import xml.etree.ElementTree as ET
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, replace
 from enum import Enum
 from pathlib import Path
@@ -268,7 +268,8 @@ def _is_link(path: Path) -> bool:
 
 def _run_in(workdir: Path, timeout_s: float, extra_env: Mapping[str, str],
             script: list[str] | None = None, *,
-            on_output: Callable[[str], None] | None = None) -> RunResult:
+            on_output: Callable[[str], None] | None = None,
+            base_env: Mapping[str, str] | None = None) -> RunResult:
     """Run pytest in `workdir`, or the command `script` (a Python file run directly).
     `timeout_s` is scaled by timeout_factor() here, so every caller (validation, hints,
     held-out checks) keeps stating the limit an exercise needs on macOS or Linux."""
@@ -288,7 +289,7 @@ def _run_in(workdir: Path, timeout_s: float, extra_env: Mapping[str, str],
     # one file, and one of them hung until the timeout (3 of 30 runs; 0 of 48 with this).
     run_tmp = tempfile.mkdtemp(prefix="tutor-tmp-")
     env = {
-        **os.environ,
+        **(os.environ if base_env is None else base_env),
         "PYTHONDONTWRITEBYTECODE": "1",
         "PYSPARK_PYTHON": sys.executable,
         "PYTHONIOENCODING": "utf-8",
@@ -306,7 +307,8 @@ def _run_in(workdir: Path, timeout_s: float, extra_env: Mapping[str, str],
 def _run_in_container(image: str, workdir: Path, timeout_s: float,
                       extra_env: Mapping[str, str], script: str | None = None, *,
                       learner: LearnerOptions | None = None,
-                      on_output: Callable[[str], None] | None = None) -> RunResult:
+                      on_output: Callable[[str], None] | None = None,
+                      parent_env: Mapping[str, str] | None = None) -> RunResult:
     """The same run in a fresh container of its own, so that one run's processes, memory and
     /tmp cannot touch another's. `workdir` is the only folder of this machine it can write."""
     if learner is None:
@@ -314,7 +316,12 @@ def _run_in_container(image: str, workdir: Path, timeout_s: float,
     # Here, before the time limit starts: this waits while a stopped VM wakes, and those
     # seconds must not count against the code. Every run asks, so that Docker going away in the
     # middle of a batch stops the batch with the reason, and not as failed runs.
-    if problem := image_problem(image):
+    # Explicit diagnostic callers strip credentials even from Docker's readiness probe;
+    # ordinary execution retains its established environment and injectable helper.
+    def readiness(command, **kwargs):
+        return subprocess.run(command, **kwargs, env=parent_env, encoding="utf-8")
+
+    if problem := (image_problem(image) if parent_env is None else image_problem(image, readiness)):
         raise ContainerError(problem)
     getuid = getattr(os, "getuid", None)
     if getuid and getuid() != runner_uid():  # root on the host: the runner is another user
@@ -327,7 +334,8 @@ def _run_in_container(image: str, workdir: Path, timeout_s: float,
         extra_env = {**extra_env, EXPORT_ENV: "1"}
     # Resolved: on macOS the temp dir's path goes through a link, and Docker shares the target.
     cmd = run_command(image, name, workdir.resolve(), timeout_s, extra_env, command)
-    result = _run_with_env(cmd, workdir, os.environ, timeout_s, command if script else None,
+    result = _run_with_env(cmd, workdir, os.environ if parent_env is None else parent_env,
+                           timeout_s, command if script else None,
                            make_tree=lambda *args: ContainerRun(name, *args), on_output=on_output)
     if result.returncode == _DOCKER_FAILED or (learner and result.returncode in (126, 127)):
         raise ContainerError(f"docker run failed: {result.output.strip()}")
@@ -335,6 +343,34 @@ def _run_in_container(image: str, workdir: Path, timeout_s: float,
         return replace(result, output=f"{result.output}\n(the run was killed, exit {_KILLED}: "
                                       "most likely over the container's memory limit)")
     return result
+
+
+def run_environment_probe(script: str, *, sources: Iterable[Path] = (),
+                          python: Path | None = None, image: str | None = None,
+                          env: Mapping[str, str] | None = None,
+                          timeout_s: float = DEFAULT_TIMEOUT_S) -> RunResult:
+    """Run a tool-written diagnostic through the same isolation/process cleanup as tests.
+
+    Doctor supplies fixed probe code, never a failure log/model's executable text. Sources
+    establish the original course policy without mounting/copying its private files. An
+    explicitly supplied disposable image may replace the course image, never its runner.
+    Only the explicit runtime map reaches child processes; old execution callers retain
+    their environment behavior. A venv subprocess is isolation, not a security sandbox.
+    """
+    required = image_for(sources)
+    if required and python is not None:
+        raise ContainerError("a container course cannot verify on a host interpreter")
+    selected = image or required
+    if selected and python is not None:
+        raise ContainerError("choose one diagnostic interpreter or image")
+    with _slot(True), tempfile.TemporaryDirectory(prefix="tutor-doctor-probe-") as tmp:
+        workdir = Path(tmp)
+        (workdir / "probe.py").write_text(script, encoding="utf-8")
+        if selected:
+            return _run_in_container(selected, workdir, timeout_s, {}, "probe.py",
+                                     parent_env=env or {})
+        return _run_in(workdir, timeout_s, {}, [str(python or sys.executable), "probe.py"],
+                       base_env=env or {})
 
 
 def _run_with_env(cmd: list[str], workdir: Path, env: Mapping[str, str], timeout_s: float,

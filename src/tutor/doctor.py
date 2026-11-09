@@ -1,8 +1,9 @@
 """Read-only setup diagnosis, with explicit opt-in preview/model advice.
 
 Default checks never load .env or call a model. Advice requires a selected failure log;
-only an explicit --env-file is read into a private map. No advice installs or fixes.
-Only --smoke writes, in a temporary copy cleaned even on interruption. Subprocess probes
+only an explicit --env-file is read into a private map. Advice alone installs or fixes nothing.
+Explicit --verify-advice installs only in disposable environments. --smoke writes only
+in its temporary copy. Subprocess probes
 are bounded and injectable. Every check is isolated: a failure never hides later checks.
 Language-specific policy lives in doctor_languages; this module only orchestrates rows.
 """
@@ -88,7 +89,7 @@ def main(argv: list[str] | None = None, *, run: Callable | None = None, validato
             print("1 failed, 0 warnings", flush=True)
             return 1
         failure = None
-        if args.advise or args.preview_advice:
+        if args.advise or args.preview_advice or args.verify_advice or args.review_new_package:
             from tutor.doctor_advice.service import AdviceInputError, read_failure
 
             try:

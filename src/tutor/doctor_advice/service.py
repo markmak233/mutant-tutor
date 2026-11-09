@@ -116,21 +116,30 @@ def prepare(facts: Facts, failure: str, *, course: Path | None = None,
     if redactor.contains_secret(model.base_url):
         raise AdviceSetupError("put model credentials in api_key_env, not in its endpoint")
     parts = prompts.messages(facts, failure, redactor)
-    # Check complete encoded payloads, including every provider-compatibility variant and
-    # both output caps. No byte-size estimate is labelled as a token count or a cost.
+    check_messages(model, parts, redactor)
+    destination = redactor.clean(
+        f"{model.provider}/{model.model} at {redactor.url(model.base_url, origin=True)}")
+    return Prepared(facts, model, redactor,
+                    tuple((m["role"], m["content"]) for m in parts), destination)
+
+
+def check_messages(model: llm.LLMConfig, messages: list[dict], redactor: Redactor, *,
+                   thinking: bool = False) -> None:
+    """Bound complete requests after every history addition and credential-redaction step.
+
+    Check every provider compatibility variant and both output caps. Byte bounds are
+    neither a token count nor a cost estimate. This never contacts the provider.
+    """
     for cap in (2048, 4096):
-        body = llm.chat_payload(model, parts, response_schema=reply_schema(),
+        body = llm.chat_payload(model, messages, response_schema=reply_schema(),
                                 schema_first=True, max_tokens=cap)
-        for variant in model.thinking_off or ({},):
+        variants = (model.thinking_on,) if thinking else (model.thinking_off or ({},))
+        for variant in variants:
             encoded = json.dumps({**body, **variant})
             if redactor.contains_secret(encoded):
                 raise AdviceSetupError("private data remains in payload; correct its configuration")
             if len(encoded.encode("utf-8")) > MAX_PAYLOAD_BYTES:
                 raise AdviceInputError("advice payload exceeds 128 KiB; use a smaller reviewed log")
-    destination = redactor.clean(
-        f"{model.provider}/{model.model} at {redactor.url(model.base_url, origin=True)}")
-    return Prepared(facts, model, redactor,
-                    tuple((m["role"], m["content"]) for m in parts), destination)
 
 
 def request(prepared: Prepared, *, chat: Callable | None = None) -> GateResult:
@@ -152,7 +161,7 @@ def result_row(result: GateResult, redactor: Redactor) -> Row:
                    "review the doctor profile/failure record and request advice again")
     if result.status == "new-package-review":
         return Row("WARN", "model advice needs a new package; independent review is pending",
-                   "wait for the second-model/PyPI review path; do not install a candidate")
+                   "run --review-new-package with --second-profile for independent PyPI review")
     if result.status == "stopped":
         return Row("WARN", "model advice: no permitted repair found (unverified)",
                    "review the failure record; no repair has been applied")

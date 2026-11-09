@@ -314,6 +314,37 @@ package candidates are withheld pending independent review. No repair is install
 applied or verified, and no call log or assistant request file is written. Provider/gate
 errors are FAIL; invalid inputs exit 2, Ctrl+C 130. The same normal exit/summary rules apply.
 
+Explicit disposable verification checks a selected import and `pip check` before asking
+for repairs, then runs that same fixed check in fresh temporary environments:
+
+```bash
+tutor doctor --verify-advice --failure failure.log --module your_package
+```
+
+This mode downloads public PyPI wheels into temporary venvs (host) or an owned temporary
+image (container), never into the original environment. Host package code runs with your
+user rights; a venv is not a security sandbox. Container probes retain the isolated
+runner's network/filesystem limits. No model-written program or shell command runs.
+Only an original failure followed by the same check passing is verified; this does not
+prove every course exercise works. A passing baseline spends no model request. Trials
+are cumulative, capped at three, stop on repeated proposals/the same missing module
+twice, and clean temporary resources on failure/interruption. Image Python stays locked.
+Missing wheels/private-index packages are reported; source builds are not enabled.
+
+New-package review is a separate explicit operation, with an independently configured
+second provider/model (choose actual independent identities, not proxy aliases):
+
+```bash
+tutor doctor --review-new-package --failure failure.log --profile first --second-profile second
+```
+
+Both models independently receive the same sanitized facts, with thinking enabled and
+without the other's answer. A same-provider or same-host pair is refused. Only matching
+normalized names with PyPI release files are displayed, along with release count and
+first upload. Agreement/existence is not a security endorsement; no new name is installed.
+Tests replace model, HTTP, environment installer and probe callbacks. Original course
+files/venv/runner are unchanged by verification or independent review.
+
 ### Testing your work in the course image
 
 From one course exercise folder, run `tutor test`, or pass its directory explicitly:

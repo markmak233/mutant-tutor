@@ -27,8 +27,13 @@ from tutor.doctor_checks import Course
 PROBE = """# tutor-doctor-metadata-v1
 import sys, json
 from importlib import metadata
-installed = [[d.metadata["Name"], d.version] for d in metadata.distributions()]
-print(json.dumps({"python": ".".join(map(str, sys.version_info[:3])), "installed": installed}))
+distributions = list(metadata.distributions())
+installed = [[d.metadata["Name"], d.version] for d in distributions]
+direct = [d.metadata["Name"] for d in distributions
+          if any(str(f).replace(chr(92), "/").endswith(".dist-info/direct_url.json")
+                 for f in (d.files or ()))]
+print(json.dumps({"python": ".".join(map(str, sys.version_info[:3])),
+                  "installed": installed, "direct": direct}))
 """
 _RUNTIME = {"PATH", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "TEMP", "TMP", "TMPDIR",
             "LANG", "LC_ALL", "LC_CTYPE"}
@@ -44,6 +49,12 @@ class FactsError(ValueError):
     """No trusted facts are available; raw probe output must not reach the user/model."""
 
 
+def runtime_environment(*, docker: bool = False) -> dict[str, str]:
+    """Explicit child allowlist; Docker alone needs CLI context/transport locations."""
+    allowed = _RUNTIME | (_DOCKER_RUNTIME if docker else set())
+    return {k: v for k, v in os.environ.items() if k.upper() in allowed}
+
+
 @dataclass(frozen=True)
 class Facts:
     """Installed versions stay strings (possibly pre/local releases), not numeric prefixes."""
@@ -51,15 +62,15 @@ class Facts:
     context: AdviceContext
     installed: Mapping[str, str]
     source: str
+    direct: frozenset[str] = frozenset()  # source/URL installs cannot be recreated by name
 
 
 def collect(course: Course | None, *, run: Callable | None = None, find: Callable | None = None,
             docker_ready: bool | None = None, image_ready: bool | None = None) -> Facts:
     """Inspect one interpreter/image, then offer actual host Python choices when relevant."""
     run = subprocess.run if run is None else run
-    runtime = {k: v for k, v in os.environ.items() if k.upper() in _RUNTIME}
-    docker_runtime = runtime | {k: v for k, v in os.environ.items()
-                                if k.upper() in _DOCKER_RUNTIME}
+    runtime = runtime_environment()
+    docker_runtime = runtime_environment(docker=True)
 
     def probe(command, **kwargs):
         # Credentials remain stripped, but Docker must retain its selected daemon context.
@@ -114,7 +125,8 @@ def collect(course: Course | None, *, run: Callable | None = None, find: Callabl
         raise FactsError("metadata probe failed; restore the selected environment before advice")
     try:
         data = json.loads(done.stdout)
-        if not isinstance(data, dict) or set(data) != {"python", "installed"}:
+        if not isinstance(data, dict) or set(data) not in (
+                {"python", "installed"}, {"python", "installed", "direct"}):
             raise ValueError
         python = release(data["python"], interpreter=True)
         if not isinstance(data["installed"], list):
@@ -129,6 +141,11 @@ def collect(course: Course | None, *, run: Callable | None = None, find: Callabl
             if package in installed and installed[package] != version:
                 raise ValueError
             installed[package] = version
+        if not isinstance(data.get("direct", []), list):
+            raise ValueError
+        direct = frozenset(package_name(n) for n in data.get("direct", []))
+        if not direct.issubset(installed):
+            raise ValueError
     except (ValueError, TypeError, RecursionError):
         raise FactsError("metadata probe returned invalid/ambiguous facts; repair the environment"
                          ) from None
@@ -141,4 +158,4 @@ def collect(course: Course | None, *, run: Callable | None = None, find: Callabl
                                 python_locked=is_image)
     except ValueError:
         raise FactsError("correct the declared requirements before requesting advice") from None
-    return Facts(context, MappingProxyType(dict(sorted(installed.items()))), source)
+    return Facts(context, MappingProxyType(dict(sorted(installed.items()))), source, direct)

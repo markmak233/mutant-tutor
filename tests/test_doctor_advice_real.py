@@ -5,8 +5,8 @@ import subprocess
 import pytest
 import test_container_real as real
 
-from tutor import doctor_checks
-from tutor.doctor_advice import facts
+from tutor import doctor_checks, execution
+from tutor.doctor_advice import facts, verification
 
 image_course = real.course
 
@@ -25,3 +25,11 @@ def test_metadata_is_read_from_existing_image_without_mount_or_install(image_cou
     assert "pytest" in result.installed and result.context.current_python.startswith("3.11")
     command = next(c for c in calls if facts.PROBE in c)
     assert "-v" not in command and "--mount" not in command
+
+
+@pytest.mark.docker
+def test_fixed_import_dependency_probe_uses_container_execution(image_course):
+    result = execution.run_environment_probe(verification.probe_script("json"),
+                                             sources=[image_course / "workspace.toml"],
+                                             env=facts.runtime_environment(docker=True))
+    assert verification.measured(result).passed, result.output
