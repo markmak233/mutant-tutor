@@ -1696,7 +1696,17 @@ deterministic judge, hybrid RAG with recall@k, the phase 5 metrics, the hint lea
     switches. A profile holding an `api_key` field or a key-like value is refused, unknown
     fields are errors, and a missing variable is named in the message. Without an `[llm]`
     section, `LLM_PROVIDER` / `LLM_MODEL` / `LLM_BASE_URL` / `LLM_API_KEY` act as one
-    profile. Like `[safety]`, the section is the owner's: generation never writes it. Apple Intelligence's on-device model is reachable too, through third-party
+    profile. Like `[safety]`, the section is the owner's: generation never writes it.
+    A profile's `temperature = "default"` (owner, 2026-11-09) leaves the temperature out of
+    its requests: Claude Opus 5.5, reached through Anthropic's OpenAI-compatible address as a
+    `custom` profile, answered HTTP 400 ("`temperature` is deprecated for this model") to the
+    0 every other call sends. It is the field's one value, as callers choose the temperature
+    and the profile only says the model takes none; the Models form offers it under More.
+    Such a model answers at its own temperature, so a rerun is not the same answer, and the
+    repair rounds' rising temperature (0.2 * N) does not apply to it. Chosen over retrying
+    without the field after a refusal: one refused request per run, and less plain. That
+    address is for trying Claude out; it has no prompt-cache control, so a native Anthropic
+    provider is still planned ("Roadmap"). Apple Intelligence's on-device model is reachable too, through third-party
     bridges that serve it as an OpenAI-compatible local API (apfel and similar; not an
     Apple interface), so the same client can call it with no extra code. It is not a default:
     about 4096 tokens for input and output together (one week's material and the format spec

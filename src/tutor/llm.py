@@ -76,7 +76,12 @@ _ACCEPTED: dict[tuple[str, str, str], int] = {}
 # stream_options (documented); others stream without the option, which may be refused.
 STREAM_USAGE = {"openai", "deepseek"}
 PROFILE_FIELDS = {"provider", "model", "base_url", "api_key_env", "reasoning_effort",
-                  "reasoning_effort_on", "timeout_s"}
+                  "reasoning_effort_on", "timeout_s", "temperature"}
+# A profile's `temperature = "default"`: the one value it takes. Requests then carry no
+# temperature, for a model that refuses one (Claude Opus 5.5 answered HTTP 400,
+# "`temperature` is deprecated for this model", 2026-11-09). Without the field every
+# request asks for 0, as before, so no other profile's requests change.
+MODEL_TEMPERATURE = "default"
 KEY_LIKE = re.compile(r"^(sk-[\w-]{16,}|[0-9a-f]{32}\.\w{8,})$")
 
 
@@ -98,6 +103,8 @@ class LLMConfig:
     # "low" (its default is "high"). Empty: the model's default depth.
     thinking_on: dict = field(default_factory=dict)
     queue: Path | None = None  # an assistant profile's request folder (provider "assistant")
+    # False (a profile's `temperature = "default"`): no temperature in the request.
+    send_temperature: bool = True
 
 
 @dataclass(frozen=True)
@@ -176,8 +183,14 @@ def _from_profile(name: str, data: dict, env: Mapping[str, str],
         thinking_off = ({"reasoning_effort": data["reasoning_effort"]},)
     thinking_on = ({"reasoning_effort": data["reasoning_effort_on"]}
                    if "reasoning_effort_on" in data else {})
+    # Only the one value: a number here would look like a setting the calls then ignore
+    # (callers choose the temperature; the profile only says the model takes none).
+    if data.get("temperature", MODEL_TEMPERATURE) != MODEL_TEMPERATURE:
+        raise LLMError(f'{where} temperature can only be "{MODEL_TEMPERATURE}" (none is sent, '
+                       "for a model that refuses one); leave it out to send 0")
     return LLMConfig(name, provider, base_url.rstrip("/"), data["model"], api_key,
-                     float(data.get("timeout_s", 300)), thinking_off, thinking_on=thinking_on)
+                     float(data.get("timeout_s", 300)), thinking_off, thinking_on=thinking_on,
+                     send_temperature="temperature" not in data)
 
 
 def _from_env(env: Mapping[str, str]) -> LLMConfig:
@@ -192,7 +205,7 @@ def _from_env(env: Mapping[str, str]) -> LLMConfig:
     config = _from_profile("env", data, env)
     return LLMConfig(config.name, config.provider, config.base_url, config.model,
                      env.get("LLM_API_KEY") or None, config.timeout_s, config.thinking_off,
-                     thinking_on=config.thinking_on)
+                     thinking_on=config.thinking_on, send_temperature=config.send_temperature)
 
 
 def image_message(prompt: str, png: bytes) -> dict:
@@ -261,8 +274,9 @@ def chat_payload(config: LLMConfig, messages: list[dict], *, max_tokens: int | N
     """
     openai = config.provider == "openai"
     body = {"model": config.model, "messages": messages}
-    if not openai:
-        # OpenAI reasoning models accept only their default temperature.
+    if not openai and config.send_temperature:
+        # OpenAI reasoning models accept only their default temperature, and so does a
+        # profile that says `temperature = "default"`.
         body["temperature"] = temperature
     if max_tokens is not None:
         # OpenAI reasoning models refuse max_tokens; the limit there includes reasoning.

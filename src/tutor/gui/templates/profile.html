@@ -130,7 +130,7 @@
     {% endif %}
   </label>
   {% endif %}
-  <details{% if values.reasoning_effort or values.reasoning_effort_on or values.timeout_s %} open{% endif %}>
+  <details{% if values.reasoning_effort or values.reasoning_effort_on or values.timeout_s or values.temperature %} open{% endif %}>
     <summary>More</summary>
     {% if chosen == "assistant" %}
     <p class="muted">Thinking and the time limit are the assistant's own: nothing to set here.</p>
@@ -148,6 +148,12 @@
       <input type="text" name="reasoning_effort_on" value="{{ values.reasoning_effort_on }}" maxlength="20" autocomplete="off"></label>
     <label class="field">Time limit per call, seconds <span class="muted">empty: 300; a new model starts at 900, as plan and generate calls with thinking can run long</span>
       <input type="number" name="timeout_s" value="{{ values.timeout_s }}" min="1" max="3600"></label>
+    {# llm.MODEL_TEMPERATURE: the profile's one value; empty leaves the field out of the file. #}
+    <label class="field">Temperature <span class="muted">a model that refuses a temperature (its error says so, e.g. Claude Opus 5.5) needs "the model's own"</span>
+      <select name="temperature">
+        <option value=""{% if not values.temperature %} selected{% endif %}>0: the steadiest answers (sent with every call)</option>
+        <option value="default"{% if values.temperature == "default" %} selected{% endif %}>the model's own: no temperature is sent</option>
+      </select></label>
     {% endif %}
   </details>
   </div>

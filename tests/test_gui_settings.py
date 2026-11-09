@@ -199,6 +199,7 @@ def _form(**changes):
     ("ds", {"base_url": "ftp://x"}, "http"),
     ("ds", {"timeout_s": "0"}, "1 to 3600"),
     ("ds", {"reasoning_effort": "very low"}, "one word"),
+    ("ds", {"temperature": "0.2"}, 'temperature can only be "default"'),
 ])
 def test_a_model_is_checked_by_llm_pys_rules(course, name, changes, problem):
     data, problems = llm_settings.check_profile(course, name, _form(**changes))
@@ -231,6 +232,27 @@ def test_a_new_model_is_set_apart_from_the_table_after_it(root):
     llm_settings.save_profile(bare, None, "b", data)
 
     assert 'model = "x"\n\n[llm.roles]' in _toml(bare)
+
+
+def test_a_models_own_temperature_is_saved_and_kept_or_dropped_by_the_form(root, env_file, course):
+    """The form's choice writes `temperature = "default"`; saving the model again keeps it,
+    and choosing 0 takes the line out (an edit drops what the form does not send)."""
+    client = _browser(root, env_file)
+    claude = {"name": "claude", "provider": "custom", "model": "claude-opus-5-5",
+              "base_url": "https://api.anthropic.com/v1", "api_key_env": "ANTHROPIC_API_KEY"}
+
+    post(client, "/c/demo-course/models/save", {**claude, "temperature": "default"})
+    assert tomllib.loads(_toml(course))["llm"]["profiles"]["claude"]["temperature"] == "default"
+    page = client.get("/c/demo-course/models/m/claude/", base_url=BASE).get_data(as_text=True)
+    assert '<option value="default" selected>' in page
+
+    post(client, "/c/demo-course/models/save",
+         {**claude, "original": "claude", "temperature": "default", "timeout_s": "900"})
+    saved = tomllib.loads(_toml(course))["llm"]["profiles"]["claude"]
+    assert saved["temperature"] == "default" and saved["timeout_s"] == 900
+
+    post(client, "/c/demo-course/models/save", {**claude, "original": "claude", "temperature": ""})
+    assert "temperature" not in tomllib.loads(_toml(course))["llm"]["profiles"]["claude"]
 
 
 def test_renaming_a_model_moves_its_roles_and_keeps_other_comments(course):

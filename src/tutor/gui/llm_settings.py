@@ -54,7 +54,7 @@ ROLES = [role for _, group in ROLE_GROUPS for role, _ in group]
 PROFILE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,39}$")
 # A profile's fields in the order a new one is written (llm.PROFILE_FIELDS, ordered).
 FIELDS = ("provider", "model", "api_key_env", "base_url", "reasoning_effort",
-          "reasoning_effort_on", "timeout_s")
+          "reasoning_effort_on", "timeout_s", "temperature")
 _WORD = re.compile(r"^[a-z]+$")
 
 

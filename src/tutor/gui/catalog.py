@@ -256,7 +256,8 @@ def fill(provider: Provider, model: Model, taken: set[str]) -> tuple[dict[str, s
                          "and the thinking is paid.")
     values = {"name": _profile_name(model.id, taken), "provider": known or "custom",
               "model": model.id, "api_key_env": provider.key_env, "base_url": base_url,
-              "reasoning_effort": effort, "reasoning_effort_on": "", "timeout_s": ""}
+              "reasoning_effort": effort, "reasoning_effort_on": "", "timeout_s": "",
+              "temperature": ""}
     return values, notes
 
 

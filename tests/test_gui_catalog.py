@@ -167,7 +167,8 @@ def test_a_known_provider_keeps_its_own_way_and_url(tmp_path):
     assert values == {"name": "ds-new-2", "provider": "deepseek", "model": "ds-new",
                       "api_key_env": "DEEPSEEK_API_KEY",
                       "base_url": "https://api.deepseek.com",  # shown; left out on saving
-                      "reasoning_effort": "", "reasoning_effort_on": "", "timeout_s": ""}
+                      "reasoning_effort": "", "reasoning_effort_on": "", "timeout_s": "",
+                      "temperature": ""}  # empty: the usual 0 is sent
     assert notes == []
 
     zai = found.provider("zai")

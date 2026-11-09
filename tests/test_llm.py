@@ -182,6 +182,34 @@ def test_openai_gets_its_own_parameter_names(sent):
     assert body["response_format"]["json_schema"]["strict"] is False
 
 
+def test_a_profile_can_say_its_model_takes_no_temperature(sent, tmp_path):
+    """`temperature = "default"`: none is sent (Claude Opus 5.5 refuses one). Any other
+    profile keeps asking for 0, so its requests are what they were."""
+    ws = workspace(tmp_path, WORKSPACE_LLM + '\n[llm.profiles.claude]\nprovider = "custom"\n'
+                   'model = "claude-opus-5-5"\nbase_url = "https://api.anthropic.com/v1"\n'
+                   'temperature = "default"\n')
+    own = config_for("oracle", "claude", workspace=ws, environ={})
+    usual = config_for("vision", workspace=ws, environ={})
+    assert (own.send_temperature, usual.send_temperature) == (False, True)
+
+    chat(own, [], purpose="oracle", max_tokens=100)
+    chat(usual, [], purpose="vision")
+
+    by_model = {json.loads(request.data)["model"]: json.loads(request.data)
+                for request, _ in sent}
+    assert "temperature" not in by_model["claude-opus-5-5"]
+    assert by_model["claude-opus-5-5"]["max_tokens"] == 100
+    assert by_model["google/gemma-4-26b-a4b-qat"]["temperature"] == 0.0
+
+
+def test_a_profiles_temperature_takes_only_the_one_value(tmp_path):
+    """A number there would look like a setting, and the calls would ignore it."""
+    ws = workspace(tmp_path, '[llm.profiles.p]\nprovider = "lmstudio"\nmodel = "m"\n'
+                   'temperature = "0.2"\n')
+    with pytest.raises(LLMError, match='temperature can only be "default"'):
+        config_for("generate", "p", workspace=ws, environ={})
+
+
 def test_a_slow_reply_says_timeout_not_unreachable(monkeypatch):
     def slow(request, timeout):
         raise TimeoutError("The read operation timed out")
