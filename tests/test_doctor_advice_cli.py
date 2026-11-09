@@ -60,8 +60,8 @@ def test_preview_is_send_material_but_never_calls_chat(ready, monkeypatch, capsy
 
 
 def test_advice_is_unverified_and_does_not_clear_existing_failures(ready, monkeypatch, capsys):
-    monkeypatch.setattr(envcheck, "check_workspace", lambda ws, **kw: [
-        envcheck.CheckResult("demo", "1", None, "synthetic missing dependency")])
+    ready[2].requirements = [
+        envcheck.CheckResult("demo", "1", None, "synthetic missing dependency")]
     assert invoke(ready, "--advise") == 1
     text = capsys.readouterr().out
     assert "model-proposed, unverified: version demo<2" in text

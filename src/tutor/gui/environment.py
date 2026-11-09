@@ -1,10 +1,9 @@
 """A course's environment (GUI step 7a): what its tests need, whether this machine has it,
 and the two installs the GUI may start (docs/design.md, "Local GUI", Environment page).
 
-- The check is `python -m tutor.envcheck --json`, run with the course's own .venv: envcheck
-  checks the interpreter that runs it, and the learner's tests run in that venv. It runs
-  from the repository, as tasks do, so it reads .env itself (JAVA_HOME, HADOOP_HOME); the
-  GUI never loads .env into its own environment.
+- The shared course_requirements probe uses the course's .venv, rather than the GUI/tool
+  interpreter. This GUI keeps its existing child-only .env lookup for JAVA_HOME/HADOOP_HOME;
+  doctor's default worker does not load .env. JSON decoding and errors are shared.
 - [requires] is edited here as a table, by envcheck's rules (plus a Hadoop release the
   image can build when tests run in the container), and written through toml_edit.
 - Installs (owner, 2026-11-06): Python packages into the course's .venv, by running
@@ -23,7 +22,6 @@ and the two installs the GUI may start (docs/design.md, "Local GUI", Environment
 
 from __future__ import annotations
 
-import json
 import os
 import re
 import shlex
@@ -39,6 +37,7 @@ import tomlkit
 from tutor import (
     compat,
     container,
+    course_requirements,
     image_recipe,
     languages,
     package_bounds,
@@ -119,23 +118,10 @@ def runner(course: Course) -> str | None:
     return _data(course).get("isolation", {}).get("runner")
 
 
-def check(course: Course, run: Callable = subprocess.run) -> Check:
-    """Run envcheck in the course's venv. `run` is a parameter so tests need no venv."""
-    python = venv_python(course)
-    if not python.exists():
-        return Check(None, problem="This course has no .venv yet: \"Install into .venv\" "
-                                   "above creates it.")
-    try:
-        done = _run_in_venv(course, python, ["-m", "tutor.envcheck", "--json"], run)
-    except (OSError, subprocess.TimeoutExpired) as e:
-        return Check(str(python), problem=f"The check did not finish: {e}")
-    try:
-        data = json.loads(done.stdout)
-        results = [r for r in data["results"] if isinstance(r, dict)]
-    except (ValueError, KeyError, TypeError):
-        return Check(str(python), problem="The check could not run in this course's .venv: "
-                                          f"{_last_line(done.stderr)}")
-    return Check(str(python), results)
+def check(course: Course, run: Callable | None = None) -> Check:
+    """The same course interpreter/probe as doctor; retain consumers' Check interface."""
+    found = course_requirements.check(course.workspace, run=run, settings_dir=tasks.REPO)
+    return Check(found.python, found.results, found.problem)
 
 
 def docker_view(course: Course, run: Callable = subprocess.run) -> DockerView:
@@ -479,11 +465,6 @@ def _run_in_venv(course: Course, python: Path, args: list[str], run: Callable):
            "LECTURE_DIR": str(course.workspace.lecture_dir)}
     return run([str(python), *args], capture_output=True, text=True,
                timeout=CHECK_TIMEOUT_S, cwd=tasks.REPO, env=env)
-
-
-def _last_line(text: str) -> str:
-    lines = [line for line in (text or "").splitlines() if line.strip()]
-    return lines[-1] if lines else "no output"
 
 
 def _data(course: Course) -> dict:

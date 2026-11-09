@@ -134,10 +134,10 @@ def test_without_a_venv_the_check_says_install_creates_it(course):
     assert "no .venv" in check.problem and run.calls == []
 
 
-def test_a_venv_without_the_tool_gives_the_last_error_line(course):
+def test_a_venv_without_the_tool_gives_a_safe_recovery_message(course):
     _venv(course)
     check = environment.check(course, FakeRun(envcheck="not json"))
-    assert "No module named 'tutor'" in check.problem
+    assert "could not run in this course's .venv" in check.problem
 
 
 # --- [requires] ----------------------------------------------------------------------------------

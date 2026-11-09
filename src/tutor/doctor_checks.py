@@ -14,7 +14,15 @@ from dataclasses import dataclass, field
 from importlib import metadata
 from pathlib import Path
 
-from tutor import config, container, doctor_languages, envcheck, languages, workspace
+from tutor import (
+    config,
+    container,
+    course_requirements,
+    doctor_languages,
+    envcheck,
+    languages,
+    workspace,
+)
 from tutor.doctor_rows import Row
 
 
@@ -26,6 +34,8 @@ class Course:
     ws: config.Workspace | None = None
     data: dict = field(default_factory=dict)
     error: Exception | None = None
+    # Within one doctor run, the venv health row and requirements share one snapshot.
+    host_check: course_requirements.Probe | None = None
 
     @property
     def runner(self) -> str | None:
@@ -126,15 +136,20 @@ def venv(course: Course, run: Callable) -> list[Row]:
     target, context = course_target(course)
     install = f'python -m tutor.workspace init {target}' + context
     if not executable.is_file():
+        course.host_check = course_requirements.Probe(None, problem="missing .venv")
         return [Row("FAIL", "course .venv is missing", install)]
     try:
         done = run([str(executable), "-c", "import tutor"], timeout=30,
                    capture_output=True, text=True,
-                   env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+                   env=course_requirements.environment(course.ws))
         good = done.returncode == 0
     except (OSError, subprocess.TimeoutExpired):
         good = False
+    if good and course.runner in (None, "host"):
+        course.host_check = course_requirements.check(course.ws, run=run)
+        good = course.host_check.problem is None
     if not good:
+        course.host_check = course_requirements.Probe(str(executable), problem="broken .venv")
         return [Row("FAIL", "course .venv Python cannot import tutor",
                     install + " --python <a Python 3.11+> --replace-venv")]
     script = executable.with_name("tutor.exe" if sys.platform == "win32" else "tutor")
@@ -144,25 +159,28 @@ def venv(course: Course, run: Callable) -> list[Row]:
 
 
 def requirements(course: Course, run: Callable, reported: set[str]) -> list[Row]:
-    """Host checks describe this interpreter; container practice needs no host toolchain."""
+    """Course-venv facts only; container practice needs no host toolchain."""
     if course.runner == "container":
         return [Row("SKIP", "tools on this machine: not needed, tests run in the course image "
                     "(`tutor test`)")]
     if course.runner not in (None, "host"):
         return [Row("SKIP", "tools on this machine: choose a valid runner first")]
     rows = []
+    snapshot = course.host_check or course_requirements.check(course.ws, run=run)
+    if snapshot.problem:
+        return [Row("SKIP", "tools on this machine: see the .venv row above")]
     target, context = course_target(course)
-    for result in envcheck.check_workspace(course.ws, run=run):
+    for result in snapshot.results:
         # envcheck also reports declaration errors. The same text belongs in one row only.
-        if not result.ok and result.hint in reported:
+        if not result["ok"] and result["hint"] in reported:
             continue
-        hint = result.hint.replace(str(course.root), target)
+        hint = result["hint"].replace(str(course.root), target)
         if target in hint:
             hint += context
-        rows.append(Row("OK" if result.ok else "FAIL",
-                        f"host {result.name}: required {result.required}, "
-                        f"found {result.found or 'not found'}",
-                        "" if result.ok else hint or "see the Environment page, step 2"))
+        rows.append(Row("OK" if result["ok"] else "FAIL",
+                        f"host {result['name']}: required {result['required']}, "
+                        f"found {result['found'] or 'not found'}",
+                        "" if result["ok"] else hint or "see the Environment page, step 2"))
     return rows
 
 

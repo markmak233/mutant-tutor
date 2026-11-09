@@ -5,15 +5,24 @@ test reads an owner's course, loads .env, installs software or contacts a model.
 """
 
 import builtins
+import json
 import subprocess
 import sys
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 
 import pytest
 
 from tutor import __main__ as dispatcher
-from tutor import config, doctor, doctor_checks, doctor_languages, envcheck, llm
+from tutor import (
+    config,
+    course_requirements,
+    doctor,
+    doctor_checks,
+    doctor_languages,
+    envcheck,
+    llm,
+)
 
 
 class Tools:
@@ -24,6 +33,7 @@ class Tools:
         self.docker = "ready"
         self.venv = "ready"
         self.image = "ready"
+        self.requirements = []  # the child interpreter's answer, never parent metadata
 
     def __call__(self, command, **kwargs):
         self.calls.append(command)
@@ -47,6 +57,9 @@ class Tools:
             if self.venv == "timeout":
                 raise subprocess.TimeoutExpired(command, 30)
             return subprocess.CompletedProcess(command, int(self.venv != "ready"), "", "")
+        if command[-1] == course_requirements.PROBE:
+            answer = {"results": [{**asdict(r), "ok": r.ok} for r in self.requirements]}
+            return subprocess.CompletedProcess(command, 0, json.dumps(answer), "")
         if command[0] == "gcc":
             return subprocess.CompletedProcess(command, 0, "12.2.0", "")
         if command[-1] == "-version":
@@ -61,7 +74,8 @@ def rig(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(doctor_checks.metadata, "version", lambda name: "1.0")
     monkeypatch.setattr(doctor_checks.importlib.util, "find_spec", lambda name: object())
-    monkeypatch.setattr(envcheck, "check_workspace", lambda ws, **kwargs: [])
+    monkeypatch.setattr(envcheck, "check_workspace",
+                        lambda *a, **k: pytest.fail("doctor checked the tool interpreter"))
     # Linux hosts differ in mmap settings; dedicated language tests cover that probe.
     monkeypatch.setitem(doctor_languages.DOCTORS, "c",
                         replace(doctor_languages.DOCTORS["c"], machine_checks=lambda run: []))
@@ -152,12 +166,11 @@ def test_container_checks_image_or_skips_without_reprobing(tmp_path, rig, capsys
         assert len([c for c in rig.calls if c[:2] == ["docker", "info"]]) == 1
 
 
-def test_runner_missing_warns_and_checks_host(tmp_path, rig, capsys, monkeypatch):
+def test_runner_missing_warns_and_checks_host(tmp_path, rig, capsys):
     root = course(tmp_path, runner=None)
-    called = []
-    monkeypatch.setattr(envcheck, "check_workspace", lambda ws, **kw: called.append(ws) or [])
     assert doctor.main([str(root)], run=rig) == 0
-    assert called and "runner not chosen" in capsys.readouterr().out
+    assert any(c[-1] == course_requirements.PROBE for c in rig.calls)
+    assert "runner not chosen" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("mode", ["absent", "broken", "missing", "timeout", "no-script"])
@@ -180,12 +193,44 @@ def test_windows_venv_paths(tmp_path, rig, monkeypatch, capsys):
     assert "has the tutor command" in capsys.readouterr().out
 
 
-def test_empty_requirement_hint_falls_back(tmp_path, rig, monkeypatch, capsys):
+def test_empty_requirement_hint_falls_back(tmp_path, rig, capsys):
     root = course(tmp_path)
-    monkeypatch.setattr(envcheck, "check_workspace", lambda ws, **kw: [
-        envcheck.CheckResult("missing", "1", None)])
+    rig.requirements = [envcheck.CheckResult("missing", "1", None)]
     assert doctor.main([str(root)], run=rig) == 1
     assert "next: see the Environment page, step 2" in capsys.readouterr().out
+
+
+def test_host_packages_and_python_come_from_course_venv(tmp_path, rig, monkeypatch, capsys):
+    """The tool lacks this synthetic package; the subprocess's installed version wins."""
+    root = course(tmp_path, declarations='[requires]\npython="3.12"\nexamplelib="1"\n')
+
+    def absent(name):
+        if name == "tutor":
+            return "1.0"
+        raise envcheck.metadata.PackageNotFoundError(name)
+
+    monkeypatch.setattr(envcheck.metadata, "version", absent)
+    rig.requirements = [envcheck.CheckResult("python", "3.12", "3.12.9"),
+                        envcheck.CheckResult("examplelib", "1", "1.4")]
+    assert doctor.main([str(root)], run=rig) == 0
+    output = capsys.readouterr().out
+    assert "OK    host examplelib: required 1, found 1.4" in output
+    assert "OK    host python: required 3.12, found 3.12.9" in output
+    probes = [c for c in rig.calls if c[-1] == course_requirements.PROBE]
+    expected = doctor_checks.workspace.venv_python(root / ".venv")
+    assert len(probes) == 1 and probes[0][0] == str(expected)
+
+
+@pytest.mark.parametrize("state", ["absent", "broken", "missing", "timeout"])
+def test_unavailable_venv_skips_host_requirements_without_duplicate_failure(
+        tmp_path, rig, capsys, state):
+    root = course(tmp_path, venv=state != "absent")
+    rig.venv = state if state != "absent" else "ready"
+    assert doctor.main([str(root)], run=rig) == 1
+    output = capsys.readouterr().out
+    assert len([line for line in output.splitlines() if line.startswith("FAIL ")]) == 1
+    assert "SKIP  tools on this machine: see the .venv row above" in output
+    assert not any(c[-1] == course_requirements.PROBE for c in rig.calls)
 
 
 def test_unexpected_error_is_one_failure_and_later_checks_run(tmp_path, rig, monkeypatch, capsys):
@@ -243,8 +288,7 @@ def test_unsupported_declarations_are_reported_once(tmp_path, rig, capsys, monke
     # Include envcheck's duplicate so the diagnostic must deduplicate across C1 and C4 too.
     problem = ("[languages.java]: java is not supported yet (exercises can be in Python or C)"
                if "languages" in declaration else envcheck.requires_problems({"javac": "17"})[0])
-    monkeypatch.setattr(envcheck, "check_workspace", lambda ws, **kw: [
-        envcheck.CheckResult("unsupported", "17", None, problem)])
+    rig.requirements = [envcheck.CheckResult("unsupported", "17", None, problem)]
     assert doctor.main([str(root)], run=rig) == 1
     assert capsys.readouterr().out.count(problem) == 1
 
