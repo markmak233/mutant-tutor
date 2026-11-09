@@ -42,6 +42,17 @@ class KeyRow:
     def is_set(self) -> bool:
         return self.tail is not None
 
+    @property
+    def by_course(self) -> list[tuple[str, list[str]]]:
+        """`used_by` as the page shows it: one (course, its profiles) per course, so a key
+        that five models of a course name reads as one line, not the course five times
+        (owner, 2026-11-10)."""
+        grouped: dict[str, list[str]] = {}
+        for entry in self.used_by:
+            course, _, profile = entry.partition(": ")
+            grouped.setdefault(course, []).append(profile)
+        return list(grouped.items())
+
 
 def read(env_file: Path) -> dict[str, str]:
     """NAME -> value for each `NAME=value` line, as config.load_env reads them (the first

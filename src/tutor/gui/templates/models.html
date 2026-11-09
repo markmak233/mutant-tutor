@@ -47,7 +47,7 @@
     <tr>
       <td><a href="{{ url_for('edit_model', name=course.folder, profile=p.name) }}">{{ p.name }}</a></td>
       <td>{{ p.data.provider }}: {{ p.data.model or p.name }}{% if makers.get(p.name) %} <span class="muted">by {{ makers[p.name] }}</span>{% endif %}</td>
-      <td>{% if key_name %}<code>{{ key_name }}</code> {% if key_name in key_set %}set{% else %}<a href="{{ url_for('key_list') }}">{{ chip("not set") }}</a>{% endif %}{% else %}<span class="muted">none needed</span>{% endif %}</td>
+      <td>{% if key_name %}<code>{{ key_name }}</code> {% if key_name in key_set %}set{% else %}<a href="{{ url_for('key_list', name=key_name) }}#add-key">{{ chip("not set") }}</a>{% endif %}{% else %}<span class="muted">none needed</span>{% endif %}</td>
       <td class="muted">{{ p.roles | join(", ") }}</td>
       <td class="row-actions">
         <form method="post" action="{{ url_for('check_models', name=course.folder) }}" class="action"><input type="hidden" name="profile" value="{{ p.name }}"><button type="submit">Check</button></form>

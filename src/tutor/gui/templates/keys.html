@@ -1,6 +1,9 @@
 {% extends "base.html" %}
 {# API keys in .env (keys.py). A key is shown only by its last 4 characters; the forms never
-   carry one back to the browser. #}
+   carry one back to the browser. "Used by" has one line per course, with that course's
+   models after it. The Add form's provider list is the kept models.dev list (catalog.py):
+   choosing a provider fills Name with the variable its key goes in, by a GET of this page
+   (htmx swaps the form on change; the small button does the same without it). #}
 {% from "_macros.html" import action %}
 {% block title %}Keys{% endblock %}
 {% block crumbs %}<span>Keys</span>{% endblock %}
@@ -21,7 +24,7 @@
       <td><code>{{ row.name }}</code>
         {% if row.shadowed %}<div class="muted">Also set where the GUI was started; commands use that one, not .env.</div>{% endif %}</td>
       <td>{% if row.is_set %}set {{ row.tail }}{% else %}<span class="chip chip-not-set">not set</span>{% endif %}</td>
-      <td class="muted">{{ row.used_by | join(", ") or "no model names it" }}</td>
+      <td class="muted">{% for course, models in row.by_course %}<div>{{ course }}: {{ models | join(", ") }}</div>{% else %}no model names it{% endfor %}</td>
       <td>
         <form method="post" action="{{ url_for('set_key') }}" class="inline-form">
           <input type="hidden" name="name" value="{{ row.name }}">
@@ -35,15 +38,33 @@
   </tbody>
 </table>
 {% endif %}
+<section id="add-key">
+<h2>Add a key</h2>
+{% if providers %}
+{# Its own GET form, so the key typed below is never part of this request. #}
+<form method="get" action="{{ url_for('key_list') }}" class="form">
+  <label class="field">Provider
+    <span class="muted">choosing one fills the name below with the variable that provider's key goes in; nothing is saved or sent</span>
+    <select name="provider" hx-get="{{ url_for('key_list') }}" hx-trigger="change" hx-target="#add-key" hx-select="#add-key" hx-swap="outerHTML">
+      <option value="">Other: type the name</option>
+      {% for p in providers %}<option value="{{ p.id }}"{% if chosen and chosen.id == p.id %} selected{% endif %}>{{ p.name }} · {{ p.key_env }}</option>{% endfor %}
+    </select>
+  </label>
+  <div class="actions"><button type="submit" class="small">Fill the name</button></div>
+</form>
+{% else %}
+<p class="muted">No provider list yet, so type the name. The list (models.dev) is downloaded on a course's Models page, under New model{% if first_course %}: <a href="{{ url_for('new_model', name=first_course) }}">open it</a>{% endif %}.</p>
+{% endif %}
 <form method="post" action="{{ url_for('set_key') }}" class="form">
-  <h2>Add a key</h2>
+  {% if existing %}<p class="notice notice-ok"><code>{{ existing.name }}</code> is set already ({{ existing.tail or "a short key" }}). Saving here replaces it.</p>{% endif %}
   <label class="field">Name
     <span class="muted">capital letters, digits and '_', e.g. DEEPSEEK_API_KEY; a model names it in "Key's name"</span>
     <input type="text" name="name" value="{{ name }}" required maxlength="64" pattern="[A-Z][A-Z0-9_]*" autocomplete="off">
   </label>
-  <label class="field">Key
+  <label class="field">Key{% if chosen %} <span class="muted">for {{ chosen.name }}</span>{% endif %}
     <input type="password" name="value" required autocomplete="new-password">
   </label>
-  <div class="actions"><button type="submit" class="primary">Save</button></div>
+  <div class="actions"><button type="submit" class="primary">{{ "Replace" if existing else "Save" }}</button></div>
 </form>
+</section>
 {% endblock %}

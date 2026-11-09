@@ -3729,6 +3729,13 @@ late; the adaptive review screens can be built with it.
     is parsed as text, never loaded into the GUI's environment, kept line for line
     otherwise, replaced in one step and readable by its owner only. A key also set in the
     environment the GUI started from wins (load_env's rule), and the page says so.
+    "Used by" lists each course once, with that course's models after it. Adding a key
+    (owner, 2026-11-10): choosing a provider fills the name with the variable its key
+    goes in, from the models.dev list the Models page keeps (`catalog.py`'s `key_env`);
+    the list is only read, by a GET of the page, and a typed name still works, as it must
+    when no list is kept yet. A provider whose key is set already says so and the form
+    replaces it. The Models page's "not set" links open the form with the name filled.
+    The provider is not guessed from the key's shape: a plain `sk-` key fits several.
   - A course's Models page writes its workspace.toml's [llm] with tomlkit (owner), which
     keeps the owner's comments; a changed value loses only its own line's comment. Every
     save is checked before the file is replaced: read back with tomllib, [llm] must be

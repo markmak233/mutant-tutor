@@ -433,3 +433,42 @@ def test_check_starts_one_task_for_the_models_named(root, env_file, monkeypatch)
     assert started[0][1][0][1:] == ["-m", "tutor.llm", "check", "cheap", "other"]
     assert started[1][1][0][-1] == "other" and started[1][2] == {"kind": "check"}
     assert post(client, "/c/demo-course/models/check", {"profile": "-x"}).status_code == 404
+
+
+# --- keys: one line per course, and the provider that fills the name --------------------------
+
+
+def test_a_key_lists_each_course_once_with_its_models_after_it():
+    row = keys.KeyRow("A_KEY", None, ["first: fast", "first: slow", "second: fast"])
+    assert row.by_course == [("first", ["fast", "slow"]), ("second", ["fast"])]
+
+
+def test_choosing_a_provider_fills_the_name_and_says_when_its_key_is_set(root, env_file):
+    import test_gui_catalog as catalog_support
+
+    catalog_support._catalog(root)  # the kept models.dev list, as the Models page leaves it
+    client = _browser(root, env_file)
+
+    page = client.get("/keys/?provider=deepseek", base_url=BASE).get_data(as_text=True)
+    assert 'name="name" value="DEEPSEEK_API_KEY"' in page and "for DeepSeek" in page
+    assert '<option value="deepseek" selected>' in page and "is set already" not in page
+
+    # Its key is in .env already: the form replaces it, and still shows no key.
+    page = client.get("/keys/?provider=zhipuai", base_url=BASE).get_data(as_text=True)
+    assert 'name="name" value="ZHIPU_API_KEY"' in page and "is set already" in page
+    form = page.split('id="add-key"')[1]
+    assert 'class="primary">Replace</button>' in form and 'value="short"' not in page
+
+    # An id that is not in the list, and a name the form would refuse, fill nothing.
+    for query in ("?provider=nobody", "?name=lower%22%3E", "?provider=lmstudio"):
+        page = client.get("/keys/" + query, base_url=BASE).get_data(as_text=True)
+        assert 'name="name" value=""' in page
+    page = client.get("/keys/?name=ACME_API_KEY", base_url=BASE).get_data(as_text=True)
+    assert 'name="name" value="ACME_API_KEY"' in page
+    assert env_file.read_text(encoding="utf-8") == ENV  # looking changes nothing
+
+
+def test_without_the_provider_list_the_form_takes_a_typed_name(root, env_file):
+    page = _browser(root, env_file).get("/keys/", base_url=BASE).get_data(as_text=True)
+    assert 'name="provider"' not in page and "No provider list yet" in page
+    assert "/c/bare/models/new" in page or "/c/demo-course/models/new" in page

@@ -43,7 +43,7 @@
   {% if p %}
   <p><strong>{{ p.name }}</strong> · <code>{{ p.base_url }}</code> ·
     {% if p.key_env %}key <code>{{ p.key_env }}</code>
-      {% if shelf.key_set %}{{ chip("ok", "in .env") }}{% else %}{{ chip("missing", "not in .env") }} <a href="{{ url_for('key_list') }}">add it on the Keys page</a>{% endif %}
+      {% if shelf.key_set %}{{ chip("ok", "in .env") }}{% else %}{{ chip("missing", "not in .env") }} <a href="{{ url_for('key_list', provider=p.id) }}#add-key">add it on the Keys page</a>{% endif %}
     {% else %}no key: a server on this machine{% endif %}
     {% if p.doc %}· <a href="{{ p.doc }}" rel="noopener noreferrer" target="_blank">its models and prices</a>{% endif %}</p>
   {% if shelf.models %}
