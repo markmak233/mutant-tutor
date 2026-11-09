@@ -272,6 +272,13 @@ The page's refresh action, or `python -m tutor.image_records "$WORKSPACE_DIR"`, 
 existing image in a network-disabled/read-only temporary container and writes a record.
 It never builds, pulls, installs or reads the GUI interpreter's packages as course facts.
 
+Wheels include the GUI assets and shipped synthetic smoke examples. Creating/replacing a
+course environment from an installed wheel uses this tool's bundled public source and a
+noneditable install; it does not depend on the original checkout or a temporary editable
+path, and does not look up an unrelated public package named `tutor`. Source checkouts
+retain their existing editable course installs. Private notes/configuration/caches and
+linked files are excluded from the controlled source bundle.
+
 A course that has not chosen runs on the host and prints a warning. For container courses,
 `tutor test` also runs the learner's tests in that image; ordinary `pytest` stays on the
 host for debugging. Docker Desktop on macOS and the Linux CI exercise the container path;

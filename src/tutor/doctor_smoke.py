@@ -10,7 +10,7 @@ import tempfile
 import time
 from pathlib import Path
 
-import tutor
+from tutor import project_source
 from tutor.container import ContainerError
 from tutor.doctor_rows import Row
 from tutor.validation import load_exercise, validate
@@ -18,8 +18,8 @@ from tutor.validation.__main__ import REPORT_FILE, format_report
 
 
 def examples_root() -> Path:
-    """Editable/source installs ship examples beside src; wheels may not include them."""
-    return Path(tutor.__file__).resolve().parents[2] / "examples"
+    """Source installs use public examples; wheels carry the same controlled examples."""
+    return project_source.examples()
 
 
 def smoke(course, part, *, validator=None, say=print) -> list[Row]:

@@ -36,7 +36,15 @@ from pathlib import Path
 
 import tomlkit
 
-from tutor import compat, container, image_recipe, languages, package_bounds, workspace
+from tutor import (
+    compat,
+    container,
+    image_recipe,
+    languages,
+    package_bounds,
+    project_source,
+    workspace,
+)
 from tutor.envcheck import NOT_PIP, pip_requirements, requires_problems, version_matches
 from tutor.gui import tasks, toml_edit
 from tutor.gui.courses import Course
@@ -180,6 +188,9 @@ def downloads(requires: dict[str, str]) -> list[tuple[str, str]]:
 
 def install_shown(course: Course) -> str:
     """The pip command `init` runs, as the page shows it before its button."""
+    if project_source.checkout() is None:
+        # Show the actual bundled-source installer, without inventing a checkout root.
+        return shlex.join(install_command(course))
     command = workspace.install_command(course.workspace.root / ".venv",
                                         workspace.DEFAULT_EXTRAS,
                                         pip_requirements(course.workspace.effective_requires))

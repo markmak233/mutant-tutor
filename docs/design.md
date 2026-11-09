@@ -3348,6 +3348,12 @@ mode is not done (see "Decisions not to do").
   to find weak knowledge points and schedule `review`-mode batches with spaced repetition.
 - Packaging and release: an install line, one click to start, CI on macOS and Windows
   (WSL) as well, versioned releases after `v0.1.0`.
+  Portable-wheel preparation built 2026-11-09: controlled setuptools hooks carry public
+  source/build metadata, GUI assets and synthetic examples, excluding private roots,
+  caches and links. Installed workspace/repair installers extract the controlled source
+  temporarily and install noneditable; source checkouts retain editable installs. No
+  unrelated PyPI tutor-name fallback. Archive paths/size are validated, examples work
+  outside a checkout, and offline wheel inspection precedes actual fresh-install checks.
   - One click (the owner's aim, 2026-11-05; a plan for the release, not built): one install
     line gets `uv`, which fetches the Python it needs and installs the tool (`uv tool install`,
     the same job as `pipx`, without needing Python first). `tutor gui` starts the server and

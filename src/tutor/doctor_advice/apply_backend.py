@@ -5,7 +5,7 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-from tutor import config, container, pythons, workspace
+from tutor import config, container, project_source, pythons, workspace
 from tutor.doctor_advice.sandbox import Disposable, requirements
 from tutor.doctor_advice.service import AdviceSetupError
 
@@ -27,12 +27,14 @@ class Backend(Disposable):
         """Build at the final path: venv console scripts cannot safely be relocated."""
         if self._command([str(python), "-I", "-m", "venv", str(live)], timeout=60).returncode:
             raise AdviceSetupError("replacement venv creation failed")
-        command = workspace.install_command(live, workspace.DEFAULT_EXTRAS,
-                                             requirements(self.found, changes))
-        command += ["--only-binary=:all:", "--index-url", "https://pypi.org/simple",
-                    "--no-cache-dir"]
-        if self._command(command, timeout=300).returncode:
-            raise AdviceSetupError("replacement venv installation failed")
+        with project_source.source() as source:
+            command = workspace.install_command(live, workspace.DEFAULT_EXTRAS,
+                                                 requirements(self.found, changes),
+                                                 source=source.path, editable=source.editable)
+            command += ["--only-binary=:all:", "--index-url", "https://pypi.org/simple",
+                        "--no-cache-dir"]
+            if self._command(command, timeout=300).returncode:
+                raise AdviceSetupError("replacement venv installation failed")
 
     def build(self, proposed: bytes) -> str:
         """New recipe against a temporary workspace; retain previous images for undo."""
