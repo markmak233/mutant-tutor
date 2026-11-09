@@ -66,6 +66,16 @@ def test_all_selected_credentials_are_removed_from_both_requests():
                               independent.PackageFacts(n, 1, "2020-01-01"))
 
 
+def test_two_destination_previews_share_actual_selected_credential_redaction():
+    first, second = prepared(), prepared("glm")
+    token = "test-not-a-real-token"
+    second = replace(second, redactor=replace(second.redactor, secrets=(token,)))
+    first = replace(first, parts=(*first.parts, ("user", token)))
+    shared = service.shared_redaction(first, second)
+    assert all(token not in item.preview() for item in shared)
+    assert token in first.preview()  # immutable caller data was not silently changed
+
+
 def test_truncated_independent_reply_is_not_a_partial_candidate():
     with pytest.raises(service.AdviceSetupError, match="truncated"):
         independent.review(prepared(), prepared("glm"),

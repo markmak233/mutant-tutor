@@ -44,6 +44,7 @@ ROLE_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
         ("repair", "takes over the repairs from the second on (empty: the generate model)")]),
     ("While you learn", [("hint", "gives hints on your attempts"),
                          ("judge", "scores hints and questions in evaluations")]),
+    ("Setup diagnosis", [("doctor", "proposes repairs only when you explicitly request advice")]),
     ("Experiments", [("heldout", "writes held-out test data"),
                      ("concept", "builds the concept index for retrieval"),
                      ("embedding", "turns pages into vectors for retrieval"),

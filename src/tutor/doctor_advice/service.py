@@ -11,7 +11,7 @@ import json
 import math
 import os
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -140,6 +140,22 @@ def check_messages(model: llm.LLMConfig, messages: list[dict], redactor: Redacto
                 raise AdviceSetupError("private data remains in payload; correct its configuration")
             if len(encoded.encode("utf-8")) > MAX_PAYLOAD_BYTES:
                 raise AdviceInputError("advice payload exceeds 128 KiB; use a smaller reviewed log")
+
+
+def shared_redaction(first: Prepared, second: Prepared) -> tuple[Prepared, Prepared]:
+    """A two-destination preview/send must remove both actual selected credential values."""
+    redactor = Redactor(tuple(set(first.redactor.secrets + second.redactor.secrets)),
+                        tuple(set(first.redactor.paths + second.redactor.paths)))
+    result = []
+    for item in (first, second):
+        if redactor.clean(item.model.model) != item.model.model:
+            raise AdviceSetupError("selected model identifier includes private data")
+        parts = tuple((role, redactor.clean(content)) for role, content in item.parts)
+        messages = [{"role": role, "content": content} for role, content in parts]
+        check_messages(item.model, messages, redactor)
+        result.append(replace(item, parts=parts, redactor=redactor,
+                              destination=redactor.clean(item.destination)))
+    return tuple(result)
 
 
 def request(prepared: Prepared, *, chat: Callable | None = None) -> GateResult:

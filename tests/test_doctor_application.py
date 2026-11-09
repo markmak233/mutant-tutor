@@ -137,7 +137,7 @@ def test_discard_backups_keeps_new_environment(rig):
     assert not (course.root / transaction.OLD_VENV).exists()
 
 
-def test_changed_configuration_refuses_undo_or_discard(rig):
+def test_changed_configuration_refuses_undo(rig):
     course, found, record = rig
     transaction.apply(application.prepare(course, found, record), course, backend=Backend(course))
     marker = course.root / "workspace.toml"
@@ -145,6 +145,17 @@ def test_changed_configuration_refuses_undo_or_discard(rig):
     with pytest.raises(AdviceSetupError, match="edited"):
         transaction.finish(course.root, undo=True)
     assert (course.root / transaction.OLD_VENV).is_dir()
+
+
+def test_finish_preserves_later_owner_edits_while_discarding_only_original_backups(rig):
+    course, found, record = rig
+    transaction.apply(application.prepare(course, found, record), course, backend=Backend(course))
+    marker = course.root / "workspace.toml"
+    text = marker.read_text(encoding="utf-8") + "\n# owner edited\n"
+    marker.write_text(text, encoding="utf-8")
+    transaction.finish(course.root, undo=False)
+    assert marker.read_text(encoding="utf-8") == text
+    assert (course.root / ".venv" / "replacement.txt").is_file()
 
 
 def test_container_application_changes_no_host_venv(rig):

@@ -124,7 +124,7 @@ def apply(plan, course, *, backend=None) -> None:
 
 
 def finish(root, *, undo: bool) -> None:
-    """Explicitly restore or discard a matching retained repair, refusing later edits."""
+    """Restore an unedited repair, or explicitly discard only original backup artifacts."""
     with locked(root):
         path, backup, live, old = (root / "workspace.toml", root / BEFORE,
                                    root / ".venv", root / OLD_VENV)
@@ -139,7 +139,7 @@ def finish(root, *, undo: bool) -> None:
             if (set(data) != {"schema", "before", "after", "host"}
                     or type(data["schema"]) is not int or data["schema"] != 1
                     or type(data["host"]) is not bool
-                    or records.digest(path.read_bytes()) != data["after"]
+                    or undo and records.digest(path.read_bytes()) != data["after"]
                     or records.digest(backup.read_bytes()) != data["before"]
                     or data["host"] and not old.is_dir()):
                 raise ValueError

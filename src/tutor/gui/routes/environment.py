@@ -68,7 +68,11 @@ def register(app: Flask) -> None:
 
     def switch_options(course: courses.Course, check: environment.Check):
         """The Pythons to offer, or [] when the check found nothing another one could fix."""
-        if check.problem or not python_switch.related(check.results):
+        if check.problem:
+            # A missing/broken venv cannot report its Python. Offer only rediscovered,
+            # compatible base interpreters so the page can recreate it without a shell.
+            return python_switch.options(course.workspace.effective_requires, [], None)
+        if not python_switch.related(check.results):
             return []
         current = pythons.ask(environment.venv_python(course))
         return python_switch.options(course.workspace.effective_requires, check.results,

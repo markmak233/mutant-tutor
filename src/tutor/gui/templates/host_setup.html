@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{# Packaged manual instructions. Query values never choose an include; metadata remains
+   escaped text, never interpolated into installation commands. No probes on page load. #}
+{% block title %}Run tests on this machine · {{ course.workspace.course }}{% endblock %}
+{% block crumbs %}
+<a href="{{ url_for('course', name=course.folder) }}">{{ course.workspace.course }}</a>
+<a href="{{ url_for('environment_view', name=course.folder) }}">Environment</a>
+<span>Host setup</span>
+{% endblock %}
+{% block content %}
+<h1>Run tests on this machine</h1>
+{% set back = url_for('environment_view', name=course.folder) %}
+<p>Current runner: <strong>{{ runner or 'not chosen (host default)' }}</strong>.
+{% if runner == 'container' %}<code>tutor test</code> uses the course image. Local compilers,
+Java and Hadoop are optional for debugging with ordinary host pytest; keep the image ready in
+<a href="{{ back }}#test-image">Environment step 4</a>.
+{% else %}Host tests need the tools below on this machine. Choose the runner in Environment.{% endif %}</p>
+<p>This page gives manual instructions and installs nothing. <a href="{{ url_for('doctor_view', name=course.folder) }}">Open Doctor</a> for this course's measured checks, package bounds and explicit repair steps.</p>
+<nav aria-label="Installation platform">
+{% for value, label in platforms.items() %}
+<a href="{{ url_for('host_setup', name=course.folder, platform=value) }}"{% if platform == value %} aria-current="page"{% endif %}>{{ label }}</a>{% if not loop.last %} · {% endif %}
+{% endfor %}
+</nav>
+<p>Instructions for <strong>{{ platforms[platform] }}</strong>. Choose your platform explicitly.
+Linux distributions differ; WSL instructions apply inside the Linux terminal, not PowerShell.</p>
+
+{# Requirements are displayed verbatim as data, including unfamiliar versions/packages. #}
+<h2>What this course declares</h2>
+{% if requires %}<table><thead><tr><th>Tool or package</th><th>Version prefix</th></tr></thead>
+<tbody>{% for name, version in requires.items() %}<tr><td>{{ name }}</td><td>{{ version }}</td></tr>{% endfor %}</tbody></table>
+{% else %}<p>No versions declared. Set them in <a href="{{ back }}#course-needs">Environment step 1</a> first.</p>{% endif %}
+
+<section>
+<h2>Python and course packages</h2>
+<ol>
+<li>Install a Python matching the declared version from <a href="https://www.python.org/downloads/">Python downloads</a>
+or your distribution's package manager. Do not assume the newest Python works with the course's libraries.</li>
+<li>Return to <a href="{{ back }}#host-install">Install on this machine</a> and use <strong>Install into .venv</strong>.
+This installs the tutor and declared pip packages into the course folder, not Java, Hadoop or a compiler.</li>
+<li>Use the environment check there. When a different installed Python can fix a compatibility issue,
+the existing check offers a Python switch; review it before rebuilding the venv.</li>
+<li>Open the course in VS Code and use its activated <code>.venv</code> terminal for tests.
+The command-line check is <code>python -m tutor.envcheck</code>, with <code>WORKSPACE_DIR</code> set to the course folder.</li>
+</ol>
+<p>Python installer locations, administrator rights and PATH changes depend on the installer;
+review its options. Undo through that installer's uninstall instructions. The GUI only manages the course venv.</p>
+</section>
+
+{# Only declared system tools get sections. Java 17 and Hadoop 3.3.6 are the existing
+   setup guide's examples, not defaults substituted for other requested versions. #}
+{% if 'java' in requires %}
+<section><h2>Java (JDK)</h2>
+<p>Required version prefix: <strong>{{ requires.java }}</strong>.</p>
+{% if requires.java == '17' %}
+{% if platform == 'macos' %}
+<p>With Homebrew already installed, in your terminal:</p>
+<pre><code>brew install openjdk@17
+brew --prefix openjdk@17</code></pre>
+<p>This downloads the JDK and dependencies into Homebrew's prefix, without sudo.
+Set <code>JAVA_HOME</code> to that prefix plus <code>/libexec/openjdk.jdk/Contents/Home</code>.
+Undo the JDK with <code>brew uninstall openjdk@17</code> and remove your own JAVA_HOME setting.</p>
+<p>Source: <a href="https://formulae.brew.sh/formula/openjdk@17">Homebrew OpenJDK 17</a>.</p>
+{% elif platform == 'windows' %}
+<p>In PowerShell, with winget available:</p><pre><code>winget install Microsoft.OpenJDK.17</code></pre>
+<p>Review the installer location, PATH options and any administrator prompt. Set <code>JAVA_HOME</code>
+to the installed JDK folder. Undo through Windows Installed apps and remove your own JAVA_HOME setting.</p>
+{% else %}
+<p>Use your distribution's JDK 17 package, or a JDK archive matching your CPU architecture.
+Package names and availability vary; this page does not assume apt. Package installation may need
+administrator rights. An archive can be unpacked into a user-owned folder and removed later.</p>
+{% endif %}
+{% else %}
+<p>No reviewed installation recipe for this version here. Choose a matching JDK using the official
+instructions; do not substitute the Java 17 example from the big-data guide.</p>
+{% endif %}
+<p><a href="https://learn.microsoft.com/en-us/java/openjdk/install">Microsoft OpenJDK installation instructions</a>.
+Set <code>JAVA_HOME</code> for the terminal/check process (or in your local <code>.env</code> for CLI commands),
+then check again. This page does not edit it or load it into the GUI process.</p>
+</section>
+{% endif %}
+
+{% if 'hadoop' in requires %}
+<section><h2>Hadoop</h2>
+<p>Required version prefix: <strong>{{ requires.hadoop }}</strong>.</p>
+{% if platform == 'windows' %}
+<p>MRJob's Hadoop runner is unsupported on native Windows: those tests are skipped, and validation
+does not accept that result. Use <a href="{{ url_for('host_setup', name=course.folder, platform='wsl') }}">the WSL instructions</a>
+or the course container. <a href="https://learn.microsoft.com/en-us/windows/wsl/install">Install WSL</a>.</p>
+{% elif requires.hadoop in ('3', '3.3', '3.3.6') %}
+<ol><li>Download the matching binary archive from <a href="https://archive.apache.org/dist/hadoop/common/hadoop-3.3.6/">Apache's Hadoop 3.3.6 archive</a>
+and verify its checksum/signature using the files there.</li>
+<li>Unpack it into a user-owned folder. Set <code>HADOOP_HOME</code> to that folder and
+<code>JAVA_HOME</code> to the compatible JDK. No administrator rights or HDFS/YARN services are needed for standalone mode.</li>
+<li>In that terminal run <code>"$HADOOP_HOME/bin/hadoop" version</code>, then return to the environment check.</li></ol>
+<p>This installs files only where you unpack them; setting PATH or a shell profile is your choice.
+Undo by removing the unpacked folder and your environment settings.</p>
+{% else %}
+<p>No reviewed archive recipe for this version here. Select the matching release from
+<a href="https://hadoop.apache.org/releases.html">Apache Hadoop releases</a> and follow its documentation.</p>
+{% endif %}
+<p>See <a href="https://hadoop.apache.org/docs/r3.3.6/hadoop-project-dist/hadoop-common/SingleCluster.html">Apache's 3.3.6 standalone setup</a>
+for that release. The repository's big-data guide records macOS and Windows checks; Linux/WSL
+installation steps have not been fresh-install tested here.</p>
+</section>
+{% endif %}
+
+{% if platform == 'windows' and 'pyspark' in requires %}
+<section><h2>Spark on native Windows</h2>
+<p>Spark file access also needs matching <code>winutils.exe</code> and <code>hadoop.dll</code> in
+<code>HADOOP_HOME\bin</code>, with that folder on PATH. Restart the terminal and VS Code after
+changing PATH; a local .env value alone does not make Windows find the DLL.</p>
+<p>The existing check reports missing winutils files. Third-party binaries require a separate trust
+decision; this page does not download them. A course container or WSL avoids this native Windows setup.
+See <a href="https://spark.apache.org/docs/3.5.7/">Spark 3.5 documentation</a> for that series;
+other versions need their matching documentation. This does not enable MRJob's Hadoop runner on Windows.</p>
+</section>
+{% endif %}
+
+{% for language in languages if language.key == 'c' %}
+<section><h2>C: existing setup</h2>
+<p>Use <a href="{{ back }}#course-needs">the existing C compiler settings</a> for versions, flags and headers.
+C validation stays in a container. Native Windows C tests are unsupported; use WSL or the container.</p>
+<p>The environment check reports <code>gcc</code>; host C tests use <code>CC</code> or <code>cc</code>.
+A found compiler version does not prove sanitizer support. This page adds no compiler installer.</p></section>
+{% endfor %}
+
+<p><a href="{{ back }}#host-install">Return to Environment and check again</a>.</p>
+<p class="muted">Instructions are based on the repository's docs/setup/bigdata.md and linked official documentation.
+Viewing them does not verify installation or change the selected runner.</p>
+{% endblock %}

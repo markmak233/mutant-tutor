@@ -21,6 +21,7 @@
     </tbody>
   </table>
   {% if not check.results %}<p class="muted">[requires] is empty, so there is nothing to check.</p>{% endif %}
+  {% endif %}
   {# Another Python, when a row above is one it could fix (gui/python_switch.py): which suit
      the course is worked out from those rows and the known conflicts, not by a model. #}
   {% if switch %}
@@ -34,7 +35,6 @@
     </tbody></table>
     {% if not switch | selectattr("offered") | list %}<p class="muted">None of the Pythons found suits this course. Install an earlier one in your own terminal (the course's setup notes in <code>docs/setup/</code> say how), then check again.</p>{% endif %}
   </div>
-  {% endif %}
   {% endif %}
   <p class="muted">{% if check.python %}Checked with <code>{{ check.python }}</code>. {% endif %}{% if not check.ok %}Python packages: "Install into .venv" above. Java, Hadoop, Python: install them in your own terminal (the course's setup notes in <code>docs/setup/</code> say how), set <code>JAVA_HOME</code> or <code>HADOOP_HOME</code> in <code>.env</code>, then check again.{% endif %}</p>
   <button type="button" class="small" hx-get="{{ url_for('environment_check', name=course.folder) }}" hx-target="#env-check" hx-swap="outerHTML">Check again</button>

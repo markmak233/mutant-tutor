@@ -45,6 +45,8 @@ def return_to(course: courses.Course, task: tasks.Task) -> tuple[str, str, str |
         return url_for("batch", name=name, batch=batch), batch, "validated"
     if kind == "check":
         return url_for("models", name=name), "Models", "models-checked"
+    if kind == "doctor":
+        return url_for("doctor_view", name=name), "Doctor", None
     if kind == "coverage-draft":
         return url_for("coverage_view", name=name), "Coverage", "coverage-drafted"
     if kind in ENVIRONMENT_NOTICES:
@@ -75,7 +77,10 @@ def again_url(course: courses.Course, task: tasks.Task) -> str | None:
 
 def task_parts(course: courses.Course, task: tasks.Task) -> dict:
     """What both the task page and its polled part show; a new course's stages too."""
-    log, cut = tasks.tail(task)
+    # Doctor previews/diffs must fit in full before their explicit send/apply action.
+    # Worker bounds keep them below this; ordinary long-task logs retain their old cap.
+    log, cut = (tasks.tail(task, limit=512 * 1024) if task.meta.get("kind") == "doctor"
+                else tasks.tail(task))
     create = task.meta.get("kind") == "create"
     return {"course": course, "task": task, "log": log, "cut": cut,
             "back": return_to(course, task), "quiet": tasks.quiet_s(task),

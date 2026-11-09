@@ -233,6 +233,32 @@ The GUI's Environment page sets this for a course, and builds its image after sh
 recipe and what it downloads. `python -m tutor.workspace init DIR`, run again after changing
 `[requires]`, installs its pip packages into the course's own `.venv`.
 
+Environment step 2 also links to **Run tests on this machine**, an optional manual setup
+guide. Choose macOS, Linux, Windows or WSL; the page shows the course's declared versions,
+Python setup, applicable Java/Hadoop instructions and links to existing C settings.
+It neither installs system tools nor checks them on page load. Return to Environment for
+the existing check. Recipes not covered are marked explicitly; Linux/WSL fresh installs
+remain untested. Container practice through `tutor test` does not require host JVM/compiler
+installation. The longer big-data walkthrough remains in [setup/bigdata.md](setup/bigdata.md).
+
+The **Doctor** link in Environment provides explicit measured checks, a package-bound
+editor and model/repair workflows. Opening it runs no probes or models. “Check this
+course now” uses the same structured doctor rows, with environment/configuration links.
+A missing or broken venv can be recreated through the existing guarded Python switch.
+The host guide starts on the current system's platform and allows an explicit alternative.
+
+For advice, choose profiles and paste only the selected failure record. “Preview selected
+data only” stores that input privately under the course's logs/doctor and shows the full
+sanitized request/destination in its task log. Sending, independent review, temporary
+verification and application are distinct actions. Current input/configuration/facts must
+match the preview fingerprint before a send; stale data requires another preview. A
+verified artifact requires a separate complete diff preview and confirmation before apply.
+Oversized GUI diffs are refused for CLI review, never silently cut. Task controls remain
+available; successful doctor tasks return to Doctor. Undo preserves later edits by refusing
+to overwrite changed configuration; finishing explicitly discards original backups while
+keeping the current environment/configuration. No real provider/package install is used
+in automated tests. Native browser click acceptance is recorded separately from Flask tests.
+
 A course that has not chosen runs on the host and prints a warning. For container courses,
 `tutor test` also runs the learner's tests in that image; ordinary `pytest` stays on the
 host for debugging. Docker Desktop on macOS and the Linux CI exercise the container path;

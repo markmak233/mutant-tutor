@@ -34,7 +34,9 @@ def course_root(folder: Path) -> Path | None:
     return next((p for p in (folder, *folder.parents) if (p / "workspace.toml").is_file()), None)
 
 
-def main(argv: list[str] | None = None, *, run: Callable | None = None, validator=None) -> int:
+def main(argv: list[str] | None = None, *, run: Callable | None = None, validator=None,
+         output: Callable[[str], None] | None = None,
+         on_row: Callable[[Row], None] | None = None) -> int:
     """Resolve injectable defaults at call time; tests never need a real course or Docker."""
     parser = argparse.ArgumentParser(prog="tutor doctor", description=__doc__.split("\n")[0])
     parser.add_argument("folder", nargs="?", type=Path,
@@ -58,10 +60,16 @@ def main(argv: list[str] | None = None, *, run: Callable | None = None, validato
 
     def say(text: str) -> None:
         for line in clean(text).splitlines():
-            print(line, flush=True)
+            if output is None:
+                print(line, flush=True)
+            else:
+                output(line)
 
     def emit(row: Row) -> None:
         rows.append(row)
+        if on_row is not None:
+            # GUI gets the same environment redaction as CLI, without parsing human logs.
+            on_row(Row(row.status, clean(row.text), clean(row.next_step)))
         # One row stays one line even when an external exception contains newlines.
         say(f"{row.status:<5} {' '.join(row.text.splitlines())}")
         if row.status in ("WARN", "FAIL"):
@@ -86,7 +94,7 @@ def main(argv: list[str] | None = None, *, run: Callable | None = None, validato
         interpreter = check("tool Python", tool_python)
         if any(row.status == "FAIL" for row in interpreter):
             emit(Row("SKIP", "remaining checks need Python 3.11+"))
-            print("1 failed, 0 warnings", flush=True)
+            say("1 failed, 0 warnings")
             return 1
         failure = None
         if args.advise or args.preview_advice or args.verify_advice or args.review_new_package:
@@ -187,7 +195,7 @@ def main(argv: list[str] | None = None, *, run: Callable | None = None, validato
         warnings = sum(row.status == "WARN" for row in rows)
         summary = (f"{failed} failed, {warnings} warnings" if failed or warnings
                    else "All checks passed")
-        print(summary, flush=True)
+        say(summary)
         return int(bool(failed))
     except KeyboardInterrupt:
         print("doctor: interrupted", file=sys.stderr, flush=True)

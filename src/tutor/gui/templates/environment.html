@@ -13,6 +13,7 @@
 {% endblock %}
 {% block content %}
 <h1>Environment</h1>
+<p><a href="{{ url_for('doctor_view', name=course.folder) }}">Doctor: diagnose setup, edit package bounds or review a repair</a></p>
 <p class="muted">Four steps, in this order. This page installs only Python packages into the course's own <code>.venv</code>, and builds the test image. Java, Hadoop or another Python you install in your own terminal, then check again in step 2.</p>
 {% if running %}
 <p class="notice notice-bad">A task is running in this course:
@@ -24,7 +25,7 @@
 <p class="muted">Nothing was saved.</p>
 {% endif %}
 
-<section class="step">
+<section class="step" id="course-needs">
 <h2><span class="step-no">1</span>What the course needs</h2>
 <p class="muted">The course's languages and the software its tests need: <code>[requires]</code> and <code>[languages]</code> in workspace.toml. Let a model find them in the lectures, or set them in the lists below; nothing is written until you add or save.</p>
 
@@ -146,7 +147,9 @@
 </section>
 
 <section class="step">
-<h2><span class="step-no">2</span>Install on this machine</h2>
+<h2 id="host-install"><span class="step-no">2</span>Install on this machine</h2>
+{# A normal link: installation instructions remain available without htmx/JavaScript. #}
+<p><a href="{{ url_for('host_setup', name=course.folder) }}">Run tests on this machine: installation guide</a> (optional).</p>
 <p class="muted">The Python packages of step 1 go into the course's own <code>.venv</code>, where your tests run in the IDE; the check below says what this machine still lacks.</p>
 <div class="actions">{{ action(url_for('install_packages', name=course.folder), "Install into .venv", primary=True) }}</div>
 <details class="review">
@@ -180,7 +183,7 @@
 </section>
 
 <section class="step{% if runner == 'host' %} step-dim{% endif %}">
-<h2><span class="step-no">4</span>Test image</h2>
+<h2 id="test-image"><span class="step-no">4</span>Test image</h2>
 <div id="env-docker" hx-get="{{ url_for('environment_docker', name=course.folder) }}" hx-trigger="load" hx-swap="outerHTML">
   <p class="muted"><span class="spinner-inline" aria-hidden="true"></span>Asking Docker …</p>
 </div>

@@ -85,6 +85,11 @@ def perform(args, course, failure: str, *, run, docker_ready: bool,
         found = facts.collect(course, run=run, docker_ready=docker_ready, image_ready=image_ready)
         prepared = service.prepare(found, failure, course=course.root if course else None,
                                    profile=args.profile, env_file=args.env_file)
+        second = None
+        if args.review_new_package:
+            second = service.prepare(found, failure, course=course.root if course else None,
+                                     profile=args.second_profile, env_file=args.env_file)
+            prepared, second = service.shared_redaction(prepared, second)
         # Prepared output has its own selected-secret redactor. The ordinary doctor's
         # blanket environment-value mask would corrupt JSON and hide a model identifier.
         print(f"Advice destination: {prepared.destination}", flush=True)
@@ -100,8 +105,6 @@ def perform(args, course, failure: str, *, run, docker_ready: bool,
         if args.review_new_package:
             from tutor.doctor_advice import independent
 
-            second = service.prepare(found, failure, course=course.root if course else None,
-                                     profile=args.second_profile, env_file=args.env_file)
             print(f"Independent review destination: {second.destination}", flush=True)
             reviewed = independent.review(prepared, second)
             if reviewed is None:

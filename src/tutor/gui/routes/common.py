@@ -18,6 +18,7 @@ STATUS_LABELS = {report.PASSED: "passed", report.STARTED: "started",
                  report.UNLOGGED: "changed, no run logged", report.NOT_STARTED: "not started"}
 # What an action can report back, by code; nothing else is ever shown. (kind, text)
 NOTICES = {
+    "bounds-saved": ("ok", "Package bounds saved. Install/rebuild and check the course again."),
     "opened-folder": ("ok", "Opened in the file manager."),
     "opened-ide": ("ok", "Opened in VS Code: the course folder, with this exercise's student "
                           "file."),

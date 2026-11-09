@@ -2409,7 +2409,23 @@ keep_older=True so existing images survive, promoting configuration only after c
 A per-course lock serializes transactions. Successful backups remain for --undo-repair
 or explicit --finish-repair --confirm; edits to saved/current config refuse undo. No
 student/lecture/model/runner edit, system install or new-package auto-application occurs.
-GUI integration, image records and final machine actions remain later milestones.
+GUI integration follows below; image records and final machine actions remain later milestones.
+
+Doctor GUI integration (2026-11-09; browser acceptance still pending): Environment links
+to Doctor and the restored optional host guide. Default page loads run no probe/model.
+Explicit checks receive structured, redacted rows from doctor.main's output/row callbacks,
+with existing Environment fix paths; missing/broken venv checks offer compatible base
+Pythons through the guarded switch action. The page edits package-bounds separately.
+Explicit selected failure text/profiles are kept under private logs/doctor; fixed worker
+tasks prepare sanitized previews, advice, independent review, disposable verification and
+full repair diffs using the CLI services. Destination/input/config/fact fingerprints bind
+send/apply to current previews. Model credentials stay in the worker's private mapping,
+never the server environment. Two selected credential values are removed from both
+previews. Doctor task log bounds show the entire bounded preview/diff; an oversized GUI
+diff is refused for CLI review, never silently truncated. Separate confirmation controls
+temporary installs/apply/undo/backup discard. Finishing preserves later owner edits while
+discarding originals; undo refuses edited configuration. Scratch-course browser clicks
+must pass independently of Flask/worker regression tests before acceptance is complete.
 
 Decided 2026-11-08 (owner), when Python 3.12 to 3.14 came into CI: a package that installs and
 imports cleanly can still fail when a job runs, because a newer Python removed something it
@@ -3725,6 +3741,16 @@ late; the adaptive review screens can be built with it.
     has nothing to check; a profile only the embedding role uses gets an embedding call.
   - Not in this step: the `[generation]` tunables (their defaults are measured values).
 - Environment page:
+  - Optional host setup guide (2026-11-09): step 2 links to a packaged, read-only page
+    with explicit macOS/Linux/Windows/WSL navigation. It reads course requirements and
+    the existing language registry; no probes, lecture reads, model requests or installs.
+    Python links back to venv install/check/switch; C links to its existing settings.
+    Declared Java/Hadoop get manual guidance derived from docs/setup/bigdata.md, with
+    official sources and coverage limits for other versions. No new language support,
+    system installer. Doctor connects this guide to measured course checks and repair paths.
+    Container practice needs no host JVM/compiler.
+    Linux/WSL fresh-install testing is still outstanding. Templates are packaged so the
+    page does not depend on a source checkout's docs directory.
   - The page is four numbered steps in the order they are done (owner, 2026-11-06, after
     trying it on a new course: by topic it read unclearly): (1) what the course needs, the
     model's draft then the list; (2) install on this machine, the check below its button;
