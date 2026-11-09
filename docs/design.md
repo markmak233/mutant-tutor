@@ -2341,6 +2341,25 @@ themselves, so a cheap layer comes first and a stronger one later.
 
 ## Version conflicts
 
+Doctor step 2A (2026-11-09): `tutor.doctor_advice` now supplies immutable caller-fact,
+advice and result records, a strict JSON schema/parser, and a pure permission gate.
+It is a library only: no CLI advice flag, model/network call, environment discovery,
+installation, execution or file write. Default doctor behavior is unchanged.
+Package identity follows PyPA's case/separator normalization. Permissions come only from
+declared and installed distributions and `compat.needed` for this course at the proposed
+Python; batch order cannot retain companions needed only by the old Python. System tools
+and unsupported toolchains are excluded from package changes. Python choices must be
+offered, unlocked, different and not ruled out by known conflicts in the current declared
+requirements. This conservative check does not resolve joint package/Python changes.
+Version constraints accept only numeric releases with ==, !=, >=, <=, >, <, ~= and comma
+intersections; ~= needs at least two components. This is a restricted subset, not a full
+PEP 440 parser or dependency solver (no wildcards, pre/post/local/epoch syntax, URLs,
+markers, extras or pip options). Syntax approval proves neither satisfiability nor that
+a matching release exists. Gate results are accepted/rejected/stopped/new-package-review,
+always unverified. Rejection or new-package review releases no changes; a new name stays
+in its separate review field. Empty changes stop rather than claim success. Models,
+disposable verification and owner-approved application remain later increments.
+
 Decided 2026-11-08 (owner), when Python 3.12 to 3.14 came into CI: a package that installs and
 imports cleanly can still fail when a job runs, because a newer Python removed something it
 uses (mrjob: `distutils` in 3.12, `pipes` in 3.13) or changed what it relies on (PySpark 3.5
@@ -3029,8 +3048,9 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
      the smoke example, machine_checks, platform_problem and validation_needs_container;
      DOCTORS matches tutor.languages.LANGUAGES. A new language adds a module, its registry
      entry, a shipped example and machine/platform tests; doctor.py does not change.
-     Framework dependencies stay in envcheck. Step 2 (model-proposed install fixes under
-     "Version conflicts", and the optional host-setup guide saved in git stash) is pending.
+     Framework dependencies stay in envcheck. Step 2A's structured advice permission gate
+     is built (2026-11-09; "Version conflicts"). Model calls, disposable verification,
+     fixes and the optional host-setup guide saved in git stash are still pending.
    `tutor doctor` also brings the model that turns an install failure no rule covers into a
    proposed fix, under the limits in "Version conflicts" (owner, 2026-11-08: with doctor, not
    before: most of its fixes need another Python or a version bound `[requires]` cannot
