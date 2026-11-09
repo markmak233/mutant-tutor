@@ -15,7 +15,9 @@ import sys
 import webbrowser
 from pathlib import Path
 
-from tutor.config import WorkspaceError, _private_dir
+from tutor import locations, project_source
+from tutor.config import WorkspaceError, _enclosing_git_repo, _private_dir
+from tutor.gui import launcher_state
 
 
 def _workspace_dir() -> str | None:
@@ -39,6 +41,11 @@ def _root(given: str | None) -> Path:
     else:
         workspace = _workspace_dir()
         if not workspace:
+            if project_source.checkout() is None:
+                root = (locations.home() / "courses").resolve()
+                if _enclosing_git_repo(root):
+                    raise WorkspaceError("default courses folder cannot be inside a git repository")
+                return root  # explicit main launch creates it under its startup lock
             raise WorkspaceError("give --root, the folder holding your course folders, or set "
                                  "WORKSPACE_DIR to one course")
         raw = str(Path(workspace).expanduser().resolve().parent)
@@ -51,6 +58,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root", help="the folder that holds the course folders")
     parser.add_argument("--port", type=int, default=0, help="default: a free port")
     parser.add_argument("--no-browser", action="store_true", help="only print the link")
+    parser.add_argument("--reset-state", action="store_true",
+                        help="discard stale launch metadata after checking the old server")
     args = parser.parse_args(argv)
     try:
         root = _root(args.root)
@@ -62,24 +71,41 @@ def main(argv: list[str] | None = None) -> int:
 
         from tutor.gui.app import create_app
     except ImportError as e:
-        print(f"gui: {e.name} is missing: pip install -e \".[gui]\"", file=sys.stderr)
+        print(f"gui: {e.name} is missing: reinstall this repository with its [gui] extra",
+              file=sys.stderr)
         return 2
 
-    token = secrets.token_urlsafe(32)
-    app = create_app(root, token)
-    # Port 0 lets the system pick a free one; the Host check needs the real one.
-    server = create_server(app, host="127.0.0.1", port=args.port)
-    app.config["PORT"] = server.effective_port
-    url = f"http://127.0.0.1:{server.effective_port}/?token={token}"
-    print(f"Courses in {root}\nOpen {url}\nCtrl+C stops the server.", flush=True)
+    server = None
+    try:
+        with launcher_state.locked(root, reset=args.reset_state):
+            state = launcher_state.existing(root)
+            if state is None:
+                locations.prepare()  # only this explicit action creates packaged config
+                token = secrets.token_urlsafe(32)
+                app = create_app(root, token)
+                # Port 0 lets the system pick a free one; the Host check needs the real one.
+                server = create_server(app, host="127.0.0.1", port=args.port)
+                app.config["PORT"] = server.effective_port
+                state = launcher_state.save(root, server.effective_port, token)
+    except (OSError, ValueError) as e:
+        if server is not None:
+            server.close()
+        print(f"gui: {e}", file=sys.stderr)
+        return 2
+    url = launcher_state.url(state)
+    action = "Ctrl+C stops the server." if server is not None else "Reused the verified server."
+    print(f"Courses in {root}\nOpen {url}\n{action}", flush=True)
     if not args.no_browser:
         webbrowser.open(url)
+    if server is None:
+        return 0
     try:
         server.run()
     except KeyboardInterrupt:
         pass
     finally:
         server.close()
+        launcher_state.clear(root, token)
     return 0
 
 

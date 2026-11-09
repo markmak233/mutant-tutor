@@ -17,7 +17,7 @@ requires-python = ">=3.11"
 # reading course PDFs into the materials cache (docs/design.md, "Reading files").
 dependencies = ["pydantic>=2,<3", "pypdfium2>=5,<6", "pillow>=10"]
 
-# The learner command shares its dispatcher with python -m tutor. GUI packaging is later.
+# Installed learner, diagnostic and local GUI commands share python -m tutor's dispatcher.
 [project.scripts]
 tutor = "tutor.__main__:main"
 

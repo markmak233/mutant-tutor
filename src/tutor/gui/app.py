@@ -53,12 +53,13 @@ The checks that ask a process or Docker load into the page with htmx, so it open
 from __future__ import annotations
 
 import hmac
+import re
 from pathlib import Path
 from types import ModuleType
 
 from flask import Flask, abort, redirect, render_template, request, url_for
 
-from tutor.gui import launch, lectures, routes, tasks
+from tutor.gui import launch, launcher_state, lectures, routes, tasks
 from tutor.gui.routes.common import NOTICES, UPLOAD_LIMIT_BYTES
 
 COOKIE = "tutor_token"
@@ -93,6 +94,13 @@ def create_app(root: Path, token: str, port: int | None = None,
         port = app.config["PORT"]
         if request.host not in (f"127.0.0.1:{port}", f"localhost:{port}"):
             abort(403, "This server answers only at 127.0.0.1 or localhost.")
+        # The local launcher alone can challenge this endpoint, without browser cookies.
+        # No other request accepts header authentication or loses its Origin check.
+        if request.path == "/_launcher" and request.method == "GET":
+            if not hmac.compare_digest(request.headers.get("X-Tutor-Launch", "").encode(),
+                                       token.encode()):
+                abort(403)
+            return None
         given = request.args.get("token")
         if given is not None and hmac.compare_digest(given, token):
             # Swap the token in the URL for the cookie, and show the page without it.
@@ -109,6 +117,13 @@ def create_app(root: Path, token: str, port: int | None = None,
     def notice():
         found = NOTICES.get(request.args.get("notice", ""))
         return {"notice": {"kind": found[0], "text": found[1]} if found else None}
+
+    @app.get("/_launcher")
+    def launcher_identity():
+        challenge = request.args.get("challenge", "")
+        if not re.fullmatch(r"[0-9a-f]{32}", challenge):
+            abort(403)
+        return {"proof": launcher_state.proof(token, root, challenge)}
 
     @app.after_request
     def add_headers(response):

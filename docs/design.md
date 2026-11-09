@@ -3354,7 +3354,14 @@ mode is not done (see "Decisions not to do").
   temporarily and install noneditable; source checkouts retain editable installs. No
   unrelated PyPI tutor-name fallback. Archive paths/size are validated, examples work
   outside a checkout, and offline wheel inspection precedes actual fresh-install checks.
-  - One click (the owner's aim, 2026-11-05; a plan for the release, not built): one install
+  Local launch built 2026-11-09: `tutor gui` shares the module launcher. Installed wheels
+  default to per-user courses/config folders (TUTOR_HOME can override both); checkout
+  WORKSPACE_DIR behavior stays. Launch state is private and root-specific. A second
+  launch verifies a fresh HMAC challenge over loopback before reusing a server; invalid
+  state has an explicit reset, and no server is killed. `tutor shortcut` creates a new
+  .command/.lnk/.desktop without overwriting or changing startup items. Native desktop
+  trust/click and browser acceptance remain separate from platform-format unit tests.
+  - One click (the owner's aim, 2026-11-05; installation acceptance still pending): one install
     line gets `uv`, which fetches the Python it needs and installs the tool (`uv tool install`,
     the same job as `pipx`, without needing Python first). `tutor gui` starts the server and
     opens the browser with that launch's token. `tutor shortcut` writes a desktop shortcut on

@@ -28,14 +28,17 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
+from tutor import locations
+
 TASKS_DIR = Path("logs") / "gui-tasks"
 TASK_FILE = "task.json"
 LOG_FILE = "output.log"
 KEEP = 20  # finished tasks kept per course; older ones are deleted when a new one starts
 TAIL_BYTES = 64_000  # how much of the end of a log a page shows
 STOP_GRACE_S = 10.0  # after Ctrl+C, how long the commands get before they are killed
-# The source checkout: commands run here, so each reads the repo's .env itself.
-REPO = Path(__file__).resolve().parents[3]
+# Commands read their config themselves; the GUI never loads keys into its environment.
+# Packaged tasks use private app config rather than an unwritable site-packages parent.
+REPO = locations.commands()
 _ID = re.compile(r"^\d{8}-\d{6}-[0-9a-f]{6}$")
 _start_lock = threading.Lock()  # waitress serves requests on several threads
 
@@ -76,6 +79,7 @@ def start(course_root: Path, title: str, commands: list[list[str]],
     `env`: variables these commands need on top of this process's own (the course's
     WORKSPACE_DIR and LECTURE_DIR). `meta`: see Task."""
     with _start_lock:
+        locations.prepare()
         if (busy := running(course_root)) is not None:
             raise TaskBusy(busy)
         base = course_root / TASKS_DIR
