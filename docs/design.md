@@ -2460,7 +2460,9 @@ does not answer (its row a Problem, the image row skipped); Build on the image's
 away from the image; a .venv on a Python the course no longer declares, switched with
 "Make .venv with Python 3.12"; with only an unsuitable Python on the machine (a
 stand-in list), "Download one with uv" opened; and a new package's independent review.
-Not clicked: the uv download itself (uv is not installed on the owner's machine).
+The uv download itself was clicked on 2026-11-10, once uv was installed: the page listed
+five CPythons with the two the course cannot use marked, the form waited for its tick,
+`uv python install` put 3.13 in uv's own folder, and the switch then offered it.
 That round found two faults no test had: the page took envcheck's exit status 1 (a
 requirement fails) for a check that could not run and dropped its rows, so the switch
 did not mark the .venv's own Python nor apply the probe's removed-module rows; and the
