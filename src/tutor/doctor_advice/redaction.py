@@ -16,6 +16,12 @@ from urllib.parse import quote, quote_plus, urlsplit, urlunsplit
 # selected profile value even when its environment variable has an unusual name.
 _SECRET = re.compile(r"(?:^|_)(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIALS?|APIKEY)(?:_|$)"
                      r"|^(?:AUTHORIZATION|DOCKER_AUTH_CONFIG)$", re.IGNORECASE)
+
+def secret_name(name: str) -> bool:
+    """Whether a variable is named like a credential (the rule the redactor uses)."""
+    return bool(_SECRET.search(name))
+
+
 _ANSI = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\))")
 _CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]")
 _BEARER = re.compile(r"\b(Bearer|Basic)\s+[A-Za-z0-9+/._~=-]+", re.IGNORECASE)

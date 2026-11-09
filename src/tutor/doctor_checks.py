@@ -15,6 +15,7 @@ from importlib import metadata
 from pathlib import Path
 
 from tutor import (
+    compat,
     config,
     container,
     course_requirements,
@@ -85,7 +86,7 @@ def docker(run: Callable, required: bool) -> list[Row]:
     if problem:
         action = ("install Docker Desktop, start it, then run tutor doctor again"
                   if "not installed" in problem else problem)
-        return [Row("FAIL" if required else "WARN", problem, action)]
+        return [Row("FAIL" if required else "WARN", problem, action, "host-guide")]
     return [Row("OK", f"Docker {version} is running")]
 
 
@@ -123,10 +124,11 @@ def runner(course: Course) -> list[Row]:
     if course.runner is None:
         return [Row("WARN", "runner not chosen; tests run on this machine",
                     "choose it on the Environment page or set [isolation] runner "
-                    "in workspace.toml")]
+                    "in workspace.toml", "choose-runner")]
     if course.runner not in ("host", "container"):
         return [Row("FAIL", "runner is not host or container",
-                    'set [isolation] runner to "host" or "container" in workspace.toml')]
+                    'set [isolation] runner to "host" or "container" in workspace.toml',
+                    "choose-runner")]
     return [Row("OK", f"runner: {course.runner}")]
 
 
@@ -137,7 +139,7 @@ def venv(course: Course, run: Callable) -> list[Row]:
     install = f'python -m tutor.workspace init {target}' + context
     if not executable.is_file():
         course.host_check = course_requirements.Probe(None, problem="missing .venv")
-        return [Row("FAIL", "course .venv is missing", install)]
+        return [Row("FAIL", "course .venv is missing", install, "install-venv")]
     try:
         done = run([str(executable), "-c", "import tutor"], timeout=30,
                    capture_output=True, text=True,
@@ -151,10 +153,10 @@ def venv(course: Course, run: Callable) -> list[Row]:
     if not good:
         course.host_check = course_requirements.Probe(str(executable), problem="broken .venv")
         return [Row("FAIL", "course .venv Python cannot import tutor",
-                    install + " --python <a Python 3.11+> --replace-venv")]
+                    install + " --python <a Python 3.11+> --replace-venv", "install-venv")]
     script = executable.with_name("tutor.exe" if sys.platform == "win32" else "tutor")
     if not script.is_file():
-        return [Row("WARN", ".venv made before the tutor command existed", install)]
+        return [Row("WARN", ".venv made before the tutor command existed", install, "install-venv")]
     return [Row("OK", "course .venv imports tutor and has the tutor command")]
 
 
@@ -180,8 +182,24 @@ def requirements(course: Course, run: Callable, reported: set[str]) -> list[Row]
         rows.append(Row("OK" if result["ok"] else "FAIL",
                         f"host {result['name']}: required {result['required']}, "
                         f"found {result['found'] or 'not found'}",
-                        "" if result["ok"] else hint or "see the Environment page, step 2"))
+                        "" if result["ok"] else hint or "see the Environment page, step 2",
+                        None if result["ok"] else requirement_fix(result)))
     return rows
+
+
+def requirement_fix(result: dict) -> str | None:
+    """Map known checks to existing actions, leaving unsupported declarations as text."""
+    name = result["name"]
+    if name == "python" or (name.endswith(" imports")
+                             and result["required"] in compat.REMOVED_MODULES):
+        return "switch-python"
+    if name in ("java", "hadoop", "gcc") or name.startswith("winutils"):
+        return "host-guide"
+    if name.endswith(" imports"):
+        return "ask-model"  # an imports failure with no known deterministic remedy
+    if envcheck.requires_problems({name: result["required"]}, allow_bounds=True):
+        return None
+    return "install-venv"
 
 
 def course_target(course: Course) -> tuple[str, str]:
@@ -206,5 +224,5 @@ def image(course: Course, run: Callable, docker_ready: bool) -> list[Row]:
         return [Row("SKIP", "test image: Docker is not available")]
     name = container.image_for([course.root / config.WORKSPACE_FILE])
     problem = container.image_problem(name, run)
-    return ([Row("FAIL", f"test image: {problem}", problem)] if problem else
+    return ([Row("FAIL", f"test image: {problem}", problem, "build-image")] if problem else
             [Row("OK", f"test image: {name}")])

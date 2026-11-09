@@ -12,12 +12,17 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 from collections.abc import Callable
 from pathlib import Path
 
 from tutor.doctor_rows import Row
+
+# Text shaped like an API key, whatever variable it came from: "sk-..." (OpenAI, DeepSeek,
+# Anthropic) and GLM's "<32 hex>.<secret>" (llm.KEY_LIKE's two shapes, anywhere in a line).
+_KEY_TEXT = re.compile(r"\bsk-[\w-]{16,}|\b[0-9a-f]{32}\.\w{8,}")
 
 
 def tool_python() -> list[Row]:
@@ -42,6 +47,7 @@ def main(argv: list[str] | None = None, *, run: Callable | None = None, validato
     parser.add_argument("folder", nargs="?", type=Path,
                         help="course folder or any folder inside it")
     from tutor.doctor_advice import cli as advice_cli
+    from tutor.doctor_advice import redaction
 
     advice_cli.add_arguments(parser)
     args = parser.parse_args(argv)
@@ -51,12 +57,16 @@ def main(argv: list[str] | None = None, *, run: Callable | None = None, validato
     rows: list[Row] = []
 
     def clean(text: str) -> str:
-        # Exception messages can quote subprocess arguments. Redact environment data at
-        # the output boundary too; never dump the environment or a probe's raw stderr.
-        values = sorted({v for v in os.environ.values() if len(v) >= 8}, key=len, reverse=True)
+        # Exception messages can quote subprocess arguments, so credentials are removed at
+        # the output boundary too: the values of variables named like one (KEY, TOKEN,
+        # SECRET, PASSWORD, ...; the redactor's rule) and any text shaped like an API key.
+        # Not every environment value (owner, 2026-11-09): hiding HOME or TMPDIR broke the
+        # paths in the commands a row advises, e.g. `init "../private[...]course"`.
+        values = sorted({v for k, v in os.environ.items()
+                         if len(v) >= 8 and redaction.secret_name(k)}, key=len, reverse=True)
         for value in values:
             text = text.replace(value, "[environment value redacted]")
-        return text
+        return _KEY_TEXT.sub("[credential redacted]", text)
 
     def say(text: str) -> None:
         for line in clean(text).splitlines():
@@ -69,7 +79,7 @@ def main(argv: list[str] | None = None, *, run: Callable | None = None, validato
         rows.append(row)
         if on_row is not None:
             # GUI gets the same environment redaction as CLI, without parsing human logs.
-            on_row(Row(row.status, clean(row.text), clean(row.next_step)))
+            on_row(Row(row.status, clean(row.text), clean(row.next_step), row.fix))
         # One row stays one line even when an external exception contains newlines.
         say(f"{row.status:<5} {' '.join(row.text.splitlines())}")
         if row.status in ("WARN", "FAIL"):
@@ -149,7 +159,7 @@ def main(argv: list[str] | None = None, *, run: Callable | None = None, validato
                             if problem:
                                 blocked.add(part.key)
                                 return [Row("FAIL", problem, "use WSL or choose the container "
-                                            "on the Environment page")]
+                                            "on the Environment page", "host-guide")]
                             return []
                         check(f"{part.key} platform", platform_check)
                 check("host tools", lambda: checks.requirements(course, run, reported))

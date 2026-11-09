@@ -10,3 +10,5 @@ class Row:
     status: str
     text: str
     next_step: str = ""
+    # A fixed GUI action identifier; CLI text and exit status do not depend on it.
+    fix: str | None = None

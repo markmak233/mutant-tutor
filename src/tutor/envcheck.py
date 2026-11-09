@@ -72,8 +72,11 @@ def requires_problems(requires: Mapping[str, str], *, allow_bounds: bool = False
                     raise ValueError
                 package_bounds.numeric_specifier(version)
             except ValueError:
+                # python, java, hadoop and gcc take a prefix only; a pip package also a bound.
+                bound = allow_bounds and name not in NOT_PIP
+                other = ' or a numeric package bound such as ">=1,<2"' if bound else ""
                 problems.append(f"[requires] {name} = {version!r}: use a version prefix such as "
-                                '"3.5" or a numeric package bound')
+                                f'"3.5"{other}')
     problems += [f"[requires] has {name} but no java, and {name} needs a JVM"
                  for name in NEEDS_JAVA if name in requires and "java" not in requires]
     # A package version known not to work on the course's Python (tutor.compat).

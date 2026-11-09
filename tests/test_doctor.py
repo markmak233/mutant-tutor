@@ -200,6 +200,20 @@ def test_empty_requirement_hint_falls_back(tmp_path, rig, capsys):
     assert "next: see the Environment page, step 2" in capsys.readouterr().out
 
 
+def test_gui_fix_metadata_does_not_change_cli_output_or_exit(rig, capsys, monkeypatch):
+    from tutor.doctor_rows import Row
+
+    answers = []
+    for fix in (None, "install-venv"):
+        monkeypatch.setattr(doctor, "tool_python",
+                            lambda fix=fix: [Row("OK", "synthetic tool", fix=fix)])
+        rows = []
+        code = doctor.main([], run=rig, on_row=rows.append)
+        answers.append((code, capsys.readouterr().out))
+        assert rows[0].fix == fix
+    assert answers[0] == answers[1]
+
+
 def test_host_packages_and_python_come_from_course_venv(tmp_path, rig, monkeypatch, capsys):
     """The tool lacks this synthetic package; the subprocess's installed version wins."""
     root = course(tmp_path, declarations='[requires]\npython="3.12"\nexamplelib="1"\n')
@@ -262,6 +276,24 @@ def test_output_redacts_environment_values_even_from_exceptions(rig, monkeypatch
     monkeypatch.setattr(doctor_checks, "tool_version", bad)
     assert doctor.main([], run=rig) == 1
     assert sentinel not in capsys.readouterr().out
+
+
+def test_output_hides_credentials_but_keeps_paths_readable(rig, monkeypatch, capsys):
+    """Only variables named like credentials are hidden, and text shaped like a key: a
+    path that happens to be some variable's value (HOME, TMPDIR) stays, so the command a
+    row advises can be copied."""
+    monkeypatch.setenv("SCRATCH_PLACE", "/somewhere/long/enough")
+    monkeypatch.setenv("SERVICE_TOKEN", "plainly-fake-token-value")
+
+    def bad():
+        raise RuntimeError("run init \"/somewhere/long/enough/course\" with "
+                           "plainly-fake-token-value and sk-test-not-a-real-key")
+
+    monkeypatch.setattr(doctor_checks, "tool_version", bad)
+    assert doctor.main([], run=rig) == 1
+    out = capsys.readouterr().out
+    assert '"/somewhere/long/enough/course"' in out
+    assert "plainly-fake-token-value" not in out and "sk-test-not-a-real-key" not in out
 
 
 @pytest.mark.parametrize("entry", ["installed", "module"])
