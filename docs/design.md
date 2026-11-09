@@ -3361,6 +3361,13 @@ mode is not done (see "Decisions not to do").
   state has an explicit reset, and no server is killed. `tutor shortcut` creates a new
   .command/.lnk/.desktop without overwriting or changing startup items. Native desktop
   trust/click and browser acceptance remain separate from platform-format unit tests.
+  Optional Python management built 2026-11-09: existing uv-managed stable CPythons join
+  interpreter discovery. The separate optional page/`tutor python` command lists uv's
+  offline catalog; only a confirmed action downloads a freshly offered interpreter,
+  checking known conflicts and measured removed imports. No system installer, PATH alias,
+  course switch, runner fallback or default-doctor install. Native install acceptance
+  uses a new scratch root and an existing Python, with implicit Python downloads disabled;
+  the packaging CI matrix covers installed wheels/fresh synthetic courses on three OSes.
   - One click (the owner's aim, 2026-11-05; installation acceptance still pending): one install
     line gets `uv`, which fetches the Python it needs and installs the tool (`uv tool install`,
     the same job as `pipx`, without needing Python first). `tutor gui` starts the server and

@@ -206,8 +206,14 @@ def init(root: Path, course: str | None = None, extras: str = DEFAULT_EXTRAS,
     if (repo := _enclosing_git_repo(root)) is not None:
         raise WorkspaceError(f"{root} is inside the git repository {repo}; choose a folder "
                              "outside it, so course material is never committed")
-    if not (REPO / "pyproject.toml").is_file():
-        raise WorkspaceError(f"no pyproject.toml in {REPO}: run this from a source checkout")
+    # Preflight the actual source provider before creating files or moving an old venv.
+    # An installed wheel has its own bundle, rather than a checkout beside site-packages.
+    try:
+        with project_source.source():
+            pass
+    except ValueError:
+        raise WorkspaceError("current tutor source could not be used; "
+                             "reinstall a complete tutor wheel") from None
     if replace_venv and python is None:
         raise WorkspaceError("--replace-venv makes the .venv with another Python: give --python")
     # [requires] as it will be: a switch to another Python is checked against that one, as a

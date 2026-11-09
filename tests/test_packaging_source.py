@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 import test_workspace as support
 
-from tutor import project_source
+from tutor import project_source, workspace
 
 
 def builder():
@@ -70,6 +70,7 @@ def test_packaged_course_install_keeps_no_editable_temporary_reference(tmp_path,
     builder().bundle(root, package)
     monkeypatch.setattr(project_source, "__file__", str(package / "project_source.py"))
     monkeypatch.setattr(project_source, "checkout", lambda: None)
+    monkeypatch.setattr(workspace, "REPO", tmp_path / "not-a-checkout")
     fake = support.FakeInstall()
     support.make(tmp_path / "course", fake)
     command = fake.commands[0]

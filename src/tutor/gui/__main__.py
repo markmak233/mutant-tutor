@@ -2,8 +2,9 @@
 
 Starts the GUI on 127.0.0.1 and opens it in the browser. `--root` is the folder that holds
 the course folders; by default the one above WORKSPACE_DIR (from the environment or `.env`),
-which is how `python -m tutor.workspace init` lays courses out. The port is a free one unless
-given. Ctrl+C stops the server.
+which is how `python -m tutor.workspace init` lays courses out. Installed wheels with no
+WORKSPACE_DIR use per-user courses/config folders. The port is a free one unless given.
+A repeat launch verifies and reuses the existing local server. Ctrl+C stops the server.
 """
 
 from __future__ import annotations
@@ -85,8 +86,10 @@ def main(argv: list[str] | None = None) -> int:
                 app = create_app(root, token)
                 # Port 0 lets the system pick a free one; the Host check needs the real one.
                 server = create_server(app, host="127.0.0.1", port=args.port)
-                app.config["PORT"] = server.effective_port
-                state = launcher_state.save(root, server.effective_port, token)
+                # Waitress reports its effective port as text; persist a validated integer.
+                port = int(server.effective_port)
+                app.config["PORT"] = port
+                state = launcher_state.save(root, port, token)
     except (OSError, ValueError) as e:
         if server is not None:
             server.close()

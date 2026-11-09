@@ -46,27 +46,20 @@ in C, are in [`examples/`](examples/).
 
 ## Quick start
 
-Requirements: Python 3.11 to 3.14 (each tested in CI; the big-data examples need 3.13 or
-older, as PySpark 3.5 does not run on 3.14) and, for the big-data examples, Java 17. Setting up from scratch: [`docs/setup/bigdata.md`](docs/setup/bigdata.md).
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then from this checkout
+with Python 3.11 already installed:
 
 ```bash
-python3.11 -m venv .venv && source .venv/bin/activate
-pip install -e ".[bigdata,dev]"
-cp .env.example .env            # set JAVA_HOME; comment out WORKSPACE_DIR / HADOOP_HOME if unused
-
-pytest                          # fast unit tests (~30 s)
-python -m tutor.validation examples/station-average-rdd/exercise examples/station-average-rdd/solution
+uv tool install --no-python-downloads --python 3.11 ".[gen,gui,doctor]"
+tutor gui
 ```
 
-The GUI (courses, lectures, models and keys, environment, planning and approving a batch;
-generating also needs the `gen` extra):
-
-```bash
-pip install -e ".[gui]"
-python -m tutor.gui             # every course folder next to WORKSPACE_DIR's, or --root DIR
-```
-
-It listens on 127.0.0.1 only, with a token for each launch.
+The GUI manages courses, lectures, models, keys and environment, then plans and approves
+a batch. It listens on 127.0.0.1 with a launch token; a second launch reuses its verified
+server. `tutor shortcut` creates a local desktop launcher. See
+[installation and fresh-machine prerequisites](docs/setup/install.md), including the
+explicit option to let uv download Python. Docker is needed for container courses;
+host big-data runs also need [Java/Hadoop](docs/setup/bigdata.md).
 
 For a course set to the container, run `tutor test` from an exercise folder (or
 `python -m tutor test`). It shows live output and records attempts on the host, with a

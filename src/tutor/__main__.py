@@ -9,6 +9,10 @@ import sys
 def main(argv: list[str] | None = None) -> int:
     """Each command owns its options and help; imports stay lazy for a small dispatcher."""
     args = list(sys.argv[1:] if argv is None else argv)
+    if args and args[0] == "python":
+        from tutor.python_manager import main as python_main
+
+        return python_main(args[1:])
     if args and args[0] == "gui":
         from tutor.gui.__main__ import main as gui_main
 
@@ -26,7 +30,7 @@ def main(argv: list[str] | None = None) -> int:
 
         return test_main(args[1:])
     parser = argparse.ArgumentParser(prog="tutor", description="Local coding practice")
-    parser.add_argument("command", choices=("test", "doctor", "gui", "shortcut"))
+    parser.add_argument("command", choices=("test", "doctor", "gui", "shortcut", "python"))
     parser.parse_args(args)
     return 2
 

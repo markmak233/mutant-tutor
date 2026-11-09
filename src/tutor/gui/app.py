@@ -81,7 +81,8 @@ def create_app(root: Path, token: str, port: int | None = None,
     """`root`: the folder holding the course folders. `port`: the one the server listens on,
     for the Host check; set later through app.config["PORT"] when the server picks it.
     `launcher`: what opens folders and VS Code (tests pass a stand-in). `env_file`: where
-    the Keys page keeps keys, by default the repository's .env, which the commands read."""
+    the Keys page keeps keys, by default the command config folder's .env (checkout or
+    private packaged app config), which only the child commands read."""
     app = Flask(__name__)
     # MAX_CONTENT_LENGTH: a request larger than this gets 413 before it is read; each lecture
     # file has its own limit (lectures.MAX_LECTURE_BYTES).

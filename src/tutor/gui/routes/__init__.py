@@ -21,6 +21,7 @@ from tutor.gui.routes import (
     new_course,
     pages,
     plans,
+    python_downloads,
     task_pages,
 )
 
@@ -28,5 +29,5 @@ from tutor.gui.routes import (
 def register_all(app: Flask) -> None:
     """Register each page area once; all templates use these unprefixed endpoints."""
     for module in (pages, task_pages, plans, lectures, new_course, keys, models, environment,
-                   doctor, coverage, host_setup, image_records):
+                   doctor, coverage, host_setup, image_records, python_downloads):
         module.register(app)

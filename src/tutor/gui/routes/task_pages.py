@@ -47,6 +47,9 @@ def return_to(course: courses.Course, task: tasks.Task) -> tuple[str, str, str |
         return url_for("models", name=name), "Models", "models-checked"
     if kind == "doctor":
         return url_for("doctor_view", name=name), "Doctor", None
+    if kind == "python-download":
+        # Retry returns to a fresh catalog/confirmation form, never silently repeats a download.
+        return url_for("python_downloads", name=name), "Optional Python", None
     if kind == "coverage-draft":
         return url_for("coverage_view", name=name), "Coverage", "coverage-drafted"
     if kind in ENVIRONMENT_NOTICES:

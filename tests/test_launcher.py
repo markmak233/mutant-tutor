@@ -2,9 +2,11 @@
 
 import base64
 import json
+import re
 import shlex
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -70,6 +72,24 @@ def test_second_gui_launch_reuses_verified_server(tmp_path, monkeypatch, capsys)
     assert "Reused the verified server" in capsys.readouterr().out
 
 
+def test_waitress_text_port_is_saved_as_integer(tmp_path, monkeypatch):
+    import waitress
+
+    class Server:
+        effective_port = "8000"
+
+        def run(self):
+            assert state.read(tmp_path)["port"] == 8000
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(waitress, "create_server", lambda *a, **k: Server())
+    monkeypatch.setattr(locations, "prepare", lambda: tmp_path)
+    assert gui_main.main(["--root", str(tmp_path), "--no-browser"]) == 0
+    assert state.read(tmp_path) is None
+
+
 def test_packaged_paths_use_private_override_without_creating_it(tmp_path, monkeypatch):
     monkeypatch.setattr(locations.project_source, "checkout", lambda: None)
     monkeypatch.setenv("TUTOR_HOME", str(tmp_path / "portable"))
@@ -108,7 +128,10 @@ def test_windows_link_uses_encoded_com_script_and_argument_quoting(tmp_path, mon
         assert "course''s folder" in script and "WScript.Shell" in script
         args = subprocess.list2cmdline(["-m", "tutor", "gui", "--root", str(root)])
         assert args.replace("'", "''") in script
-        (tmp_path / "Tutor.lnk").write_bytes(b"synthetic link")
+        raw = re.search(r"CreateShortcut\('((?:[^']|'')*)'\)", script)[1]
+        target = Path(raw.replace("''", "'"))
+        assert not target.exists() and target != tmp_path / "Tutor.lnk"
+        target.write_bytes(b"synthetic link")
         return subprocess.CompletedProcess(command, 0)
 
     assert shortcut.create(tmp_path, root, run=run).suffix == ".lnk"

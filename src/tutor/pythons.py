@@ -3,7 +3,9 @@
 
 Found, never installed: on PATH as python3.11, python3.12, ... (and python3), and on Windows
 through the py launcher's list. Each is asked for its own version, since a name can point at
-anything. Only versions this project runs on (3.11 or later) are kept.
+anything. Installed uv-managed stable CPythons join through an offline catalog query;
+missing/broken uv never hides PATH interpreters and discovery never downloads Python.
+Only versions this project runs on (3.11 or later) are kept.
 """
 
 from __future__ import annotations
@@ -15,6 +17,8 @@ import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+
+from tutor import python_manager
 
 LOWEST = (3, 11)  # pyproject.toml's requires-python
 _NEWEST_MINOR = 20  # names python3.11 .. python3.20 are looked for
@@ -38,11 +42,12 @@ class Found:
         return ".".join(self.version.split(".")[:2])
 
 
-def ask(python: Path, run: Callable = subprocess.run) -> Found | None:
+def ask(python: Path, run: Callable | None = None) -> Found | None:
     """The interpreter's own answer: its version and its base interpreter, or None when it
     does not run."""
     try:
-        done = run([str(python), "-c", _ASK], capture_output=True, text=True, timeout=15)
+        done = (run or subprocess.run)([str(python), "-c", _ASK], capture_output=True,
+                                       text=True, timeout=15)
     except (OSError, subprocess.TimeoutExpired):
         return None
     lines = done.stdout.strip().splitlines()
@@ -64,11 +69,18 @@ def _candidates(which: Callable, run: Callable) -> list[Path]:
     return found
 
 
-def find(which: Callable = shutil.which, run: Callable = subprocess.run) -> list[Found]:
+def find(which: Callable | None = None, run: Callable | None = None) -> list[Found]:
     """Every Python 3.11 or later found, newest first, each once (two names for one file,
     such as python3 and python3.12, count once)."""
     seen: dict[Path, Found] = {}
-    for path in _candidates(which, run):
+    which, run = which or shutil.which, run or subprocess.run
+    candidates = _candidates(which, run)
+    try:
+        candidates += [e.path for e in python_manager.catalog(installed=True, which=which, run=run)
+                       if e.path is not None]
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        pass  # optional uv must not hide existing PATH/py-launcher interpreters
+    for path in candidates:
         try:
             real = path.resolve()
         except OSError:
