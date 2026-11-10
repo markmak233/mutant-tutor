@@ -4,6 +4,7 @@ English strings extracted from the pages, and a model's translation checked and 
 test calls a model: the chat function is a stand-in keyed by the request's content."""
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -170,6 +171,60 @@ def test_a_page_shows_the_chosen_language_and_the_switch_goes_back_and_forth(roo
                        data={"language": "fr"}).status_code == 400
 
 
+# --- right to left -----------------------------------------------------------------------------
+
+ARABIC = '''msgid ""
+msgstr ""
+"X-Name: العربية\\n"
+
+msgid "Courses"
+msgstr "الدورات"
+
+msgid "Keys"
+msgstr "المفاتيح 2"
+'''
+
+
+def test_the_direction_is_read_off_the_text_unless_the_header_says():
+    assert i18n.direction_of({}, "") == "ltr"  # English: nothing to read
+    assert i18n.direction_of({"Courses": "课程"}, "中文") == "ltr"
+    assert i18n.direction_of({"Courses": "الدورات", ("x", 0): "1 عنصر"}, "ar") == "rtl"
+    assert i18n.direction_of({"Courses": "קורסים"}, "עברית") == "rtl"
+    # A name typed as a code does not outvote the text; punctuation and digits decide
+    # nothing; a file with no translations yet goes by its name.
+    assert i18n.direction_of({"Next:": "- 2 הבא"}, "he") == "rtl"
+    assert i18n.direction_of({}, "العربية") == "rtl"
+    assert i18n.direction_of({"Courses": "Courses"}, "العربية") == "ltr"  # given back English
+    assert i18n.read_po(ARABIC)[1]["X-Name"] == "العربية"
+
+
+def test_a_right_to_left_language_sets_the_page_direction(root):
+    (root / i18n.TRANSLATIONS / "ar.po").write_text(ARABIC, encoding="utf-8")
+    client = _browser(root)
+    assert 'dir="ltr"' in _page(client, "/")  # English
+    i18n.choose(root, "zh")
+    assert 'dir="ltr"' in _page(client, "/")
+    i18n.choose(root, "ar")
+    text = _page(client, "/")
+    assert 'lang="ar" dir="rtl"' in text and "<title>الدورات" in text
+    # The header, when it says, wins over the text: a hand-edited file may set it.
+    (root / i18n.TRANSLATIONS / "ar.po").write_text(
+        ARABIC.replace('"X-Name: العربية\\n"', '"X-Name: العربية\\n"\n"X-Direction: LTR\\n"'),
+        encoding="utf-8")
+    assert 'lang="ar" dir="ltr"' in _page(client, "/")
+
+
+def test_the_stylesheet_names_no_physical_side():
+    """`<html dir="rtl">` mirrors the pages only when the stylesheet says start and end,
+    never left and right (gui/static/style.css)."""
+    css = (Path(i18n.__file__).parent / "static" / "style.css").read_text(encoding="utf-8")
+    physical = re.compile(r"\b(?:margin|padding|border)-(?:left|right)\b|\b(?:left|right)\s*:"
+                          r"|text-align\s*:\s*(?:left|right)\b")
+    rules = re.sub(r"/\*.*?\*/", "", css, flags=re.S)  # the comments may say "left"
+    assert [line for line in rules.splitlines() if physical.search(line)] == []
+    assert "code, pre, kbd, .log { direction: ltr;" in css  # code stays left to right
+
+
 def test_a_notice_and_a_plural_are_translated(root):
     client = _browser(root)
     i18n.choose(root, "zh")
@@ -314,6 +369,7 @@ def test_the_command_writes_the_file_in_batches_and_asks_only_for_what_is_missin
     path = tmp_path / "courses" / i18n.TRANSLATIONS / "中文.po"
     catalog, headers = i18n.read_po(path.read_text(encoding="utf-8"))
     assert headers["X-Name"] == "中文" and "tutor.gui.translate" in headers["X-Generator"]
+    assert headers["X-Direction"] == "ltr"  # read off the translations (gui/i18n.py)
     assert catalog == {"Courses": "课程", "Keys": "密钥", ("%(count)s batch", 0): "%(count)s 批",
                        ("%(count)s batch", 1): "%(count)s 批"}
     assert len(asked) == 2  # two batches of two

@@ -1,7 +1,9 @@
 <!doctype html>
 {# Every page extends this. Values are escaped by Jinja2; nothing here marks text as safe
-   but a translation, which _() marks so (gui/i18n.py checks each one for markup first). #}
-<html lang="{{ gui_language }}">
+   but a translation, which _() marks so (gui/i18n.py checks each one for markup first).
+   dir: "rtl" for a language written right to left (gui/i18n.py); the stylesheet uses
+   logical properties, so the browser mirrors the layout from this one attribute. #}
+<html lang="{{ gui_language }}" dir="{{ gui_direction }}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">

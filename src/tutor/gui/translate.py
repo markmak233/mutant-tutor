@@ -147,8 +147,11 @@ def save(path: Path, name: str, messages: list[Message], catalog: dict,
         else:
             entries.append((m.singular, m.plural, catalog.get((m.singular, 0), ""),
                             catalog.get((m.singular, 1), "")))
+    # X-Direction: the side the language is written from, read off the translations so
+    # far (gui/i18n.py `direction_of`), so the pages mirror for Arabic, Hebrew, Persian...
     headers = {"Content-Type": "text/plain; charset=UTF-8", "MIME-Version": "1.0",
                "Content-Transfer-Encoding": "8bit", i18n.NAME_HEADER: name,
+               i18n.DIRECTION_HEADER: i18n.direction_of(catalog, name),
                "X-Generator": f"tutor.gui.translate {PROMPT_VERSION}, {model}, "
                               f"{date.today().isoformat()}"}
     path.parent.mkdir(parents=True, exist_ok=True)

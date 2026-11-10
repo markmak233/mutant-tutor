@@ -3983,7 +3983,22 @@ late; the adaptive review screens can be built with it.
     passed in as captured blocks (`{% set code_x %}<code>…</code>{% endset %}`, which
     escape their content), so a translator sees the whole sentence. Still English:
     the language rows' titles and roles (`tutor.languages`, a core module), a
-    throwaway `_` must not be used in a module that imports gettext as `_`.
+    throwaway `_` must not be used in a module that imports gettext as `_`. Right to
+    left (owner, 2026-11-10 "Arabic also needs the layout mirrored"; 2026-11-11): every
+    page is `<html dir="rtl">` for such a language and the stylesheet names no physical
+    side (start and end, `margin-inline-start`, `inset-inline-start`; a test refuses
+    `left` and `right`), so the browser mirrors the pages from that one attribute;
+    code, paths, commands and a task's log are `direction: ltr` and bidi-isolated, as
+    they read the same in every language. The direction comes from the file's
+    `X-Direction` header (`rtl` or `ltr`, written by `tutor.gui.translate`), else read
+    off the translations themselves (the side most of their first strong characters
+    are written from, Unicode's bidirectional classes R and AL against L; the name
+    decides a tie only, so a name typed as a code, "ar", does not outvote the text), so
+    a hand-written file needs no header and nothing new on the form. Checked in Chrome
+    with a hand-written Arabic file (nine strings, no model; `notes/gui-checks/
+    rtl_click_test.py`): the header, buttons, lists, tables and forms mirrored with no
+    horizontal overflow, `<code>` left to right; an arrow in a string ("Lectures →") is
+    the translator's to turn, as it is text.
   - Servers on this machine in New model (owner, 2026-11-07 "WSL and Mac llama, those
     local ones, later"; 2026-11-10). models.dev lists only LM Studio of them. The form's
     provider choice now starts with an "On this machine" group (Ollama, LM Studio,
