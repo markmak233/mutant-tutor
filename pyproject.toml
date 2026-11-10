@@ -71,7 +71,7 @@ where = ["src"]
 # The GUI's pages and stylesheet are not Python files, so a built package must be told to
 # include them.
 [tool.setuptools.package-data]
-"tutor.gui" = ["templates/*.html", "static/*"]
+"tutor.gui" = ["templates/*.html", "static/*", "translations/*.po"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

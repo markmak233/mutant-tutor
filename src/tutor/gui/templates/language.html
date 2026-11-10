@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{# The GUI's languages (gui/i18n.py): the switch (also in every page's footer), and
+   "Translate into", which has a course's model write a new language's file as a task
+   (gui/translate.py; paid, so only on its click). English is built in; the others are
+   files under <root>/translations, one per language, which the owner may edit. #}
+{% block title %}{{ _("Language") }}{% endblock %}
+{% block crumbs %}<span>{{ _("Language") }}</span>{% endblock %}
+{% block content %}
+<h1>{{ _("Language") }}</h1>
+<p class="muted">{{ _("The pages' own text, in the language chosen here for every course. What a task prints, what a model wrote and the exercise files stay as they are.") }}</p>
+<section class="step">
+<h2>{{ _("Choose") }}</h2>
+<ul class="sources">
+{% for code, name in gui_languages.items() %}
+  <li>{% if code == gui_language %}<strong>{{ name }}</strong> <span class="muted">{{ _("(in use)") }}</span>{% else %}
+    <form method="post" action="{{ url_for('set_language') }}" class="action"><input type="hidden" name="language" value="{{ code }}"><input type="hidden" name="back" value="{{ url_for('language_page') }}"><button type="submit">{{ name }}</button></form>{% endif %}
+    {% if code != "en" %}<code class="muted">{{ folder / (code ~ ".po") }}</code>{% endif %}</li>
+{% endfor %}
+</ul>
+{% if not chosen %}<p class="muted">{{ _("No choice is kept yet: the browser's language is used when there is a file for it, else English.") }}</p>{% endif %}
+</section>
+<section class="step">
+<h2>{{ _("Translate into another language") }}</h2>
+{% if models %}
+<form method="post" action="{{ url_for('translate_language') }}" class="form">
+  <label class="field">{{ _("Language") }} <span class="muted">{{ _("as the switch will show it, e.g. 中文, Deutsch, 日本語; a code such as zh lets the browser's language pick it") }}</span>
+    <input type="text" name="name" required maxlength="40" autocomplete="off"></label>
+  <label class="field">{{ _("Model") }} <span class="muted">{{ _("a course's setup model and its key; the task runs in that course") }}</span>
+    <select name="course">{% for course, model in models %}<option value="{{ course.folder }}">{{ course.workspace.course }}: {{ model }}</option>{% endfor %}</select></label>
+  <label class="check"><input type="checkbox" name="again" value="1"> {{ _("Translate every string again (else only those the language's file lacks)") }}</label>
+  <p class="muted">{{ _("%(strings)d English strings; about %(tokens)d thousand tokens in and out for all of them: a paid model charges for them. A translation that changes a placeholder or adds markup is left English.", strings=strings, tokens=tokens_k) }}</p>
+  <div class="actions"><button type="submit" class="primary">{{ _("Translate") }}</button></div>
+</form>
+{% else %}
+<p>{{ _("No course has a model yet: add one on a course's Models page first.") }}</p>
+{% endif %}
+</section>
+{% endblock %}

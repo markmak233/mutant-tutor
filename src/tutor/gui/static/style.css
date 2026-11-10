@@ -278,3 +278,11 @@ table.catalog-models td.num, table.catalog-models td:nth-child(2), table.catalog
 table.catalog-models tr.chosen td { background: var(--track); }
 /* The model form's off-screen Save, which Enter presses (profile.html). */
 .enter-saves { position: absolute; left: -10000px; width: 1px; height: 1px; overflow: hidden; }
+
+/* The language switch at the foot of every page (gui/i18n.py): the one in use in bold,
+   the others as small buttons in one line. */
+footer.language-switch {
+  max-width: 64rem; margin: 1rem auto; padding: 0.5rem 1rem; color: var(--muted);
+  display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; font-size: 0.9rem;
+}
+footer.language-switch form.action { display: inline; }

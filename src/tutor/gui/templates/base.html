@@ -1,10 +1,11 @@
 <!doctype html>
-{# Every page extends this. Values are escaped by Jinja2; nothing here marks text as safe. #}
-<html lang="en">
+{# Every page extends this. Values are escaped by Jinja2; nothing here marks text as safe
+   but a translation, which _() marks so (gui/i18n.py checks each one for markup first). #}
+<html lang="{{ gui_language }}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}Courses{% endblock %} · mutant-tutor</title>
+  <title>{% block title %}{{ _("Courses") }}{% endblock %} · mutant-tutor</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   {# htmx 2.0.11, vendored and checked against npm's sha512 (design.md). No eval, no script
      tags in swapped HTML, no inline indicator styles: the CSP allows none of them. #}
@@ -15,11 +16,16 @@
   <header>
     <a class="brand" href="{{ url_for('home') }}">mutant-tutor</a>
     <nav aria-label="Breadcrumb">{% block crumbs %}{% endblock %}</nav>
-    <a class="header-link" href="{{ url_for('key_list') }}">Keys</a>
+    <a class="header-link" href="{{ url_for('key_list') }}">{{ _("Keys") }}</a>
   </header>
   <main>
-    {% if notice %}<p class="notice notice-{{ notice.kind }}" role="status">{{ notice.text }}</p>{% endif %}
+    {% if notice %}<p class="notice notice-{{ notice.kind }}" role="status">{{ _(notice.text) }}</p>{% endif %}
     {% block content %}{% endblock %}
   </main>
+  <footer class="language-switch">
+    {# The language, for every course (gui/i18n.py): the others as buttons, back to this page. #}
+    <a href="{{ url_for('language_page') }}">{{ _("Language") }}</a>:
+    {% for code, name in gui_languages.items() %}{% if code == gui_language %}<strong>{{ name }}</strong>{% else %}<form method="post" action="{{ url_for('set_language') }}" class="action"><input type="hidden" name="language" value="{{ code }}"><input type="hidden" name="back" value="{{ request.full_path if request.query_string else request.path }}"><button type="submit" class="small">{{ name }}</button></form>{% endif %}{% endfor %}
+  </footer>
 </body>
 </html>

@@ -3483,14 +3483,9 @@ format (see "Learning rules").
   Output, Example and Constraints in English (the rules read as an exam states them, with
   no mistranslated rule); whether `hints.md` and `tutor.hint` follow.
 
-The GUI in other languages (owner, 2026-11-07; not built). Why not now: the GUI's text still
-changes with every step (23 templates, the notices, and messages written by the Python
-modules: several hundred strings), so a translation now would double each change and its
-tests; and the exercises themselves are in the lectures' language, so a translated GUI
-around them helps only half. Revisit at packaging and release, when the text has settled, and
-together with translated `question.md` above.
-- Shape: gettext (Flask-Babel), English as the only source; the language from a setting or the
-  browser; untranslated strings fall back to English.
+The GUI in other languages: built 2026-11-10 (see "The GUI" below, "The pages in another
+language"); the owner's decision that day: the repository ships English only, and a model
+writes any other language on the Language page. Translated `question.md` above stays deferred.
 
 Later phases, after phase 5 (order decided 2026-10-26, numbered 2026-10-30): phase 6 the
 second course, phase 7 the local GUI, then packaging and release. Changed by the owner on
@@ -3946,6 +3941,38 @@ late; the adaptive review screens can be built with it.
     provider is a GET form, so the page can be reloaded. A `custom` profile at Anthropic's
     own address is refused with the advice to choose `anthropic` (the rule every known
     provider's address has).
+  - The pages in another language (owner, 2026-11-07 asked; 2026-11-10: "I ship no
+    translation; a Language page has a model write the language you want, and the switch
+    goes back and forth, English included"; `gui/i18n.py`, `gui/translate.py`, the Language
+    page). The pages' own text goes through gettext: `_()` and `{% trans %}` in the
+    templates (`{% pluralize %}` for a count), `N_()` on a module-level English string
+    (the notices), which the page translates when it shows it. Not translated: a task's
+    output, `tutor doctor`'s lines (the command's own), what a model wrote, file names and
+    TOML keys, the exercise files VS Code opens. At run time only the standard library's
+    `gettext` and Jinja's `i18n` extension: a language is `<root>/translations/<name>.po`
+    (the name as the owner typed it, "中文"; its header keeps it for the switch), read by
+    this tool's own small .po reader, so no binary `.mo` and no Babel. The English strings
+    are extracted from the pages and modules themselves (Jinja's own `babel_extract` on
+    the templates, an `ast` walk for the calls in the modules), so nothing is kept in
+    step by hand. "Translate into" on the Language page runs `python -m tutor.gui.translate
+    NAME` as a task of the course whose setup model it asks (paid, so on that click only;
+    the page says about how many thousand tokens): batches of 60 strings as a numbered
+    JSON list, a schema for the answer, and each translation kept only when `i18n.safe`
+    passes (the same `%` placeholders, as Jinja formats a translation with `%` and a stray
+    one would fail the page; the same `<...>` pieces, so no markup of the model's own);
+    a refused or unanswered string stays English and is asked again next time, as a run
+    asks only for what the file lacks, so a page changed in English never breaks another
+    language. Jinja's new-style `_()` marks what gettext returns as safe HTML (so the
+    values it formats in are escaped), translated or not, so the callables escape the
+    text first: an English string may say `<profile>` and shows as written; a literal `%`
+    in a page's English is written `%%` (a test checks every string). The language: the
+    owner's choice on the footer's switch, kept for every course in
+    `<root>/.tutor-gui-settings.json`, else the browser's Accept-Language when a file of
+    that code exists, else English. Tried on Ollama's qwen3 0.6B for the click check
+    (59 of 82 strings; the rest stayed English): the path, not the quality. Plural forms:
+    two for every language (the same text twice where a language has one). The
+    templates are wrapped page by page (82 strings on 2026-11-10: the home page, the
+    frame, the Language page and the notices).
   - Servers on this machine in New model (owner, 2026-11-07 "WSL and Mac llama, those
     local ones, later"; 2026-11-10). models.dev lists only LM Studio of them. The form's
     provider choice now starts with an "On this machine" group (Ollama, LM Studio,

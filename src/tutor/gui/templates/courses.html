@@ -2,8 +2,8 @@
 {% from "_macros.html" import bar, chip %}
 {% block content %}
 <div class="title-line">
-  <h1>Your courses</h1>
-  <div class="actions"><a class="button" href="{{ url_for('new_course') }}">New course</a></div>
+  <h1>{{ _("Your courses") }}</h1>
+  <div class="actions"><a class="button" href="{{ url_for('new_course') }}">{{ _("New course") }}</a></div>
 </div>
 <div class="cards">
 {% for view in views %}
@@ -11,22 +11,22 @@
   <section class="card">
     <div class="card-head">
       <h2><a href="{{ url_for('course', name=course.folder) }}">{{ course.workspace.course }}</a></h2>
-      <span class="muted">{{ view.batches | length }} batch{{ "es" if view.batches | length != 1 }}</span>
+      <span class="muted">{% trans count=view.batches | length %}{{ count }} batch{% pluralize %}{{ count }} batches{% endtrans %}</span>
     </div>
     {{ bar(view.count("passed"), view.rows | length) }}
-    <p class="muted">Must exercises: {{ view.count("passed", "must") }} of {{ view.count(None, "must") }} passed</p>
+    <p class="muted">{{ _("Must exercises: %(passed)d of %(total)d passed", passed=view.count("passed", "must"), total=view.count(None, "must")) }}</p>
     {% set next = view.next %}
     {% if next %}
-    <p class="next">Next:
+    <p class="next">{{ _("Next:") }}
       <a href="{{ url_for('exercise', name=course.folder, batch=next[0].name, exercise=next[1].id) }}">{{ next[1].title }}</a>
-      <span class="muted">{{ next[0].name }}</span> {{ chip(next[1].status, labels[next[1].status]) }}</p>
+      <span class="muted">{{ next[0].name }}</span> {{ chip(next[1].status, _(labels[next[1].status])) }}</p>
     {% elif view.rows %}
-    <p class="next">Every must exercise has passed.</p>
+    <p class="next">{{ _("Every must exercise has passed.") }}</p>
     {% else %}
-    <p class="next muted">No exercises yet.</p>
+    <p class="next muted">{{ _("No exercises yet.") }}</p>
     {% endif %}
     {% if view.recent %}
-    <h3>Recent runs</h3>
+    <h3>{{ _("Recent runs") }}</h3>
     <ul class="runs">
     {% for run in view.recent[:3] %}
       <li>{{ chip(run.result) }}
@@ -37,12 +37,12 @@
     {% endif %}
   </section>
 {% else %}
-  <p>No course folder here yet: "New course" makes one, with its lectures.</p>
+  <p>{{ _('No course folder here yet: "New course" makes one, with its lectures.') }}</p>
 {% endfor %}
 </div>
-<p class="muted">Course folders in <code>{{ root }}</code></p>
+<p class="muted">{{ _("Course folders in") }} <code>{{ root }}</code></p>
 {% if problems %}
-<h2>Not shown</h2>
+<h2>{{ _("Not shown") }}</h2>
 <ul class="problems">{% for line in problems %}<li>{{ line }}</li>{% endfor %}</ul>
 {% endif %}
 {% endblock %}
