@@ -1,0 +1,6 @@
+{# The address a server on this machine is asked at, beside the provider choice of the New
+   model form (profile.html): shown for a local provider with its default, hidden for a cloud
+   one. htmx swaps it whenever the choice changes (routes/models.local_address); the hidden
+   `at_for` names the provider the address was shown for, so a choice changed without htmx
+   never sends one server's address to another. #}
+<span id="local-at">{% if at_provider %}<label>at <input type="text" name="at" value="{{ at or at_provider.base_url }}" maxlength="200" size="28" autocomplete="off" title="the server's address: change the port here, then list again"></label><input type="hidden" name="at_for" value="{{ at_provider.id }}">{% endif %}</span>

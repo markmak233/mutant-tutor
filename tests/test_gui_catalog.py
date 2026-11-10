@@ -366,6 +366,24 @@ def test_a_local_servers_address_can_be_changed_and_listed_again(root, monkeypat
     assert 'name="base_url" value="http://localhost:11435/v1"' in text
     text = _page(client, "/c/demo-course/models/new?catalog=ollama&at=localhost:11435")
     assert "The address starts with http://" in text and len(asked) == 2
+    # The choice changed after the address was shown (no htmx): that address is not sent
+    # to the other server; the box shows the new provider's own.
+    text = _page(client, "/c/demo-course/models/new?catalog=lmstudio"
+                         "&at=http://localhost:11435/v1&at_for=ollama")
+    assert asked[-1] == "http://localhost:1234/v1"
+    assert 'name="at" value="http://localhost:1234/v1"' in text
+    assert 'name="at_for" value="lmstudio"' in text
+
+
+def test_the_address_box_follows_the_choice(root):
+    """htmx swaps the box when the choice changes: a local provider's default address, or
+    nothing for a cloud one."""
+    client = _browser(root)
+    text = _page(client, "/c/demo-course/models/new/at?catalog=vllm")
+    assert 'name="at" value="http://localhost:8000/v1"' in text and 'value="vllm"' in text
+    text = _page(client, "/c/demo-course/models/new/at?catalog=deepseek")
+    assert text.strip() == '<span id="local-at"></span>'
+    assert 'hx-get="/c/demo-course/models/new/at"' in _page(client, "/c/demo-course/models/new")
 
 
 def test_a_providers_address_from_the_list_is_marked_and_a_moved_one_shown(root):

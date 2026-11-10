@@ -85,6 +85,8 @@ def register(app: Flask) -> None:
         provider = catalog.local_provider(chosen) or (found.provider(chosen) if found
                                                       else None)
         problem, at = "", " ".join(request.args.get("at", "").split()).rstrip("/")
+        if request.args.get("at_for", chosen) != chosen:
+            at = ""  # the address shown for another provider (the choice changed since)
         if provider and provider.id in catalog.LOCAL:
             if at and not at.startswith(("http://", "https://")):
                 problem, at = f"The address starts with http://, not {at[:40]!r}.", ""
@@ -112,6 +114,14 @@ def register(app: Flask) -> None:
                  "at": at,  # the address typed in, carried by the page's links
                  "key_set": bool(provider and provider.key_env in key_names())}
         return profile_page(course, None, values, [], shelf=shelf)
+
+    @app.get("/c/<name>/models/new/at")
+    def local_address(name: str):
+        """The address box beside the provider choice (_local_at.html), for the provider
+        `catalog` names: htmx asks for it whenever the choice changes. Reads nothing."""
+        course_or_404(name)
+        provider = catalog.local_provider(request.args.get("catalog", ""))
+        return render_template("_local_at.html", at_provider=provider, at="")
 
     @app.post("/c/<name>/models/catalog")
     def refresh_catalog(name: str):

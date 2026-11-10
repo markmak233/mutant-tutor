@@ -24,7 +24,7 @@
   {% set sel = shelf.provider.id if shelf.provider else "" %}
   <form method="get" action="{{ url_for('new_model', name=course.folder) }}" class="catalog-pick">
     <label>Provider
-      <select name="catalog">
+      <select name="catalog" hx-get="{{ url_for('local_address', name=course.folder) }}" hx-trigger="change" hx-target="#local-at" hx-swap="outerHTML">
         <optgroup label="On this machine">
         {% for id, label in local.items() %}<option value="{{ id }}"{% if sel == id %} selected{% endif %}>{{ label }} ({{ id }})</option>{% endfor %}
         </optgroup>
@@ -38,7 +38,7 @@
         {% endif %}
       </select>
     </label>
-    {% if sel in local %}<label>at <input type="text" name="at" value="{{ shelf.at or shelf.provider.base_url }}" maxlength="200" size="28" autocomplete="off" title="the server's address: change the port here, then list again"></label>{% endif %}
+    {% with at_provider=(shelf.provider if sel in local else none), at=shelf.at %}{% include "_local_at.html" %}{% endwith %}
     <button type="submit" class="small">List its models</button>
     {% if found %}<button type="submit" class="small" formmethod="post" formaction="{{ url_for('refresh_catalog', name=course.folder) }}">Refresh the list</button>{% endif %}
   </form>
