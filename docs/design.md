@@ -3228,7 +3228,12 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
         tests fail is a failed task, which stays on its log, where the failures are, with
         Run again; one that passes goes back to the exercise with a notice. Clicked in
         headless Chrome on a scratch container course with no image: the button, the task,
-        `tutor test`'s own "image is missing" message, Back and Run again.
+        `tutor test`'s own "image is missing" message, Back and Run again. The exercise
+        page then lists its own runs (owner, the same day: "the record is in Tasks, but
+        that means leaving the exercise"): every logged attempt, newest first, with its
+        counts, duration and snapshot name, never its first error (as the dashboard's
+        runs: a hand-calculation answer can sit in it; the task's log has it), and the
+        test tasks started from the page, linked to their logs.
       - Optional, after it: a page for a learner who wants to run tests on the host anyway,
         saying how to install that course's toolchain (Java, Hadoop, a C compiler) on their
         platform, automated where a language allows it safely. Toolchains differ by language,

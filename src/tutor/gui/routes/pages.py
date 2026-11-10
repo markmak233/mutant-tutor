@@ -71,8 +71,15 @@ def register(app: Flask) -> None:
         text = courses.question(course, batch, exercise)
         # The file the learner writes in: student.py, or student.c in a C exercise.
         student = student_path(folder).name
+        # This exercise's runs: the logged attempts, and the test tasks started from this
+        # page (their logs), newest first.
+        runs = [t for t in tasks.list_tasks(course.workspace.root)
+                if t.meta.get("kind") == "learner-test" and t.meta.get("batch") == batch
+                and t.meta.get("exercise") == exercise]
         return render_template("exercise.html", course=course, batch=view, row=row,
                                question=rendering.question_html(text) if text else None,
+                               attempts=courses.exercise_attempts(course, batch, exercise),
+                               test_tasks=runs,
                                labels=STATUS_LABELS, student=student,
                                # "Run my tests" only where tutor test works: a container
                                # course (owner, 2026-11-10); a host course runs pytest.

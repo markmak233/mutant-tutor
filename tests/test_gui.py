@@ -676,3 +676,25 @@ def test_a_test_run_goes_back_to_its_exercise_and_can_run_again(root, monkeypatc
     page = get(client, f"/c/demo-course/tasks/{failed.id}/").get_data(as_text=True)
     assert f'action="/c/demo-course/b/{BATCH}/e/ex-one/test"' in page  # Run again
     assert f'href="/c/demo-course/b/{BATCH}/e/ex-one/"' in page  # Back to ex-one
+
+
+def test_an_exercise_page_lists_its_own_runs_and_the_tasks_that_ran_them(root, monkeypatch):
+    """The record is on the exercise, not only on the course page (owner, 2026-11-10)."""
+    mine = tasks.Task("20260102-100000-abcdef", root / "demo-course", "Run my tests: ex-one",
+                      tasks.DONE, "2026-01-02 10:04:00", "", [["x"]], [0], None,
+                      {"kind": "learner-test", "batch": BATCH, "exercise": "ex-one"})
+    other = tasks.Task("20260102-100001-abcdef", root / "demo-course", "Run my tests: ex-two",
+                       tasks.FAILED, "2026-01-02 10:06:00", "", [["x"]], [1], None,
+                       {"kind": "learner-test", "batch": BATCH, "exercise": "ex-two"})
+    monkeypatch.setattr(tasks, "list_tasks", lambda course_root: [other, mine])
+    client = _browser(root, FakeLauncher())
+
+    page = get(client, f"/c/demo-course/b/{BATCH}/e/ex-one/").get_data(as_text=True)
+
+    assert "<h2>Runs</h2>" in page
+    assert page.index("2026-01-02 10:05:00") < page.index("2026-01-02 10:00:00")  # newest first
+    assert "0 passed, 0 failed" in page and SECRET not in page  # counts, never the first error
+    assert f'href="/c/demo-course/tasks/{mine.id}/"' in page  # this exercise's task
+    assert mine.id in page and other.id not in page
+    course = courses.get_course(root, "demo-course")
+    assert courses.exercise_attempts(course, BATCH, "ex-two") == []  # never run

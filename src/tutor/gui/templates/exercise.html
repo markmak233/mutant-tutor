@@ -26,4 +26,24 @@
 <h1>{{ row.title }}</h1>
 <p>No question.md: the question is {{ question_in }} of <code>{{ student }}</code>.</p>
 {% endif %}
+{# This exercise's runs, so the record is here and not only on the course page (owner,
+   2026-11-10): every logged attempt (attempts.jsonl), and the "Run my tests" tasks with
+   their logs. Never the first error (courses.Attempt): a task's log has it. #}
+{% if attempts or test_tasks %}
+<h2>Runs</h2>
+{% if test_tasks %}
+<p class="muted">From this page:
+  {% for t in test_tasks %}<a href="{{ url_for('task', name=course.folder, task_id=t.id) }}">{{ t.started }}</a> {{ chip(t.status) }}{{ " · " if not loop.last }}{% endfor %}</p>
+{% endif %}
+{% if attempts %}
+<ul class="runs">
+{% for a in attempts %}
+  <li>{{ chip(a.result) }} <span>{{ a.time }}</span>
+    <span class="muted">{{ a.passed }} passed, {{ a.failed }} failed{% if a.errors %}, {{ a.errors }} error{{ "s" if a.errors != 1 }}{% endif %}{% if a.skipped %}, {{ a.skipped }} skipped{% endif %}{% if a.duration_s is not none %}, {{ "%.1f" | format(a.duration_s) }} s{% endif %}{% if a.code %} · snapshot <code>{{ a.code.rsplit("/", 1)[-1] }}</code>{% endif %}</span></li>
+{% endfor %}
+</ul>
+{% else %}
+<p class="muted">No logged run yet.</p>
+{% endif %}
+{% endif %}
 {% endblock %}
