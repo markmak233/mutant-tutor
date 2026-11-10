@@ -179,6 +179,7 @@ smartCodingReview/                       # public repo (the `tutor/` above), cod
 │   │                                    #   P3 parses LLM output into the same models
 │   ├── materials/                       # P3a course files -> per-file md cache (pypdfium2), vision pages; [requires] draft
 │   ├── llm.py                           # P3a thin OpenAI-compatible client, standard library only, no LangChain
+│   ├── llm_anthropic.py                 # Claude's Messages API behind llm.chat (provider "anthropic")
 │   ├── graph/                           # P3 langgraph dependency added here; languages.py: per-language profiles;
 │   │                                    #   nodes.py an item's nodes, oracle.py, drafts.py, batch.py, build.py the wiring;
 │   │                                    #   prompts.py the templates, prompt_parts/ one module per language
@@ -1705,14 +1706,55 @@ deterministic judge, hybrid RAG with recall@k, the phase 5 metrics, the hint lea
     Such a model answers at its own temperature, so a rerun is not the same answer, and the
     repair rounds' rising temperature (0.2 * N) does not apply to it. Chosen over retrying
     without the field after a refusal: one refused request per run, and less plain. That
-    address is for trying Claude out; it has no prompt-cache control, so a native Anthropic
-    provider is still planned ("Roadmap"). Apple Intelligence's on-device model is reachable too, through third-party
+    address was for trying Claude out; since 2026-11-10 Claude has its own provider (next
+    entry). Apple Intelligence's on-device model is reachable too, through third-party
     bridges that serve it as an OpenAI-compatible local API (apfel and similar; not an
     Apple interface), so the same client can call it with no extra code. It is not a default:
     about 4096 tokens for input and output together (one week's material and the format spec
     do not fit), no image input found, one fixed small model, and rate limits for
     background use. It may serve as one more local arm in the phase 5 model comparison or for
     short text tasks.
+  - Anthropic provider (owner, 2026-11-10: "use the native provider"), `provider =
+    "anthropic"` in `tutor/llm_anthropic.py`, standard library like the rest of the client.
+    Why not the compatible address: Anthropic's own docs call that layer a way "to test and
+    compare model capabilities", "not a long-term or production-ready solution", and it has
+    no prompt caching at all (`prompt_tokens_details` "always empty"; the 11-10 judge
+    calibration with Sonnet 5.5 paid $2.52 for 1.1M input tokens that way); the Messages
+    API opts into caching per request. Measured before deciding (one course, 11-10): plan
+    (Sonnet 9/9 coverage rows), oracle (Sonnet 54/58 agree with the reference, mutants 91%)
+    and the judge (Sonnet as good as gpt-terra on planted defects, 13/18 to 14/18, with no
+    owner-approved exercise marked unclear against gpt's 6). The mapping, in the module's
+    docstring and here in short: the system prompt is a top-level field; `max_tokens` is
+    required (32,000 when a caller gives none, the pipeline's thinking default; thinking
+    counts towards it); no `thinking` field (adaptive and on by default on the 5.5 models,
+    Opus cannot turn it off) and no temperature (refused), so a call's depth goes through
+    `output_config.effort`: `thinking=False` sends the profile's `reasoning_effort` or
+    "low", `thinking=True` its `reasoning_effort_on` or nothing (the model's default), the
+    same profile fields every provider uses; a JSON schema goes to `output_config.format`
+    (structured output), after the constraints Anthropic refuses are dropped from the copy
+    sent (`exclusiveMinimum`, `maxItems`, ...: HTTP 400 for the draft and doctor schemas in
+    the first probe; the caller's pydantic model still checks them), and a schema with a
+    free-form map (the draft's `data_files`, which the API refuses outright) goes into the
+    prompt as DeepSeek's JSON mode does, the caller validating as always; the reply's text
+    blocks are joined, thinking blocks left out, `max_tokens` becomes the "length" finish
+    reason the graph reads; the event stream is put back together like the OpenAI one.
+    Usage keeps the client's one meaning: Anthropic's `input_tokens` leaves out the tokens
+    read from or written to the cache, so the reply adds the three back (costs are computed
+    from the total), with `cached_tokens` and a new `cache_write_tokens` kept apart in the
+    call log. The request and error handling are one function (`llm.exchange`) for both
+    shapes; only the path, the headers (`x-api-key`, `anthropic-version`) and the reading of
+    the reply differ. No SDK: the owner's keys stay in `.env` as for every provider; the
+    SDK's credential chain (`ant auth login`, workload identity) is a later option, not a
+    reason for a dependency now. Checked with Haiku 5.5 against the real API before the
+    tests were final (8 calls, $0.0004); the Models page clicked in headless Chrome on a
+    scratch course (New model, Anthropic from the list, Use, Save: `provider = "anthropic"`,
+    no base_url written). Cache breakpoints are the next step, not this one:
+    the judge's prompt puts the exercise before the slides, with the exercise's own pages
+    marked in them, so its shared prefix is only the system prompt; caching it means the
+    slides first and the marks moved out of them, which is a calibrated prompt changed, so
+    a recalibration with Sonnet, measured with `cache_read_input_tokens` before a saving is
+    claimed ("Prompt layout for caching"). Until then the judge stays on gpt-terra, or
+    moves to Sonnet at full price if the OpenAI key's end (about 12-03) comes first.
 - [3] Summary of recently covered material in the generation prompt (ContentGen found it
   improved generated questions); built from `coverage.md` and the batch's sources.
 - [3] Call log: one JSONL line per LLM call (node, model, input / output / cached tokens,
@@ -3759,18 +3801,19 @@ late; the adaptive review screens can be built with it.
     the request carries nothing of the courses. Kept in `<root>/.cache/models-dev.json`,
     reduced to what is used (about 1.2 MB, 204 providers of 235): the providers models.dev
     marks as taking OpenAI's requests, plus those it lists with their own SDK whose
-    OpenAI-compatible URL is checked in their docs (`catalog.OPENAI_URLS`: Anthropic,
-    Gemini, xAI, Mistral, Groq, Together, MiniMax, OpenRouter); the rest are counted on the
+    OpenAI-compatible URL is checked in their docs (`catalog.OPENAI_URLS`: Gemini, xAI,
+    Mistral, Groq, Together, MiniMax, OpenRouter); the rest are counted on the
     page. A downloaded value is checked before it is kept (https, or http on this machine;
     a key name in capitals; a plain model id) and shown escaped. Above the hand-written
     form, which stays: a provider (common ones first, the key's state in `.env` by name),
     its models newest first without withdrawn ones, and "Use", which fills the form and
-    saves nothing. A provider llm.py knows (DeepSeek, Zhipu and z.ai as `glm`, OpenAI, LM
-    Studio) keeps its own way to turn thinking off; another one is `custom` with its URL,
-    and a thinking model gets the lowest `reasoning_effort` it takes (none, minimal, low),
-    or a note that each call thinks. No script: choosing a provider is a GET form, so the
-    page can be reloaded. Anthropic goes through its OpenAI-compatible layer, which has no
-    prompt caching; the page says so.
+    saves nothing. A provider llm.py knows (DeepSeek, Zhipu and z.ai as `glm`, OpenAI,
+    Anthropic since 2026-11-10, LM Studio) keeps its own way to turn thinking off; another
+    one is `custom` with its URL, and a thinking model gets the lowest `reasoning_effort` it
+    takes (none, minimal, low), or a note that each call thinks. No script: choosing a
+    provider is a GET form, so the page can be reloaded. A `custom` profile at Anthropic's
+    own address is refused with the advice to choose `anthropic` (the rule every known
+    provider's address has).
   - One provider's oracle (owner, 2026-11-07: "not everyone buys several APIs; do not
     forbid it, at least warn"). The oracle at the same provider and address as generate or
     repair was refused, by the Models page and by the graph before any call. It now runs,

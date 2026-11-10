@@ -1,5 +1,5 @@
 """A thin client for OpenAI-compatible chat and embedding APIs (docs/design.md, [3] model
-access).
+access), plus Anthropic's own Messages API (tutor/llm_anthropic.py, provider "anthropic").
 
 Standard library only. Models are named profiles in the workspace's workspace.toml, and
 roles (vision, generate, ...) say which profile a task uses:
@@ -42,7 +42,7 @@ import tomllib
 import urllib.error
 import urllib.request
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 
@@ -61,6 +61,9 @@ PROVIDERS = {
     "deepseek": ("https://api.deepseek.com",
                  ({"thinking": {"type": "disabled"}}, {"reasoning_effort": "none"})),
     "custom": (None, ()),  # any other OpenAI-compatible server; base_url required
+    # Claude through its own Messages API (tutor/llm_anthropic.py): no thinking switches
+    # here, as the depth is part of that request body (`output_config.effort`).
+    "anthropic": ("https://api.anthropic.com/v1", ()),
     # No server: a coding assistant answers request files (tutor/exchange.py). Its "model"
     # names the assistant (default: the profile name), so two profiles of one assistant
     # (one for the oracle) are recognised as the same reader.
@@ -82,6 +85,10 @@ PROFILE_FIELDS = {"provider", "model", "base_url", "api_key_env", "reasoning_eff
 # "`temperature` is deprecated for this model", 2026-11-09). Without the field every
 # request asks for 0, as before, so no other profile's requests change.
 MODEL_TEMPERATURE = "default"
+# The line that puts a schema into the prompt for a provider that cannot take it as a request
+# field (DeepSeek's JSON mode; Anthropic for a schema its structured output refuses). Byte
+# for byte: DeepSeek's generate and repair prompts, pinned, are built from it.
+SCHEMA_IN_PROMPT = "Reply with one JSON object that fits this JSON Schema:\n"
 KEY_LIKE = re.compile(r"^(sk-[\w-]{16,}|[0-9a-f]{32}\.\w{8,})$")
 
 
@@ -116,6 +123,9 @@ class Reply:
     finish_reason: str | None = None  # "length": cut off at max_tokens
     # Input tokens served from the provider's prompt cache (cheaper), when it reports them.
     cached_tokens: int | None = None
+    # Input tokens written to that cache this call (Anthropic prices them above base),
+    # when the provider reports them apart; counted in input_tokens as well.
+    cache_write_tokens: int | None = None
 
 
 def config_for(role: str, profile: str | None = None, workspace: Path | None = None,
@@ -243,6 +253,12 @@ def chat(config: LLMConfig, messages: list[dict], *, purpose: str,
         reply = exchange.ask(config, messages, purpose, response_schema)  # or AwaitingAnswer
         _log(log_path, purpose, config, reply, time.monotonic() - start, None)
         return reply
+    if config.provider == "anthropic":
+        from tutor import llm_anthropic  # imported here: it builds on this module
+
+        return llm_anthropic.chat(config, messages, purpose=purpose, log_path=log_path,
+                                  max_tokens=max_tokens, response_schema=response_schema,
+                                  stream=stream, on_progress=on_progress, thinking=thinking)
     body = chat_payload(config, messages, max_tokens=max_tokens, temperature=temperature,
                         response_schema=response_schema, stream=stream, schema_first=schema_first)
     key = (config.provider, config.base_url, config.model)
@@ -254,7 +270,7 @@ def chat(config: LLMConfig, messages: list[dict], *, purpose: str,
     for number in range(first, len(variants)):
         try:
             reply = _post(config, {**body, **variants[number]}, purpose, log_path, on_progress)
-        except _Rejected as e:
+        except Rejected as e:
             if number == len(variants) - 1:
                 raise LLMError(str(e)) from None
             continue
@@ -266,12 +282,22 @@ def chat(config: LLMConfig, messages: list[dict], *, purpose: str,
 
 def chat_payload(config: LLMConfig, messages: list[dict], *, max_tokens: int | None = None,
                  temperature: float = 0.0, response_schema: dict | None = None,
-                 stream: bool = False, schema_first: bool = False) -> dict:
+                 stream: bool = False, schema_first: bool = False,
+                 thinking: bool = True) -> dict:
     """Pure provider payload layout, shared by sending and doctor preview/size checks.
 
     The default is the original chat payload byte for byte. Provider compatibility
     variants are added by chat; no credential headers, network or file access happens here.
+    `thinking` matters only to an anthropic profile, whose depth is part of the body
+    (the others add it as a variant in chat); `schema_first` and `temperature` do not
+    apply there (the schema is a field of its own, and it sends no temperature).
     """
+    if config.provider == "anthropic":
+        from tutor import llm_anthropic  # imported here: it builds on this module
+
+        return llm_anthropic.payload(config, messages, max_tokens=max_tokens,
+                                     response_schema=response_schema, stream=stream,
+                                     thinking=thinking)
     openai = config.provider == "openai"
     body = {"model": config.model, "messages": messages}
     if not openai and config.send_temperature:
@@ -285,9 +311,8 @@ def chat_payload(config: LLMConfig, messages: list[dict], *, max_tokens: int | N
         # DeepSeek's chat API documents only JSON mode, and only with thinking off: the
         # schema goes into the prompt instead, and the caller's validation still decides.
         body["response_format"] = {"type": "json_object"}
-        schema_message = {"role": "system" if schema_first else "user", "content": (
-            "Reply with one JSON object that fits this JSON Schema:\n"
-            + json.dumps(response_schema))}
+        schema_message = {"role": "system" if schema_first else "user",
+                          "content": SCHEMA_IN_PROMPT + json.dumps(response_schema)}
         # Put shared instructions and schema ahead of dynamic facts only when requested.
         if schema_first:
             at = next((i for i, m in enumerate(messages) if m["role"] != "system"), len(messages))
@@ -316,6 +341,9 @@ def embed(config: LLMConfig, texts: list[str], *, purpose: str, log_path: Path |
     if config.provider == "assistant":
         raise LLMError(f"profile {config.name!r} has no API to embed with: use a provider "
                        f"with an /embeddings endpoint")
+    if config.provider == "anthropic":
+        raise LLMError(f"profile {config.name!r}: Anthropic offers no embedding model; use an "
+                       f"lmstudio, openai or glm profile for the embedding role")
     body: dict = {"model": config.model, "input": texts}
     if dimensions is not None:
         body["dimensions"] = dimensions
@@ -347,41 +375,66 @@ def embed(config: LLMConfig, texts: list[str], *, purpose: str, log_path: Path |
     return vectors
 
 
-class _StreamCut(Exception):
-    """A stream ended with neither [DONE] nor a finish reason: the reply may be incomplete."""
+class StreamCut(Exception):
+    """A stream ended before its end mark ([DONE], or Anthropic's message_stop): the reply
+    may be incomplete. Raised by a stream reader; exchange() turns it into an LLMError."""
 
 
-class _Rejected(Exception):
+class Rejected(Exception):
     """HTTP 400: the request (often a thinking switch) was refused; another variant may work."""
 
 
 def _headers(config: LLMConfig) -> dict[str, str]:
     headers = {"Content-Type": "application/json"}
-    if config.api_key:
+    if config.provider == "anthropic":
+        from tutor import llm_anthropic
+
+        headers["anthropic-version"] = llm_anthropic.VERSION
+        if config.api_key:
+            headers["x-api-key"] = config.api_key
+    elif config.api_key:
         headers["Authorization"] = f"Bearer {config.api_key}"
     return headers
 
 
 def _post(config: LLMConfig, body: dict, purpose: str, log_path: Path | None,
           on_progress: Callable[[int], None] | None = None) -> Reply:
-    request = urllib.request.Request(f"{config.base_url}/chat/completions",
+    """One chat completion request, read in the OpenAI shape."""
+    def read(response) -> Reply:
+        # A stray byte that is not UTF-8 in a long reply should cost one character
+        # (the caller validates the text), not the whole call.
+        data = (_read_stream(response, on_progress) if body.get("stream")
+                else json.loads(response.read().decode("utf-8", errors="replace")))
+        choice = data["choices"][0]
+        usage = data.get("usage") or {}
+        return Reply(choice["message"]["content"] or "", usage.get("prompt_tokens"),
+                     usage.get("completion_tokens"), 0.0, choice.get("finish_reason"),
+                     (usage.get("prompt_tokens_details") or {}).get("cached_tokens"))
+
+    return exchange(config, "/chat/completions", body, purpose, log_path, read)
+
+
+def exchange(config: LLMConfig, path: str, body: dict, purpose: str, log_path: Path | None,
+             read: Callable[[object], Reply]) -> Reply:
+    """POST `body` to the profile's server at `path` and return `read(response)` with its
+    seconds filled in, logged. Every way the call can fail becomes a logged LLMError whose
+    message says what to do, with the key never in it: an HTTP error (400 is Rejected, so
+    chat() can try its next thinking switch), a reply slower than timeout_s, an unreachable
+    server, a stream cut short, or a body of another shape than `read` expects. The
+    anthropic module shares this; only `path`, the headers and `read` differ."""
+    request = urllib.request.Request(f"{config.base_url}{path}",
                                      data=json.dumps(body).encode(), headers=_headers(config))
     start = time.monotonic()
     try:
         with urllib.request.urlopen(request, timeout=config.timeout_s) as response:
-            # A stray byte that is not UTF-8 in a long reply should cost one character
-            # (the caller validates the text), not the whole call.
-            data = (_read_stream(response, on_progress) if body.get("stream")
-                    else json.loads(response.read().decode("utf-8", errors="replace")))
-        choice = data["choices"][0]
-        text = choice["message"]["content"] or ""
+            reply = read(response)
     except urllib.error.HTTPError as e:
         # Redacted before it is cut, so a key on the cut cannot be left half there.
         body = _redact(e.read()[:4000].decode(errors="replace"), config)
         error = f"HTTP {e.code} from {config.base_url}: {body[:300]}"
         _log(log_path, purpose, config, None, time.monotonic() - start, error)
         if e.code == 400:
-            raise _Rejected(error) from None
+            raise Rejected(error) from None
         raise LLMError(error) from e
     except TimeoutError as e:
         # The server answers but the reply takes longer than timeout_s (a long generation
@@ -394,18 +447,15 @@ def _post(config: LLMConfig, body: dict, purpose: str, log_path: Path | None,
         error = _redact(f"cannot reach {config.base_url} ({e}); is the server running?", config)
         _log(log_path, purpose, config, None, time.monotonic() - start, error)
         raise LLMError(error) from e
-    except _StreamCut as e:
+    except StreamCut as e:
         error = f"{e} from {config.base_url}; try again"
         _log(log_path, purpose, config, None, time.monotonic() - start, error)
         raise LLMError(error) from e
-    except (KeyError, IndexError, json.JSONDecodeError) as e:
+    except (KeyError, IndexError, TypeError, json.JSONDecodeError) as e:
         error = _redact(f"unexpected reply from {config.base_url}: {e!r}", config)
         _log(log_path, purpose, config, None, time.monotonic() - start, error)
         raise LLMError(error) from e
-    usage = data.get("usage") or {}
-    reply = Reply(text, usage.get("prompt_tokens"), usage.get("completion_tokens"),
-                  time.monotonic() - start, choice.get("finish_reason"),
-                  (usage.get("prompt_tokens_details") or {}).get("cached_tokens"))
+    reply = replace(reply, seconds=time.monotonic() - start)
     _log(log_path, purpose, config, reply, reply.seconds, None)
     return reply
 
@@ -447,7 +497,7 @@ def _read_stream(response, on_progress: Callable[[int], None] | None) -> dict:
             finish = choice.get("finish_reason") or finish
     if not done and finish is None:
         # The connection closed early; what arrived must not pass for a whole reply.
-        raise _StreamCut(f"the stream ended after {received} characters without finishing")
+        raise StreamCut(f"the stream ended after {received} characters without finishing")
     return {"choices": [{"message": {"content": "".join(parts)}, "finish_reason": finish}],
             "usage": usage or {}}
 
@@ -464,6 +514,7 @@ def _log(path: Path | None, purpose: str, config: LLMConfig, reply: Reply | None
         "base_url": config.base_url,
         "input_tokens": reply.input_tokens if reply else None,
         "cached_tokens": reply.cached_tokens if reply else None,
+        "cache_write_tokens": reply.cache_write_tokens if reply else None,
         "output_tokens": reply.output_tokens if reply else None,
         "seconds": round(seconds, 2),
         "finish_reason": reply.finish_reason if reply else None,

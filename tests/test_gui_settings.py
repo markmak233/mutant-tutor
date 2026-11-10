@@ -238,8 +238,8 @@ def test_a_models_own_temperature_is_saved_and_kept_or_dropped_by_the_form(root,
     """The form's choice writes `temperature = "default"`; saving the model again keeps it,
     and choosing 0 takes the line out (an edit drops what the form does not send)."""
     client = _browser(root, env_file)
-    claude = {"name": "claude", "provider": "custom", "model": "claude-opus-5-5",
-              "base_url": "https://api.anthropic.com/v1", "api_key_env": "ANTHROPIC_API_KEY"}
+    claude = {"name": "claude", "provider": "anthropic", "model": "claude-opus-5-5",
+              "api_key_env": "ANTHROPIC_API_KEY"}
 
     post(client, "/c/demo-course/models/save", {**claude, "temperature": "default"})
     assert tomllib.loads(_toml(course))["llm"]["profiles"]["claude"]["temperature"] == "default"

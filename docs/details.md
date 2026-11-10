@@ -98,8 +98,8 @@ each added after a measured failure (details and numbers in [`docs/design.md`](d
   prompt, course pages, example exercise): 54-93% of input tokens per batch.
 
 Each role (plan, generate, repair, oracle, and vision for reading slides) is a profile in
-the workspace's `workspace.toml`, so any OpenAI-compatible models can be combined, local or
-cloud. The oracle is best another provider's, by another maker, than the models that
+the workspace's `workspace.toml`, so any OpenAI-compatible models, and Claude through its
+own API, can be combined, local or cloud. The oracle is best another provider's, by another maker, than the models that
 write the exercise; with one key, one provider still works, with a warning that its check is
 less independent. In the GUI, New model can fill the form from the public
 [models.dev](https://models.dev) catalog (base URL, key name, models newest first, prices),
@@ -566,6 +566,7 @@ src/tutor/
                    `python -m tutor.container build | status`
   llm.py           a small client for OpenAI-compatible APIs (LM Studio, GLM, OpenAI,
                    DeepSeek): roles -> profiles, structured output, streaming, call log
+  llm_anthropic.py Claude's own Messages API behind the same llm.chat (provider "anthropic")
   materials/       course PDFs and saved web pages -> a per-page (per-section) markdown cache,
                    image slides via a vision model;
                    `python -m tutor.materials`; `python -m tutor.materials.requires` drafts

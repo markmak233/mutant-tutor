@@ -62,7 +62,7 @@ MODELS_DEV = {
                     "painter": _model("acme-paint", modalities={"input": ["text"],
                                                                 "output": ["image"]}),
                     "odd-id": _model("<b>acme</b>")}},
-    # Its own SDK, with the OpenAI-compatible URL from OPENAI_URLS.
+    # Its own SDK; llm.py speaks its Messages API (provider "anthropic").
     "anthropic": {"id": "anthropic", "name": "Anthropic", "npm": "@ai-sdk/anthropic",
                   "env": ["ANTHROPIC_API_KEY"], "models": {"c": _model("claude-test-1")}},
     "openrouter": {"id": "openrouter", "name": "OpenRouter", "npm": "@openrouter/ai-sdk-provider",
@@ -190,8 +190,15 @@ def test_another_provider_is_custom_with_the_lowest_thinking_it_takes(tmp_path):
     assert efforts[0][0]["base_url"] == "https://api.acme.example/v1"
     assert [v["reasoning_effort"] for v, _ in efforts] == ["none", "low", ""]
     assert "cannot be turned down" in efforts[2][1][0]
+
+
+def test_anthropic_is_its_own_provider_not_the_compatible_layer(tmp_path):
     anthropic = _catalog(tmp_path).provider("anthropic")
-    assert "no prompt caching" in catalog.fill(anthropic, anthropic.models[0], set())[1][0]
+    values, notes = catalog.fill(anthropic, anthropic.models[0], set())
+
+    assert (values["provider"], values["base_url"]) == ("anthropic", "https://api.anthropic.com/v1")
+    assert values["api_key_env"] == "ANTHROPIC_API_KEY"
+    assert notes == []
 
 
 # --- downloading -------------------------------------------------------------------------------

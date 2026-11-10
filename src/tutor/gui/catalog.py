@@ -39,10 +39,10 @@ SHOWN = 40  # models listed before "Show all"
 
 # models.dev lists these with their own SDK (and mostly no base URL); each one's
 # OpenAI-compatible URL, from the provider's own docs (checked 2026-11-07). MiniMax is listed
-# there with its Anthropic-style URL, which this tool's client does not speak.
+# there with its Anthropic-style URL, which this tool's client speaks only for Anthropic
+# itself (KNOWN below: its own provider in llm.py since 2026-11-10).
 OPENAI_URLS = {
     "openrouter": "https://openrouter.ai/api/v1",
-    "anthropic": "https://api.anthropic.com/v1",
     "google": "https://generativelanguage.googleapis.com/v1beta/openai",
     "xai": "https://api.x.ai/v1",
     "mistral": "https://api.mistral.ai/v1",
@@ -54,14 +54,13 @@ OPENAI_URLS = {
 # Providers llm.py knows by name: their own way to turn thinking off, and their base URL
 # (z.ai is Zhipu's international site: GLM's rules, another URL).
 KNOWN = {"deepseek": "deepseek", "zhipuai": "glm", "zai": "glm", "openai": "openai",
-         "lmstudio": "lmstudio"}
+         "anthropic": "anthropic", "lmstudio": "lmstudio"}
 # Listed first, in this order; the rest follow by name.
 COMMON = ("deepseek", "zhipuai", "zai", "moonshotai-cn", "moonshotai", "alibaba-cn", "alibaba",
           "minimax-cn", "minimax", "volcengine", "siliconflow-cn", "siliconflow", "openai",
           "anthropic", "google", "xai", "mistral", "openrouter", "groq", "togetherai",
           "lmstudio")
-NOTES = {"anthropic": "Through Anthropic's OpenAI-compatible layer: no prompt caching, and "
-                      "the thinking is not returned."}
+NOTES: dict[str, str] = {}  # a line the New model form shows for a provider, by id
 # How models.dev marks a provider that takes OpenAI's requests at its own base URL.
 _OPENAI_SHAPED = ("@ai-sdk/openai-compatible", "@ai-sdk/openai")
 _KEY = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")

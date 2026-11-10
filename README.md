@@ -27,8 +27,8 @@ and is built as an AI engineering portfolio project.
   answer.
 - **Hints that never show the answer.** `python -m tutor.hint` runs your tests and names a
   known mistake, or the planted mutant your code fails like.
-- **Your models.** Any OpenAI-compatible model, local or cloud, one per role (plan, generate,
-  repair, oracle, ...); the GUI fills a model's settings from the public
+- **Your models.** Any OpenAI-compatible model, or Claude through its own API, local or
+  cloud, one per role (plan, generate, repair, oracle, ...); the GUI fills a model's settings from the public
   [models.dev](https://models.dev) list. With no API key, a coding assistant on a
   subscription can answer instead ([assistant mode](docs/assistant-mode.md)).
 - **Generated code kept apart.** Each test run can start a fresh Docker container with no
