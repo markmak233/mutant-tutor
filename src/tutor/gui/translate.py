@@ -186,7 +186,7 @@ def ask(config: LLMConfig, name: str, batch: list[Message], log_path: Path | Non
             continue  # not answered: asked again next time
         # Given back unchanged ("Docker", "OK": the same in the language, or one the model
         # would not translate) is kept as it is: the page shows the same either way, and the
-        # file is then complete, instead of asking for these again on every run (2026-11-11).
+        # file is then complete, instead of asking for these again on every run (2026-11-10).
         # `--again` asks for everything once more.
         if m.plural is None:
             if i18n.safe(m.singular, item.text):

@@ -3964,7 +3964,7 @@ late; the adaptive review screens can be built with it.
     asks only for what the file lacks, so a page changed in English never breaks another
     language; a string the model gives back unchanged ("Docker") is kept so, as done,
     else it was asked again on every run and the count never reached the total
-    (2026-11-11). Jinja's new-style `_()` marks what gettext returns as safe HTML (so the
+    (2026-11-10). Jinja's new-style `_()` marks what gettext returns as safe HTML (so the
     values it formats in are escaped), translated or not, so the callables escape the
     text first: an English string may say `<profile>` and shows as written; a literal `%`
     in a page's English is written `%%` (a test checks every string). The language: the
@@ -3973,7 +3973,7 @@ late; the adaptive review screens can be built with it.
     that code exists, else English. Tried on Ollama's qwen3 0.6B for the click check
     (59 of 82 strings; the rest stayed English): the path, not the quality. Plural forms:
     two for every language (the same text twice where a language has one). Every
-    template is wrapped (2026-11-11: 880 strings), and the Python side too: the form
+    template is wrapped (2026-11-10: 880 strings), and the Python side too: the form
     problems a module returns are looked up with `gettext_` inside the request, the
     state words a chip shows (task statuses, plan and item states, doctor's statuses,
     the [requires] kinds) and the explanations are `N_()` strings, so the files and the

@@ -329,7 +329,7 @@ def log_lines(path: Path) -> list[dict]:
     """The batch log's records, in order; none when there is no file. A line that is not a
     JSON object is skipped with a warning, not fatal: a run killed while writing one (Stop
     after its grace time, a full disk) once would have stopped every later resume of the
-    batch at the broken line (2026-11-11)."""
+    batch at the broken line (2026-11-10)."""
     if not path.is_file():
         return []
     found, bad = [], 0

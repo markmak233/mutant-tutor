@@ -280,7 +280,7 @@ def test_a_translation_is_kept_when_it_passes_and_refused_when_it_does_not():
                    ("%(count)s batch", 1): "%(count)s 批", "Stays": "Stays"}
     assert [r.split(":")[0] for r in refused] == ["refused (placeholders differ, or markup)"] * 2
     # Unanswered and refused: still missing, so asked again next time. Given back unchanged
-    # ("Stays"): kept, so the file is complete and the run after asks nothing (2026-11-11).
+    # ("Stays"): kept, so the file is complete and the run after asks nothing (2026-11-10).
     assert [m.singular for m in translate.missing(batch, got)] == [
         "%(n)d of %(total)d passed", "Keys", "Not shown"]
 

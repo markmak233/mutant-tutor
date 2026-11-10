@@ -125,7 +125,7 @@ def kick(course_root: Path) -> Task | None:
             if not _claim(task.folder):
                 # Another process is starting it (or removing it) this moment. Not on to
                 # the next one: both read the same queue, and the loser would start the
-                # second task beside the first (found 2026-11-11). The next kick, a
+                # second task beside the first (found 2026-11-10). The next kick, a
                 # page's poll within a second, starts it if it still waits.
                 break
             data = json.loads((task.folder / TASK_FILE).read_text(encoding="utf-8"))
