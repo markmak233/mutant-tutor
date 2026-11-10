@@ -50,7 +50,19 @@ from pathlib import Path
 # in order (a model that rejects one with HTTP 400 gets the next). GLM-5.3 models refuse
 # `thinking: disabled` and accept only reasoning_effort low / high / max.
 PROVIDERS = {
+    # Servers on this machine (owner, 2026-11-10; LM Studio since 2026-10): each at the port
+    # its docs give, with the request field its docs give for thinking off. A local server
+    # may ignore a field it does not know instead of refusing it, so a switch that did not
+    # take is not noticed here: `check` reports thinking that stayed on (Reply.reasoning_chars).
     "lmstudio": ("http://localhost:1234/v1", ({"reasoning_effort": "none"},)),
+    # Ollama's OpenAI layer takes reasoning_effort ("none": off; tried 2026-11-10 on 0.30.2,
+    # where its native `think: false` is ignored on this path, with no error).
+    "ollama": ("http://localhost:11434/v1", ({"reasoning_effort": "none"},)),
+    # llama-server: the chat template's switch (Qwen's name for it), else its budget.
+    "llamacpp": ("http://localhost:8080/v1",
+                 ({"chat_template_kwargs": {"enable_thinking": False}},
+                  {"reasoning_budget": 0})),
+    "vllm": ("http://localhost:8000/v1", ({"chat_template_kwargs": {"enable_thinking": False}},)),
     "glm": ("https://open.bigmodel.cn/api/paas/v4",
             ({"thinking": {"type": "disabled"}}, {"reasoning_effort": "low"})),
     # Reasoning models differ in their lowest setting; the first one accepted is used.
@@ -142,6 +154,11 @@ class Reply:
     # Input tokens written to that cache this call (Anthropic prices them above base),
     # when the provider reports them apart; counted in input_tokens as well.
     cache_write_tokens: int | None = None
+    # Characters of hidden thinking the reply carried (`reasoning_content` or `reasoning`
+    # beside the content, or a <think> block inside it): 0 when none came, None when the
+    # provider's shape is not read for it. A call with thinking off that carries some shows
+    # the switch did not take (a local server that ignores a field it does not know).
+    reasoning_chars: int | None = None
 
 
 def config_for(role: str, profile: str | None = None, workspace: Path | None = None,
@@ -423,9 +440,11 @@ def _post(config: LLMConfig, body: dict, purpose: str, log_path: Path | None,
                 else json.loads(response.read().decode("utf-8", errors="replace")))
         choice = data["choices"][0]
         usage = data.get("usage") or {}
-        return Reply(choice["message"]["content"] or "", usage.get("prompt_tokens"),
+        message = choice["message"]
+        return Reply(message["content"] or "", usage.get("prompt_tokens"),
                      usage.get("completion_tokens"), 0.0, choice.get("finish_reason"),
-                     (usage.get("prompt_tokens_details") or {}).get("cached_tokens"))
+                     (usage.get("prompt_tokens_details") or {}).get("cached_tokens"),
+                     reasoning_chars=reasoning_chars(message))
 
     return exchange(config, "/chat/completions", body, purpose, log_path, read)
 
@@ -487,10 +506,23 @@ def _redact(text: str, config: LLMConfig) -> str:
 _SECRET = re.compile(r"(?<=Bearer )\S+|sk-[\w-]{16,}")
 
 
+THINK_BLOCK = re.compile(r"<think>.*?(?:</think>|$)", re.DOTALL)
+
+
+def reasoning_chars(message: dict) -> int:
+    """How much hidden thinking a reply's message carried: the `reasoning_content` field
+    (DeepSeek, vLLM, llama.cpp, LM Studio) or `reasoning` (Ollama) beside the content, and
+    a <think> block a server left inside the content (one that did not parse it out)."""
+    apart = message.get("reasoning_content") or message.get("reasoning") or ""
+    inside = THINK_BLOCK.match(message.get("content") or "")
+    return len(apart) + (len(inside.group(0)) if inside else 0)
+
+
 def _read_stream(response, on_progress: Callable[[int], None] | None) -> dict:
     """A streamed completion (server-sent events, one `data: {json}` line per piece) put
     back together as the reply a call without streaming returns."""
     parts, received, finish, usage, done = [], 0, None, None, False
+    thought = 0  # characters of reasoning_content / reasoning in the pieces
     for raw in response:
         line = raw.decode("utf-8", errors="replace").strip()
         if not line.startswith("data:"):
@@ -504,7 +536,9 @@ def _read_stream(response, on_progress: Callable[[int], None] | None) -> dict:
             raise KeyError(f"error in the stream: {chunk['error']}")
         usage = chunk.get("usage") or usage  # the last piece, when the provider sends it
         for choice in chunk.get("choices") or []:
-            text = (choice.get("delta") or {}).get("content")
+            delta = choice.get("delta") or {}
+            thought += len(delta.get("reasoning_content") or delta.get("reasoning") or "")
+            text = delta.get("content")
             if text:
                 parts.append(text)
                 received += len(text)
@@ -514,8 +548,8 @@ def _read_stream(response, on_progress: Callable[[int], None] | None) -> dict:
     if not done and finish is None:
         # The connection closed early; what arrived must not pass for a whole reply.
         raise StreamCut(f"the stream ended after {received} characters without finishing")
-    return {"choices": [{"message": {"content": "".join(parts)}, "finish_reason": finish}],
-            "usage": usage or {}}
+    return {"choices": [{"message": {"content": "".join(parts), "reasoning": "x" * thought},
+                         "finish_reason": finish}], "usage": usage or {}}
 
 
 def _log(path: Path | None, purpose: str, config: LLMConfig, reply: Reply | None,
@@ -534,6 +568,7 @@ def _log(path: Path | None, purpose: str, config: LLMConfig, reply: Reply | None
         "output_tokens": reply.output_tokens if reply else None,
         "seconds": round(seconds, 2),
         "finish_reason": reply.finish_reason if reply else None,
+        "reasoning_chars": reply.reasoning_chars if reply else None,
         "outcome": "ok" if error is None else "error",
         "error": error,
     }
@@ -561,7 +596,14 @@ def check(config: LLMConfig, log_path: Path | None = None, embedding: bool = Fal
     reply = chat(config, [{"role": "user", "content": CHECK_PROMPT}], purpose="check",
                  log_path=log_path, max_tokens=32, thinking=False)
     said = " ".join(reply.text.split())[:40] or "(an empty reply)"
-    return f"ok, answered {said!r} in {reply.seconds:.1f} s"
+    line = f"ok, answered {said!r} in {reply.seconds:.1f} s"
+    if reply.reasoning_chars:
+        # The switch for thinking off did not take: a local server ignores a field it does
+        # not know instead of refusing it (which would have made chat() try the next one).
+        line += (f"; but thinking stayed on ({reply.reasoning_chars} characters of it): the "
+                 "provider's switch for thinking off was ignored. Set reasoning_effort in the "
+                 "profile to what this model takes, or start the server with thinking off.")
+    return line
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -3946,6 +3946,43 @@ late; the adaptive review screens can be built with it.
     provider is a GET form, so the page can be reloaded. A `custom` profile at Anthropic's
     own address is refused with the advice to choose `anthropic` (the rule every known
     provider's address has).
+  - Servers on this machine in New model (owner, 2026-11-07 "WSL and Mac llama, those
+    local ones, later"; 2026-11-10). models.dev lists only LM Studio of them. The form's
+    provider choice now starts with an "On this machine" group (Ollama, LM Studio,
+    llama.cpp's llama-server, vLLM; `catalog.LOCAL`), there without the models.dev list,
+    each a provider of llm.py's at the port its docs give (11434, 1234, 8080, 8000) with
+    the request field its docs give for thinking off (Ollama `reasoning_effort: "none"`;
+    llama-server and vLLM `chat_template_kwargs: {enable_thinking: false}`, llama-server
+    then `reasoning_budget: 0`). "List its models" asks the server itself, `GET /v1/models`
+    with no key (`catalog.installed`): what it has loaded or pulled, which models.dev could
+    not know; that call goes only to localhost, so the page never makes the GUI's server
+    call out. The server's list does not say whether a model thinks or reads images (the
+    table says "not said"). Another port or address is typed into the form by hand; a
+    server in WSL is reached from Windows at localhost too (WSL 2 forwards it; written
+    from the docs, to be clicked on the owner's PC at the packaging check).
+    What makes a local server unlike a cloud one: it ignores a request field it does not
+    know instead of refusing it with 400 (Ollama 0.30.2 and `think: false` on its OpenAI
+    path, tried 2026-11-10), so chat()'s try-the-next-switch never runs and thinking stays
+    on unnoticed: slower, and the tiny `check` reply comes back empty, the whole 32 tokens
+    spent thinking. So every reply now counts the thinking it carried
+    (`Reply.reasoning_chars`: `reasoning_content` or Ollama's `reasoning` beside the
+    content, or a `<think>` block a server left inside it; streamed pieces too; in the
+    call log), and Check says "thinking stayed on (N characters of it)" with what to set.
+    Tried on Ollama with qwen3 0.6B: the built-in switch answers "ok" in 0.7 s; a switch
+    it ignores gives the empty reply and the line. llama-server and vLLM are tested with
+    stand-ins only (neither is installed here with a model).
+  - The models.dev list is downloaded data (owner, 2026-11-07, "not now"; done
+    2026-11-10). A changed base URL or key name in it, filled by "Use" and saved, would
+    send that key and the course's text to another host on every call. Three guards: a
+    provider this tool knows (`catalog.KNOWN`, `OPENAI_URLS`, LOCAL) always gets this
+    tool's own URL, whatever the list says (`Provider.own_url`; z.ai's own URL is a
+    constant, as it differs from Zhipu's), and the page marks the others "address from
+    models.dev: check the domain before saving"; a fetch keeps which providers' URLs differ
+    from the copy before (`url_changes`, shown on the page until the next fetch: a provider
+    does move, a list can be tampered with); and saving a profile is refused when its key
+    name is used by any profile of any course at another host (`llm_settings.key_elsewhere`:
+    one key goes to one provider; the same host at another path passes, a key-less local
+    profile is not compared). The kept list is format 3 (one kept before is fetched again).
   - One provider's oracle (owner, 2026-11-07: "not everyone buys several APIs; do not
     forbid it, at least warn"). The oracle at the same provider and address as generate or
     repair was refused, by the Models page and by the graph before any call. It now runs,

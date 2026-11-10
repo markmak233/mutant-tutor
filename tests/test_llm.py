@@ -489,6 +489,42 @@ def test_check_sends_one_tiny_request_with_thinking_off(sent):
     assert body["messages"][0]["content"] == llm.CHECK_PROMPT
 
 
+def test_check_says_when_thinking_stayed_on(monkeypatch):
+    """A local server ignores a switch it does not know instead of refusing it (Ollama
+    0.30 and `think`, 2026-11-10), so the reply carries thinking: the line says so, as the
+    400-and-next-switch path never runs. The thinking is read beside the content
+    (`reasoning`, Ollama's name; `reasoning_content`, the others') or as a <think> block
+    inside it, and logged."""
+    replies = iter([
+        {"choices": [{"message": {"content": "", "reasoning": "Okay, the user wants"},
+                      "finish_reason": "length"}]},
+        {"choices": [{"message": {"content": "<think>\nhmm\n</think>\n\nok"}}]},
+        {"choices": [{"message": {"content": "ok", "reasoning_content": ""}}]},
+    ])
+    monkeypatch.setattr(llm.urllib.request, "urlopen",
+                        lambda request, timeout: FakeResponse(json.dumps(next(replies)).encode()))
+    config = LLMConfig("q", "ollama", "http://localhost:11434/v1", "qwen3:0.6b",
+                       thinking_off=({"reasoning_effort": "none"},))
+    line = llm.check(config)
+    assert line.startswith("ok, answered '(an empty reply)'")
+    assert "thinking stayed on (20 characters of it)" in line
+    assert "Set reasoning_effort in the profile" in line
+    assert "thinking stayed on (20 characters" in llm.check(config)  # the <think> block
+    assert "thinking stayed on" not in llm.check(config)
+
+
+def test_reasoning_in_a_stream_is_counted_too(monkeypatch, tmp_path):
+    monkeypatch.setattr(llm.urllib.request, "urlopen", lambda request, timeout: FakeResponse(
+        stream_of({"choices": [{"delta": {"reasoning": "Okay, "}}]},
+                  {"choices": [{"delta": {"reasoning_content": "so"}}]},
+                  {"choices": [{"delta": {"content": "ok"}, "finish_reason": "stop"}]})))
+    log = tmp_path / "calls.jsonl"
+    reply = chat(LLMConfig("p", "vllm", "http://localhost:8000/v1", "m"), [],
+                 purpose="generate", stream=True, log_path=log)
+    assert (reply.text, reply.reasoning_chars) == ("ok", 8)
+    assert json.loads(log.read_text(encoding="utf-8"))["reasoning_chars"] == 8
+
+
 def test_check_skips_an_assistant(sent):
     config = LLMConfig("cc", "assistant", "assistant:cc", "cc")
 

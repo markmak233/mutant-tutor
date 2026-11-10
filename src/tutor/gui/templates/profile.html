@@ -2,7 +2,9 @@
 {# One model: a profile in [llm.profiles]. The key itself stays in .env; this names it.
    A new one can be filled from the models.dev catalog above the form (catalog.py): choose
    a provider (GET, so the page can be reloaded), then "Use" on one of its models fills the
-   form, which is saved only by its own Save. The catalog is downloaded on a click only. #}
+   form, which is saved only by its own Save. The catalog is downloaded on a click only.
+   A server on this machine (catalog.LOCAL) is listed without the catalog: its models are
+   asked of the server itself, at its default address. #}
 {% from "_macros.html" import action, chip %}
 {% block title %}{{ original or "New model" }} · {{ course.workspace.course }}{% endblock %}
 {% block crumbs %}
@@ -17,36 +19,51 @@
 {% endif %}
 {% if shelf %}
 <section class="catalog">
-  <h2>Fill from models.dev</h2>
+  <h2>Fill from a list</h2>
   {% set found = shelf.catalog %}
-  {% if not found %}
-  {% if shelf.stale %}<p class="notice notice-bad">The list kept ({{ shelf.stale }}) came from an older version of this tool, which now keeps more of it (who made each model): fetch it again.</p>{% endif %}
-  <p class="muted">A public list of AI providers and their models (<a href="https://models.dev" rel="noopener noreferrer" target="_blank">models.dev</a>, MIT): base URL, key name, release dates, prices. It is downloaded only when you click, and nothing of your courses is sent. Or fill the form below by hand.</p>
-  {{ action(url_for('refresh_catalog', name=course.folder), "Fetch the list") }}
-  {% else %}
+  {% set sel = shelf.provider.id if shelf.provider else "" %}
   <form method="get" action="{{ url_for('new_model', name=course.folder) }}" class="catalog-pick">
     <label>Provider
       <select name="catalog">
+        <optgroup label="On this machine">
+        {% for id, label in local.items() %}<option value="{{ id }}"{% if sel == id %} selected{% endif %}>{{ label }} ({{ id }})</option>{% endfor %}
+        </optgroup>
+        {% if found %}
         <optgroup label="Common">
-        {% for p in found.providers if p.id in common %}<option value="{{ p.id }}"{% if shelf.provider and shelf.provider.id == p.id %} selected{% endif %}>{{ p.name }} ({{ p.id }})</option>{% endfor %}
+        {% for p in found.providers if p.id in common %}<option value="{{ p.id }}"{% if sel == p.id %} selected{% endif %}>{{ p.name }} ({{ p.id }})</option>{% endfor %}
         </optgroup>
         <optgroup label="All the others">
-        {% for p in found.providers if p.id not in common %}<option value="{{ p.id }}"{% if shelf.provider and shelf.provider.id == p.id %} selected{% endif %}>{{ p.name }} ({{ p.id }})</option>{% endfor %}
+        {% for p in found.providers if p.id not in common %}<option value="{{ p.id }}"{% if sel == p.id %} selected{% endif %}>{{ p.name }} ({{ p.id }})</option>{% endfor %}
         </optgroup>
+        {% endif %}
       </select>
     </label>
     <button type="submit" class="small">List its models</button>
-    <button type="submit" class="small" formmethod="post" formaction="{{ url_for('refresh_catalog', name=course.folder) }}">Refresh the list</button>
+    {% if found %}<button type="submit" class="small" formmethod="post" formaction="{{ url_for('refresh_catalog', name=course.folder) }}">Refresh the list</button>{% endif %}
   </form>
+  <p class="muted">A server on this machine (Ollama, LM Studio, llama.cpp, vLLM) lists the models it has, at its usual port; a server in WSL is reached at localhost too (WSL 2 forwards it). Another port or address: fill the form below by hand.</p>
+  {% if not found %}
+  {% if shelf.stale %}<p class="notice notice-bad">The list kept ({{ shelf.stale }}) came from an older version of this tool, which now keeps more of it: fetch it again.</p>{% endif %}
+  <p class="muted">The cloud providers come from a public list (<a href="https://models.dev" rel="noopener noreferrer" target="_blank">models.dev</a>, MIT): base URL, key name, release dates, prices. It is downloaded only when you click, and nothing of your courses is sent. Or fill the form below by hand.</p>
+  {{ action(url_for('refresh_catalog', name=course.folder), "Fetch the list") }}
+  {% else %}
   <p class="muted">From <a href="https://models.dev" rel="noopener noreferrer" target="_blank">models.dev</a>, fetched {{ found.fetched }}: {{ found.providers | length }} providers this tool can call; {{ found.left_out }} more need their own SDK and are not listed.</p>
+  {% if found.url_changes %}
+  <p class="notice notice-bad">Since the fetch before, the list gives another address for:
+    {% for id, before, now in found.url_changes %}<br><code>{{ id }}</code>: <code>{{ before }}</code> → <code>{{ now }}</code>{% endfor %}
+    <br>A provider does move; a list can also be tampered with. Check the new domain on the provider's own site before using it.</p>
+  {% endif %}
+  {% endif %}
   {% set p = shelf.provider %}
   {% if p %}
-  <p><strong>{{ p.name }}</strong> · <code>{{ p.base_url }}</code> ·
+  <p><strong>{{ p.name }}</strong> · <code>{{ p.base_url }}</code>{% if not p.own_url %} <span class="muted">(address from models.dev: check the domain before saving)</span>{% endif %} ·
     {% if p.key_env %}key <code>{{ p.key_env }}</code>
       {% if shelf.key_set %}{{ chip("ok", "in .env") }}{% else %}{{ chip("missing", "not in .env") }} <a href="{{ url_for('key_list', provider=p.id) }}#add-key">add it on the Keys page</a>{% endif %}
     {% else %}no key: a server on this machine{% endif %}
-    {% if p.doc %}· <a href="{{ p.doc }}" rel="noopener noreferrer" target="_blank">its models and prices</a>{% endif %}</p>
-  {% if shelf.models %}
+    {% if p.doc %}· <a href="{{ p.doc }}" rel="noopener noreferrer" target="_blank">{% if p.id in local %}its docs{% else %}its models and prices{% endif %}</a>{% endif %}</p>
+  {% if shelf.problem %}
+  <p class="notice notice-bad">{{ shelf.problem }}</p>
+  {% elif shelf.models %}
   <table class="catalog-models">
     <thead><tr><th>Model</th><th>Released</th><th>Thinking</th><th>Reads images</th><th class="num">Context</th><th class="num">USD per 1M tokens, in · out</th><th></th></tr></thead>
     <tbody>
@@ -68,10 +85,9 @@
   <p class="muted">models.dev lists no model of this provider that is still offered.</p>
   {% endif %}
   {% endif %}
-  {% endif %}
 </section>
 {% if shelf.model %}
-<div class="notice notice-ok">Filled from models.dev with <code>{{ shelf.model.id }}</code>: check it, change what you like (a newer model's name, say), then Save.
+<div class="notice notice-ok">Filled from {% if shelf.provider.id in local %}the server's list{% else %}models.dev{% endif %} with <code>{{ shelf.model.id }}</code>: check it, change what you like (a newer model's name, say), then Save.
   {% for note in shelf.notes %}<br>{{ note }}{% endfor %}</div>
 {% endif %}
 <h2>{{ "Or by hand" if not shelf.model else "The model" }}</h2>

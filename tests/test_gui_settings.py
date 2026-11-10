@@ -390,6 +390,45 @@ def test_saving_the_shown_own_url_writes_none(root, env_file, course):
     assert "base_url" not in tomllib.loads(_toml(course))["llm"]["profiles"]["ds"]
 
 
+def test_a_key_name_used_at_another_host_in_any_course_is_refused(root, env_file, course):
+    """A changed URL (a moved provider, or a tampered list) must not send a key elsewhere:
+    one key name goes to one host, across the courses. The same host passes, as does
+    saving a profile again, and a key name at a local server with no key is not one."""
+    client = _browser(root, env_file)
+    _write(root / "bare" / "workspace.toml", 'course = "bare"\n\n[llm.profiles.o]\n'
+           'provider = "custom"\nmodel = "m"\napi_key_env = "ACME_API_KEY"\n'
+           'base_url = "https://api.acme.example/v1"\n')
+
+    # OPENAI_API_KEY goes to api.openai.com from `other`: a custom server with it is refused.
+    bad = post(client, "/c/demo-course/models/save",
+               {"name": "x", **_form(provider="custom", base_url="https://evil.example/v1",
+                                     api_key_env="OPENAI_API_KEY")})
+    assert bad.status_code == 400
+    text = bad.get_data(as_text=True)
+    assert "OPENAI_API_KEY is the key other (demo) sends to api.openai.com" in text
+    assert "would send it to evil.example" in text
+    assert "x" not in tomllib.loads(_toml(course))["llm"]["profiles"]
+    # Across courses too: bare's ACME_API_KEY goes to api.acme.example.
+    bad = post(client, "/c/demo-course/models/save",
+               {"name": "y", **_form(provider="custom", base_url="https://api.other.example/v1",
+                                     api_key_env="ACME_API_KEY")})
+    assert "ACME_API_KEY is the key o (bare) sends to api.acme.example" in bad.get_data(
+        as_text=True)
+    # The same host (another path), a profile saved again, and no key: all pass.
+    ok = post(client, "/c/demo-course/models/save",
+              {"name": "z", **_form(provider="custom", base_url="https://api.openai.com/v2",
+                                    api_key_env="OPENAI_API_KEY")})
+    assert ok.status_code == 303
+    again = post(client, "/c/demo-course/models/save",
+                 {"name": "other", "original": "other", **_form(provider="openai",
+                                                                model="gpt-6.1-terra",
+                                                                api_key_env="OPENAI_API_KEY")})
+    assert again.status_code == 303
+    local = post(client, "/c/demo-course/models/save",
+                 {"name": "q", **_form(provider="ollama", model="qwen3:0.6b", api_key_env="")})
+    assert local.status_code == 303
+
+
 def test_the_models_page_shows_each_key_set_or_not(root, env_file, monkeypatch):
     monkeypatch.delenv("ZHIPU_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)

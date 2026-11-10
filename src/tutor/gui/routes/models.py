@@ -5,6 +5,7 @@ Routes are registered on the app by `register` (see gui/routes/__init__.py)."""
 
 from __future__ import annotations
 
+import dataclasses
 import os
 
 from flask import Flask, abort, current_app, redirect, render_template, request, url_for
@@ -40,7 +41,7 @@ def profile_page(course: courses.Course, original: str | None, values: dict,
     return render_template("profile.html", course=course, original=original,
                            values=values, problems=problems, fields=llm_settings.FIELDS,
                            providers=list(llm.PROVIDERS), shelf=shelf,
-                           common=catalog.COMMON,
+                           common=catalog.COMMON, local=catalog.LOCAL,
                            defaults=llm_settings.provider_defaults()), code
 
 
@@ -74,10 +75,17 @@ def register(app: Flask) -> None:
     def new_model(name: str):
         """A blank form, with the models.dev catalog above it (catalog.py): `catalog` picks
         a provider, whose models are listed, `model` one of them, which fills the form, and
-        `all` lists every model instead of the newest."""
+        `all` lists every model instead of the newest. A server on this machine (LOCAL) is
+        asked for its own models, at its default address, with no key."""
         course = course_or_404(name)
         found = catalog.load(app.config["ROOT"])
-        provider = found.provider(request.args.get("catalog", "")) if found else None
+        chosen = request.args.get("catalog", "")
+        provider = catalog.local_provider(chosen) or (found.provider(chosen) if found
+                                                      else None)
+        problem = ""
+        if provider and provider.id in catalog.LOCAL:
+            listed, problem = catalog.installed(provider.base_url)
+            provider = dataclasses.replace(provider, models=listed)
         model = next((m for m in provider.models if m.id == request.args.get("model")),
                      None) if provider else None
         values: dict = {"name": ""}
@@ -93,7 +101,7 @@ def register(app: Flask) -> None:
             shown.append(model)
         shelf = {"catalog": found, "stale": "" if found else catalog.stale(app.config["ROOT"]),
                  "provider": provider, "model": model, "notes": notes,
-                 "models": shown, "hidden": len(listed) - len(shown),
+                 "models": shown, "hidden": len(listed) - len(shown), "problem": problem,
                  "key_set": bool(provider and provider.key_env in key_names())}
         return profile_page(course, None, values, [], shelf=shelf)
 
@@ -105,12 +113,13 @@ def register(app: Flask) -> None:
         root = app.config["ROOT"]
         if problem := catalog.refresh(root):
             shelf = {"catalog": catalog.load(root), "stale": catalog.stale(root),
-                     "provider": None, "model": None,
+                     "provider": None, "model": None, "problem": "",
                      "notes": [], "models": [], "hidden": 0, "key_set": False}
             return profile_page(course, None, {"name": ""}, [problem], 502, shelf=shelf)
         found = catalog.load(root)
         chosen = request.form.get("catalog", "")
-        args = {"catalog": chosen} if found and found.provider(chosen) else {}
+        args = ({"catalog": chosen} if chosen in catalog.LOCAL
+                or (found and found.provider(chosen)) else {})
         return redirect(url_for("new_model", name=name, notice="catalog-fetched", **args),
                         code=303)
 
@@ -131,6 +140,10 @@ def register(app: Flask) -> None:
         profile = form["name"].strip()
         data, problems = llm_settings.check_profile(course, profile, form)
         if data is not None:
+            # A key name used at another host, in any course, is refused (catalog.py: a
+            # changed URL must not send a key elsewhere).
+            problems = llm_settings.key_elsewhere(app.config["ROOT"], course, profile, data)
+        if data is not None and not problems:
             problems = llm_settings.save_profile(course, original, profile, data)
         if problems:
             return profile_page(course, original, form, problems, 400)

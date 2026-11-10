@@ -19,6 +19,8 @@ import sys
 import tomllib
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
+from urllib.parse import urlsplit
 
 import tomlkit
 
@@ -26,7 +28,7 @@ from tutor import llm
 from tutor.config import WORKSPACE_FILE
 from tutor.gui import keys, toml_edit
 from tutor.gui.catalog import same_url
-from tutor.gui.courses import Course
+from tutor.gui.courses import Course, find_courses
 from tutor.gui.toml_edit import put as _put
 from tutor.gui.toml_edit import spaced as _spaced
 
@@ -359,6 +361,36 @@ def copy_models(course: Course, source: Course) -> list[str]:
             _put(roles, role, name)
 
     return _edit(course, change, expected)
+
+
+def key_elsewhere(root: Path, course: Course, name: str, data: dict) -> list[str]:
+    """The problem when the profile's key name is used by a profile of any course under
+    `root` at another host: one key belongs to one provider, and a profile that sends it
+    elsewhere (a changed URL in the models.dev list, say) would give it away on every call.
+    The same host at another path (z.ai's two sites are two keys) passes; so does a profile
+    with no key (a server on this machine)."""
+    key, url = data.get("api_key_env"), data.get("base_url")
+    if not key:
+        return []
+    host = _host(url or llm.PROVIDERS[data["provider"]][0] or "")
+    for other in find_courses(root)[0]:
+        for p_name, p_data in section(other).get("profiles", {}).items():
+            if not isinstance(p_data, dict) or p_data.get("api_key_env") != key:
+                continue
+            if other.folder == course.folder and p_name == name:
+                continue  # the profile being saved, as it was
+            there = _host(p_data.get("base_url")
+                          or (llm.PROVIDERS.get(p_data.get("provider"), (None,))[0] or ""))
+            if there and host and there != host:
+                return [f"{key} is the key {p_name} ({other.workspace.course}) sends to "
+                        f"{there}; this model would send it to {host}. One key goes to one "
+                        "provider: give this model's key another name, or check the base "
+                        "URL (a key sent to the wrong host is given away)."]
+    return []
+
+
+def _host(url: str) -> str:
+    return (urlsplit(url).hostname or "").lower()
 
 
 def check_command(names: list[str]) -> list[str]:
