@@ -1,7 +1,11 @@
 {# The part of the plan page that changes. While a task runs for this plan, htmx fetches it
    again every second; the copy it gets once the task has ended has no trigger, so the
    polling stops and the plan with its buttons appears. Every value from plan.json and the
-   log is escaped like any other. #}
+   log is escaped like any other.
+   Text through _() and ngettext (gui/i18n.py). The states (plan, item, task) are N_()
+   strings of generation.py, plan_items.py and tasks.py: a chip keeps the English value for
+   its CSS class and shows _(state); the explanations (generation.EXPLAIN) likewise. What
+   a model or a check wrote (reasons, details, notes, ids) stays as it is. #}
 {% from "_macros.html" import action, chip, log_box %}
 {% set running = plan.task is not none and plan.task.pending %}
 {# Another course task no longer blocks this plan's buttons: a click queues (owner,
@@ -11,29 +15,30 @@
   {# The draft folder's date (DATE_p3-LABEL), as the batch folder shows it. In this part,
      not above it: right after the form is sent the draft does not exist yet, and only this
      part is fetched again once it does (found by a click, 2026-11-09). #}
-  {% if plan.draft %}<p class="muted">Planned {{ plan.draft.name[:10] }}</p>{% endif %}
+  {% if plan.draft %}<p class="muted">{{ _("Planned %(date)s", date=plan.draft.name[:10]) }}</p>{% endif %}
   <div class="facts-line">
-    {{ chip(plan.state) }}
+    {{ chip(plan.state, _(plan.state)) }}
     {% if plan.batch %}<span class="muted">{{ plan.batch }}</span>{% endif %}
-    {% if plan.settings.mode %}<span class="muted">mode {{ plan.settings.mode }}{% if plan.settings.hide_answers %}, test runs hide answers{% endif %}</span>{% endif %}
-    {% if plan.how_many.count %}<span class="muted">exactly {{ plan.how_many.count }} asked for</span>
-    {% elif plan.how_many.max_count %}<span class="muted">the model chose how many, at most {{ plan.how_many.max_count }}</span>{% endif %}
-    {% if running %}{{ action(url_for('stop_task', name=course.folder, task_id=plan.task.id), "Stop") }}{% endif %}
+    {% if plan.settings.mode %}<span class="muted">{{ _("mode %(mode)s", mode=plan.settings.mode) }}{% if plan.settings.hide_answers %}{{ _(", test runs hide answers") }}{% endif %}</span>{% endif %}
+    {% if plan.how_many.count %}<span class="muted">{{ _("exactly %(n)s asked for", n=plan.how_many.count) }}</span>
+    {% elif plan.how_many.max_count %}<span class="muted">{{ _("the model chose how many, at most %(n)s", n=plan.how_many.max_count) }}</span>{% endif %}
+    {% if running %}{{ action(url_for('stop_task', name=course.folder, task_id=plan.task.id), _("Stop")) }}{% endif %}
   </div>
-  <p>{{ explain[plan.state] }}</p>
+  <p>{{ _(explain[plan.state]) }}</p>
   {% include "_quiet.html" %}
-  {% if plan.generated and plan.has_manifest %}<p><a href="{{ url_for('batch', name=course.folder, batch=plan.batch) }}">Open the batch</a></p>{% endif %}
-  {% if plan.selection_error %}<p class="notice notice-bad">{{ plan.selection_error }}</p><p><a href="{{ url_for('plan', name=course.folder, label=plan.label) }}">Refresh plan</a></p>{% endif %}
+  {% if plan.generated and plan.has_manifest %}<p><a href="{{ url_for('batch', name=course.folder, batch=plan.batch) }}">{{ _("Open the batch") }}</a></p>{% endif %}
+  {% if plan.selection_error %}<p class="notice notice-bad">{{ plan.selection_error }}</p><p><a href="{{ url_for('plan', name=course.folder, label=plan.label) }}">{{ _("Refresh plan") }}</a></p>{% endif %}
   {% if selection_error %}<p class="notice notice-bad">{{ selection_error }}</p>{% endif %}
   {% if plan.plan_error %}<p class="notice notice-bad">{{ plan.plan_error }}</p>{% endif %}
 
   {% if plan.shows_plan and plan.items %}
   {# The plan waits for approval and coverage.md has nothing on some of its lectures: it
      came from the page titles alone (owner, 2026-11-10: week 9's plan ran that way). #}
-  {% if no_coverage %}<p class="notice notice-bad">coverage.md has no rows for {{ no_coverage | join(", ") }}: this plan was made from the page titles alone, not from the file's gaps. You can still approve it; a better plan starts from rows drafted and merged on the <a href="{{ url_for('coverage_view', name=course.folder) }}">Coverage</a> page, then a new batch.</p>{% endif %}
-  {% if plan.edited %}<p class="notice notice-ok">plan.json was edited: it differs from the model's plan, and approving uses it.</p>{% endif %}
+  {% set coverage_link %}<a href="{{ url_for('coverage_view', name=course.folder) }}">{{ _("Coverage") }}</a>{% endset %}
+  {% if no_coverage %}<p class="notice notice-bad">{{ _("coverage.md has no rows for %(names)s: this plan was made from the page titles alone, not from the file's gaps. You can still approve it; a better plan starts from rows drafted and merged on the %(page)s page, then a new batch.", names=no_coverage | join(", "), page=coverage_link) }}</p>{% endif %}
+  {% if plan.edited %}<p class="notice notice-ok">{{ _("plan.json was edited: it differs from the model's plan, and approving uses it.") }}</p>{% endif %}
   <table class="plan">
-    <thead><tr><th class="num">#</th>{% if plan.can_approve %}<th>Generate</th>{% endif %}<th>Exercise</th>{% if statuses %}<th>Status</th>{% endif %}<th>Source</th><th>What it practises</th></tr></thead>
+    <thead><tr><th class="num">#</th>{% if plan.can_approve %}<th>{{ _("Generate") }}</th>{% endif %}<th>{{ _("Exercise") }}</th>{% if statuses %}<th>{{ _("Status") }}</th>{% endif %}<th>{{ _("Source") }}</th><th>{{ _("What it practises") }}</th></tr></thead>
     <tbody>
     {% for item in plan.items %}
       {# Once approved, each exercise's status next to it (plan_items.item_statuses), and a
@@ -42,41 +47,41 @@
       <tr>
         <td class="num">{{ loop.index }}</td>
         {# Native form association keeps selection usable without JavaScript or nested forms. #}
-        {% if plan.can_approve %}<td><input type="checkbox" name="item" value="{{ item.id }}" form="approve-selection" aria-label="Generate {{ item.id }}"{% if checked is none or item.id in checked %} checked{% endif %}></td>{% endif %}
+        {% if plan.can_approve %}<td><input type="checkbox" name="item" value="{{ item.id }}" form="approve-selection" aria-label="{{ _('Generate %(id)s', id=item.id) }}"{% if checked is none or item.id in checked %} checked{% endif %}></td>{% endif %}
         <td><strong>{% if status and status.state in ("valid", "invalid", "saved, not validated") %}<a href="{{ url_for('exercise', name=course.folder, batch=plan.batch, exercise=item.id) }}">{{ item.id }}</a>{% else %}{{ item.id }}{% endif %}</strong>
           <div class="muted">{{ item.type }} · {{ item.interface }} · {{ item.framework }}</div></td>
-        {% if statuses %}<td class="item-status">{% if status %}{{ chip(status.state) }}
+        {% if statuses %}<td class="item-status">{% if status %}{{ chip(status.state, _(status.state)) }}
           {% if status.reason %}<div class="muted">{{ status.reason }}</div>{% endif %}
           {# The last round's failure hides earlier rounds the output cap ended: say so, and
              offer the one larger cap (owner, 2026-11-10, week 9's two items). #}
-          {% if status.cut_off_rounds %}<div class="muted cut-off">Round{{ "s" if status.cut_off_rounds | length > 1 }} {{ status.cut_off_rounds | join(", ") }}: the reply was cut off at the batch's output cap.</div>{% endif %}
-          {% if status.state == "Left out by you" and status.reason %}<a href="{{ url_for('new_batch', name=course.folder) }}">New batch with a valid source and unused ID</a> · <a href="{{ url_for('course', name=course.folder) }}">Course and existing exercises</a>{% endif %}
-          {% if status.can_generate and plan.generation_complete and not busy and not plan.selection_error %}<form method="post" action="{{ url_for('generate_left_out', name=course.folder, label=plan.label) }}" class="action"><input type="hidden" name="item" value="{{ item.id }}"><button type="submit">Generate</button></form>{% endif %}
-          {% if status.can_retry and not busy and not plan.selection_error %}<form method="post" action="{{ url_for('retry_item', name=course.folder, label=plan.label) }}" class="action"><input type="hidden" name="item" value="{{ item.id }}"><button type="submit">Try again</button></form>
-          {% if status.cut_off_rounds %}<form method="post" action="{{ url_for('retry_item', name=course.folder, label=plan.label) }}" class="action"><input type="hidden" name="item" value="{{ item.id }}"><input type="hidden" name="cap" value="{{ retry_cap }}"><button type="submit">Try again with a {{ "{:,}".format(retry_cap) }} output cap</button></form>{% endif %}
-          {% elif status.can_retry %}<div class="muted">"Try again" comes back when this plan's task ends.</div>{% endif %}{% endif %}</td>{% endif %}
-        <td>{{ item.lecture }}<div class="muted">slides {{ item.slides }}</div></td>
+          {% if status.cut_off_rounds %}<div class="muted cut-off">{% trans count=status.cut_off_rounds | length, rounds=status.cut_off_rounds | join(", ") %}Round {{ rounds }}: the reply was cut off at the batch's output cap.{% pluralize %}Rounds {{ rounds }}: the reply was cut off at the batch's output cap.{% endtrans %}</div>{% endif %}
+          {% if status.state == "Left out by you" and status.reason %}<a href="{{ url_for('new_batch', name=course.folder) }}">{{ _("New batch with a valid source and unused ID") }}</a> · <a href="{{ url_for('course', name=course.folder) }}">{{ _("Course and existing exercises") }}</a>{% endif %}
+          {% if status.can_generate and plan.generation_complete and not busy and not plan.selection_error %}<form method="post" action="{{ url_for('generate_left_out', name=course.folder, label=plan.label) }}" class="action"><input type="hidden" name="item" value="{{ item.id }}"><button type="submit">{{ _("Generate") }}</button></form>{% endif %}
+          {% if status.can_retry and not busy and not plan.selection_error %}<form method="post" action="{{ url_for('retry_item', name=course.folder, label=plan.label) }}" class="action"><input type="hidden" name="item" value="{{ item.id }}"><button type="submit">{{ _("Try again") }}</button></form>
+          {% if status.cut_off_rounds %}<form method="post" action="{{ url_for('retry_item', name=course.folder, label=plan.label) }}" class="action"><input type="hidden" name="item" value="{{ item.id }}"><input type="hidden" name="cap" value="{{ retry_cap }}"><button type="submit">{{ _("Try again with a %(cap)s output cap", cap="{:,}".format(retry_cap)) }}</button></form>{% endif %}
+          {% elif status.can_retry %}<div class="muted">{{ _("\"Try again\" comes back when this plan's task ends.") }}</div>{% endif %}{% endif %}</td>{% endif %}
+        <td>{{ item.lecture }}<div class="muted">{{ _("slides %(range)s", range=item.slides) }}</div></td>
         <td>{{ item.knowledge_point }}
-          {% if item.notes %}<div class="muted">Checks: {{ item.notes }}</div>{% endif %}
-          {% if item.reason %}<div class="muted">Why: {{ item.reason }}</div>{% endif %}</td>
+          {% if item.notes %}<div class="muted">{{ _("Checks: %(text)s", text=item.notes) }}</div>{% endif %}
+          {% if item.reason %}<div class="muted">{{ _("Why: %(text)s", text=item.reason) }}</div>{% endif %}</td>
       </tr>
       {# A try with nothing changed tends to fail the same way, so the owner can read what the
          last round failed on and add a note for the next try (owner, 2026-11-07). #}
       {% if status and status.can_retry and not busy and not plan.selection_error %}
       <tr class="retry-note"><td></td><td colspan="4">
         <details{% if status.note %} open{% endif %}>
-          <summary>Try again with a note{% if status.detail %}, and what the last round failed on{% endif %}</summary>
-          {% if status.detail %}<p class="muted">The last round's check output. It can show the expected values of the discarded draft's tests.</p>
+          <summary>{{ _("Try again with a note") }}{% if status.detail %}{{ _(", and what the last round failed on") }}{% endif %}</summary>
+          {% if status.detail %}<p class="muted">{{ _("The last round's check output. It can show the expected values of the discarded draft's tests.") }}</p>
           <pre class="failure">{{ status.detail }}</pre>
-          {% elif plan.hides_answers and status.state == "discarded" %}<p class="muted">The last round's check output is not shown: this batch hides answers, and the output can quote them.</p>{% endif %}
+          {% elif plan.hides_answers and status.state == "discarded" %}<p class="muted">{{ _("The last round's check output is not shown: this batch hides answers, and the output can quote them.") }}</p>{% endif %}
           <form method="post" action="{{ url_for('retry_item', name=course.folder, label=plan.label) }}" class="form">
             <input type="hidden" name="item" value="{{ item.id }}">
-            <label class="field">Note for the next try
-              <span class="muted">added to this exercise's notes for this try only (plan.json stays as approved), e.g. which reading of the question the reference and the tests must share{% if status.note %}; this is the note the last try used{% endif %}</span>
+            <label class="field">{{ _("Note for the next try") }}
+              <span class="muted">{{ _("added to this exercise's notes for this try only (plan.json stays as approved), e.g. which reading of the question the reference and the tests must share") }}{% if status.note %}{{ _("; this is the note the last try used") }}{% endif %}</span>
               <textarea name="note" rows="3" maxlength="2000" required>{{ status.note }}</textarea>
             </label>
-            {% if status.cut_off_rounds %}<label class="field"><input type="checkbox" name="cap" value="{{ retry_cap }}" checked> Allow {{ "{:,}".format(retry_cap) }} output tokens this try (the batch's cap cut round{{ "s" if status.cut_off_rounds | length > 1 }} {{ status.cut_off_rounds | join(", ") }} short; the model's thinking counts towards it)</label>{% endif %}
-            <div class="actions"><button type="submit">Try again with this note</button></div>
+            {% if status.cut_off_rounds %}<label class="field"><input type="checkbox" name="cap" value="{{ retry_cap }}" checked> {% trans count=status.cut_off_rounds | length, cap="{:,}".format(retry_cap), rounds=status.cut_off_rounds | join(", ") %}Allow {{ cap }} output tokens this try (the batch's cap cut round {{ rounds }} short; the model's thinking counts towards it){% pluralize %}Allow {{ cap }} output tokens this try (the batch's cap cut rounds {{ rounds }} short; the model's thinking counts towards it){% endtrans %}</label>{% endif %}
+            <div class="actions"><button type="submit">{{ _("Try again with this note") }}</button></div>
           </form>
         </details>
       </td></tr>
@@ -88,22 +93,22 @@
 
   {% set failed = statuses.values() | selectattr("can_retry") | list if statuses else [] %}
   {% if failed and not busy and not plan.selection_error %}
-  {% if failed | length > 1 %}<div class="actions">{{ action(url_for('retry_all', name=course.folder, label=plan.label), "Try all " ~ (failed | length) ~ " again", primary=True) }}</div>{% endif %}
-  <p class="muted">"Try again" generates an exercise once more with this batch's models and settings, then validates it{% if failed | length > 1 %}; "Try all" does so for each that did not come out, one after another, with no notes{% endif %}. Like approving, it costs money.</p>
+  {% if failed | length > 1 %}<div class="actions">{{ action(url_for('retry_all', name=course.folder, label=plan.label), _("Try all %(n)s again", n=failed | length), primary=True) }}</div>{% endif %}
+  <p class="muted">{% if failed | length > 1 %}{{ _("\"Try again\" generates an exercise once more with this batch's models and settings, then validates it; \"Try all\" does so for each that did not come out, one after another, with no notes. Like approving, it costs money.") }}{% else %}{{ _("\"Try again\" generates an exercise once more with this batch's models and settings, then validates it. Like approving, it costs money.") }}{% endif %}</p>
   {% endif %}
 
   {% if plan.shows_plan and plan.at_limit %}
-  <p class="notice notice-bad">The model planned as many exercises as the limit ({{ plan.how_many.max_count }}), so some knowledge points may have been merged or left out. The limit is fixed once the plan is made, so sending it back cannot go past it. For more, {% if plan.can_review %}add items to plan.json, or {% endif %}start a new batch with a higher limit.</p>
+  <p class="notice notice-bad">{{ _("The model planned as many exercises as the limit (%(n)s), so some knowledge points may have been merged or left out. The limit is fixed once the plan is made, so sending it back cannot go past it.", n=plan.how_many.max_count) }} {% if plan.can_review %}{{ _("For more, add items to plan.json, or start a new batch with a higher limit.") }}{% else %}{{ _("For more, start a new batch with a higher limit.") }}{% endif %}</p>
   {% endif %}
 
   {% if plan.can_approve and plan.problems %}
-  <div class="notice notice-bad">Problems the check found when the plan was shown:
+  <div class="notice notice-bad">{{ _("Problems the check found when the plan was shown:") }}
     <ul>{% for line in plan.problems %}<li>{{ line }}</li>{% endfor %}</ul>
-    Approval requires unique, identifiable IDs throughout the plan. Only checked rows need valid schemas, unused IDs, chosen sources and valid slide ranges; edit plan.json or send it back to fix them.</div>
+    {{ _("Approval requires unique, identifiable IDs throughout the plan. Only checked rows need valid schemas, unused IDs, chosen sources and valid slide ranges; edit plan.json or send it back to fix them.") }}</div>
   {% endif %}
 
   {% if statuses.values() | selectattr("can_generate") | list %}
-  <p class="muted">Generate starts one left-out item as a new paid generation after the selected run finishes and the course is idle. It uses the approved notes and saved settings; current course model definitions resolve the saved profile choices.</p>
+  <p class="muted">{{ _("Generate starts one left-out item as a new paid generation after the selected run finishes and the course is idle. It uses the approved notes and saved settings; current course model definitions resolve the saved profile choices.") }}</p>
   <table class="compact"><tbody>{% for role, text in models if role != "plan" %}<tr><th>{{ role }}</th><td>{{ text }}</td></tr>{% endfor %}</tbody></table>
   {% endif %}
 
@@ -111,29 +116,29 @@
   <div class="actions">
     {% if plan.can_approve %}<form method="post" id="approve-selection" action="{{ url_for('approve_plan', name=course.folder, label=plan.label) }}" class="action">
       <input type="hidden" name="selection_form" value="1"><input type="hidden" name="plan_digest" value="{{ plan.plan_digest }}">
-      <button type="submit" class="primary">Approve and generate selected</button>
+      <button type="submit" class="primary">{{ _("Approve and generate selected") }}</button>
     </form>{% endif %}
-    {{ action(url_for('edit_plan', name=course.folder, label=plan.label), "Edit plan.json in VS Code") }}
+    {{ action(url_for('edit_plan', name=course.folder, label=plan.label), _("Edit plan.json in VS Code")) }}
   </div>
-  <p class="muted">Only checked items are generated. Unchecked items stay on this plan as Left out by you. Approving costs money and uses the models below; container courses need Docker running.</p>
+  <p class="muted">{{ _("Only checked items are generated. Unchecked items stay on this plan as Left out by you. Approving costs money and uses the models below; container courses need Docker running.") }}</p>
   <table class="compact"><tbody>
     {% for role, text in models if role != "plan" %}<tr><th>{{ role }}</th><td>{{ text }}</td></tr>{% endfor %}
   </tbody></table>
   <form method="post" action="{{ url_for('send_back_plan', name=course.folder, label=plan.label) }}" class="form">
-    <label class="field">Send it back
-      <span class="muted">what to change, in plain words; the plan model makes a new plan, which waits for you again</span>
+    <label class="field">{{ _("Send it back") }}
+      <span class="muted">{{ _("what to change, in plain words; the plan model makes a new plan, which waits for you again") }}</span>
       <textarea name="feedback" rows="3" maxlength="2000" required></textarea>
     </label>
-    <div class="actions"><button type="submit">Send back</button></div>
+    <div class="actions"><button type="submit">{{ _("Send back") }}</button></div>
   </form>
   {% elif not running and plan.can_continue %}
-  <div class="actions">{{ action(url_for('continue_plan', name=course.folder, label=plan.label), "Continue", primary=True) }}</div>
+  <div class="actions">{{ action(url_for('continue_plan', name=course.folder, label=plan.label), _("Continue"), primary=True) }}</div>
   {% endif %}
 
   {% if plan.task %}
   <details class="task-output"{% if running or plan.task.status != "done" %} open{% endif %}>
-    <summary>Output of <a href="{{ url_for('task', name=course.folder, task_id=plan.task.id) }}">{{ plan.task.title }}</a>
-      {{ chip(plan.task.status) }} <span class="muted">{{ plan.task.started }}</span></summary>
+    <summary>{{ _("Output of") }} <a href="{{ url_for('task', name=course.folder, task_id=plan.task.id) }}">{{ plan.task.title }}</a>
+      {{ chip(plan.task.status, _(plan.task.status)) }} <span class="muted">{{ plan.task.started }}</span></summary>
     {{ log_box(log, cut) }}
   </details>
   {% endif %}

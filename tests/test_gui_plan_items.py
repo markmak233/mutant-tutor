@@ -114,7 +114,7 @@ def test_another_tasks_run_no_longer_hides_try_again_but_this_plans_does(root, c
     monkeypatch.setattr(tasks, "list_tasks", lambda course_root: [mine, other])
     page = get(_browser(root), "/c/demo-course/plans/w9-test/").get_data(as_text=True)
     assert 'name="item" value=' not in page
-    assert page.count("comes back when this plan's task ends") == 2
+    assert page.count("comes back when this plan&#39;s task ends") == 2
     monkeypatch.setattr(tasks, "start", lambda *a, **k: pytest.fail("nothing may start"))
     response = post(_browser(root), "/c/demo-course/plans/w9-test/retry", {"item": "c"})
     assert "notice=plan-moved" in response.headers["Location"]
@@ -289,7 +289,7 @@ def test_the_page_offers_the_larger_cap_only_where_a_round_was_cut_off(root, cou
     _cut_off(course, batch)
     page = get(_browser(root), "/c/demo-course/plans/w9-test/").get_data(as_text=True)
 
-    assert "Rounds 0, 1: the reply was cut off at the batch's output cap." in page
+    assert "Rounds 0, 1: the reply was cut off at the batch&#39;s output cap." in page
     assert page.count('name="cap" value="64000"') == 2  # the button, and the note form's box
     assert "Try again with a 64,000 output cap" in page
 

@@ -36,6 +36,7 @@ from datetime import datetime
 from pathlib import Path
 
 from tutor import locations
+from tutor.gui.i18n import N_
 
 TASKS_DIR = Path("logs") / "gui-tasks"
 TASK_FILE = "task.json"
@@ -49,8 +50,11 @@ REPO = locations.commands()
 _ID = re.compile(r"^\d{8}-\d{6}-[0-9a-f]{6}$")
 _start_lock = threading.Lock()  # waitress serves requests on several threads
 
-RUNNING, DONE, FAILED, STOPPED, LOST = "running", "done", "failed", "stopped", "lost"
-QUEUED = "queued"  # written, not started: it starts when the course's running task ends
+# The status words, as task.json keeps them; N_() marks them so a page can show them
+# translated (gui/i18n.py), the file and the comparisons keep the English.
+RUNNING, DONE, FAILED, STOPPED, LOST = (N_("running"), N_("done"), N_("failed"), N_("stopped"),
+                                        N_("lost"))
+QUEUED = N_("queued")  # written, not started: it starts when the course's running task ends
 CLAIM_FILE = "claimed"  # created once, by whoever starts the task (os.O_EXCL)
 
 

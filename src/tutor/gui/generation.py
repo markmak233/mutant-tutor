@@ -40,6 +40,7 @@ from pathlib import Path
 
 from tutor.gui import tasks, toml_edit
 from tutor.gui.courses import Course
+from tutor.gui.i18n import N_
 from tutor.materials import coverage_store
 from tutor.materials.cache import is_lecture, lecture_caches, lecture_name
 from tutor.materials.slides import lecture_number
@@ -71,37 +72,38 @@ KINDS = (PLAN, FEEDBACK, APPROVE, CONTINUE, RETRY)  # a task of one of these goe
 _PLANNING_KINDS = (PLAN, FEEDBACK, CONTINUE)
 
 # Where a batch stands; the words the pages show.
-MAKING_PLAN = "making the plan"
-GENERATING = "generating"
-CONTINUING = "continuing"
-WAITING = "waiting for you"
-STOPPED = "stopped midway"
-NO_PLAN = "plan not finished"
-ASSISTANT = "waiting for the assistant"
-GENERATED = "generated"
-NOT_STARTED = "did not start"
-QUEUED = "queued"  # a task of this plan waits for the course's running task to end
+MAKING_PLAN = N_("making the plan")
+GENERATING = N_("generating")
+CONTINUING = N_("continuing")
+WAITING = N_("waiting for you")
+STOPPED = N_("stopped midway")
+NO_PLAN = N_("plan not finished")
+ASSISTANT = N_("waiting for the assistant")
+GENERATED = N_("generated")
+NOT_STARTED = N_("did not start")
+QUEUED = N_("queued")  # a task of this plan waits for the course's running task to end
+# What each state means, as the plan page says it (N_(): translated when shown).
 EXPLAIN = {
-    QUEUED: "A task of this plan is queued: it starts when the course's running task ends. "
-            "Until then it can be removed from the course page.",
-    MAKING_PLAN: "The plan model is at work. This page updates by itself, and the plan "
-                 "appears here when it is ready.",
-    GENERATING: "Generating the approved plan: each exercise is written, validated in a "
-                "container and repaired when it fails. It goes on if you close this page.",
-    CONTINUING: "Continuing from where the last run stopped.",
-    WAITING: "The plan waits for you. Approve it to generate the exercises, edit plan.json "
+    QUEUED: N_("A task of this plan is queued: it starts when the course's running task ends. "
+            "Until then it can be removed from the course page."),
+    MAKING_PLAN: N_("The plan model is at work. This page updates by itself, and the plan "
+                 "appears here when it is ready."),
+    GENERATING: N_("Generating the approved plan: each exercise is written, validated in a "
+                "container and repaired when it fails. It goes on if you close this page."),
+    CONTINUING: N_("Continuing from where the last run stopped."),
+    WAITING: N_("The plan waits for you. Approve it to generate the exercises, edit plan.json "
              "first, or send it back with what to change. Nothing is generated before you "
-             "approve.",
-    STOPPED: "Generation stopped before every exercise finished. Continue runs the rest; "
-             "exercises that finished are kept and not run again.",
-    NO_PLAN: "Making the plan stopped before it was ready. Continue makes it from where it "
-             "stopped, and it waits for you again.",
-    ASSISTANT: "The batch waits for answers from the coding assistant (assistant mode, "
-               "docs/assistant-mode.md). Answer them from a terminal, then Continue.",
-    GENERATED: "The run has finished. Saved exercises, if any, are on the course page.",
-    NOT_STARTED: "The command stopped before it made the batch's folder; its output below "
+             "approve."),
+    STOPPED: N_("Generation stopped before every exercise finished. Continue runs the rest; "
+             "exercises that finished are kept and not run again."),
+    NO_PLAN: N_("Making the plan stopped before it was ready. Continue makes it from where it "
+             "stopped, and it waits for you again."),
+    ASSISTANT: N_("The batch waits for answers from the coding assistant (assistant mode, "
+               "docs/assistant-mode.md). Answer them from a terminal, then Continue."),
+    GENERATED: N_("The run has finished. Saved exercises, if any, are on the course page."),
+    NOT_STARTED: N_("The command stopped before it made the batch's folder; its output below "
                  "says why (Docker not running, for example). Fix that, then start a new "
-                 "batch; the label is free.",
+                 "batch; the label is free."),
 }
 
 

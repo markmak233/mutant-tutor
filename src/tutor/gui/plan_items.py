@@ -28,11 +28,13 @@ from tutor.gui.generation import (
     STOPPED,
     PlanView,
 )
+from tutor.gui.i18n import N_
 
 # What each exercise of an approved plan came to, shown next to it on the plan page.
-ITEM_VALID, ITEM_INVALID, ITEM_SAVED = "valid", "invalid", "saved, not validated"
-ITEM_DISCARDED, ITEM_ERROR, ITEM_PENDING = "discarded", "error", "not generated yet"
-ITEM_LEFT_OUT = "Left out by you"
+# N_(): the page shows them translated; the values stay English (CSS classes, comparisons).
+ITEM_VALID, ITEM_INVALID, ITEM_SAVED = N_("valid"), N_("invalid"), N_("saved, not validated")
+ITEM_DISCARDED, ITEM_ERROR, ITEM_PENDING = N_("discarded"), N_("error"), N_("not generated yet")
+ITEM_LEFT_OUT = N_("Left out by you")
 _ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,79}$")  # a plan id, safe as a file name
 DETAIL_CHARS = 1500  # of the last round's failure shown, enough for pytest's first assertion
 NOTE_PREFIX = "The owner adds, for this try: "  # how a retry's note joins the item's notes

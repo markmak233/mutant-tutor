@@ -31,7 +31,7 @@
 <h2>{{ _("Plans") }}</h2>
 <ul class="runs">
 {% for plan in plans %}
-  <li>{{ chip(plan.state) }} <a href="{{ url_for('plan', name=course.folder, label=plan.label) }}">{{ plan.label }}</a>
+  <li>{{ chip(plan.state, _(plan.state)) }} <a href="{{ url_for('plan', name=course.folder, label=plan.label) }}">{{ plan.label }}</a>
     {% if plan.batch %}<span class="muted">{{ plan.batch }}</span>{% endif %}</li>
 {% endfor %}
 </ul>
@@ -60,7 +60,7 @@
 <h2>{{ _("Queued") }}</h2>
 <ol class="runs">
 {% for task in queue %}
-  <li>{{ chip(task.status) }} <a href="{{ url_for('task', name=course.folder, task_id=task.id) }}">{{ task.title }}</a>
+  <li>{{ chip(task.status, _(task.status)) }} <a href="{{ url_for('task', name=course.folder, task_id=task.id) }}">{{ task.title }}</a>
     <span class="muted">{{ _("queued %(when)s", when=task.started) }}</span>
     <form method="post" action="{{ url_for('remove_task', name=course.folder, task_id=task.id) }}" class="action"><button type="submit">{{ _("Remove") }}</button></form></li>
 {% endfor %}
@@ -70,7 +70,7 @@
 <h2>{{ _("Tasks") }}</h2>
 <ul class="runs">
 {% for task in tasks %}
-  <li>{{ chip(task.status) }} <a href="{{ url_for('task', name=course.folder, task_id=task.id) }}">{{ task.title }}</a>
+  <li>{{ chip(task.status, _(task.status)) }} <a href="{{ url_for('task', name=course.folder, task_id=task.id) }}">{{ task.title }}</a>
     <span class="muted">{{ task.started }}</span></li>
 {% endfor %}
 </ul>

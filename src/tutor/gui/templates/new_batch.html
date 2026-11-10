@@ -1,21 +1,23 @@
 {% extends "base.html" %}
 {# The new-batch form. It starts `python -m tutor.graph plan` (generation.py), which makes the
    plan and pauses; nothing is generated before the owner approves on the plan page. When the
-   server refuses a value, this page comes back with the values typed, escaped. #}
-{% block title %}New batch{% endblock %}
+   server refuses a value, this page comes back with the values typed, escaped.
+   Text through _() (gui/i18n.py); file names, commands and the mode words (learn, review,
+   the manifest's values) stay as they are; a link or <code> inside a sentence is a captured
+   block passed in, so the sentence is one string. #}
+{% block title %}{{ _("New batch") }}{% endblock %}
 {% block crumbs %}
 <a href="{{ url_for('course', name=course.folder) }}">{{ course.workspace.course }}</a>
-<span>New batch</span>
+<span>{{ _("New batch") }}</span>
 {% endblock %}
 {% block content %}
-<h1>New batch</h1>
-<p class="muted">The plan model proposes exercises from the lectures you choose, the gaps in
-  <code>coverage.md</code> and your preferences. The plan then waits for you: approve it, edit
-  it, or send it back with what to change.</p>
+<h1>{{ _("New batch") }}</h1>
+{% set code_coverage %}<code>coverage.md</code>{% endset %}
+<p class="muted">{{ _("The plan model proposes exercises from the lectures you choose, the gaps in %(file)s and your preferences. The plan then waits for you: approve it, edit it, or send it back with what to change.", file=code_coverage) }}</p>
 {% if running %}
-<p class="notice notice-bad">A task is running in this course:
+<p class="notice notice-bad">{{ _("A task is running in this course:") }}
   <a href="{{ url_for('task', name=course.folder, task_id=running.id) }}">{{ running.title }}</a>.
-  A task started now is queued behind it.</p>
+  {{ _("A task started now is queued behind it.") }}</p>
 {% endif %}
 {% if problems %}
 <ul class="notice notice-bad form-problems">{% for line in problems %}<li>{{ line }}</li>{% endfor %}</ul>
@@ -23,54 +25,55 @@
 {% if c_blocked %}
 {# A C course whose tests would not run in a container (environment.c_without_container):
    every draft would fail rule `safe`, so no batch starts; the server refuses one too. #}
-{% if not problems %}<p class="notice notice-bad">A C course's exercises are validated only in a container, so a batch starts once the course runs its tests in one: choose it on the <a href="{{ url_for('environment_view', name=course.folder) }}">Environment</a> page (step 3) and build the test image (step 4).</p>{% endif %}
-<p><a href="{{ url_for('course', name=course.folder) }}">Back to {{ course.workspace.course }}</a></p>
+{% set env_link %}<a href="{{ url_for('environment_view', name=course.folder) }}">{{ _("Environment") }}</a>{% endset %}
+{% if not problems %}<p class="notice notice-bad">{{ _("A C course's exercises are validated only in a container, so a batch starts once the course runs its tests in one: choose it on the %(page)s page (step 3) and build the test image (step 4).", page=env_link) }}</p>{% endif %}
+<p><a href="{{ url_for('course', name=course.folder) }}">{{ _("Back to %(page)s", page=course.workspace.course) }}</a></p>
 {% elif not ready %}
-<p>No lecture of this course has been read yet: upload or read them on the
-  <a href="{{ url_for('lecture_list', name=course.folder) }}">Lectures</a> page.</p>
+{% set lectures_link %}<a href="{{ url_for('lecture_list', name=course.folder) }}">{{ _("Lectures") }}</a>{% endset %}
+<p>{{ _("No lecture of this course has been read yet: upload or read them on the %(page)s page.", page=lectures_link) }}</p>
 {% else %}
 <form method="post" action="{{ url_for('start_plan', name=course.folder) }}" class="form">
   <fieldset>
-    <legend>Lectures</legend>
+    <legend>{{ _("Lectures") }}</legend>
     {% for name in ready %}
-    <label class="check"><input type="checkbox" name="lecture" value="{{ name }}"{% if name in values.lectures %} checked{% endif %}> {{ name }}{% if name in no_coverage %} <span class="muted no-coverage">(no rows in coverage.md)</span>{% endif %}</label>
+    <label class="check"><input type="checkbox" name="lecture" value="{{ name }}"{% if name in values.lectures %} checked{% endif %}> {{ name }}{% if name in no_coverage %} <span class="muted no-coverage">{{ _("(no rows in coverage.md)") }}</span>{% endif %}</label>
     {% endfor %}
-    {% if unread %}<p class="muted">Not read yet, so not offered: {{ unread | join(", ") }}. Read them with <code>python -m tutor.materials</code>.</p>{% endif %}
+    {% set code_materials %}<code>python -m tutor.materials</code>{% endset %}
+    {% if unread %}<p class="muted">{{ _("Not read yet, so not offered: %(names)s. Read them with %(command)s.", names=unread | join(", "), command=code_materials) }}</p>{% endif %}
     {# A plan for a lecture coverage.md has nothing on comes from the page titles alone: the
        planner picks knowledge points from the file's gap rows (owner, 2026-11-10). #}
-    {% if no_coverage %}<p class="muted">A lecture marked "no rows in coverage.md" can be planned, but from its page titles alone: the plan model picks knowledge points from coverage.md's gap rows. Better first: draft and merge its rows on the <a href="{{ url_for('coverage_view', name=course.folder) }}">Coverage</a> page.</p>{% endif %}
+    {% set coverage_link %}<a href="{{ url_for('coverage_view', name=course.folder) }}">{{ _("Coverage") }}</a>{% endset %}
+    {% if no_coverage %}<p class="muted">{{ _("A lecture marked \"no rows in coverage.md\" can be planned, but from its page titles alone: the plan model picks knowledge points from coverage.md's gap rows. Better first: draft and merge its rows on the %(page)s page.", page=coverage_link) }}</p>{% endif %}
   </fieldset>
-  <label class="field">Label
-    <span class="muted">lowercase letters, digits and '-', e.g. w9-streams; the batch folder is named DATE_p3-LABEL; a label used before gets -1, -2, ...</span>
+  <label class="field">{{ _("Label") }}
+    <span class="muted">{{ _("lowercase letters, digits and '-', e.g. w9-streams; the batch folder is named DATE_p3-LABEL; a label used before gets -1, -2, ...") }}</span>
     <input type="text" name="label" value="{{ values.label }}" required maxlength="40" pattern="[a-z0-9][a-z0-9\-]*" autocomplete="off">
   </label>
   <fieldset>
-    <legend>Mode</legend>
-    <label class="check"><input type="radio" name="mode" value="learn"{% if values.mode == "learn" %} checked{% endif %}> learn: a question may explain the cause of a bug</label>
-    <label class="check"><input type="radio" name="mode" value="review"{% if values.mode == "review" %} checked{% endif %}> review: only its symptom</label>
+    <legend>{{ _("Mode") }}</legend>
+    <label class="check"><input type="radio" name="mode" value="learn"{% if values.mode == "learn" %} checked{% endif %}> {{ _("learn: a question may explain the cause of a bug") }}</label>
+    <label class="check"><input type="radio" name="mode" value="review"{% if values.mode == "review" %} checked{% endif %}> {{ _("review: only its symptom") }}</label>
   </fieldset>
   <fieldset>
-    <legend>How many exercises</legend>
+    <legend>{{ _("How many exercises") }}</legend>
     <label class="check"><input type="radio" name="how" value="auto"{% if values.how == "auto" %} checked{% endif %}>
-      Let the plan model decide: one per knowledge point it finds in the chosen lectures' gaps, leaving out what existing exercises practise, at most
-      <input type="number" name="max_count" min="1" max="40" value="{{ values.max_count }}" aria-label="At most"></label>
+      {{ _("Let the plan model decide: one per knowledge point it finds in the chosen lectures' gaps, leaving out what existing exercises practise, at most") }}
+      <input type="number" name="max_count" min="1" max="40" value="{{ values.max_count }}" aria-label="{{ _('At most') }}"></label>
     <label class="check"><input type="radio" name="how" value="exact"{% if values.how == "exact" %} checked{% endif %}>
-      Exactly <input type="number" name="count" min="1" max="40" value="{{ values.count }}" aria-label="Exactly"></label>
-    <p class="muted">The limit is fixed once the plan is made: sending the plan back cannot go past it.</p>
+      {{ _("Exactly") }} <input type="number" name="count" min="1" max="40" value="{{ values.count }}" aria-label="{{ _('Exactly') }}"></label>
+    <p class="muted">{{ _("The limit is fixed once the plan is made: sending the plan back cannot go past it.") }}</p>
   </fieldset>
-  <label class="field">Your preferences
-    <span class="muted">optional, in plain words</span>
+  <label class="field">{{ _("Your preferences") }}
+    <span class="muted">{{ _("optional, in plain words") }}</span>
     <textarea name="prefs" rows="4" maxlength="2000">{{ values.prefs }}</textarea>
   </label>
-  <label class="check"><input type="checkbox" name="hide_answers"{% if values.hide_answers %} checked{% endif %}> Hand-calculation exercises: a test run shows only passed or failed, since a traceback would print the right number</label>
-  <h2>Models</h2>
+  <label class="check"><input type="checkbox" name="hide_answers"{% if values.hide_answers %} checked{% endif %}> {{ _("Hand-calculation exercises: a test run shows only passed or failed, since a traceback would print the right number") }}</label>
+  <h2>{{ _("Models") }}</h2>
   <table class="compact"><tbody>
     {% for role, text in models %}<tr><th>{{ role }}</th><td>{{ text }}</td></tr>{% endfor %}
   </tbody></table>
-  <p class="muted">Making the plan calls the plan model, a few times at most. After you approve,
-    generating calls the models for every exercise, often several rounds each, and validates
-    each in a container, so Docker Desktop must be running. With a paid API, both cost money.</p>
-  <div class="actions"><button type="submit" class="primary">Make the plan</button></div>
+  <p class="muted">{{ _("Making the plan calls the plan model, a few times at most. After you approve, generating calls the models for every exercise, often several rounds each, and validates each in a container, so Docker Desktop must be running. With a paid API, both cost money.") }}</p>
+  <div class="actions"><button type="submit" class="primary">{{ _("Make the plan") }}</button></div>
 </form>
 {% endif %}
 {% endblock %}

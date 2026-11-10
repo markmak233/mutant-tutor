@@ -4,7 +4,7 @@
 {% from "_macros.html" import action, chip, log_box %}
 <div id="task-log"{% if task.pending %} hx-get="{{ url_for('task_log', name=course.folder, task_id=task.id) }}" hx-trigger="every 1s" hx-swap="outerHTML"{% endif %}>
   <div class="facts-line">
-    {{ chip(task.status) }}
+    {{ chip(task.status, _(task.status)) }}
     {% if task.queued %}
     {# Waiting its turn (tasks.kick starts it when the running task ends); the owner can
        take it out until then. #}
