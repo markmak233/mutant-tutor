@@ -3999,7 +3999,12 @@ late; the adaptive review screens can be built with it.
     then shorter forms down to the language, then a file of the same language and script,
     then of the same language ("pt" finds pt-br). The files written before by name
     (`zh_hk.po`) keep working under their names; renamed to the tag, the browser finds
-    them too. Jinja's new-style `_()` marks what gettext returns as safe HTML (so the
+    them too. The model to ask (owner, 2026-11-10: the drop-down offered each course's
+    setup model and all four were the same Sonnet; 2026-11-11): every course's chat
+    profiles (`environment.chat_profiles`: the embedding role's left out), the same
+    provider and model in several courses listed once under the first, the first
+    course's setup model chosen; the task runs in the course that owns the profile, with
+    its key (`--profile`). Jinja's new-style `_()` marks what gettext returns as safe HTML (so the
     values it formats in are escaped), translated or not, so the callables escape the
     text first: an English string may say `<profile>` and shows as written; a literal `%`
     in a page's English is written `%%` (a test checks every string). The language: the

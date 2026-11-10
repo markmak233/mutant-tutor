@@ -35,8 +35,10 @@
     <select name="code"><option value="">{{ _("(typed below)") }}</option>{% for x in table %}<option value="{{ x.code }}">{{ x.name }} · {{ x.code }}</option>{% endfor %}</select></label>
   <label class="field">{{ _("Or a language not in the list") }} <span class="muted">{{ _("as the switch will show it, e.g. Esperanto, 喵语; a tag such as zh-Hant lets the browser's language pick it") }}</span>
     <input type="text" name="name" maxlength="40" autocomplete="off"></label>
-  <label class="field">{{ _("Model") }} <span class="muted">{{ _("a course's setup model and its key; the task runs in that course") }}</span>
-    <select name="course">{% for course, model in models %}<option value="{{ course.folder }}">{{ course.workspace.course }}: {{ model }}</option>{% endfor %}</select></label>
+  {# Every course's chat profiles (routes/language.py `models`), the first course's setup
+     model chosen; the task runs in the course that owns the profile, with its key. #}
+  <label class="field">{{ _("Model") }} <span class="muted">{{ _("any course's model, with that course's key; the task runs in that course") }}</span>
+    <select name="model">{% for value, label, chosen in models %}<option value="{{ value }}"{% if chosen %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
   {# The note: kept in the file's header and sent with every batch of every run, so the
      batches and later runs keep one register (translate.py; a run without one reuses the
      file's). #}

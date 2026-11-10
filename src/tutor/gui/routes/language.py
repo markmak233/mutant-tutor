@@ -18,14 +18,30 @@ from tutor.gui.routes.common import course_or_404, start_task
 def register(app: Flask) -> None:
     """Add this module's routes to `app`; their endpoint names are their function names."""
 
-    def with_model() -> list[tuple[courses.Course, str]]:
-        """The courses whose models a translation could ask, with the model's name."""
-        found = []
+    def models() -> list[tuple[str, str, bool]]:
+        """The drop-down's models: every course's chat profiles (environment.chat_profiles),
+        as (value "folder|profile", label "course: profile (provider: model)", chosen).
+        The same provider and model in several courses is listed once, under the first
+        course (its key and log serve); chosen: the first course's setup model."""
+        found, seen = [], set()
         for course in courses.find_courses(app.config["ROOT"])[0]:
-            model = environment.setup_model(course)
-            if model:
-                found.append((course, model))
+            setup = environment.setup_profile(course)
+            for name, provider, model in environment.chat_profiles(course):
+                if (provider, model) in seen:
+                    continue
+                seen.add((provider, model))
+                found.append((f"{course.folder}|{name}",
+                              f"{course.workspace.course}: {name} ({provider}: {model})",
+                              not any(chosen for _v, _l, chosen in found)
+                              and setup is not None and setup[0] == name))
         return found
+
+    def chosen_profile() -> tuple[courses.Course, str] | None:
+        """The form's model, "folder|profile", when the course has that chat profile."""
+        folder, _, profile = request.form.get("model", "").partition("|")
+        course = course_or_404(folder)
+        names = [name for name, _p, _m in environment.chat_profiles(course)]
+        return (course, profile) if profile in names else None
 
     @app.get("/language")
     def language_page():
@@ -34,7 +50,7 @@ def register(app: Flask) -> None:
         # Each language's file: (strings it has, those kept as the English), for its line.
         files = {code: i18n.translations_for(code, root)
                  for code in i18n.available(root) if code != i18n.ENGLISH}
-        return render_template("language.html", chosen=i18n.chosen(root), models=with_model(),
+        return render_template("language.html", chosen=i18n.chosen(root), models=models(),
                                strings=len(strings), tokens_k=translate.tokens_about(strings),
                                folder=root / i18n.TRANSLATIONS,
                                counts={code: t.counts() for code, t in files.items()},
@@ -56,18 +72,19 @@ def register(app: Flask) -> None:
 
     @app.post("/language/translate")
     def translate_language():
-        """`python -m tutor.gui.translate NAME` (or `--code TAG`, a language from the
-        built-in table) as a task of the course whose model it asks (paid, so only on this
-        click); `again=1` asks for every string."""
+        """`python -m tutor.gui.translate NAME --profile P` (or `--code TAG`, a language
+        from the built-in table) as a task of the course whose profile it asks (paid, so
+        only on this click); `again=1` asks for every string."""
         row = language_table.by_code(request.form.get("code", ""))
         name = row.name if row else " ".join(request.form.get("name", "").split())
-        course = course_or_404(request.form.get("course", ""))
+        picked = chosen_profile()
         if not i18n.slug(name) or i18n.slug(name) == i18n.ENGLISH:
             return redirect(url_for("language_page", notice="no-language-name"), code=303)
-        if environment.setup_model(course) is None:
-            return redirect(url_for("language_page", notice="no-setup-model"), code=303)
+        if picked is None:
+            return redirect(url_for("language_page", notice="no-translate-model"), code=303)
+        course, profile = picked
         command = [sys.executable, "-m", "tutor.gui.translate",
-                   "--root", str(app.config["ROOT"])]
+                   "--root", str(app.config["ROOT"]), "--profile", profile]
         if row:  # the table's tag names the file and gives the name, note and direction
             command += ["--code", row.code]
         # The note to the translator (register, wording): kept in the file, sent each run.

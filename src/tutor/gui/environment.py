@@ -445,6 +445,17 @@ def setup_model(course: Course) -> str | None:
     """The model a draft would ask (requires_draft.model's choice), as a page names it;
     None when the course has no models, as the page then cannot tell whether a run
     could ask any (the LLM_* variables of .env, which the GUI does not read)."""
+    found = setup_profile(course)
+    if found is None:
+        return None
+    profile, role, data = found
+    return (f"{profile} ({data.get('provider', '?')}: "
+            f"{data.get('model') or data.get('provider')}), the {role} model")
+
+
+def setup_profile(course: Course) -> tuple[str, str, dict] | None:
+    """(profile name, the role that names it, its [llm.profiles] table) of the model a
+    draft would ask: the setup role's, else plan's, else generate's; None without one."""
     llm = _data(course).get("llm", {})
     if not llm:
         return None
@@ -453,8 +464,22 @@ def setup_model(course: Course) -> str | None:
     data = llm.get("profiles", {}).get(named[role]) if role else None
     if not isinstance(data, dict):
         return None
-    return (f"{named[role]} ({data.get('provider', '?')}: "
-            f"{data.get('model') or data.get('provider')}), the {role} model")
+    return named[role], role, data
+
+
+def chat_profiles(course: Course) -> list[tuple[str, str, str]]:
+    """Every profile of the course a chat request could go to, as (name, provider,
+    model), in the file's order; the one the embedding role names is left out (an
+    embedding model answers no chat). For the Language page's model choice (owner,
+    2026-11-10: every course's setup model was the same Sonnet, so the choice was none)."""
+    llm = _data(course).get("llm", {})
+    embedding = llm.get("roles", {}).get("embedding") if isinstance(llm, dict) else None
+    found = []
+    for name, data in (llm.get("profiles", {}) if isinstance(llm, dict) else {}).items():
+        if name != embedding and isinstance(data, dict):
+            provider = str(data.get("provider", "?"))
+            found.append((name, provider, str(data.get("model") or provider)))
+    return found
 
 
 def draft_command(again: bool = False) -> list[str]:

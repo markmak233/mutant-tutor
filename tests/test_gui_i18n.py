@@ -261,11 +261,25 @@ def test_an_error_page_and_a_form_problem_are_translated(root):
 
 
 def test_the_language_page_lists_offers_and_starts_a_translation(root, monkeypatch):
+    # A second course: two chat profiles, one of them the first course's model again
+    # (listed once, under the first course), and an embedding profile (not a chat).
+    other = root / "other-course"
+    other.mkdir()
+    (other / "workspace.toml").write_text(
+        'course = "other"\n\n[llm.profiles.big]\nprovider = "anthropic"\n'
+        'model = "claude-opus-5-5"\napi_key_env = "ANTHROPIC_API_KEY"\n'
+        '[llm.profiles.same]\nprovider = "deepseek"\nmodel = "x"\napi_key_env = "D"\n'
+        '[llm.profiles.vec]\nprovider = "openai"\nmodel = "text-embedding-3-small"\n'
+        'api_key_env = "OPENAI_API_KEY"\n\n[llm.roles]\nplan = "big"\nembedding = "vec"\n',
+        encoding="utf-8")
     client = _browser(root)
     text = _page(client, "/language")
     assert "<strong>English</strong>" in text and ">中文</button>" in text
-    assert "zh.po" in text and "demo: m (deepseek: x), the setup model" in text
-    assert "English strings; about" in text
+    assert "zh.po" in text and "English strings; about" in text
+    options = re.findall(r'<option value="([^"]*)"( selected)?>([^<]*)</option>', text)
+    assert [o for o in options if "|" in o[0]] == [
+        ("demo-course|m", " selected", "demo: m (deepseek: x)"),  # the setup model, chosen
+        ("other-course|big", "", "other: big (anthropic: claude-opus-5-5)")]
     # The file's line: what it has against the English, none kept as the English here.
     shown, same = i18n.translations_for("zh", root).counts()
     assert same == 0 and f"{shown} of {len(translate.english())} translated</span>" in text
@@ -275,29 +289,37 @@ def test_the_language_page_lists_offers_and_starts_a_translation(root, monkeypat
                         lambda course, title, commands, meta=None: started.append(
                             (course.folder, title, commands, meta)) or ("ok", 303))
     client.post("/language/translate", base_url=BASE, headers={"Origin": BASE},
-                data={"name": " Deutsch ", "course": "demo-course", "again": "1",
+                data={"name": " Deutsch ", "model": "demo-course|m", "again": "1",
                       "note": " Swiss spelling,\n no ß "})
     folder, title, commands, meta = started[0]
     assert (folder, title, meta) == ("demo-course", "Translate the GUI into Deutsch",
                                      {"kind": "translate"})
     assert commands[0][1:] == ["-m", "tutor.gui.translate", "--root", str(root),
-                               "--note", "Swiss spelling, no ß", "--again",
+                               "--profile", "m", "--note", "Swiss spelling, no ß", "--again",
                                "--", "Deutsch"]  # after "--": "-x" is a name, not an option
     response = client.post("/language/translate", base_url=BASE, headers={"Origin": BASE},
-                           data={"name": "en", "course": "demo-course"})
+                           data={"name": "en", "model": "demo-course|m"})
     assert response.headers["Location"].endswith("notice=no-language-name")
     # A language from the table: `--code TAG`, no name; the typed name is then ignored.
+    # The other course's profile: the task runs there, with its key.
     assert "<option value=\"zh-Hant-HK\">繁體中文（香港） · zh-Hant-HK</option>" in text
     client.post("/language/translate", base_url=BASE, headers={"Origin": BASE},
-                data={"code": "zh-Hant-HK", "name": "x", "course": "demo-course"})
+                data={"code": "zh-Hant-HK", "name": "x", "model": "other-course|big"})
     folder, title, commands, meta = started[1]
-    assert title == "Translate the GUI into 繁體中文（香港）"
+    assert (folder, title) == ("other-course", "Translate the GUI into 繁體中文（香港）")
     assert commands[0][1:] == ["-m", "tutor.gui.translate", "--root", str(root),
-                               "--code", "zh-Hant-HK"]
-    # Nothing chosen and nothing typed: told so, nothing started.
+                               "--profile", "big", "--code", "zh-Hant-HK"]
+    # Nothing chosen and nothing typed: told so, nothing started; so with a profile the
+    # course does not have (the embedding one included), or a course that is not there.
     response = client.post("/language/translate", base_url=BASE, headers={"Origin": BASE},
-                           data={"code": "", "name": "", "course": "demo-course"})
+                           data={"code": "", "name": "", "model": "demo-course|m"})
     assert response.headers["Location"].endswith("notice=no-language-name")
+    for model in ("other-course|vec", "demo-course|nope", "demo-course", ""):
+        response = client.post("/language/translate", base_url=BASE,
+                               headers={"Origin": BASE}, data={"code": "de", "model": model})
+        assert response.status_code in (303, 404), model
+        if response.status_code == 303:
+            assert response.headers["Location"].endswith("notice=no-translate-model"), model
     assert len(started) == 2
 
 
