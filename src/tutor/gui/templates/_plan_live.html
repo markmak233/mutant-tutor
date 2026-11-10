@@ -26,6 +26,9 @@
   {% if plan.plan_error %}<p class="notice notice-bad">{{ plan.plan_error }}</p>{% endif %}
 
   {% if plan.shows_plan and plan.items %}
+  {# The plan waits for approval and coverage.md has nothing on some of its lectures: it
+     came from the page titles alone (owner, 2026-11-10: week 9's plan ran that way). #}
+  {% if no_coverage %}<p class="notice notice-bad">coverage.md has no rows for {{ no_coverage | join(", ") }}: this plan was made from the page titles alone, not from the file's gaps. You can still approve it; a better plan starts from rows drafted and merged on the <a href="{{ url_for('coverage_view', name=course.folder) }}">Coverage</a> page, then a new batch.</p>{% endif %}
   {% if plan.edited %}<p class="notice notice-ok">plan.json was edited: it differs from the model's plan, and approving uses it.</p>{% endif %}
   <table class="plan">
     <thead><tr><th class="num">#</th>{% if plan.can_approve %}<th>Generate</th>{% endif %}<th>Exercise</th>{% if statuses %}<th>Status</th>{% endif %}<th>Source</th><th>What it practises</th></tr></thead>

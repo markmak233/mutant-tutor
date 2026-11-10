@@ -33,9 +33,12 @@
   <fieldset>
     <legend>Lectures</legend>
     {% for name in ready %}
-    <label class="check"><input type="checkbox" name="lecture" value="{{ name }}"{% if name in values.lectures %} checked{% endif %}> {{ name }}</label>
+    <label class="check"><input type="checkbox" name="lecture" value="{{ name }}"{% if name in values.lectures %} checked{% endif %}> {{ name }}{% if name in no_coverage %} <span class="muted no-coverage">(no rows in coverage.md)</span>{% endif %}</label>
     {% endfor %}
     {% if unread %}<p class="muted">Not read yet, so not offered: {{ unread | join(", ") }}. Read them with <code>python -m tutor.materials</code>.</p>{% endif %}
+    {# A plan for a lecture coverage.md has nothing on comes from the page titles alone: the
+       planner picks knowledge points from the file's gap rows (owner, 2026-11-10). #}
+    {% if no_coverage %}<p class="muted">A lecture marked "no rows in coverage.md" can be planned, but from its page titles alone: the plan model picks knowledge points from coverage.md's gap rows. Better first: draft and merge its rows on the <a href="{{ url_for('coverage_view', name=course.folder) }}">Coverage</a> page.</p>{% endif %}
   </fieldset>
   <label class="field">Label
     <span class="muted">lowercase letters, digits and '-', e.g. w9-streams; the batch folder is named DATE_p3-LABEL; a label used before gets -1, -2, ...</span>

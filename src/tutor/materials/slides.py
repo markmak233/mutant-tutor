@@ -34,6 +34,13 @@ _LABELLED = re.compile(r"^\s*L(\d+(?:\.\d+)?)\s+(.*)$")
 _CACHE_NAME = re.compile(r"^Lecture_(\d+(?:\.\d+)?)[-_]")
 
 
+def lecture_number(text: str) -> str | None:
+    """The first lecture number a name carries ("Lecture_9.1-MapReduce_V" -> "9.1"), or
+    None for a name written without one."""
+    found = _NUMBER.search(text)
+    return found.group(1) if found else None
+
+
 def lecture_numbers(source) -> list[str]:
     """The lecture numbers metadata `source.lecture` names, in order and each once:
     "L2.1, L2.2" -> ["2.1", "2.2"]. [] for a hand-made exercise's "synthetic" source."""

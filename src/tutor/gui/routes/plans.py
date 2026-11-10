@@ -23,6 +23,9 @@ def new_batch_page(course: courses.Course, values: dict, problems: list[str], co
     shown = {"label": "", "lectures": [], "count": "", "prefs": "",
              **generation.defaults(course), **values}
     return render_template("new_batch.html", course=course, ready=ready, unread=unread,
+                           # Lectures coverage.md has nothing for: marked, as a plan for them
+                           # comes from the page titles alone (owner, 2026-11-10).
+                           no_coverage=set(generation.coverage_missing(course, ready)),
                            values=shown, problems=problems,
                            models=generation.models(course),
                            running=tasks.running(course.workspace.root),
@@ -47,6 +50,10 @@ def plan_page(template: str, name: str, label: str, error: str = "", checked=Non
                            checked=checked, course_busy=tasks.running(course.workspace.root),
                            statuses=plan_items.item_statuses(course, view), quiet=quiet,
                            retry_cap=plan_items.RETRY_CAP,
+                           # While the plan waits for approval: the lectures it was made for
+                           # that coverage.md has nothing on (owner, 2026-11-10).
+                           no_coverage=generation.coverage_missing(
+                               course, view.source_lectures) if view.can_approve else [],
                            waiting_for=waiting_for(course, view.task) if quiet else "")
 
 

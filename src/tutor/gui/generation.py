@@ -41,6 +41,7 @@ from pathlib import Path
 from tutor.gui import tasks, toml_edit
 from tutor.gui.courses import Course
 from tutor.materials.cache import is_lecture, lecture_caches, lecture_name
+from tutor.materials.slides import lecture_number
 
 # The command, a list so a test can put a stand-in script here.
 GRAPH = [sys.executable, "-m", "tutor.graph"]
@@ -184,6 +185,40 @@ def lectures(course: Course) -> tuple[list[str], list[str]]:
     files = sorted(p.stem for p in _files(course.workspace.lecture_dir)
                    if is_lecture(p) and _usable(p.name))
     return ready, [name for name in files if name not in ready]
+
+
+def coverage_missing(course: Course, lectures: list[str]) -> list[str]:
+    """The lectures among `lectures` that coverage.md shows no trace of, in their order: a
+    plan made for them comes from the page titles alone, as week 9's did on 2026-11-09
+    when the drafted rows had not been merged (owner, 2026-11-10: warn). Three traces
+    count, as the file is written two ways: a heading equal to the lecture's name (the
+    draft's format, `coverage.has_section`); a heading that carries its number ("L9.1",
+    "Lecture 9.1", a hand-written file); or a table row whose Slides cell starts with its
+    week ("9.22-9.23"). The last cannot tell two lectures of one week apart (both number
+    their slides 9.x), so a week with rows for one of them warns for neither. Without a
+    coverage.md every lecture is missing; a lecture whose name carries no number is judged
+    by its heading alone."""
+    try:
+        text = (course.workspace.root / "coverage.md").read_text(encoding="utf-8")
+    except OSError:
+        return list(lectures)
+    headings = [line.lstrip("#").strip() for line in text.splitlines()
+                if line.lstrip().startswith("#")]
+    cells = [line.strip().strip("|").split("|")[0].strip() for line in text.splitlines()
+             if line.lstrip().startswith("|")]
+    missing = []
+    for lecture in lectures:
+        number = lecture_number(lecture)
+        week = number.split(".")[0] if number else None
+        if lecture in headings:
+            continue
+        if number and any(re.search(rf"(?<![\d.]){re.escape(number)}(?![\d])", h)
+                          for h in headings):
+            continue
+        if week and any(cell.startswith(f"{week}.") for cell in cells):
+            continue
+        missing.append(lecture)
+    return missing
 
 
 def defaults(course: Course) -> dict:

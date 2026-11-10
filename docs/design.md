@@ -3662,7 +3662,24 @@ late; the adaptive review screens can be built with it.
   off. The batch's own cap is unchanged: raising the default would pay for longer thinking
   on every item. "Try all" keeps the batch's cap. Clicked in headless Chrome on a scratch
   course with the stand-in graph (the record rewritten as the real one was): the line, the
-  button, the task's command with both caps last.
+  button, the task's command with both caps last. Both week 9 items came out VALID through
+  it the same afternoon (first replies of 51,616 and 52,220 output tokens, which the old
+  cap had cut; one needed two repairs, the other one).
+- Lectures coverage.md has nothing on (owner, 2026-11-10). Week 9's plan of 11-09 had run
+  with no coverage rows for its two lectures: the drafted rows were still in
+  `coverage-draft.md`, unmerged, so the plan model picked knowledge points from the page
+  titles alone, and nothing said so. `generation.coverage_missing` names the lectures the
+  file shows no trace of, by three signs, since the file is written two ways: a heading
+  equal to the lecture's name (the draft's format), a heading carrying its number ("L8.1
+  Finding Similar Items I" in a hand-written file), or a table row whose Slides cell starts
+  with its week ("8.3-8.9"; two lectures of one week both number their slides 8.x, so a
+  week with rows for one of them warns for neither). The New batch form marks such a
+  lecture "(no rows in coverage.md)" with a line pointing to the Coverage page, and a plan
+  waiting for approval shows a notice naming them: it can still be approved (a new course
+  has no coverage yet, and the planner works without it), but the owner knows what the
+  plan was made from. Checked on the real course's New batch form: its two week 9 lectures
+  are marked, weeks 2 and 8 (the one heading style and the other) are not; the waiting
+  plan's notice on a test plan, as the real week 9 plan is past approval.
 - Fixing in the page, not through Claude (owner, 2026-11-06: "这些漏洞下次在网页有补充"):
   - A task that failed or was stopped has "Run again", when it is safe to run twice (reading
     lectures, transcribing, Validate all, Check, install, build, the two drafts). It posts to

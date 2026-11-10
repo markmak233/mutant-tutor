@@ -467,3 +467,78 @@ def test_plan_send_back_and_approve_with_a_stand_in_for_the_graph(root, course, 
 
 
 # --- each exercise's status, and generating one again (owner, 2026-11-06) ---------------------
+
+
+# --- lectures coverage.md has nothing on (owner, 2026-11-10) ---------------------------------
+
+
+COVERAGE = """# Coverage
+
+## Week 1
+
+### L1 Introduction
+| Slides | Point | Status |
+|---|---|---|
+| 1.3-1.5 | What big data is | concept |
+
+## Lecture_7.1-Streams
+
+| Slides | Point | Status |
+|---|---|---|
+| 7.2-7.4 | Sampling a stream | gap-code |
+
+## Week 8
+
+| Slides | Point | Status |
+|---|---|---|
+| 8.3-8.9 | Near neighbours | concept |
+"""
+
+
+ONLY_L1 = "## L1\n| Slides | Point | Status |\n|---|---|---|\n"
+
+
+def test_a_lecture_counts_as_covered_by_its_heading_its_number_or_its_weeks_rows(course):
+    _write(course.workspace.root / "coverage.md", COVERAGE)
+    asked = ["L1", "Lecture_7.1-Streams", "Lecture_8.2-Similar_Items_II",
+             "Lecture_9.1-MapReduce_V", "Week_9_notes"]
+
+    missing = generation.coverage_missing(course, asked)
+
+    # L1: a heading carries "L1"; 7.1: the draft's own heading; 8.2: rows numbered 8.x
+    # (the week's other lecture, which cannot be told apart); 9.1: nothing; a name with no
+    # number and no heading of its own: nothing either.
+    assert missing == ["Lecture_9.1-MapReduce_V", "Week_9_notes"]
+
+
+def test_without_a_coverage_file_every_lecture_is_missing(course):
+    assert generation.coverage_missing(course, ["L1", "L2"]) == ["L1", "L2"]
+
+
+def test_the_new_batch_form_marks_lectures_coverage_has_nothing_on(root, course):
+    _write(course.workspace.root / "coverage.md", ONLY_L1)
+
+    page = get(_browser(root), "/c/demo-course/new-batch").get_data(as_text=True)
+
+    assert page.count("(no rows in coverage.md)") == 1
+    assert 'value="L2"' in page[:page.index("(no rows in coverage.md)")]  # L2 marked, not L1
+    assert 'value="L1"' not in page[page.rindex('value="L2"'):]
+    assert "/c/demo-course/coverage/" in page
+
+
+def test_a_waiting_plan_for_an_uncovered_lecture_says_it_came_from_page_titles(root, course):
+    _draft(course)  # planned from L1, waiting for approval
+    page = get(_browser(root), "/c/demo-course/plans/w9-test/").get_data(as_text=True)
+    assert "coverage.md has no rows for L1" in page and "page titles alone" in page
+
+    _write(course.workspace.root / "coverage.md", ONLY_L1)
+    page = get(_browser(root), "/c/demo-course/plans/w9-test/").get_data(as_text=True)
+    assert "coverage.md has no rows" not in page
+
+
+def test_a_generated_plan_no_longer_warns(root, course):
+    from gui_generation_helpers import _generated
+
+    _generated(course)  # approved and generated, no coverage.md at all
+    page = get(_browser(root), "/c/demo-course/plans/w9-test/").get_data(as_text=True)
+    assert "coverage.md has no rows" not in page
