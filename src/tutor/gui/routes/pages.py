@@ -7,7 +7,16 @@ from __future__ import annotations
 
 from flask import Flask, abort, redirect, render_template, url_for
 
-from tutor.gui import course_setup, courses, generation, lectures, plan_items, rendering, tasks
+from tutor.gui import (
+    course_setup,
+    courses,
+    environment,
+    generation,
+    lectures,
+    plan_items,
+    rendering,
+    tasks,
+)
 from tutor.gui.routes.common import (
     RECENT_TASKS,
     STATUS_LABELS,
@@ -65,8 +74,28 @@ def register(app: Flask) -> None:
         return render_template("exercise.html", course=course, batch=view, row=row,
                                question=rendering.question_html(text) if text else None,
                                labels=STATUS_LABELS, student=student,
+                               # "Run my tests" only where tutor test works: a container
+                               # course (owner, 2026-11-10); a host course runs pytest.
+                               in_container=environment.runner(course) == "container",
                                question_in=("the opening comment" if student.endswith(".c")
                                             else "the docstring"))
+
+    @app.post("/c/<name>/b/<batch>/e/<exercise>/test")
+    def test_exercise(name: str, batch: str, exercise: str):
+        """The learner's own tests in the course image (`tutor test`, the command the
+        README gives for the terminal), as a task: live output on the task page, the
+        attempt recorded on the host as by the terminal (owner, 2026-11-10: a button, so
+        no terminal is needed). A run whose tests fail is a failed task, which stays on
+        its log, where the failures are; one that passes goes back to the exercise."""
+        course, _, row, folder = exercise_or_404(name, batch, exercise)
+        back = url_for("exercise", name=name, batch=batch, exercise=exercise)
+        if environment.runner(course) != "container":
+            return redirect(f"{back}?notice=tests-host-course", code=303)
+        if problem := courses.container_problem(course):
+            return redirect(f"{back}?notice={problem}", code=303)
+        command = [courses.task_python(course), "-m", "tutor", "test", str(folder)]
+        return start_task(course, f"Run my tests: {row.id}", [command],
+                          meta={"kind": "learner-test", "batch": batch, "exercise": exercise})
 
     # --- actions: POST only, each back to its page with a notice ----------------------------
 

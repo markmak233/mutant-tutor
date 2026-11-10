@@ -3219,6 +3219,16 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
       container course needs on the host only Docker, the tool and an IDE: the image already
       holds Java, Hadoop and gcc. Done when a C and a Spark exercise give the same outcomes
       both ways and their attempts lines match.
+      - The exercise page's "Run my tests in the container" (owner, 2026-11-10: the
+        terminal command as a button). It starts `python -m tutor test <exercise>` as a
+        course task, so it queues like any other, shows live output on its task page and
+        records the attempt on the host as the terminal would. Shown only for a container
+        course (a host course's notice says to run pytest in the course terminal); Docker
+        or the image missing stops it before it starts, as for validation. A run whose
+        tests fail is a failed task, which stays on its log, where the failures are, with
+        Run again; one that passes goes back to the exercise with a notice. Clicked in
+        headless Chrome on a scratch container course with no image: the button, the task,
+        `tutor test`'s own "image is missing" message, Back and Run again.
       - Optional, after it: a page for a learner who wants to run tests on the host anyway,
         saying how to install that course's toolchain (Java, Hadoop, a C compiler) on their
         platform, automated where a language allows it safely. Toolchains differ by language,

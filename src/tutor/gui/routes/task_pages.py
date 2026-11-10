@@ -45,6 +45,10 @@ def return_to(course: courses.Course, task: tasks.Task) -> tuple[str, str, str |
         return url_for("lecture_list", name=name), "Lectures", "lectures-read"
     if kind == "validate" and isinstance(batch, str):
         return url_for("batch", name=name, batch=batch), batch, "validated"
+    exercise = task.meta.get("exercise")
+    if kind == "learner-test" and isinstance(batch, str) and isinstance(exercise, str):
+        return (url_for("exercise", name=name, batch=batch, exercise=exercise), exercise,
+                "tests-passed")
     if kind == "check":
         return url_for("models", name=name), "Models", "models-checked"
     if kind == "doctor":
@@ -82,6 +86,9 @@ def again_url(course: courses.Course, task: tasks.Task) -> str | None:
     kind, name, batch = task.meta.get("kind"), course.folder, task.meta.get("batch")
     if kind == "validate" and isinstance(batch, str):
         return url_for("validate_batch", name=name, batch=batch)
+    exercise = task.meta.get("exercise")
+    if kind == "learner-test" and isinstance(batch, str) and isinstance(exercise, str):
+        return url_for("test_exercise", name=name, batch=batch, exercise=exercise)
     endpoint = {"read": "read_lectures", "vision": "transcribe_lectures",
                 "check": "check_models", "install": "install_packages",
                 "build": "build_image", "requires-draft": "draft_requires",

@@ -612,3 +612,67 @@ def test_a_c_exercise_opens_and_names_its_student_c(root):
     assert "student.py" not in page
     course = (root / "demo-course").resolve()
     assert launcher.calls == [("vscode", course, folder.resolve() / "student.c")]
+
+
+# --- "Run my tests in the container" on an exercise page (owner, 2026-11-10) -----------------
+
+
+def test_a_host_course_has_no_run_my_tests_button_and_the_route_says_why(root, monkeypatch):
+    client = _browser(root, FakeLauncher())
+    page = get(client, f"/c/demo-course/b/{BATCH}/e/ex-one/").get_data(as_text=True)
+    assert "Run my tests" not in page
+    monkeypatch.setattr(tasks, "start", lambda *a, **k: pytest.fail("nothing may start"))
+
+    response = post(client, f"/c/demo-course/b/{BATCH}/e/ex-one/test")
+
+    assert response.headers["Location"].endswith("/e/ex-one/?notice=tests-host-course")
+
+
+def test_run_my_tests_starts_tutor_test_on_the_exercise_in_the_image(root, monkeypatch):
+    _container_course(root)
+    monkeypatch.setattr(courses, "container_problem", lambda course: None)
+    started = []
+    monkeypatch.setattr(tasks, "start", lambda course_root, title, commands, env, meta=None:
+                        started.append((title, commands, meta)) or tasks.Task(
+                            "20260102-100000-abcdef", course_root, title, "running", "", None,
+                            commands, [], 1, meta or {}))
+    client = _browser(root, FakeLauncher())
+    page = get(client, f"/c/demo-course/b/{BATCH}/e/ex-one/").get_data(as_text=True)
+    assert "Run my tests in the container" in page and "<code>tutor test</code>" in page
+
+    response = post(client, f"/c/demo-course/b/{BATCH}/e/ex-one/test")
+
+    title, (command,), meta = started[0]
+    folder = (root / "demo-course" / "batches" / BATCH / "exercises" / "ex-one").resolve()
+    assert title == "Run my tests: ex-one"
+    assert command[1:] == ["-m", "tutor", "test", str(folder)]
+    assert meta == {"kind": "learner-test", "batch": BATCH, "exercise": "ex-one"}
+    assert response.headers["Location"] == "/c/demo-course/tasks/20260102-100000-abcdef/"
+    # Docker not running: nothing starts, the exercise page says so.
+    monkeypatch.setattr(courses, "container_problem", lambda course: "docker-stopped")
+    response = post(client, f"/c/demo-course/b/{BATCH}/e/ex-one/test")
+    assert response.headers["Location"].endswith("/e/ex-one/?notice=docker-stopped")
+    assert len(started) == 1
+
+
+def test_a_test_run_goes_back_to_its_exercise_and_can_run_again(root, monkeypatch):
+    """Passed: back to the exercise with a notice. Failed (tests failed): stays on its log,
+    where the failures are, with "Run again"."""
+    course_root = root / "demo-course"
+    meta = {"kind": "learner-test", "batch": BATCH, "exercise": "ex-one"}
+    passed = tasks.Task("20260102-100000-abcdef", course_root, "Run my tests: ex-one",
+                        tasks.DONE, "", "", [["x"]], [0], None, meta)
+    failed = tasks.Task("20260102-100001-abcdef", course_root, "Run my tests: ex-one",
+                        tasks.FAILED, "", "", [["x"]], [1], None, meta)
+    monkeypatch.setattr(tasks, "get", lambda root_, task_id:
+                        {passed.id: passed, failed.id: failed}.get(task_id))
+    monkeypatch.setattr(tasks, "tail", lambda task, limit=0: ("1 failed", False))
+    client = _browser(root, FakeLauncher())
+
+    polled = client.get(f"/c/demo-course/tasks/{passed.id}/log", base_url=BASE,
+                        headers={"HX-Request": "true"})
+    assert polled.headers["HX-Redirect"] == (
+        f"/c/demo-course/b/{BATCH}/e/ex-one/?notice=tests-passed")
+    page = get(client, f"/c/demo-course/tasks/{failed.id}/").get_data(as_text=True)
+    assert f'action="/c/demo-course/b/{BATCH}/e/ex-one/test"' in page  # Run again
+    assert f'href="/c/demo-course/b/{BATCH}/e/ex-one/"' in page  # Back to ex-one

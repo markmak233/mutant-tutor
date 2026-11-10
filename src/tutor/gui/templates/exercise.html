@@ -16,8 +16,9 @@
 <div class="actions">
   {{ action(url_for('open_exercise_in_ide', name=course.folder, batch=batch.name, exercise=row.id), "Open in VS Code", primary=True) }}
   {{ action(url_for('open_exercise_folder', name=course.folder, batch=batch.name, exercise=row.id), "Open folder") }}
+  {% if in_container %}{{ action(url_for('test_exercise', name=course.folder, batch=batch.name, exercise=row.id), "Run my tests in the container") }}{% endif %}
 </div>
-<p class="muted">Solve it in VS Code: it opens the course folder, so its terminal uses the course's venv, with <code>{{ student }}</code>.</p>
+<p class="muted">Solve it in VS Code: it opens the course folder, so its terminal uses the course's venv, with <code>{{ student }}</code>.{% if in_container %} "Run my tests" runs <code>tutor test</code> on your <code>{{ student }}</code> in the course image, as the terminal would, and records the attempt; the run shows on its task page.{% endif %}</p>
 {% if question %}
 {# Markdown rendered with raw HTML off (rendering.py); the only value marked safe. #}
 <article class="question">{{ question }}</article>
