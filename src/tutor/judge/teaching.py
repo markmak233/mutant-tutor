@@ -14,12 +14,20 @@ good to learn from. A model rates that on the owner's four points, y or n each:
 It reads what the student reads (question.md, the starting file, and the "Useful
 functions" part of hints.md, where the API syntax is taught with small examples), the
 reference (to see whether solving needs the knowledge point; the student never sees it),
-the exercise's lecture with its own pages marked, the lectures taught so far and the batch
+the exercise's lecture with its own pages named, the lectures taught so far and the batch
 mode; never the tests, mutants or the hint levels. Without the Useful functions part,
 about ten of 25 flags (2026-10-31) were "the question does not teach the API syntax", which
 design.md puts in hints.md on purpose. Each point has `evidence` (a quote that decides
 it) before its y/n: written first, it is a scratchpad, as `plan` is for the held-out
 writer.
+
+The prompt is an `llm.Prompt` in two parts (2026-11-10, for the anthropic provider's cache):
+first what every exercise of a lecture in a batch shares (the mode, the lectures taught,
+the lecture's pages with no per-exercise mark), then the exercise (its own pages named,
+the question, the starting file, Useful functions, the reference). Before, the exercise
+came first and the pages carried its mark, so no two calls shared a prefix (design.md,
+"Prompt layout for caching": gpt-terra hit 7%). The judge's words did not change; its
+order did, so its calibration was run again (design.md, "Anthropic provider").
 
 It never touches validity, and nothing in generation reads it. A point's verdicts are
 trusted only once calibrate.py shows they agree with the owner's ratings.
@@ -38,11 +46,11 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from tutor import llm
-from tutor.materials.slides import lecture_context, lectures_taught
+from tutor.materials.slides import lecture_context, lectures_taught, own_pages
 from tutor.schema import language_of
 
 # Bump when the prompt changes: it is part of the inputs' hash, so every verdict is redone.
-PROMPT_VERSION = 4
+PROMPT_VERSION = 5  # 5: slides first, the exercise's pages named apart (2026-11-10)
 MAX_TOKENS = 4_000  # four short points
 RETRIES = 2  # more replies after the first, each told what was wrong with the last
 REPORT_FILE = "quality.json"  # in solutions/<id>/, next to validation.json
@@ -106,8 +114,9 @@ class Inputs:
     question: str
     skeleton: str
     reference: str
-    slides: str  # the exercise's lecture, its pages marked; "" if none found
+    slides: str  # the exercise's lecture, no page marked; "" if none found
     taught: list[str] = field(default_factory=list)  # lecture names up to this one
+    pages: list[str] = field(default_factory=list)  # the exercise's own pages, "L p.N"
     mode: str = "learn"
     useful: str = ""  # the "Useful functions" part of hints.md; "" if it has none
 
@@ -143,8 +152,9 @@ def gather(batch_dir: Path, exercise_id: str, workspace: Path,
     return Inputs(question=question, skeleton=skeleton,
                   reference=(reference if reference is not None
                              else (solution / "reference.py").read_text(encoding="utf-8")),
-                  slides=lecture_context(workspace, source),
+                  slides=lecture_context(workspace, source, mark=False),
                   taught=lectures_taught(workspace, source), mode=mode,
+                  pages=own_pages(workspace, source),
                   useful=(useful_functions(hints.read_text(encoding="utf-8"))
                           if hints.is_file() else ""))
 
@@ -203,21 +213,26 @@ careful student gets past (an edge case the constraints settle, a nitpick).
 Return only the JSON object."""
 
 
-def user_prompt(inputs: Inputs) -> str:
+def user_prompt(inputs: Inputs) -> llm.Prompt:
+    """Two parts (see the module docstring): the batch's and the lecture's, then the
+    exercise's. The shared part is byte for byte the same for every exercise of the lecture
+    in the batch, which is what a provider's prompt cache needs."""
     taught = ", ".join(inputs.taught) or "(not known)"
-    parts = [f"Batch mode: {inputs.mode}",
-             f"Lectures taught so far, in order: {taught}",
-             "The question, as the student reads it:\n" + inputs.question,
-             "The starting file the student gets (student.py):\n```python\n"
-             + inputs.skeleton.rstrip() + "\n```",
-             ("The \"Useful functions\" part of hints.md, which the student reads with the "
-              "question:\n" + inputs.useful if inputs.useful
-              else "The hints file has no \"Useful functions\" part."),
-             "The reference solution (never shown to the student):\n```python\n"
-             + inputs.reference.rstrip() + "\n```",
-             ("The lecture slides (the exercise's own pages are marked):\n" + inputs.slides
-              if inputs.slides else "No slides are available for this exercise.")]
-    return "\n\n".join(parts)
+    shared = [f"Batch mode: {inputs.mode}",
+              f"Lectures taught so far, in order: {taught}",
+              ("The lecture slides:\n" + inputs.slides if inputs.slides
+               else "No slides are available for this exercise.")]
+    own = [("This exercise's own pages: " + ", ".join(inputs.pages) if inputs.pages
+            else "Which pages are this exercise's own is not known."),
+           "The question, as the student reads it:\n" + inputs.question,
+           "The starting file the student gets (student.py):\n```python\n"
+           + inputs.skeleton.rstrip() + "\n```",
+           ("The \"Useful functions\" part of hints.md, which the student reads with the "
+            "question:\n" + inputs.useful if inputs.useful
+            else "The hints file has no \"Useful functions\" part."),
+           "The reference solution (never shown to the student):\n```python\n"
+           + inputs.reference.rstrip() + "\n```"]
+    return llm.Prompt("\n\n".join(shared) + "\n\n", "\n\n".join(own))
 
 
 def judge(inputs: Inputs, model: Judge) -> tuple[Verdict, dict[str, int]]:

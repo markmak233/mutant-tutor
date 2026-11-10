@@ -1640,8 +1640,8 @@ the call log shows the result. Meaning comes first: a short prompt gains nothing
 contorted, and reordering a calibrated prompt means calibrating it again.
 
 Measured so far: DeepSeek hits 53-75% on generate and repair. `gpt-6.1-terra` as the judge hits 7%,
-its largest OpenAI cost. Its prompt puts each exercise before the slides, and the slides carry marks
-for that exercise, but moving the slides first was not enough. In a small test (2026-11-03, week 8's
+its largest OpenAI cost. Its prompt then put each exercise before the slides, and the slides carried
+marks for that exercise; moving the slides first was not enough there. In a small test (2026-11-03, week 8's
 11 exercises and 2 first drafts with known errors), exercises sharing about 9000 tokens at the start
 hit 0%, sent one at a time or in parallel, while the same whole prompt sent again minutes later hit
 99.98%. A 90-second wait before the second call, a `prompt_cache_key` and the slides in a message of
@@ -1652,6 +1652,11 @@ The same test shows what a layout change would risk. The judge run again on its 
 the letters of 3 of the 13 and whether an exercise is fully fine on 1. The new layout changed 3 of
 13 against the first run, no more than that noise, and still flagged both known errors. 13 items
 show a direction only, but phase 5 has to report the judge's numbers with this noise in mind.
+
+On Anthropic the prefix is explicit (2026-11-10, "Anthropic provider", cache breakpoints): with
+the slides first and the exercise's pages named apart, the judge hit 71% of its input on the
+54-item calibration, a 60% saving at Sonnet 5.5's prices; the same layout change that hit 0%
+on OpenAI for a reason never found.
 
 ## LLM engineering candidates (review at the start of each phase)
 
@@ -1748,13 +1753,44 @@ deterministic judge, hybrid RAG with recall@k, the phase 5 metrics, the hint lea
     reason for a dependency now. Checked with Haiku 5.5 against the real API before the
     tests were final (8 calls, $0.0004); the Models page clicked in headless Chrome on a
     scratch course (New model, Anthropic from the list, Use, Save: `provider = "anthropic"`,
-    no base_url written). Cache breakpoints are the next step, not this one:
-    the judge's prompt puts the exercise before the slides, with the exercise's own pages
-    marked in them, so its shared prefix is only the system prompt; caching it means the
-    slides first and the marks moved out of them, which is a calibrated prompt changed, so
-    a recalibration with Sonnet, measured with `cache_read_input_tokens` before a saving is
-    claimed ("Prompt layout for caching"). Until then the judge stays on gpt-terra, or
-    moves to Sonnet at full price if the OpenAI key's end (about 12-03) comes first.
+    no base_url written).
+  - Cache breakpoints (owner, 2026-11-10, the same day). A caller that gives a message as
+    an `llm.Prompt` (its parts: the shared one first, then this call's own) tells the
+    provider where the prefix ends: the anthropic module sends one text block per part
+    with `cache_control` after every part but the last, and marks the system prompt's last
+    block too (at most four marks, the API's limit). To every other reader a Prompt is the
+    plain string its parts make (a `str` subclass): the OpenAI-shaped providers, the
+    assistant's request files and their ids, the tests' fakes and the prompt pins see the
+    bytes a string would give, so DeepSeek's generate and repair requests did not change
+    by a byte (the pins prove it), and the pins were not recomputed. Explicit breakpoints,
+    not the API's automatic one: that lands on the last block, which in these prompts is
+    the part that changes every call. Who gives parts: the generate, repair and retry
+    prompts (the course pages first, the example and the item after, so the items of a
+    lecture and the rounds of an item share the pages); the judge (below). Not the oracle
+    (its spec is about 260 tokens, under the 512 a Claude 5.5 model caches), nor the plan
+    (one call) or the hints judge (no slides). The judge's prompt had to change order for
+    this: the exercise came first and the slides last, with the exercise's own pages
+    marked in their headings, so no two calls shared more than the system prompt (the 7%
+    hit rate under "Prompt layout for caching"). Now the batch mode, the lectures taught
+    and the unmarked pages come first, then a line naming the exercise's own pages, the
+    question, the starting file, Useful functions and the reference; the words did not
+    change, the order did, so `PROMPT_VERSION` went to 5 and the calibration was run
+    again with Sonnet 5.5, sequentially so that the first call of a lecture fills the
+    cache before the next reads it. Measured (54 rated items and 18 planted defects, the
+    same set as the morning's run on the compatible address): 71% of the input served from
+    the cache (781,749 of 1,101,216 tokens; 53 of 54 calls read, 7 wrote), $0.96 against
+    $2.39 for the same calls uncached, a 60% saving; 215 s. The verdicts: planted defects
+    12 of 18 (clear 1/5, fits 3/5, taught 3/3, targets 5/5) against 13 of 18 in the
+    morning, and the real ratings the same (clear 1 of 5 found, no owner-approved exercise
+    marked n), within the rerun noise this section records (3 of 13 letters); one of the
+    two fits misses was a verdict with an empty `evidence` and ok=true, which the judge's
+    retries do not catch (only a reply that fails the schema is asked again). So the judge
+    role moved to `claude-sonnet-5-5` in every course (owner's condition: not worse than
+    the morning's run), and the last OpenAI role is gone; the OpenAI profiles stay in the
+    files until the key ends. A 1-hour cache lifetime (writes at 2x) was not needed:
+    sequential judging stays within the 5 minutes; generation's repair rounds, with
+    minutes of validation between calls, are where it may matter, to be read from the
+    call log of the next batch before deciding.
 - [3] Summary of recently covered material in the generation prompt (ContentGen found it
   improved generated questions); built from `coverage.md` and the batch's sources.
 - [3] Call log: one JSONL line per LLM call (node, model, input / output / cached tokens,

@@ -131,6 +131,21 @@ def test_chat_sends_an_openai_request_and_logs_without_the_key(sent, tmp_path):
     assert SECRET not in log.read_text(encoding="utf-8")
 
 
+def test_a_prompt_in_parts_is_one_plain_string_to_an_openai_shaped_provider(sent):
+    """llm.Prompt marks where the anthropic provider's cache breakpoints go; everyone else
+    gets the parts joined, byte for byte the string a caller would have sent before."""
+    prompt = llm.Prompt("shared pages\n\n", "the item")
+
+    chat(LLMConfig("p", "deepseek", "https://api.deepseek.com", "deepseek-v4-flash"),
+         [{"role": "user", "content": prompt}], purpose="generate",
+         response_schema={"type": "object"})
+
+    body = json.loads(sent[0][0].data)
+    assert body["messages"][0]["content"] == "shared pages\n\nthe item"
+    assert isinstance(body["messages"][0]["content"], str)
+    assert "shared pages" in prompt and prompt.split("\n")[0] == "shared pages"  # a str
+
+
 def test_no_authorization_header_without_a_key(sent):
     chat(LLMConfig("p", "custom", "http://x/v1", "gemma"), [], purpose="test")
     assert sent[0][0].get_header("Authorization") is None

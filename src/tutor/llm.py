@@ -114,6 +114,22 @@ class LLMConfig:
     send_temperature: bool = True
 
 
+class Prompt(str):
+    """A prompt given in parts, the part every call of a kind shares first (a lecture's
+    pages, say), then what this call adds. To every reader it is the one string the parts
+    make: every OpenAI-shaped provider, the assistant's request files and their ids, the
+    tests' fakes and the prompt pins see exactly the bytes a plain string would give. Only
+    the anthropic provider looks at `parts`, to put a cache breakpoint after each shared
+    part (docs/design.md, "Prompt layout for caching"). Equal to its plain string."""
+
+    __slots__ = ("parts",)
+
+    def __new__(cls, *parts: str) -> Prompt:
+        prompt = super().__new__(cls, "".join(parts))
+        prompt.parts = parts
+        return prompt
+
+
 @dataclass(frozen=True)
 class Reply:
     text: str

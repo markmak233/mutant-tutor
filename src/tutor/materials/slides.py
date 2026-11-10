@@ -43,14 +43,44 @@ def lecture_numbers(source) -> list[str]:
     return list(dict.fromkeys(_NUMBER.findall(source.get("lecture") or "")))
 
 
-def lecture_context(workspace: Path, source, limit: int = CONTEXT_CHARS) -> str:
+def lecture_context(workspace: Path, source, limit: int = CONTEXT_CHARS,
+                    mark: bool = True) -> str:
     """The lectures metadata `source` names, as "## <lecture> p.N · slide L" sections, the
-    exercise's own pages (`source.pdf_pages`) marked. Whole lectures if they fit in
-    `limit` characters, else only the exercise's own pages. "" for a hand-made exercise's
+    exercise's own pages (`source.pdf_pages`) marked unless `mark` is False (the judge
+    names them apart instead, so the pages read the same for every exercise of the lecture
+    and a provider's prompt cache serves them). Whole lectures if they fit in `limit`
+    characters, else only the exercise's own pages. "" for a hand-made exercise's
     "synthetic" source; also "", with a warning, when `source` names a lecture but no page of
     it is found (not in the cache, or too long with its own pages unreadable)."""
+    lectures = _lectures(workspace, source)
+    whole = sum(len(e.body) for _, entries, _ in lectures
+                for e in entries.values()) <= limit
+    sections = []
+    for name, entries, mine in lectures:
+        for number in sorted(entries):
+            if whole or number in mine:
+                e = entries[number]
+                label = f" · slide {e.label}" if e.label else ""
+                own = " · this exercise's page" if mark and number in mine else ""
+                sections.append(f"## {name} p.{number}{label}{own}\n{e.body}")
+    if not sections and isinstance(source, dict) and source.get("lecture"):
+        warnings.warn(f"no pages found for lecture {source['lecture']!r} (pdf_pages "
+                      f"{source.get('pdf_pages')!r}): this runs without slides", stacklevel=2)
+    return "\n\n".join(sections)
+
+
+def own_pages(workspace: Path, source) -> list[str]:
+    """The exercise's own pages as "<lecture> p.N" lines, in lecture and page order: what
+    lecture_context(mark=False) leaves out of the sections, for a line of its own."""
+    return [f"{name} p.{number}" for name, entries, mine in _lectures(workspace, source)
+            for number in sorted(entries) if number in mine]
+
+
+def _lectures(workspace: Path, source) -> list[tuple[str, dict, set[int]]]:
+    """(lecture name, its cached pages, the exercise's page numbers in it) for each lecture
+    `source` names; [] for a source that is not a dict (a hand-made exercise's)."""
     if not isinstance(source, dict):
-        return ""
+        return []
     pdf_pages = source.get("pdf_pages") or ""
     lectures = []  # (name, its pages, the exercise's pages in it)
     if (named := _named_file(workspace, source)) is not None:
@@ -68,20 +98,7 @@ def lecture_context(workspace: Path, source, limit: int = CONTEXT_CHARS) -> str:
             if path is not None:
                 lectures.append((_lecture_name(path), cache.load(path),
                                  own.get(number, set())))
-    whole = sum(len(e.body) for _, entries, _ in lectures
-                for e in entries.values()) <= limit
-    sections = []
-    for name, entries, mine in lectures:
-        for number in sorted(entries):
-            if whole or number in mine:
-                e = entries[number]
-                label = f" · slide {e.label}" if e.label else ""
-                mark = " · this exercise's page" if number in mine else ""
-                sections.append(f"## {name} p.{number}{label}{mark}\n{e.body}")
-    if not sections and source.get("lecture"):
-        warnings.warn(f"no pages found for lecture {source['lecture']!r} (pdf_pages "
-                      f"{source.get('pdf_pages')!r}): this runs without slides", stacklevel=2)
-    return "\n\n".join(sections)
+    return lectures
 
 
 def page_groups(pdf_pages: str, lectures: list[str]) -> list[tuple[str, set[int]]]:

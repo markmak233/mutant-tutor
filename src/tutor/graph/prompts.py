@@ -5,9 +5,11 @@ Ordered for prompt caching, which reuses the longest prefix a provider has seen:
 prompt is the same for every item of a course (format rules, the testkit API, the course
 conventions); the user message then gives the course pages (shared by the items of one
 lecture), the example exercise (shared by items of one framework and interface), and only
-then the item and, when repairing, the failed draft. The course
-conventions come from the workspace's conventions.md, never from this file: everything
-here holds for any course.
+then the item and, when repairing, the failed draft. The generate, repair and retry prompts
+are `llm.Prompt`s in two parts, the pages and the rest: one string to every reader, and
+to the anthropic provider the place of its cache breakpoint (2026-11-10; the bytes are the
+ones pinned before). The course conventions come from the workspace's conventions.md,
+never from this file: everything here holds for any course.
 """
 
 from __future__ import annotations
@@ -18,6 +20,7 @@ from pathlib import Path
 
 from tutor.graph.prompt_parts import LanguagePrompts, c, python
 from tutor.graph.state import PlanItem
+from tutor.llm import Prompt
 from tutor.validation.safety import CORE_IMPORTS
 
 # Each language's parts, by the name its graph/languages.py Profile has.
@@ -206,17 +209,20 @@ MODES = {
 }
 
 
-def item_prompt(item: PlanItem, context: str, mode: str = "learn",
-                language: str = "python") -> str:
-    """The generate prompt for one item, longest-shared part first (see the module
-    docstring): the course pages, the example exercise, then the item itself. A language
-    that marks material (C) marks the pages (Python's stays as calibrated)."""
+def item_parts(item: PlanItem, context: str, mode: str = "learn",
+               language: str = "python") -> tuple[str, str]:
+    """The generate prompt for one item in its two parts, longest-shared first (see the
+    module docstring): the course pages, which every item of the lecture shares, then the
+    example exercise and the item itself. A language that marks material (C) marks the
+    pages (Python's stays as calibrated)."""
     mark = _marker(LANGUAGES[language])
-    return (
+    pages = (
         "The course pages (one section per PDF page, `## p.N · slide S`; image slides "
         "were transcribed, so code there is as on the slide):\n\n"
         + mark("lecture", context)
-        + "\n\n" + example(item.framework, item.interface)
+        + "\n\n")
+    own = (
+        example(item.framework, item.interface)
         + f"\n\nWrite the exercise `{item.id}`.\n"
         f"Knowledge point: {item.knowledge_point}\n"
         f"From: {item.lecture}, slides {item.slides}\n"
@@ -224,6 +230,13 @@ def item_prompt(item: PlanItem, context: str, mode: str = "learn",
         f"Batch mode: {MODES[mode]}\n"
         + (f"Notes: {item.notes}\n" if item.notes else "")
     )
+    return pages, own
+
+
+def item_prompt(item: PlanItem, context: str, mode: str = "learn",
+                language: str = "python") -> Prompt:
+    """The generate prompt for one item: its two parts as one Prompt (a string)."""
+    return Prompt(*item_parts(item, context, mode, language))
 
 
 # Rule 1 failing means the reference and a test disagree; a week 4 item spent three
@@ -236,14 +249,17 @@ RULE_1_HINT = (
 
 def repair_prompt(item: PlanItem, context: str, draft_json: str, failure: str,
                   mode: str = "learn", unchanged: bool = False,
-                  language: str = "python") -> str:
+                  language: str = "python") -> Prompt:
     """`unchanged`: that answer repeated the one before it, which failed the same way. A
     language that marks material (C) marks the previous answer and the validator's report,
-    since the report quotes what generated code printed."""
+    since the report quotes what generated code printed. The pages stay the shared part,
+    so a repair round reuses what the generate call cached."""
     parts = LANGUAGES[language]
     mark = _marker(parts)
-    return (
-        item_prompt(item, context, mode, language)
+    pages, own = item_parts(item, context, mode, language)
+    return Prompt(
+        pages,
+        own
         + "\n\nYour previous answer:\n"
         + mark("previous_answer", draft_json)
         + "\n\nThe validator rejected it:\n"
@@ -263,12 +279,14 @@ def repair_prompt(item: PlanItem, context: str, draft_json: str, failure: str,
 
 
 def retry_prompt(item: PlanItem, context: str, failure: str, mode: str = "learn",
-                 language: str = "python") -> str:
+                 language: str = "python") -> Prompt:
     """After a reply that could not be read at all (cut off, or not JSON): there is no draft
     to repair, so the item is asked again, with what went wrong."""
     mark = _marker(LANGUAGES[language])
-    return (
-        item_prompt(item, context, mode, language)
+    pages, own = item_parts(item, context, mode, language)
+    return Prompt(
+        pages,
+        own
         + "\n\nA previous attempt gave no usable answer: "
         + mark("validator_report", failure)
         + "\nAnswer again from the start. Keep your reasoning short and spend the output on "

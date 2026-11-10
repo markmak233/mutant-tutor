@@ -75,7 +75,8 @@ def test_the_request_has_claudes_shape_and_headers(sent, tmp_path):
     assert request.get_header("X-api-key") == SECRET  # urllib capitalises header names
     assert request.get_header("Anthropic-version") == llm_anthropic.VERSION
     assert request.get_header("Authorization") is None
-    assert body["system"] == [{"type": "text", "text": "Be brief."}]
+    assert body["system"] == [{"type": "text", "text": "Be brief.",
+                               "cache_control": {"type": "ephemeral"}}]  # always a breakpoint
     assert body["messages"] == [
         {"role": "user", "content": [{"type": "text", "text": "Question?"}]},
         {"role": "assistant", "content": [{"type": "text", "text": "Draft."}]},
@@ -206,6 +207,38 @@ def test_an_image_message_becomes_a_base64_image_block(sent):
     assert base64.b64decode(content[1]["source"]["data"]) == b"\x89PNG fake"
 
 
+def test_a_prompt_in_parts_gets_a_breakpoint_after_each_shared_part(sent):
+    """llm.Prompt: the pages every item of a lecture shares, then the item. The shared
+    part is a block with cache_control, the item's part the last block without one; an
+    empty part is left out (the API refuses an empty text block)."""
+    prompt = llm.Prompt("pages\n\n", "", "item 1")
+    assert prompt == "pages\n\nitem 1" and isinstance(prompt, str)  # one string to all else
+
+    chat(config(), [{"role": "system", "content": "spec"}, {"role": "user", "content": prompt}],
+         purpose="generate", response_schema={"type": "object"}, thinking=False)
+
+    body = json.loads(sent[0][0].data)
+    assert body["system"] == [{"type": "text", "text": "spec",
+                               "cache_control": {"type": "ephemeral"}}]
+    assert body["messages"][0]["content"] == [
+        {"type": "text", "text": "pages\n\n", "cache_control": {"type": "ephemeral"}},
+        {"type": "text", "text": "item 1"}]
+    assert json.dumps(prompt) == '"pages\\n\\nitem 1"'  # the assistant's request files, logs
+
+
+def test_a_plain_string_gets_no_breakpoint_and_long_prompts_keep_four_at_most(sent):
+    many = llm.Prompt("a", "b", "c", "d", "e", "f")
+
+    chat(config(), [{"role": "system", "content": "s"}, {"role": "user", "content": "plain"},
+                    {"role": "assistant", "content": "x"}, {"role": "user", "content": many}],
+         purpose="x")
+
+    body = json.loads(sent[0][0].data)
+    assert body["messages"][0]["content"] == [{"type": "text", "text": "plain"}]
+    marked = [b["text"] for m in body["messages"] for b in m["content"] if "cache_control" in b]
+    assert marked == ["a", "b", "c"]  # the system's mark plus three: four in all
+
+
 def test_content_already_in_blocks_passes_through_for_the_cache_step():
     parts = [{"type": "text", "text": "shared", "cache_control": {"type": "ephemeral"}},
              {"type": "text", "text": "varying"}]
@@ -223,7 +256,7 @@ def test_chat_payload_previews_the_same_body_doctor_would_send():
 
     assert preview == llm_anthropic.payload(config(), messages, response_schema={"type": "object"},
                                             max_tokens=2048)
-    assert preview["system"] == [{"type": "text", "text": "s"}] and preview["max_tokens"] == 2048
+    assert preview["system"][0]["text"] == "s" and preview["max_tokens"] == 2048
 
 
 # --- the reply -------------------------------------------------------------------------------

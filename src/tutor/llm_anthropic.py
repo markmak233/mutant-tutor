@@ -36,9 +36,13 @@ What differs from a chat completion, and how this module maps it:
 - Streaming is a different event stream (message_start, content_block_delta, message_delta,
   message_stop), put back together into the same Reply.
 
-Cache breakpoints (`cache_control` on the shared blocks) are the next step, once callers
-split their prompts into a shared and a varying block; this module already accepts content
-given as a list of text parts, so that step changes callers, not the wire format here.
+Cache breakpoints: a caller that gives a message's content as an `llm.Prompt` (the shared
+part first, then this call's own) gets one text block per part, with `cache_control` on
+every part but the last; the system prompt's last block is marked too. Anthropic then
+reuses the prefix up to a breakpoint for 5 minutes at a tenth of the input price or less
+(a write costs 1.25 times), so the items of one lecture, and the repair rounds of one item,
+pay for its pages once. A plain string is one block with no breakpoint. At most 4
+breakpoints per request (the API's limit): the system's and the first three of the parts.
 """
 
 from __future__ import annotations
@@ -55,6 +59,8 @@ VERSION = "2026-10-21"  # the anthropic-version header the current docs use
 # (graph/settings.py); the model's thinking counts towards it.
 DEFAULT_MAX_TOKENS = 32_000
 EFFORT_OFF = "low"  # thinking "off": the lowest effort every 5.5 model takes
+CACHE = {"type": "ephemeral"}  # a cache breakpoint with the default 5-minute lifetime
+MAX_BREAKPOINTS = 4  # the API's limit per request
 # Anthropic's stop reasons -> the finish reasons callers read ("length": cut off).
 STOP_REASONS = {"end_turn": "stop", "stop_sequence": "stop", "max_tokens": "length"}
 # JSON Schema keywords Anthropic's structured output refuses (docs, "JSON Schema
@@ -94,7 +100,11 @@ def payload(config: llm.LLMConfig, messages: list[dict], *, max_tokens: int | No
                   "messages": [{"role": m["role"], "content": blocks(m["content"])}
                                for m in messages if m["role"] != "system"]}
     if system:
+        # The system prompt is the same for every call of a kind: always a breakpoint
+        # (a prompt under the model's minimum, 512 tokens, is simply not cached).
+        system[-1]["cache_control"] = CACHE
         body["system"] = system
+    _cap_breakpoints(body)
     output: dict = {}
     level = effort(config, thinking)
     if level:
@@ -163,10 +173,16 @@ def structurable(schema) -> bool:
 
 
 def blocks(content: str | list[dict]) -> list[dict]:
-    """Content blocks from a message's content: a string becomes one text block; a list of
-    OpenAI-style parts (text, image_url with a data URL) becomes the matching blocks. A
-    list of parts already in Anthropic's shape passes through, so a caller can split a
-    prompt into blocks (the shared part, then the varying part) for the cache step."""
+    """Content blocks from a message's content: an llm.Prompt becomes one text block per
+    part with a cache breakpoint after each shared part (empty parts left out: the API
+    refuses an empty text block); any other string one text block; a list of OpenAI-style
+    parts (text, image_url with a data URL) the matching blocks, a part already in
+    Anthropic's shape passing through."""
+    if isinstance(content, llm.Prompt):
+        parts = [{"type": "text", "text": part} for part in content.parts if part]
+        for block in parts[:-1]:
+            block["cache_control"] = CACHE
+        return parts or [{"type": "text", "text": ""}]
     if isinstance(content, str):
         return [{"type": "text", "text": content}]
     out = []
@@ -182,6 +198,17 @@ def blocks(content: str | list[dict]) -> list[dict]:
         else:
             out.append(part)  # a text block, or any block already in Anthropic's shape
     return out
+
+
+def _cap_breakpoints(body: dict) -> None:
+    """No more than MAX_BREAKPOINTS `cache_control` marks in the request: the system's
+    stays, then the earliest of the messages' (the largest shared parts come first), the
+    rest are removed. Our callers set at most two; this keeps a longer Prompt legal."""
+    marked = [block for message in body["messages"] for block in message["content"]
+              if "cache_control" in block]
+    allowed = MAX_BREAKPOINTS - sum("cache_control" in b for b in body.get("system", []))
+    for block in marked[max(allowed, 0):]:
+        del block["cache_control"]
 
 
 def _read(response, stream: bool, on_progress: Callable[[int], None] | None) -> dict:
