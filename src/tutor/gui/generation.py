@@ -40,6 +40,7 @@ from pathlib import Path
 
 from tutor.gui import tasks, toml_edit
 from tutor.gui.courses import Course
+from tutor.materials import coverage_store
 from tutor.materials.cache import is_lecture, lecture_caches, lecture_name
 from tutor.materials.slides import lecture_number
 
@@ -198,6 +199,9 @@ def coverage_missing(course: Course, lectures: list[str]) -> list[str]:
     their slides 9.x), so a week with rows for one of them warns for neither. Without a
     coverage.md every lecture is missing; a lecture whose name carries no number is judged
     by its heading alone."""
+    store = coverage_store.load(course.workspace.root)
+    if store is not None:  # the data says exactly which lectures have points
+        return coverage_store.missing_lectures(store, lectures)
     try:
         text = (course.workspace.root / "coverage.md").read_text(encoding="utf-8")
     except OSError:

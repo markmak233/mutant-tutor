@@ -4140,6 +4140,41 @@ late; the adaptive review screens can be built with it.
     footers, so its ranges are PDF pages; generation sends such a lecture whole anyway.
     Using the draft is the owner's click. Checked by a click in Chrome on a scratch course:
     use, then add a second lecture after a hand-written line, which stayed.
+  - coverage as data (owner, 2026-11-09 the idea, 2026-11-10 "do it now, it is the same
+    thing" after the no-rows warning; `tutor/materials/coverage_store.py`). `coverage.json`
+    is the source of truth and `coverage.md` is rendered from it on every save, in the
+    shape the file always had. Why: the Markdown file could not be updated for a changed
+    lecture without losing the owner's edits, a batch could only propose its marks, and
+    whether a lecture had rows was a guess from headings. Per lecture, keyed by the name a
+    plan uses: the hash of the lecture text it was drafted from, the date and model, the
+    owner's title and notes, the points and the pages none covers. A point: a stable id
+    (sha256 of lecture, slides and text, never its position, so adding a row moves
+    nothing), slides, text, one of the five statuses, the check in square brackets, any
+    other note, `covered_by` (the `ex:<id> (batch)` marks, a list, the status kept under
+    them so a gap's kind survives the exercise), `owner_edited` and `removed`. Reading the
+    old file once (`migrate`, the file before kept as `coverage.md.bak`): both shapes the
+    files had, a draft's `## <lecture file>` headings and a hand-written file's `## Week N`
+    / `### L8.1 Title` headings mapped to lectures by their numbers (the title kept, a
+    week's note given to its first lecture); the status cell parsed as the files wrote it,
+    escaped `|` included; a row that is not three cells, and any other text, kept as
+    notes; a section that is no lecture (a labs table) kept after the lectures. Checked on
+    the three courses that have a file: every table row read (102, 220 and 276), and the
+    rendered file read again gives the same lectures. Merging a new draft of one lecture:
+    by id, a point found again is kept with the owner's fields untouched (its pages filled
+    in), a point the owner edited or an exercise practises is kept whatever the draft says,
+    any other point the draft no longer has is marked removed and listed under the table
+    for the owner to confirm (never deleted by code), a new point is added where the draft
+    puts it. A batch marks the one point its saved exercise's lecture and slides match
+    exactly (`mark_covered`); with no or several matches it stays a proposal. The plan
+    prompt receives the rendered table when the data exists (the same bytes for the same
+    data; the prompt's own text is unchanged and its pins hold), the file as written for a
+    course not migrated, "(none)" for one with neither, so a new course still plans. Edits
+    to the rendered file do not flow back (`rendered_is_stale` tells the page). Command
+    line: `python -m tutor.materials.coverage_store migrate | render | redraft [--all]`;
+    the drafting itself stays in `tutor.materials.coverage`. The Coverage page on this data
+    (editing a point, re-drafting a lecture, confirming removals, the one-click migration)
+    and the batch's direct marks are the next step; then every course is drafted again
+    from scratch with the Claude models, the owner's edits and marks carried over.
 - Packaging the GUI itself as an image (owner asked, 2026-11-05: the aim is opening it in one click,
   see "Packaging and release", which does not need this, so an image is at most a later option). The
   costs: to start test containers from inside, it needs the Docker socket, which amounts to root on

@@ -19,7 +19,7 @@ from tutor.graph.languages import PYTHON, Profile
 from tutor.graph.nodes import Deps, describe_error, model_label
 from tutor.graph.plan_selection import validate_selection
 from tutor.graph.state import BatchState, ItemState, PlanItem
-from tutor.materials import cache
+from tutor.materials import cache, coverage_store
 from tutor.schema import Manifest, SourceRef
 
 REPO = Path(__file__).resolve().parents[3]  # for the manifest's git commit
@@ -108,10 +108,11 @@ def plan_batch(state: BatchState, deps: Deps) -> BatchState:
     (at most PLAN_RETRIES times) with the problems found."""
     lectures, count = state["lectures"], state.get("count")
     max_count = state.get("max_count", 6)
-    coverage = deps.workspace / "coverage.md"
     inputs = dict(
         lectures=lectures,
-        coverage=coverage.read_text(encoding="utf-8") if coverage.is_file() else "(none)",
+        # The coverage table: rendered from coverage.json when the course has one (the
+        # same bytes for the same data), else coverage.md as written, else "(none)".
+        coverage=coverage_store.planner_text(deps.workspace),
         pages="\n".join(page_titles(deps.workspace, lecture) for lecture in lectures),
         existing=existing_exercises(deps.workspace), preferences=state.get("preferences", ""),
         count=count, max_count=max_count, feedback=state.get("feedback", ""),
