@@ -798,3 +798,82 @@ def test_a_removed_module_row_is_named_as_such():
     """envcheck's probe reports "<package> imports" rows; they are not pip packages."""
     assert environment.kind("pydub imports") == "removed standard-library module"
     assert environment.kind("pydub") == "pip package"
+
+
+# --- what the lectures' code uses beyond the core modules (owner, 2026-11-10) ----------------
+
+
+def _code_lecture(course, name="L2.pdf"):
+    entries = [cache.Entry(1, "2.1", "text", "h1",
+                           "import subprocess, os\nfrom collections import Counter\n"
+                           "import numpy.linalg as la\nimport below: the slide's prose\n"),
+               cache.Entry(2, "2.2", "text", "h2",
+                           "#include <stdio.h>\n#include \"mylist.h\"\n#include <sys/socket.h>\n"
+                           "import subprocess\n")]
+    path = course.workspace.root / "cache" / "lectures" / f"{name}.md"
+    _write(path, cache.render(name, entries))
+
+
+def test_modules_and_headers_the_lectures_use_are_found_with_their_sources(course):
+    from tutor.materials import imports_found
+
+    _code_lecture(course)
+
+    found = {(f.kind, f.name): f for f in imports_found.found_in_lectures(course.workspace.root)}
+
+    assert ("import", "collections") not in found  # a core module
+    assert ("include", "stdio.h") not in found  # a standard header
+    sub = found[("import", "subprocess")]
+    assert sub.risky and len(sub.sources) == 2 and sub.first.page == 1
+    assert sub.first.line == "import subprocess, os" and sub.first.lecture == "L2"
+    assert ("import", "os") not in found  # core, whatever RISKY says
+    assert found[("import", "numpy")].first.line == "import numpy.linalg as la"  # top level
+    assert not found[("import", "numpy")].risky
+    assert found[("import", "below")].first.line == "import below: the slide's prose"  # prose
+    assert found[("include", "mylist.h")].first.line == '#include "mylist.h"'
+    assert found[("include", "socket.h")].first.line == "#include <sys/socket.h>"
+    assert [f.kind for f in imports_found.found_in_lectures(course.workspace.root)][:3] == [
+        "import", "import", "import"]  # imports first, most-cited first
+
+
+def test_the_page_lists_them_and_the_ticked_ones_go_into_safety(root, course):
+    _code_lecture(course)
+    client = _browser(root)
+
+    page = client.get("/c/demo-course/environment/", base_url=BASE).get_data(as_text=True)
+
+    assert "The lectures' code uses, and exercises may not yet" in page
+    assert '<tr class="risky">' in page and "<code>subprocess</code>" in page
+    assert 'name="header" value="mylist.h"' in page and "L2 p.2: <code>#include" in page
+
+    response = post(client, "/c/demo-course/environment/allow-found",
+                    {"module": ["numpy"], "header": ["mylist.h"]})
+
+    assert "notice=found-allowed" in response.headers["Location"]
+    safety = tomllib.loads((course.workspace.root / "workspace.toml").read_text(
+        encoding="utf-8"))["safety"]
+    assert safety == {"allow_imports": ["numpy"], "allow_headers": ["mylist.h"]}
+    page = client.get("/c/demo-course/environment/", base_url=BASE).get_data(as_text=True)
+    assert 'value="numpy"' not in page and 'value="mylist.h"' not in page  # allowed now
+    assert 'value="subprocess"' in page  # still offered
+
+    # A second save adds to the lists; what is there stays.
+    post(client, "/c/demo-course/environment/allow-found", {"module": ["subprocess"]})
+    safety = tomllib.loads((course.workspace.root / "workspace.toml").read_text(
+        encoding="utf-8"))["safety"]
+    assert safety["allow_imports"] == ["numpy", "subprocess"]
+    assert safety["allow_headers"] == ["mylist.h"]
+    assert (course.workspace.root / "workspace.toml.bak").is_file()
+
+
+@pytest.mark.parametrize(("data", "problem"), [
+    ({}, "Tick what"),
+    ({"module": ["not a module"]}, "not a module name"),
+    ({"header": ["../etc/passwd"]}, "not a header file name"),
+])
+def test_only_names_of_the_right_shape_are_allowed(root, course, data, problem):
+    _code_lecture(course)
+    response = post(_browser(root), "/c/demo-course/environment/allow-found", data)
+    assert response.status_code == 400 and problem in response.get_data(as_text=True)
+    assert "safety" not in tomllib.loads(
+        (course.workspace.root / "workspace.toml").read_text(encoding="utf-8"))

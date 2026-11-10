@@ -142,6 +142,31 @@
   </div>
 </form>
 
+{# Modules and headers the lectures' code uses that exercises may not use yet, found in the
+   cached lectures with no model (materials/imports_found; owner, 2026-11-10): the standard
+   library beyond the core set, and a course's own headers. Each with where it was seen; the
+   owner ticks what the exercises may use. #}
+{% if found_imports %}
+<form method="post" action="{{ url_for('allow_found', name=course.folder) }}" class="form wide" id="found-imports">
+  <h3>The lectures' code uses, and exercises may not yet</h3>
+  <p class="muted">Found in the cached lectures' import and include lines (no model). Tick what the exercises may use: a module goes into <code>[safety] allow_imports</code>, a header into <code>allow_headers</code>. A module marked <strong>risky</strong> starts processes, reaches the network, loads code or touches the interpreter: allowing it lets generated exercises do that too, so tick it only for a course that teaches it.</p>
+  <table class="requires">
+    <thead><tr><th></th><th>Name</th><th>Seen</th><th>Where</th></tr></thead>
+    <tbody>
+    {% for f in found_imports %}
+      <tr{% if f.risky %} class="risky"{% endif %}>
+        <td><input type="checkbox" name="{{ 'module' if f.kind == 'import' else 'header' }}" value="{{ f.name }}" aria-label="Allow {{ f.name }}"></td>
+        <td><code>{{ f.name }}</code>{% if f.kind == 'include' %} <span class="muted">header</span>{% endif %}{% if f.risky %} <strong>risky</strong>{% endif %}</td>
+        <td>{{ f.sources | length }} line{{ "s" if f.sources | length != 1 }}</td>
+        <td class="muted">{{ f.first.lecture }} p.{{ f.first.page }}: <code>{{ f.first.line }}</code></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <div class="actions"><button type="submit">Allow the ticked</button></div>
+</form>
+{% endif %}
+
 {# Each added language's own settings, after Python's. #}
 {% for row in ls.rows if row.removable %}{% include "_language_" ~ row.language.key ~ ".html" %}{% endfor %}
 </section>

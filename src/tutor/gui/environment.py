@@ -49,6 +49,7 @@ from tutor.envcheck import NOT_PIP, pip_requirements, requires_problems, version
 from tutor.gui import requirement_versions, tasks, toml_edit
 from tutor.gui.courses import Course
 from tutor.gui.toml_edit import put
+from tutor.materials import imports_found
 from tutor.materials import requires as requires_draft
 
 CHECK_TIMEOUT_S = 60  # java -version, in a venv that may be cold; measured 0.2 s warm
@@ -299,6 +300,55 @@ def check_imports(rows: list[tuple[str, str]], ticked: set[str], modules: dict[s
         elif module in allow:
             allow.remove(module)
     return (None if problems else allow), problems
+
+
+def found_imports(course: Course) -> list[imports_found.Found]:
+    """The modules and headers the lectures' code uses that exercises may not use yet, each
+    with where it was seen (materials/imports_found; owner, 2026-11-10). [] with no lecture
+    read, or a workspace.toml whose [safety] lists are not lists (the page says so there)."""
+    try:
+        return imports_found.found_in_lectures(course.workspace.root)
+    except (OSError, ValueError):
+        return []
+
+
+def allow_found(course: Course, modules: list[str], headers: list[str]) -> list[str]:
+    """Add the ticked modules to [safety] allow_imports and the ticked headers to
+    allow_headers, each checked as a name of its kind; nothing else in the table moves.
+    The problems, else []."""
+    problems = []
+    modules = [m.strip() for m in modules if m.strip()]
+    headers = [h.strip() for h in headers if h.strip()]
+    for module in modules:
+        if not MODULE.match(module):
+            problems.append(f"{module!r} is not a module name.")
+    for header in headers:
+        if not re.fullmatch(r"[\w.-]+\.h", header):
+            problems.append(f"{header!r} is not a header file name such as stack.h.")
+    if not modules and not headers:
+        problems.append("Tick what the exercises may use first.")
+    if problems:
+        return problems
+    safety = toml_edit.read(course.workspace.root).get("safety", {})
+    current_modules = [m for m in safety.get("allow_imports", []) if isinstance(m, str)]
+    current_headers = [h for h in safety.get("allow_headers", []) if isinstance(h, str)]
+    new_modules = current_modules + [m for m in modules if m not in current_modules]
+    new_headers = current_headers + [h for h in headers if h not in current_headers]
+    expected = {k: v for k, v in safety.items() if k not in ("allow_imports", "allow_headers")}
+    if new_modules:
+        expected["allow_imports"] = new_modules
+    if new_headers:
+        expected["allow_headers"] = new_headers
+
+    def change(doc) -> None:
+        if "safety" not in doc:
+            doc["safety"] = tomlkit.table()
+        if new_modules:
+            put(doc["safety"], "allow_imports", new_modules)
+        if new_headers:
+            put(doc["safety"], "allow_headers", new_headers)
+
+    return toml_edit.edit(course.workspace.root, "safety", change, expected)
 
 
 def save_requires(course: Course, table: dict[str, str], allow: list[str] | None = None

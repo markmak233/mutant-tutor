@@ -27,6 +27,7 @@ NOTICES = {
     "no-file-manager": ("bad", "No file manager command (xdg-open) was found."),
     "failed": ("bad", "It could not be started."),
     "tests-passed": ("ok", "Your tests passed in the course image; the attempt is recorded."),
+    "found-allowed": ("ok", "Added to [safety]: the exercises may use what you ticked."),
     "tests-host-course": ("bad", "This course runs its tests on the host: run pytest in the "
                                  "exercise folder from the course's terminal."),
     "queued": ("ok", "Queued: it starts when the course's running task ends (a course runs "

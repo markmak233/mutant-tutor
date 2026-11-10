@@ -41,6 +41,7 @@ def environment_page(course: courses.Course, problems: list[str], code: int = 20
                            chosen=chosen or {},
                            others_allowed=[m for m in allowed
                                            if m not in {r.module for r in rows}],
+                           found_imports=environment.found_imports(course),
                            not_pip=environment.NOT_PIP, runner=environment.runner(course),
                            has_venv=environment.venv_python(course).exists(),
                            install=environment.install_shown(course),
@@ -129,6 +130,18 @@ def register(app: Flask) -> None:
                      for n, v, k in zip(names, versions, keys, strict=False) if n or v]
             return environment_page(course, problems, 400, typed)
         return redirect(url_for("environment_view", name=name) + "?notice=requires-saved",
+                        code=303)
+
+    @app.post("/c/<name>/environment/allow-found")
+    def allow_found(name: str):
+        """The ticked modules and headers the lectures' code uses go into [safety]
+        allow_imports / allow_headers (owner, 2026-11-10): the owner's tick, one by one."""
+        course = course_or_404(name)
+        problems = environment.allow_found(course, request.form.getlist("module"),
+                                           request.form.getlist("header"))
+        if problems:
+            return environment_page(course, problems, 400)
+        return redirect(url_for("environment_view", name=name) + "?notice=found-allowed",
                         code=303)
 
     @app.post("/c/<name>/environment/draft")

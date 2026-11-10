@@ -2293,6 +2293,27 @@ themselves, so a cheap layer comes first and a stronger one later.
       standard library's, each a plain `name.h` path) and `gcc = "12"` in [requires] when
       missing (the image's Debian gcc). Checked writes as every other table, the file before
       kept as `.bak`.
+    - What the lectures' code uses beyond the core modules (owner, 2026-11-10; the plan
+      had a model drafting `[safety] allow_imports` and `[languages.*]` at a course's
+      creation, each entry with its source, accepted one by one). The [requires] draft
+      already proposes the pip packages, and ticking one allows its module; `[languages.c]
+      flags` already come from the lectures' gcc lines. What was left out: a module that
+      is no pip package (`subprocess`, `socket`, `threading`, `struct`: the standard
+      library, which the draft leaves out on purpose) was never proposed, so a course that
+      teaches it got exercises the static check refused; likewise a header a course ships.
+      Import and include lines are exact text, so `materials/imports_found.py` reads them
+      with a regular expression, no model (as the C flags): every module the cached
+      lectures' code imports beyond the core set, the frameworks' and `allow_imports`, and
+      every header beyond the standard ones and `allow_headers`, each with the lecture,
+      page and line it was seen on, most-cited first. Step 1 lists them with a tick each
+      and "Allow the ticked", which adds to `[safety] allow_imports` / `allow_headers`
+      through the checked write (`.bak` kept); a name that starts processes, reaches the
+      network, loads code or touches the interpreter is marked risky, with what allowing
+      it means. Never ticked by code. A prose line that starts with "import" shows up too
+      (one did), with its line, and the owner skips it. On the real courses it found one
+      prose line on the Spark course and the two headers the C course ships.
+      `[languages.*]` beyond C waits for a second language. Clicked in headless Chrome on
+      a scratch course: the three rows, two ticked and allowed, the risky one left.
     - The page's step 1, laid out for more languages (owner, 2026-11-07): "Find it in the
       lectures" first; then one language list, Python first and not removable (the tests are
       pytest), each row its [requires] toolchain's version (python, gcc), with "Add a
