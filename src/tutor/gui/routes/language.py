@@ -57,9 +57,10 @@ def register(app: Flask) -> None:
             return redirect(url_for("language_page", notice="no-language-name"), code=303)
         if environment.setup_model(course) is None:
             return redirect(url_for("language_page", notice="no-setup-model"), code=303)
-        command = [sys.executable, "-m", "tutor.gui.translate", name,
+        command = [sys.executable, "-m", "tutor.gui.translate",
                    "--root", str(app.config["ROOT"])]
         if request.form.get("again") == "1":
             command.append("--again")
+        command += ["--", name]  # after "--": a name starting with "-" is not an option
         return start_task(course, f"Translate the GUI into {name}", [command],
                           meta={"kind": "translate"})

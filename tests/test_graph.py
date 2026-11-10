@@ -579,6 +579,21 @@ def test_an_item_saved_before_is_not_saved_again_nor_overwritten(tmp_path):
         nodes.save(state, d)
 
 
+def test_a_broken_line_in_the_batch_log_does_not_stop_a_resume(tmp_path, capsys):
+    """A run killed while writing a line (Stop after its grace time) leaves half a line;
+    the records around it still count, and the line is reported, not fatal."""
+    d = deps(tmp_path, None)
+    round_dir = tmp_path / "round-0"
+    write_draft(ExerciseDraft.model_validate(draft()), "sum-list", round_dir)
+    nodes.save({"item": ITEM, "round_dir": str(round_dir)}, d)
+    with d.generation_log.open("a", encoding="utf-8") as f:
+        f.write('{"time": "2026-11-11T10:00:00", "exercise": "other", "outco')  # cut off
+    assert nodes._saved_before(d, "sum-list")
+    assert len(nodes.log_lines(d.generation_log)) == 1
+    assert "generation.jsonl: 1 unreadable line(s) left out" in capsys.readouterr().err
+    assert batch._models_of(d, {"sum-list"}) == nodes.model_label(d.config)
+
+
 def test_hide_answers_keeps_a_failing_test_from_printing_the_answer(tmp_path):
     """The run still names the test and its result, and the number stays hidden."""
     d = deps(tmp_path, None, hide_answers=True)

@@ -14,7 +14,8 @@ once could push runs past their time limits, a false INVALID. A second task wait
 queue (owner, 2026-11-09: one long task used to block every button of the course) and can
 be removed before it starts; the click that queued it is its consent, paid or not (owner,
 2026-11-10). Two processes can notice the queue at once (a runner ending, a page loading):
-a task starts only for the one that creates its `claimed` file first.
+a task starts only for the one that creates its `claimed` file first, and the other starts
+nothing in that call.
 
 The runner owns task.json once it has started; before that, this module writes it.
 """
@@ -118,7 +119,11 @@ def kick(course_root: Path) -> Task | None:
             return None
         for task in queued(course_root):
             if not _claim(task.folder):
-                continue  # another process is starting it this moment
+                # Another process is starting it (or removing it) this moment. Not on to
+                # the next one: both read the same queue, and the loser would start the
+                # second task beside the first (found 2026-11-11). The next kick, a
+                # page's poll within a second, starts it if it still waits.
+                break
             data = json.loads((task.folder / TASK_FILE).read_text(encoding="utf-8"))
             data.update(status=RUNNING, started=_now())  # started: when it really did
             _write(task.folder, data)

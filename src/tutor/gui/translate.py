@@ -15,7 +15,8 @@ Babel, and nothing to keep in step with the pages. A run asks only for the strin
 lacks (`--again`: all of them), in batches of BATCH, each a JSON list the model answers in
 the same shape (a schema, and the caller still checks). A translation is kept only when
 `i18n.safe` passes (the same `%` placeholders, no `<>`): a refused one is listed and left
-English. The file's entries the English no longer has are dropped.
+English. A string given back unchanged is kept so: it counts as translated, and is not asked
+again. The file's entries the English no longer has are dropped.
 """
 
 from __future__ import annotations
@@ -181,8 +182,12 @@ def ask(config: LLMConfig, name: str, batch: list[Message], log_path: Path | Non
     by_number = {item.n: item for item in answer.items}
     for i, m in enumerate(batch, 1):
         item = by_number.get(i)
-        if item is None or not item.text.strip() or item.text == m.singular:
-            continue  # not answered, or left English: asked again next time
+        if item is None or not item.text.strip():
+            continue  # not answered: asked again next time
+        # Given back unchanged ("Docker", "OK": the same in the language, or one the model
+        # would not translate) is kept as it is: the page shows the same either way, and the
+        # file is then complete, instead of asking for these again on every run (2026-11-11).
+        # `--again` asks for everything once more.
         if m.plural is None:
             if i18n.safe(m.singular, item.text):
                 got[m.singular] = item.text

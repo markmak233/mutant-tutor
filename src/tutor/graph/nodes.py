@@ -20,6 +20,7 @@ import hashlib
 import json
 import re
 import shutil
+import sys
 import threading
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
@@ -320,12 +321,30 @@ def save(state: ItemState, deps: Deps) -> ItemState:
 
 def _saved_before(deps: Deps, exercise_id: str) -> bool:
     """The batch log records `exercise_id` as saved (by an earlier run of this batch)."""
-    if not deps.generation_log.is_file():
-        return False
-    lines = (json.loads(line)
-             for line in deps.generation_log.read_text(encoding="utf-8").splitlines())
-    return any(line["exercise"] == exercise_id and line["outcome"] == "saved"
-               for line in lines)
+    return any(line.get("exercise") == exercise_id and line.get("outcome") == "saved"
+               for line in log_lines(deps.generation_log))
+
+
+def log_lines(path: Path) -> list[dict]:
+    """The batch log's records, in order; none when there is no file. A line that is not a
+    JSON object is skipped with a warning, not fatal: a run killed while writing one (Stop
+    after its grace time, a full disk) once would have stopped every later resume of the
+    batch at the broken line (2026-11-11)."""
+    if not path.is_file():
+        return []
+    found, bad = [], 0
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        try:
+            row = json.loads(line) if line.strip() else None
+        except ValueError:
+            row = None
+        if isinstance(row, dict):
+            found.append(row)
+        elif line.strip():
+            bad += 1
+    if bad:
+        print(f"warning: {path.name}: {bad} unreadable line(s) left out", file=sys.stderr)
+    return found
 
 
 def discard(state: ItemState, deps: Deps) -> ItemState:

@@ -108,6 +108,30 @@ def test_a_second_task_queues_and_starts_when_the_first_ends(tmp_path):
     assert (second.folder / tasks.CLAIM_FILE).is_file()  # claimed once, by the hand-over
 
 
+def test_a_kick_that_loses_the_claim_starts_nothing_else(tmp_path, monkeypatch):
+    """Two processes (a runner ending, a page's poll) read the same queue: the one whose
+    claim on the oldest task fails must not go on and start the next one beside it (one
+    task per course). Here the other process is a claim made by hand."""
+    started = []
+    monkeypatch.setattr(tasks.subprocess, "Popen",
+                        lambda cmd, **kw: started.append(Path(cmd[-1]).name))
+    first = tasks.start(tmp_path, "first", [py("pass")], {})  # claimed here, by this call
+    data = json.loads((first.folder / tasks.TASK_FILE).read_text(encoding="utf-8"))
+    tasks._write(first.folder, {**data, "status": tasks.DONE})  # ended (no runner ran)
+    for title in ("second", "third"):
+        monkeypatch.setattr(tasks, "running", lambda root: first)  # queue only, no start
+        tasks.start(tmp_path, title, [py("pass")], {})
+    monkeypatch.undo()
+    monkeypatch.setattr(tasks.subprocess, "Popen",
+                        lambda cmd, **kw: started.append(Path(cmd[-1]).name))
+    second, third = tasks.queued(tmp_path)
+    assert tasks._claim(second.folder)  # the other process, this moment
+    started.clear()
+
+    assert tasks.kick(tmp_path) is None
+    assert started == [] and tasks.get(tmp_path, third.id).queued
+
+
 def test_a_failed_task_does_not_hold_the_queue(tmp_path):
     first = tasks.start(tmp_path, "fails", [py("import sys; sys.exit(3)")], {})
     second = tasks.start(tmp_path, "second", [py("pass")], {})

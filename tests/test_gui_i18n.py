@@ -189,8 +189,8 @@ def test_the_language_page_lists_offers_and_starts_a_translation(root, monkeypat
     folder, title, commands, meta = started[0]
     assert (folder, title, meta) == ("demo-course", "Translate the GUI into Deutsch",
                                      {"kind": "translate"})
-    assert commands[0][1:] == ["-m", "tutor.gui.translate", "Deutsch", "--root", str(root),
-                               "--again"]
+    assert commands[0][1:] == ["-m", "tutor.gui.translate", "--root", str(root), "--again",
+                               "--", "Deutsch"]  # after "--": "-x" is a name, not an option
     response = client.post("/language/translate", base_url=BASE, headers={"Origin": BASE},
                            data={"name": "en", "course": "demo-course"})
     assert response.headers["Location"].endswith("notice=no-language-name")
@@ -257,11 +257,12 @@ def test_a_translation_is_kept_when_it_passes_and_refused_when_it_does_not():
     config = llm.LLMConfig("m", "deepseek", "https://api.deepseek.com", "x")
     got, refused = translate.ask(config, "中文", batch, None, chat_fn=chat)
     assert got == {"Courses": "课程", ("%(count)s batch", 0): "%(count)s 批",
-                   ("%(count)s batch", 1): "%(count)s 批"}
+                   ("%(count)s batch", 1): "%(count)s 批", "Stays": "Stays"}
     assert [r.split(":")[0] for r in refused] == ["refused (placeholders differ, or markup)"] * 2
-    # Unanswered, left English, refused: all still missing, so asked again next time.
+    # Unanswered and refused: still missing, so asked again next time. Given back unchanged
+    # ("Stays"): kept, so the file is complete and the run after asks nothing (2026-11-11).
     assert [m.singular for m in translate.missing(batch, got)] == [
-        "%(n)d of %(total)d passed", "Keys", "Not shown", "Stays"]
+        "%(n)d of %(total)d passed", "Keys", "Not shown"]
 
 
 def test_the_command_writes_the_file_in_batches_and_asks_only_for_what_is_missing(

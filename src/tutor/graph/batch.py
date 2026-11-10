@@ -16,7 +16,7 @@ from pydantic import ValidationError
 
 from tutor.graph import prompts
 from tutor.graph.languages import PYTHON, Profile
-from tutor.graph.nodes import Deps, describe_error, model_label
+from tutor.graph.nodes import Deps, describe_error, log_lines, model_label
 from tutor.graph.plan_selection import validate_selection
 from tutor.graph.state import BatchState, ItemState, PlanItem
 from tutor.materials import cache, coverage_store
@@ -226,11 +226,9 @@ def collect(state: BatchState, deps: Deps) -> BatchState:
 def _models_of(deps: Deps, ids: set[str]) -> str | None:
     """The models that generated the saved `ids`, from the batch log: a batch resumed with
     another --profile mixes models, and the manifest names them all."""
-    if not deps.generation_log.is_file():
-        return None
-    lines = [json.loads(line)
-             for line in deps.generation_log.read_text(encoding="utf-8").splitlines()]
-    saved = [x for x in lines if x["exercise"] in ids and x["outcome"] == "saved"]
+    lines = log_lines(deps.generation_log)  # a broken line is skipped, not fatal
+    saved = [x for x in lines if x.get("exercise") in ids and x.get("outcome") == "saved"
+             and isinstance(x.get("model"), str)]
     models = ([x["model"] for x in saved]
               + [f"repair {x['repair_model']}" for x in saved if x.get("repair_model")]
               + [f"oracle {x['oracle_model']}" for x in saved if x.get("oracle_model")])
