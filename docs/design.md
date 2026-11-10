@@ -3964,7 +3964,12 @@ late; the adaptive review screens can be built with it.
     asks only for what the file lacks, so a page changed in English never breaks another
     language; a string the model gives back unchanged ("Docker") is kept so, as done,
     else it was asked again on every run and the count never reached the total
-    (2026-11-10). Jinja's new-style `_()` marks what gettext returns as safe HTML (so the
+    (2026-11-10), but counted apart, "kept as the English by the model", in each batch's
+    line, the run's last line and the Language page's line for the file (`i18n.unchanged`:
+    an entry whose text is its msgid), since it may be the model declining rather than the
+    word being the same (2026-11-10: a made-up language, 喵语, got all 165 strings back
+    and the run said "165 of 165 translated"); `--again-unchanged` asks for those alone,
+    say on another model (2026-11-11). Jinja's new-style `_()` marks what gettext returns as safe HTML (so the
     values it formats in are escaped), translated or not, so the callables escape the
     text first: an English string may say `<profile>` and shows as written; a literal `%`
     in a page's English is written `%%` (a test checks every string). The language: the

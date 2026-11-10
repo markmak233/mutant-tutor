@@ -14,7 +14,11 @@
 {% for code, name in gui_languages.items() %}
   <li>{% if code == gui_language %}<strong>{{ name }}</strong> <span class="muted">{{ _("(in use)") }}</span>{% else %}
     <form method="post" action="{{ url_for('set_language') }}" class="action"><input type="hidden" name="language" value="{{ code }}"><input type="hidden" name="back" value="{{ url_for('language_page') }}"><button type="submit">{{ name }}</button></form>{% endif %}
-    {% if code != "en" %}<code class="muted">{{ folder / (code ~ ".po") }}</code>{% endif %}</li>
+    {% if code != "en" %}<code class="muted">{{ folder / (code ~ ".po") }}</code>
+    {# The file's count: translated, and apart those the model gave back as the English
+       (the same word, or one it would not translate), which the file keeps (translate.py). #}
+    {% set have, same = counts[code] %}
+    <span class="muted">{{ _("%(done)d of %(total)d translated", done=have - same, total=strings) }}{% if same %}; {{ _("%(same)d kept as the English by the model", same=same) }}{% endif %}</span>{% endif %}</li>
 {% endfor %}
 </ul>
 {% if not chosen %}<p class="muted">{{ _("No choice is kept yet: the browser's language is used when there is a file for it, else English.") }}</p>{% endif %}

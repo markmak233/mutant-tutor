@@ -31,9 +31,12 @@ def register(app: Flask) -> None:
     def language_page():
         root = app.config["ROOT"]
         strings = translate.english()
+        # Each language's file: (strings it has, those kept as the English), for its line.
+        counts = {code: i18n.translations_for(code, root).counts()
+                  for code in i18n.available(root) if code != i18n.ENGLISH}
         return render_template("language.html", chosen=i18n.chosen(root), models=with_model(),
                                strings=len(strings), tokens_k=translate.tokens_about(strings),
-                               folder=root / i18n.TRANSLATIONS)
+                               folder=root / i18n.TRANSLATIONS, counts=counts)
 
     @app.post("/language")
     def set_language():

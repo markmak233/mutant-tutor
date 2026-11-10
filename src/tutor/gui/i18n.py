@@ -111,6 +111,14 @@ class Translations(gettext.NullTranslations):
     def ngettext(self, msgid1: str, msgid2: str, n: int) -> str:
         return self._catalog.get((msgid1, int(n != 1))) or (msgid1 if n == 1 else msgid2)
 
+    def counts(self) -> tuple[int, int]:
+        """(strings the file has, those among them kept as the English): a model gives a
+        string back unchanged when it is the same in the language ("Docker") or it would
+        not translate it (2026-11-10: a made-up language got every string back), and the
+        file keeps it so (`tutor.gui.translate`); the Language page and the command's
+        report tell these from the translated ones."""
+        return len(self._catalog), unchanged(self._catalog)
+
 
 _loaded: dict[Path, tuple[float, Translations]] = {}
 _NONE = Translations({}, "English")
@@ -229,6 +237,14 @@ def placeholders(text: str) -> list[str]:
     """The `%` placeholders of a string as Jinja's gettext formats them; a `%` that is not
     one (a literal that should be `%%`) comes out as "%" alone."""
     return _PLACEHOLDER.findall(text)
+
+
+def unchanged(catalog: dict) -> int:
+    """How many of a catalog's entries keep the English: a plain entry whose text is its
+    msgid, or a plural entry whose first form is (the keys are msgid, or (msgid, form))."""
+    return sum(1 for key, text in catalog.items()
+               if (isinstance(key, str) and text == key)
+               or (isinstance(key, tuple) and key[1] == 0 and text == key[0]))
 
 
 def direction_of(catalog: dict, name: str = "") -> str:

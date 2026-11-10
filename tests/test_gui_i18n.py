@@ -254,6 +254,9 @@ def test_the_language_page_lists_offers_and_starts_a_translation(root, monkeypat
     assert "<strong>English</strong>" in text and ">中文</button>" in text
     assert "zh.po" in text and "demo: m (deepseek: x), the setup model" in text
     assert "English strings; about" in text
+    # The file's line: what it has against the English, none kept as the English here.
+    shown, same = i18n.translations_for("zh", root).counts()
+    assert same == 0 and f"{shown} of {len(translate.english())} translated</span>" in text
 
     started = []
     monkeypatch.setattr("tutor.gui.routes.language.start_task",
@@ -392,6 +395,53 @@ def test_the_command_writes_the_file_in_batches_and_asks_only_for_what_is_missin
     assert catalog["New course"] == "新课程" and "Keys" not in catalog
     assert catalog["Courses"] == "课程"
     assert translate.main(["en", "--root", str(tmp_path)]) == 2
+
+
+def test_strings_kept_as_the_english_are_counted_apart_and_can_be_asked_again(
+        tmp_path, monkeypatch, capsys):
+    """A model gives "Docker" back unchanged (the same word), or every string (a language
+    it would not write, 2026-11-10): the file keeps them, the report counts them apart from
+    the translated ones, and `--again-unchanged` asks for those alone."""
+    course = tmp_path / "courses" / "demo-course"
+    (course / "lectures").mkdir(parents=True)
+    (course / "workspace.toml").write_text(
+        'course = "demo"\n\n[llm.profiles.m]\nprovider = "deepseek"\nmodel = "x"\n'
+        'api_key_env = "DEEPSEEK_API_KEY"\n\n[llm.roles]\nsetup = "m"\n', encoding="utf-8")
+    monkeypatch.setenv("WORKSPACE_DIR", str(course))
+    monkeypatch.setenv("LECTURE_DIR", str(course / "lectures"))
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-not-a-real-key")
+    monkeypatch.setattr(translate, "english", lambda folder=None: [
+        translate.Message("Courses"), translate.Message("Docker"),
+        translate.Message("%(count)s batch", "%(count)s batches")])
+    asked = []
+
+    def chat(config, messages, **kw):
+        asked.append(messages[1]["content"])
+        items = [{"n": 1, "text": "课程"}, {"n": 2, "text": "Docker"},
+                 {"n": 3, "text": "%(count)s batch", "plural": "%(count)s batches"}]
+        if "Courses" not in messages[1]["content"]:  # the second run: those two alone
+            items = [{"n": 1, "text": "容器"},
+                     {"n": 2, "text": "%(count)s 批", "plural": "%(count)s 批"}]
+        return llm.Reply(json.dumps({"items": items}), 1, 1, 0.1, "stop")
+
+    monkeypatch.setattr(translate, "chat", chat)
+    root = tmp_path / "courses"
+    assert translate.main(["中文", "--root", str(root)]) == 0
+    out = capsys.readouterr().out
+    assert "batch 1: 1 translated, 2 kept as the English, 0 refused" in out
+    assert "中文: 1 of 3 strings translated; 2 kept as the English by the model" in out
+    catalog = i18n.read_po((root / i18n.TRANSLATIONS / "中文.po").read_text(encoding="utf-8"))[0]
+    assert i18n.unchanged(catalog) == 2 and translate.missing(
+        translate.english(), catalog) == []  # kept: a plain run asks for nothing more
+    assert i18n.translations_for("中文", root).counts() == (4, 2)  # 4 entries: the plural's two
+    assert translate.main(["中文", "--root", str(root)]) == 0 and len(asked) == 1
+
+    assert translate.main(["中文", "--root", str(root), "--again-unchanged"]) == 0
+    assert len(asked) == 2 and "Courses" not in asked[1] and '"text": "Docker"' in asked[1]
+    catalog = i18n.read_po((root / i18n.TRANSLATIONS / "中文.po").read_text(encoding="utf-8"))[0]
+    assert catalog == {"Courses": "课程", "Docker": "容器", ("%(count)s batch", 0): "%(count)s 批",
+                       ("%(count)s batch", 1): "%(count)s 批"}
+    assert "中文: 3 of 3 strings translated" in capsys.readouterr().out
 
 
 def test_a_failed_model_keeps_what_was_translated(tmp_path, monkeypatch, capsys):

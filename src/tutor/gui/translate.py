@@ -2,7 +2,7 @@
 `<root>/translations/<language>.po` (gui/i18n.py; owner, 2026-11-10: the repository ships
 English only, and the Language page makes any other language on a click).
 
-    python -m tutor.gui.translate NAME [--profile P] [--again]
+    python -m tutor.gui.translate NAME [--profile P] [--again | --again-unchanged]
 
 NAME is the language as the owner wrote it ("中文", "Deutsch"): the model is told to translate
 into it, the file is named by its slug, and the switch shows the name. Run as a course's task
@@ -15,8 +15,11 @@ Babel, and nothing to keep in step with the pages. A run asks only for the strin
 lacks (`--again`: all of them), in batches of BATCH, each a JSON list the model answers in
 the same shape (a schema, and the caller still checks). A translation is kept only when
 `i18n.safe` passes (the same `%` placeholders, no `<>`): a refused one is listed and left
-English. A string given back unchanged is kept so: it counts as translated, and is not asked
-again. The file's entries the English no longer has are dropped.
+English. A string given back unchanged is kept so and not asked again, but counted apart
+("kept as the English", `i18n.unchanged`), as it may be the model declining rather than the
+word being the same (2026-11-10: a made-up language got all 165 back, reported as translated);
+`--again-unchanged` asks for those alone, say on another model. The file's entries the
+English no longer has are dropped.
 """
 
 from __future__ import annotations
@@ -131,9 +134,21 @@ def stored(path: Path) -> tuple[dict, dict[str, str]]:
 
 
 def missing(messages: list[Message], catalog: dict) -> list[Message]:
+    """The English strings the catalog has no entry for (an entry kept as the English
+    counts as one: `--again-unchanged` drops those from the catalog first)."""
     return [m for m in messages
             if (m.plural is None and m.singular not in catalog)
             or (m.plural is not None and (m.singular, 0) not in catalog)]
+
+
+def without_unchanged(catalog: dict) -> dict:
+    """The catalog less the entries kept as the English (both forms of a plural one)."""
+    kept = {key[0] if isinstance(key, tuple) else key
+            for key, text in catalog.items()
+            if (isinstance(key, str) and text == key)
+            or (isinstance(key, tuple) and key[1] == 0 and text == key[0])}
+    return {key: text for key, text in catalog.items()
+            if (key[0] if isinstance(key, tuple) else key) not in kept}
 
 
 def save(path: Path, name: str, messages: list[Message], catalog: dict,
@@ -230,6 +245,8 @@ def main(argv: list[str] | None = None) -> int:
                                           "else plan's, else generate's)")
     parser.add_argument("--again", action="store_true",
                         help="translate every string again, not only those the file lacks")
+    parser.add_argument("--again-unchanged", action="store_true",
+                        help="ask again for the strings the model gave back as the English")
     parser.add_argument("--root", help="where the translations folder goes (default: the "
                                        "course folder's parent, the GUI's root)")
     args = parser.parse_args(argv)
@@ -248,6 +265,8 @@ def main(argv: list[str] | None = None) -> int:
     path = path_for(root, name)
     messages = english()
     catalog = {} if args.again else stored(path)[0]
+    if args.again_unchanged:  # those entries go, so they are asked for again
+        catalog = without_unchanged(catalog)
     todo = missing(messages, catalog)
     print(f"{len(messages)} English strings; {len(todo)} to translate into {name} "
           f"({config.name}: {config.model}); file {path}", flush=True)
@@ -270,16 +289,26 @@ def main(argv: list[str] | None = None) -> int:
             continue
         catalog.update(got)
         refused_all += refused
-        print(f"  batch {start // BATCH + 1}: {len(got)} translated, {len(refused)} refused",
-              flush=True)
+        # `got` has both forms of a plural: count messages, and apart those kept English.
+        same = i18n.unchanged(got)
+        print(f"  batch {start // BATCH + 1}: {len(got) - _plurals(got) - same} translated, "
+              f"{same} kept as the English, {len(refused)} refused", flush=True)
         save(path, name, messages, catalog, config.model)  # kept as it goes
     save(path, name, messages, catalog, config.model)
     for line in refused_all:
         print(f"  {line}", flush=True)
     left = len(missing(messages, catalog))
-    print(f"{name}: {len(messages) - left} of {len(messages)} strings translated"
-          + (f"; {left} stay English (run again to ask for them)" if left else ""), flush=True)
+    same = i18n.unchanged(catalog)
+    print(f"{name}: {len(messages) - left - same} of {len(messages)} strings translated"
+          + (f"; {same} kept as the English by the model (--again-unchanged asks for them "
+             "again)" if same else "")
+          + (f"; {left} not answered (run again to ask for them)" if left else ""), flush=True)
     return 0
+
+
+def _plurals(got: dict) -> int:
+    """The second forms in `got`: a plural message has two entries, counted as one."""
+    return sum(1 for key in got if isinstance(key, tuple) and key[1] == 1)
 
 
 if __name__ == "__main__":
