@@ -1,10 +1,11 @@
 {% extends "base.html" %}
 {# One knowledge point of a lecture, to change and save (gui/coverage.py, save_point). Saving
-   marks it as the owner's, so a later draft keeps it as it is. #}
-{% block title %}Point · {{ course.workspace.course }}{% endblock %}
+   marks it as the owner's, so a later draft keeps it as it is. Text through _()
+   (gui/i18n.py); the status words and the point's own text stay as they are. #}
+{% block title %}{{ _("Point") }} · {{ course.workspace.course }}{% endblock %}
 {% block crumbs %}
 <a href="{{ url_for('course', name=course.folder) }}">{{ course.workspace.course }}</a>
-<a href="{{ url_for('coverage_view', name=course.folder) }}">Coverage</a>
+<a href="{{ url_for('coverage_view', name=course.folder) }}">{{ _("Coverage") }}</a>
 <span>{{ lecture }}</span>
 {% endblock %}
 {% block content %}
@@ -13,17 +14,17 @@
 <ul class="notice notice-bad form-problems">{% for line in problems %}<li>{{ line }}</li>{% endfor %}</ul>
 {% endif %}
 <form method="post" action="{{ url_for('save_coverage_point', name=course.folder, lecture=lecture, point_id=point.id) }}" class="form">
-  <label class="field">Slides <span class="muted">the footers printed on the slides, e.g. 4.15-4.24</span><input name="slides" value="{{ point.slides }}" required></label>
-  <label class="field">Point<input name="point" value="{{ point.point }}" required></label>
-  <label class="field">Status<select name="status">{% for s in statuses %}<option value="{{ s }}"{% if s == point.status %} selected{% endif %}>{{ s }}</option>{% endfor %}</select></label>
-  <label class="field">Check <span class="muted">what an exercise could check; the plan reads it for gap-code rows</span><input name="check" value="{{ point.check }}"></label>
-  <label class="field">Note<input name="note" value="{{ point.note }}"></label>
-  <label class="field">Covered by <span class="muted">the exercises that practise it, e.g. ex:word-count (p2-w1), ex:other (p2-w1); a batch fills this in for the rows its exercises match</span><input name="covered" value="{{ covered }}"></label>
-  <p class="muted">{% if point.owner_edited %}Edited by you: a draft keeps it as it is.{% else %}From a draft{% if point.first_page %} (pages {{ point.first_page }}-{{ point.last_page }}){% endif %}; once saved here it is yours and a draft keeps it.{% endif %}</p>
+  <label class="field">{{ _("Slides") }} <span class="muted">{{ _("the footers printed on the slides, e.g. 4.15-4.24") }}</span><input name="slides" value="{{ point.slides }}" required></label>
+  <label class="field">{{ _("Point") }}<input name="point" value="{{ point.point }}" required></label>
+  <label class="field">{{ _("Status") }}<select name="status">{% for s in statuses %}<option value="{{ s }}"{% if s == point.status %} selected{% endif %}>{{ s }}</option>{% endfor %}</select></label>
+  <label class="field">{{ _("Check") }} <span class="muted">{{ _("what an exercise could check; the plan reads it for gap-code rows") }}</span><input name="check" value="{{ point.check }}"></label>
+  <label class="field">{{ _("Note") }}<input name="note" value="{{ point.note }}"></label>
+  <label class="field">{{ _("Covered by") }} <span class="muted">{{ _("the exercises that practise it, e.g. ex:word-count (p2-w1), ex:other (p2-w1); a batch fills this in for the rows its exercises match") }}</span><input name="covered" value="{{ covered }}"></label>
+  <p class="muted">{% if point.owner_edited %}{{ _("Edited by you: a draft keeps it as it is.") }}{% elif point.first_page %}{{ _("From a draft (pages %(first)s-%(last)s); once saved here it is yours and a draft keeps it.", first=point.first_page, last=point.last_page) }}{% else %}{{ _("From a draft; once saved here it is yours and a draft keeps it.") }}{% endif %}</p>
   <div class="actions">
-    <button type="submit" class="primary">Save</button>
-    <a class="button" href="{{ url_for('coverage_view', name=course.folder) }}">Back</a>
+    <button type="submit" class="primary">{{ _("Save") }}</button>
+    <a class="button" href="{{ url_for('coverage_view', name=course.folder) }}">{{ _("Back") }}</a>
   </div>
 </form>
-<form method="post" action="{{ url_for('drop_coverage_point', name=course.folder, lecture=lecture, point_id=point.id) }}" class="action"><button type="submit">Delete this point</button></form>
+<form method="post" action="{{ url_for('drop_coverage_point', name=course.folder, lecture=lecture, point_id=point.id) }}" class="action"><button type="submit">{{ _("Delete this point") }}</button></form>
 {% endblock %}

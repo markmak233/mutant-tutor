@@ -1,30 +1,32 @@
 {% extends "base.html" %}
 {# Stored facts are displayed only under an explicit current/stale/unknown label.
-   Comparison uses the course venv's envcheck data, never the GUI's interpreter. #}
-{% block title %}Image build record · {{ course.workspace.course }}{% endblock %}
-{% block crumbs %}<a href="{{ url_for('course', name=course.folder) }}">{{ course.workspace.course }}</a><a href="{{ url_for('environment_view', name=course.folder) }}#test-image">Environment</a><span>Image build record</span>{% endblock %}
+   Comparison uses the course venv's envcheck data, never the GUI's interpreter.
+   Text through _() (gui/i18n.py); the record's own values (status word, detail,
+   digests, names, versions) stay as they are. #}
+{% block title %}{{ _("Image build record") }} · {{ course.workspace.course }}{% endblock %}
+{% block crumbs %}<a href="{{ url_for('course', name=course.folder) }}">{{ course.workspace.course }}</a><a href="{{ url_for('environment_view', name=course.folder) }}#test-image">{{ _("Environment") }}</a><span>{{ _("Image build record") }}</span>{% endblock %}
 {% block content %}
-<h1>Image build record</h1>
+<h1>{{ _("Image build record") }}</h1>
 <p><strong>{{ view.status }}</strong> · {{ view.detail }}</p>
-{% if history_problem %}<p>{{ history_problem }} <a href="{{ url_for('environment_view', name=course.folder) }}#course-needs">Review the course requirements in step 1</a>.</p>{% endif %}
-<p><a href="{{ url_for('environment_view', name=course.folder) }}#test-image">Build or rebuild the image</a> · <a href="{{ url_for('environment_view', name=course.folder) }}#host-install">Check or fix the setup</a></p>
-<form method="post" action="{{ url_for('refresh_image_record', name=course.folder) }}"><p>Read versions from the current existing image. This starts a temporary network-disabled container and writes a private course record; it does not build, pull, install or change course settings.</p><button type="submit"{% if running %} disabled{% endif %}>Refresh current image record</button></form>
+{% if history_problem %}<p>{{ history_problem }} <a href="{{ url_for('environment_view', name=course.folder) }}#course-needs">{{ _("Review the course requirements in step 1") }}</a>.</p>{% endif %}
+<p><a href="{{ url_for('environment_view', name=course.folder) }}#test-image">{{ _("Build or rebuild the image") }}</a> · <a href="{{ url_for('environment_view', name=course.folder) }}#host-install">{{ _("Check or fix the setup") }}</a></p>
+<form method="post" action="{{ url_for('refresh_image_record', name=course.folder) }}"><p>{{ _("Read versions from the current existing image. This starts a temporary network-disabled container and writes a private course record; it does not build, pull, install or change course settings.") }}</p><button type="submit"{% if running %} disabled{% endif %}>{{ _("Refresh current image record") }}</button></form>
 {% if view.data %}
 {% set data = view.data %}
-<h2>Stored snapshot{% if view.status != 'current' %} ({{ view.status }}, not a current comparison){% endif %}</h2>
-<dl><dt>Recorded at</dt><dd>{{ data.recorded_at | local_time }}</dd><dt>Image</dt><dd><code>{{ data.image }}</code></dd><dt>Actual image ID</dt><dd><code>{{ data.image_id }}</code></dd><dt>Canonical recipe digest</dt><dd><code>{{ data.recipe }}</code></dd></dl>
+<h2>{{ _("Stored snapshot") }}{% if view.status != 'current' %} {{ _("(%(status)s, not a current comparison)", status=view.status) }}{% endif %}</h2>
+<dl><dt>{{ _("Recorded at") }}</dt><dd>{{ data.recorded_at | local_time }}</dd><dt>{{ _("Image") }}</dt><dd><code>{{ data.image }}</code></dd><dt>{{ _("Actual image ID") }}</dt><dd><code>{{ data.image_id }}</code></dd><dt>{{ _("Canonical recipe digest") }}</dt><dd><code>{{ data.recipe }}</code></dd></dl>
 {% if data.provenance %}
-<dl><dt>Build time</dt><dd>{{ data.provenance.built_at | local_time }}</dd><dt>Base selected for this build</dt><dd>{{ data.provenance.base.name }}</dd><dt>Actual base image ID (configuration digest)</dt><dd><code>{{ data.provenance.base.id }}</code></dd><dt>Base registry manifest digests</dt><dd>{% for digest in data.provenance.base.repo_digests %}<code>{{ digest }}</code>{% if not loop.last %}<br>{% endif %}{% else %}Unavailable; the actual base content ID above is recorded.{% endfor %}</dd></dl>
-{% else %}<p>Base/build provenance is unknown for this older image. Refresh cannot infer it from a mutable base tag. Rebuild to capture it.</p>{% endif %}
+<dl><dt>{{ _("Build time") }}</dt><dd>{{ data.provenance.built_at | local_time }}</dd><dt>{{ _("Base selected for this build") }}</dt><dd>{{ data.provenance.base.name }}</dd><dt>{{ _("Actual base image ID (configuration digest)") }}</dt><dd><code>{{ data.provenance.base.id }}</code></dd><dt>{{ _("Base registry manifest digests") }}</dt><dd>{% for digest in data.provenance.base.repo_digests %}<code>{{ digest }}</code>{% if not loop.last %}<br>{% endif %}{% else %}{{ _("Unavailable; the actual base content ID above is recorded.") }}{% endfor %}</dd></dl>
+{% else %}<p>{{ _("Base/build provenance is unknown for this older image. Refresh cannot infer it from a mutable base tag. Rebuild to capture it.") }}</p>{% endif %}
 {% if view.status == 'current' %}
-<h2>Course venv versus image</h2>
-{% if host.problem %}<p>{{ host.problem }} Use the Environment link above to create/check it.</p>{% endif %}
-<p>The host column is measured with this course's venv. A different version is information, not an automatic failure or pin.</p>
-<table><thead><tr><th>Requirement</th><th>Declared prefix/bound</th><th>Course venv/host tool</th><th>Image</th><th>Comparison</th></tr></thead><tbody>
-{% for row in rows %}<tr><td>{{ row.name }}</td><td>{{ row.required }}</td><td>{{ row.host or 'unknown' }}</td><td>{{ row.image or 'unknown' }}</td><td>{{ row.state }}</td></tr>{% endfor %}
+<h2>{{ _("Course venv versus image") }}</h2>
+{% if host.problem %}<p>{{ host.problem }} {{ _("Use the Environment link above to create/check it.") }}</p>{% endif %}
+<p>{{ _("The host column is measured with this course's venv. A different version is information, not an automatic failure or pin.") }}</p>
+<table><thead><tr><th>{{ _("Requirement") }}</th><th>{{ _("Declared prefix/bound") }}</th><th>{{ _("Course venv/host tool") }}</th><th>{{ _("Image") }}</th><th>{{ _("Comparison") }}</th></tr></thead><tbody>
+{% for row in rows %}<tr><td>{{ row.name }}</td><td>{{ row.required }}</td><td>{{ row.host or _('unknown') }}</td><td>{{ row.image or _('unknown') }}</td><td>{{ row.state }}</td></tr>{% endfor %}
 </tbody></table>
-<details><summary>All recorded distributions</summary><table><tbody>{% for name, version in data.inventory.packages.items() %}<tr><td>{{ name }}</td><td>{{ version }}</td></tr>{% endfor %}</tbody></table></details>
+<details><summary>{{ _("All recorded distributions") }}</summary><table><tbody>{% for name, version in data.inventory.packages.items() %}<tr><td>{{ name }}</td><td>{{ version }}</td></tr>{% endfor %}</tbody></table></details>
 {% endif %}
 {% endif %}
-{% if history %}<h2>Recent stored build snapshots</h2><p>Up to 20 snapshots, including older recipes. These are historical records, not claims about the current image.</p><table><thead><tr><th>Recorded/build time</th><th>Image ID</th><th>Actual base ID</th></tr></thead><tbody>{% for old in history %}<tr><td>{{ (old.provenance.built_at if old.provenance else old.recorded_at) | local_time }}</td><td><code>{{ old.image_id }}</code></td><td><code>{{ old.provenance.base.id if old.provenance else 'unknown' }}</code></td></tr>{% endfor %}</tbody></table>{% endif %}
+{% if history %}<h2>{{ _("Recent stored build snapshots") }}</h2><p>{{ _("Up to 20 snapshots, including older recipes. These are historical records, not claims about the current image.") }}</p><table><thead><tr><th>{{ _("Recorded/build time") }}</th><th>{{ _("Image ID") }}</th><th>{{ _("Actual base ID") }}</th></tr></thead><tbody>{% for old in history %}<tr><td>{{ (old.provenance.built_at if old.provenance else old.recorded_at) | local_time }}</td><td><code>{{ old.image_id }}</code></td><td><code>{{ old.provenance.base.id if old.provenance else _('unknown') }}</code></td></tr>{% endfor %}</tbody></table>{% endif %}
 {% endblock %}
