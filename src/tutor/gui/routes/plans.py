@@ -46,6 +46,7 @@ def plan_page(template: str, name: str, label: str, error: str = "", checked=Non
                            explain=generation.EXPLAIN, selection_error=error,
                            checked=checked, course_busy=tasks.running(course.workspace.root),
                            statuses=plan_items.item_statuses(course, view), quiet=quiet,
+                           retry_cap=plan_items.RETRY_CAP,
                            waiting_for=waiting_for(course, view.task) if quiet else "")
 
 
@@ -154,25 +155,35 @@ def register(app: Flask) -> None:
         2026-11-06): only one the plan page shows as discarded or failed, and only while no
         task of this plan runs; it costs money, as approving does. "Try again with a note"
         posts a note too, added to the exercise's notes for this try (owner, 2026-11-07, after
-        a retry failed the same way, as nothing about it had changed)."""
+        a retry failed the same way, as nothing about it had changed). `cap` (owner,
+        2026-11-10): the one larger output cap, plan_items.RETRY_CAP, offered when a round's
+        reply was cut off at the batch's cap; any other value is refused, and it is taken
+        only for an item whose rounds were cut off (the page offers it nowhere else)."""
         course, view = plan_or_404(name, label)
         exercise = request.form.get("item", "")
         back = url_for("plan", name=name, label=label)
         note = generation.clean_text(request.form.get("note", ""))
         if note is None:
             return redirect(f"{back}?notice=note-bad", code=303)
+        cap = request.form.get("cap", "")
+        if cap not in ("", str(plan_items.RETRY_CAP)):
+            return redirect(f"{back}?notice=cap-bad", code=303)
         status = plan_items.item_statuses(course, view).get(exercise)
         running = tasks.running(course.workspace.root)
         if status is None or not status.can_retry or running or view.selection_error:
             return redirect(f"{back}?notice=plan-moved", code=303)
+        if cap and not status.cut_off_rounds:
+            return redirect(f"{back}?notice=plan-moved", code=303)
         if problem := courses.container_problem(course):
             return redirect(f"{back}?notice={problem}", code=303)
         commands = plan_items.prepare_retry(course, view, exercise, courses.task_python(course),
-                                            note=note)
+                                            note=note,
+                                            max_tokens=plan_items.RETRY_CAP if cap else None)
         if commands is None:
             abort(404, "The plan has no such exercise.")
-        return start_task(course, f"Generate {exercise} again" + (" with a note" if note else ""),
-                          commands,
+        title = (f"Generate {exercise} again" + (" with a note" if note else "")
+                 + (f" and a {plan_items.RETRY_CAP:,} output cap" if cap else ""))
+        return start_task(course, title, commands,
                           meta={"kind": generation.RETRY, "label": label, "item": exercise},
                           then=back)
 

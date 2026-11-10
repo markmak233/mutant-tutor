@@ -240,3 +240,91 @@ def test_the_batch_page_links_back_to_the_plan_it_came_from(course):
     (newer / "checkpoint.sqlite").write_bytes(b"")
     assert generation.plan_label(course, batch.name) is None
     assert generation.plan_label(course, "not-a-batch-name") is None
+
+
+# --- a larger output cap for an item whose replies were cut off (owner, 2026-11-10) ----------
+
+
+def _cut_off(course, batch):
+    """Exercise c's record as week 9's two had it: rounds 0 and 1 cut off at max_tokens, the
+    later rounds a real failure, which alone was shown before."""
+    lines = (batch / "generation.jsonl").read_text(encoding="utf-8").splitlines()
+    cut = "format: the reply does not fit the JSON schema (the reply was cut off at max_tokens): x"
+    record = {"exercise": "c", "outcome": "discarded", "rounds": 3, "attempts": [
+        {"round": 0, "failure": cut}, {"round": 1, "failure": cut},
+        {"round": 2, "failure": "rule 1 (reference passes) FAIL: expected 42, got 41"},
+        {"round": 3, "failure": "rule 1 (reference passes) FAIL: expected 42, got 40"}]}
+    lines = [line for line in lines if json.loads(line)["exercise"] != "c"] + [json.dumps(record)]
+    _write(batch / "generation.jsonl", "\n".join(lines) + "\n")
+
+
+def test_rounds_cut_off_at_the_cap_are_found_in_any_round_not_only_the_last(course):
+    draft, batch = _generated(course)
+    _cut_off(course, batch)
+    view = generation.plan_view(course, "w9-test")
+
+    statuses = plan_items.item_statuses(course, view)
+
+    assert statuses["c"].cut_off_rounds == (0, 1)
+    assert statuses["c"].reason.startswith("rule 1 (reference passes)")  # the last round, as before
+    assert statuses["d"].cut_off_rounds == () and statuses["a"].cut_off_rounds == ()
+
+
+def test_the_page_offers_the_larger_cap_only_where_a_round_was_cut_off(root, course):
+    draft, batch = _generated(course)
+    page = get(_browser(root), "/c/demo-course/plans/w9-test/").get_data(as_text=True)
+    assert 'name="cap"' not in page and "cut off" not in page
+
+    _cut_off(course, batch)
+    page = get(_browser(root), "/c/demo-course/plans/w9-test/").get_data(as_text=True)
+
+    assert "Rounds 0, 1: the reply was cut off at the batch's output cap." in page
+    assert page.count('name="cap" value="64000"') == 2  # the button, and the note form's box
+    assert "Try again with a 64,000 output cap" in page
+
+
+def test_the_cap_retry_sets_both_caps_after_the_batchs_settings(root, course, monkeypatch):
+    draft, batch = _generated(course)
+    _cut_off(course, batch)
+    started = _record_starts(monkeypatch)
+
+    post(_browser(root), "/c/demo-course/plans/w9-test/retry", {"item": "c", "cap": "64000"})
+
+    title, (graph, validate), meta = started[0]
+    assert title == "Generate c again and a 64,000 output cap"
+    sets = [a for a in graph if a.startswith("--set=")]
+    assert sets[-2:] == ["--set=max_tokens=64000", "--set=max_tokens_no_thinking=64000"]
+    assert "--set=mode=review" in sets[:-2]  # run.json's settings first; the last --set wins
+    assert meta == {"kind": "retry", "label": "w9-test", "item": "c"}
+    assert json.loads((draft / "retry-c.json").read_text(encoding="utf-8")).get("notes") is None
+
+
+def test_a_note_and_the_cap_go_together(root, course, monkeypatch):
+    draft, batch = _generated(course)
+    _cut_off(course, batch)
+    started = _record_starts(monkeypatch)
+
+    post(_browser(root), "/c/demo-course/plans/w9-test/retry",
+         {"item": "c", "cap": "64000", "note": "keep the tests small"})
+
+    title, (graph, _), _ = started[0]
+    assert title == "Generate c again with a note and a 64,000 output cap"
+    assert "--set=max_tokens=64000" in graph
+    assert "keep the tests small" in (draft / "retry-c.json").read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize(("item", "cap", "notice"), [
+    ("c", "128000", "cap-bad"),  # only the one offered
+    ("c", "64000; rm", "cap-bad"),
+    ("d", "64000", "plan-moved"),  # d failed with an error, no round was cut off
+])
+def test_another_cap_or_an_item_not_cut_off_starts_nothing(root, course, monkeypatch, item, cap,
+                                                           notice):
+    draft, batch = _generated(course)
+    _cut_off(course, batch)
+    monkeypatch.setattr(tasks, "start", lambda *a, **k: pytest.fail("nothing may start"))
+
+    response = post(_browser(root), "/c/demo-course/plans/w9-test/retry",
+                    {"item": item, "cap": cap})
+
+    assert f"notice={notice}" in response.headers["Location"]

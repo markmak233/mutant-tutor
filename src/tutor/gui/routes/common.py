@@ -39,6 +39,7 @@ NOTICES = {
                           "now."),
     "note-bad": ("bad", "The note was not used: write plain text, 2000 characters at most, "
                         "or leave it empty to try again without one."),
+    "cap-bad": ("bad", "Nothing started: the output cap can only be the one offered."),
     "catalog-fetched": ("ok", "The list from models.dev is up to date: choose a provider."),
     "folder-cancelled": ("ok", "Nothing was saved from the folder, and its files are no "
                                "longer kept."),

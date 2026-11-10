@@ -3647,6 +3647,22 @@ late; the adaptive review screens can be built with it.
   note is kept beside the item file, and the next try's box starts from it. A batch made
   with `hide_answers` (hand-calculation exercises) shows no check output, which can quote
   expected values; the note still works there. "Try all" takes no notes.
+- "Try again with a 64,000 output cap" (owner, 2026-11-10). A plan's two items came out
+  discarded with a rule 1 failure shown, but their first two rounds had been cut off at
+  `max_tokens` (32,000, with thinking on, which counts towards it): only the last round's
+  failure is shown, so the cut-offs were invisible, and a plain retry would run into the
+  same cap. Now an exercise's status reads every round of its generation.jsonl record and
+  says which were cut off ("Rounds 0, 1: the reply was cut off at the batch's output cap"),
+  and only such an exercise gets a second button, and a ticked box in the note form, for a
+  retry with the one larger cap `plan_items.RETRY_CAP` (64,000): both `max_tokens` and
+  `max_tokens_no_thinking` as `--set`s after run.json's, since the graph keeps the last
+  value of a setting given twice and a repair round may run with thinking off. One step,
+  not a free number: the one a cut-off item needs, within the settings' 128,000, and the
+  route takes no other value (`cap-bad`) and none for an item whose rounds were not cut
+  off. The batch's own cap is unchanged: raising the default would pay for longer thinking
+  on every item. "Try all" keeps the batch's cap. Clicked in headless Chrome on a scratch
+  course with the stand-in graph (the record rewritten as the real one was): the line, the
+  button, the task's command with both caps last.
 - Fixing in the page, not through Claude (owner, 2026-11-06: "这些漏洞下次在网页有补充"):
   - A task that failed or was stopped has "Run again", when it is safe to run twice (reading
     lectures, transcribing, Validate all, Check, install, build, the two drafts). It posts to

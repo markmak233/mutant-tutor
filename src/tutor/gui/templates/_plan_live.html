@@ -42,9 +42,13 @@
           <div class="muted">{{ item.type }} · {{ item.interface }} · {{ item.framework }}</div></td>
         {% if statuses %}<td class="item-status">{% if status %}{{ chip(status.state) }}
           {% if status.reason %}<div class="muted">{{ status.reason }}</div>{% endif %}
+          {# The last round's failure hides earlier rounds the output cap ended: say so, and
+             offer the one larger cap (owner, 2026-11-10, week 9's two items). #}
+          {% if status.cut_off_rounds %}<div class="muted cut-off">Round{{ "s" if status.cut_off_rounds | length > 1 }} {{ status.cut_off_rounds | join(", ") }}: the reply was cut off at the batch's output cap.</div>{% endif %}
           {% if status.state == "Left out by you" and status.reason %}<a href="{{ url_for('new_batch', name=course.folder) }}">New batch with a valid source and unused ID</a> · <a href="{{ url_for('course', name=course.folder) }}">Course and existing exercises</a>{% endif %}
           {% if status.can_generate and plan.generation_complete and not busy and not plan.selection_error %}<form method="post" action="{{ url_for('generate_left_out', name=course.folder, label=plan.label) }}" class="action"><input type="hidden" name="item" value="{{ item.id }}"><button type="submit">Generate</button></form>{% endif %}
           {% if status.can_retry and not busy and not plan.selection_error %}<form method="post" action="{{ url_for('retry_item', name=course.folder, label=plan.label) }}" class="action"><input type="hidden" name="item" value="{{ item.id }}"><button type="submit">Try again</button></form>
+          {% if status.cut_off_rounds %}<form method="post" action="{{ url_for('retry_item', name=course.folder, label=plan.label) }}" class="action"><input type="hidden" name="item" value="{{ item.id }}"><input type="hidden" name="cap" value="{{ retry_cap }}"><button type="submit">Try again with a {{ "{:,}".format(retry_cap) }} output cap</button></form>{% endif %}
           {% elif status.can_retry %}<div class="muted">"Try again" comes back when the running task ends: a course runs one task at a time.</div>{% endif %}{% endif %}</td>{% endif %}
         <td>{{ item.lecture }}<div class="muted">slides {{ item.slides }}</div></td>
         <td>{{ item.knowledge_point }}
@@ -66,6 +70,7 @@
               <span class="muted">added to this exercise's notes for this try only (plan.json stays as approved), e.g. which reading of the question the reference and the tests must share{% if status.note %}; this is the note the last try used{% endif %}</span>
               <textarea name="note" rows="3" maxlength="2000" required>{{ status.note }}</textarea>
             </label>
+            {% if status.cut_off_rounds %}<label class="field"><input type="checkbox" name="cap" value="{{ retry_cap }}" checked> Allow {{ "{:,}".format(retry_cap) }} output tokens this try (the batch's cap cut round{{ "s" if status.cut_off_rounds | length > 1 }} {{ status.cut_off_rounds | join(", ") }} short; the model's thinking counts towards it)</label>{% endif %}
             <div class="actions"><button type="submit">Try again with this note</button></div>
           </form>
         </details>
