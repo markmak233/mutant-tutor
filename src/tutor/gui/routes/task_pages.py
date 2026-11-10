@@ -96,7 +96,9 @@ def task_parts(course: courses.Course, task: tasks.Task) -> dict:
     log, cut = (tasks.tail(task, limit=512 * 1024) if task.meta.get("kind") == "doctor"
                 else tasks.tail(task))
     create = task.meta.get("kind") == "create"
-    return {"course": course, "task": task, "log": log, "cut": cut,
+    ahead = [t for t in tasks.pending(course.workspace.root) if t.id < task.id] \
+        if task.queued else []
+    return {"course": course, "task": task, "log": log, "cut": cut, "ahead": ahead,
             "back": return_to(course, task), "quiet": tasks.quiet_s(task),
             "again": again_url(course, task),
             "waiting_for": waiting_for(course, task),
@@ -122,6 +124,9 @@ def register(app: Flask) -> None:
         error is, with a link back. Only the poll redirects: opening an old task's page
         shows its log. A new course goes on to its page once it is ready."""
         course, task = task_or_404(name, task_id)
+        if task.queued:
+            tasks.kick(course.workspace.root)  # nothing running? then it is this one's turn
+            course, task = task_or_404(name, task_id)
         parts = task_parts(course, task)
         response = make_response(render_template("_task_log.html", **parts))
         back = parts["back"]
@@ -132,6 +137,15 @@ def register(app: Flask) -> None:
             response.headers["HX-Redirect"] = back[0] + (f"?notice={back[2]}" if back[2]
                                                          else "")
         return response
+
+    @app.post("/c/<name>/tasks/<task_id>/remove")
+    def remove_task(name: str, task_id: str):
+        """A queued task leaves the queue; one that started meanwhile stays."""
+        course, task = task_or_404(name, task_id)
+        notice = "removed" if tasks.remove(task) else "not-queued"
+        back = (url_for("course", name=name) if notice == "removed"
+                else url_for("task", name=name, task_id=task_id))
+        return redirect(f"{back}?notice={notice}", code=303)
 
     @app.post("/c/<name>/tasks/<task_id>/stop")
     def stop_task(name: str, task_id: str):

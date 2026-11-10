@@ -47,7 +47,7 @@ def plan_page(template: str, name: str, label: str, error: str = "", checked=Non
     return render_template(template, course=course, plan=view, log=log, cut=cut,
                            models=plan_selection.effective_models(course, view),
                            explain=generation.EXPLAIN, selection_error=error,
-                           checked=checked, course_busy=tasks.running(course.workspace.root),
+                           checked=checked,
                            statuses=plan_items.item_statuses(course, view), quiet=quiet,
                            retry_cap=plan_items.RETRY_CAP,
                            # While the plan waits for approval: the lectures it was made for
@@ -176,8 +176,10 @@ def register(app: Flask) -> None:
         if cap not in ("", str(plan_items.RETRY_CAP)):
             return redirect(f"{back}?notice=cap-bad", code=303)
         status = plan_items.item_statuses(course, view).get(exercise)
-        running = tasks.running(course.workspace.root)
-        if status is None or not status.can_retry or running or view.selection_error:
+        # Another course task queues this one; a task of this plan (running or queued)
+        # refuses it, so one exercise is not generated twice.
+        busy = view.task is not None and view.task.pending
+        if status is None or not status.can_retry or busy or view.selection_error:
             return redirect(f"{back}?notice=plan-moved", code=303)
         if cap and not status.cut_off_rounds:
             return redirect(f"{back}?notice=plan-moved", code=303)
@@ -201,7 +203,8 @@ def register(app: Flask) -> None:
         course, view = plan_or_404(name, label)
         back = url_for("plan", name=name, label=label)
         failed = [k for k, v in plan_items.item_statuses(course, view).items() if v.can_retry]
-        if not failed or tasks.running(course.workspace.root) or view.selection_error:
+        busy = view.task is not None and view.task.pending
+        if not failed or busy or view.selection_error:
             return redirect(f"{back}?notice=plan-moved", code=303)
         if problem := courses.container_problem(course):
             return redirect(f"{back}?notice={problem}", code=303)
@@ -223,7 +226,7 @@ def register(app: Flask) -> None:
         exercise = request.form.get("item", "")
         status = plan_items.item_statuses(course, view).get(exercise)
         if (view.selection_error or not view.generation_complete or status is None
-                or not status.can_generate or tasks.running(course.workspace.root)):
+                or not status.can_generate or (view.task is not None and view.task.pending)):
             return redirect(f"{back}?notice=plan-moved", code=303)
         if problem := courses.container_problem(course):
             return redirect(f"{back}?notice={problem}", code=303)

@@ -80,7 +80,10 @@ NO_PLAN = "plan not finished"
 ASSISTANT = "waiting for the assistant"
 GENERATED = "generated"
 NOT_STARTED = "did not start"
+QUEUED = "queued"  # a task of this plan waits for the course's running task to end
 EXPLAIN = {
+    QUEUED: "A task of this plan is queued: it starts when the course's running task ends. "
+            "Until then it can be removed from the course page.",
     MAKING_PLAN: "The plan model is at work. This page updates by itself, and the plan "
                  "appears here when it is ready.",
     GENERATING: "Generating the approved plan: each exercise is written, validated in a "
@@ -159,8 +162,9 @@ class PlanView:
 
     @property
     def shows_plan(self) -> bool:
-        """Show the full review/approved material, but hide an old plan during replanning."""
-        return self.state in (WAITING, GENERATING, STOPPED, ASSISTANT, GENERATED)
+        """Show the full review/approved material, but hide an old plan during replanning.
+        A queued task's plan stays visible: the owner sees what waits to run."""
+        return self.state in (WAITING, GENERATING, STOPPED, ASSISTANT, GENERATED, QUEUED)
 
     @property
     def generated(self) -> bool:
@@ -405,11 +409,11 @@ def plan_view(course: Course, label: str, history: list[tasks.Task] | None = Non
         return None
     if draft is None:
         # The command has not made its folder yet, or stopped before (Docker not running).
-        return PlanView(label, _running_state(task) if task.active else NOT_STARTED, None, None,
-                        task=task)
+        return PlanView(label, _running_state(task) if task.pending else NOT_STARTED, None,
+                        None, task=task)
     items, plan_error, edited = _plan(draft)
     batch_dir = course.workspace.root / "batches" / draft.name
-    if task is not None and task.active:
+    if task is not None and task.pending:
         state = _running_state(task)
     elif (batch_dir / "manifest.json").is_file():
         state = GENERATED
@@ -444,13 +448,16 @@ def open_plans(course: Course, history: list[tasks.Task] | None = None) -> list[
     labels = [label for p in _dirs(course.workspace.root / "batches" / ".drafts")
               if (label := label_of(p.name)) and (p / "checkpoint.sqlite").is_file()]
     labels += [t.meta["label"] for t in history
-               if t.active and isinstance(t.meta.get("label"), str)]
+               if t.pending and isinstance(t.meta.get("label"), str)]
     views = [plan_view(course, label, history) for label in dict.fromkeys(labels)]
     return [v for v in views if v is not None and v.state not in (GENERATED, NOT_STARTED)]
 
 
 def _running_state(task: tasks.Task) -> str:
-    """What a running task does, by its kind; Continue may finish a plan or a batch."""
+    """What a running task does, by its kind; Continue may finish a plan or a batch. A
+    queued one: queued, whatever its kind."""
+    if task.queued:
+        return QUEUED
     kind = task.meta.get("kind")
     return GENERATING if kind in (APPROVE, RETRY) else MAKING_PLAN if kind in (PLAN, FEEDBACK) \
         else CONTINUING

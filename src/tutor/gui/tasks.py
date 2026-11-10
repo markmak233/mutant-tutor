@@ -1,16 +1,22 @@
 """Long tasks the GUI starts: existing CLI commands run in the background, one after another.
 
 Each task is a folder in the course's logs/gui-tasks/: task.json (what to run, and its state)
-and output.log (everything the commands print). `start` writes task.json and launches
-`python -m tutor.gui.runner <folder>` in a session of its own, then returns; the runner runs
-the commands, writes their output to the log and their exit codes to task.json. So the page
-only reads files, and a task goes on if the GUI stops (docs/design.md, "Local GUI").
+and output.log (everything the commands print). `start` writes task.json as queued and
+calls `kick`, which launches `python -m tutor.gui.runner <folder>` for the oldest queued task
+in a session of its own when nothing runs, then returns; the runner runs the commands, writes
+their output to the log and their exit codes to task.json, and at its end kicks the queue
+again, so the next task starts with no GUI needed. The page only reads files, and a task goes
+on if the GUI stops (docs/design.md, "Local GUI").
 
 The commands come from the GUI's own code with checked paths, never from a request. A course
 runs one task at a time: validation already runs its checks in parallel, and two batches at
-once could push runs past their time limits, a false INVALID.
+once could push runs past their time limits, a false INVALID. A second task waits in the
+queue (owner, 2026-11-09: one long task used to block every button of the course) and can
+be removed before it starts; the click that queued it is its consent, paid or not (owner,
+2026-11-10). Two processes can notice the queue at once (a runner ending, a page loading):
+a task starts only for the one that creates its `claimed` file first.
 
-The runner owns task.json once it has started; before that, this module writes it once.
+The runner owns task.json once it has started; before that, this module writes it.
 """
 
 from __future__ import annotations
@@ -43,14 +49,8 @@ _ID = re.compile(r"^\d{8}-\d{6}-[0-9a-f]{6}$")
 _start_lock = threading.Lock()  # waitress serves requests on several threads
 
 RUNNING, DONE, FAILED, STOPPED, LOST = "running", "done", "failed", "stopped", "lost"
-
-
-class TaskBusy(Exception):
-    """The course already has a running task; `task` is that one."""
-
-    def __init__(self, task: Task):
-        super().__init__(task.id)
-        self.task = task
+QUEUED = "queued"  # written, not started: it starts when the course's running task ends
+CLAIM_FILE = "claimed"  # created once, by whoever starts the task (os.O_EXCL)
 
 
 @dataclass(frozen=True)
@@ -72,37 +72,92 @@ class Task:
     def active(self) -> bool:
         return self.status == RUNNING
 
+    @property
+    def queued(self) -> bool:
+        return self.status == QUEUED
+
+    @property
+    def pending(self) -> bool:
+        """Running or waiting to: what a page counts as "this is being done"."""
+        return self.status in (RUNNING, QUEUED)
+
 
 def start(course_root: Path, title: str, commands: list[list[str]],
           env: dict[str, str], grace_s: float = STOP_GRACE_S, meta: dict | None = None) -> Task:
-    """Write the task and launch its runner. Raises TaskBusy if one is running already.
-    `env`: variables these commands need on top of this process's own (the course's
-    WORKSPACE_DIR and LECTURE_DIR). `meta`: see Task."""
+    """Write the task as queued and start the queue: the task runs now when nothing else
+    does, else when the tasks before it have ended. Returns it as it then stands (running
+    or queued). `env`: variables these commands need on top of this process's own (the
+    course's WORKSPACE_DIR and LECTURE_DIR). `meta`: see Task."""
     with _start_lock:
         locations.prepare()
-        if (busy := running(course_root)) is not None:
-            raise TaskBusy(busy)
         base = course_root / TASKS_DIR
         _prune(base)
-        # Names sort by start time: the second, then its microseconds in six hex digits
-        # (it was random, and two tasks in one second could sort the wrong way round, so a
-        # plan's page took the older task for its newest). Unique, as starts take the lock.
+        # Names sort by the time they were queued: the second, then its microseconds in
+        # six hex digits (it was random, and two tasks in one second could sort the wrong
+        # way round, so a plan's page took the older task for its newest). Unique, as
+        # starts take the lock. The queue runs in this order.
         now = datetime.now()
         task_id = f"{now:%Y%m%d-%H%M%S}-{now.microsecond:06x}"
         folder = base / task_id
         folder.mkdir(parents=True)
-        _write(folder, {"title": title, "status": RUNNING, "started": _now(), "finished": None,
+        _write(folder, {"title": title, "status": QUEUED, "started": _now(), "finished": None,
                         "commands": commands, "env": env, "exit_codes": [], "pid": None,
                         "grace_s": grace_s, "meta": meta or {}})
         (folder / LOG_FILE).touch()
-        # A session of its own: Ctrl+C on the GUI's terminal does not reach it, and stop()
-        # can signal it alone. Nothing of it is inherited: no open files, no terminal.
-        flags = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
-                 if sys.platform == "win32" else {"start_new_session": True})
-        subprocess.Popen([sys.executable, "-m", "tutor.gui.runner", str(folder)], cwd=REPO,
-                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                         stderr=subprocess.DEVNULL, **flags)
-        return get(course_root, task_id)
+    kick(course_root)
+    return get(course_root, task_id)
+
+
+def kick(course_root: Path) -> Task | None:
+    """Start the oldest queued task if nothing runs; the task started, or None. Called when
+    a task is queued, when a runner ends (runner.py) and when a page reads the course's
+    tasks, so a queue goes on even if a runner died. Safe to call from two processes at
+    once: the task starts only for the one that claims it."""
+    with _start_lock:
+        if running(course_root) is not None:
+            return None
+        for task in queued(course_root):
+            if not _claim(task.folder):
+                continue  # another process is starting it this moment
+            data = json.loads((task.folder / TASK_FILE).read_text(encoding="utf-8"))
+            data.update(status=RUNNING, started=_now())  # started: when it really did
+            _write(task.folder, data)
+            # A session of its own: Ctrl+C on the GUI's terminal does not reach it, and
+            # stop() can signal it alone. Nothing of it is inherited: no open files, no
+            # terminal.
+            flags = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+                     if sys.platform == "win32" else {"start_new_session": True})
+            subprocess.Popen([sys.executable, "-m", "tutor.gui.runner", str(task.folder)],
+                             cwd=REPO, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL, **flags)
+            return get(course_root, task.id)
+    return None
+
+
+def _claim(folder: Path) -> bool:
+    """Whether this call is the one that starts the task: its claim file did not exist."""
+    try:
+        os.close(os.open(folder / CLAIM_FILE, os.O_CREAT | os.O_EXCL | os.O_WRONLY))
+    except FileExistsError:
+        return False
+    except OSError:
+        return False
+    return True
+
+
+def queued(course_root: Path) -> list[Task]:
+    """The tasks waiting to run, oldest (next) first."""
+    return [t for t in reversed(list_tasks(course_root)) if t.queued]
+
+
+def remove(task: Task) -> bool:
+    """Take a queued task out of the queue; False when it is not queued (any more)."""
+    with _start_lock:
+        current = get(task.folder.parents[2], task.id)
+        if current is None or not current.queued or not _claim(task.folder):
+            return False  # started meanwhile, or being started
+        shutil.rmtree(task.folder, ignore_errors=True)
+        return True
 
 
 def get(course_root: Path, task_id: str) -> Task | None:
@@ -119,6 +174,7 @@ def get(course_root: Path, task_id: str) -> Task | None:
         status = LOST  # the runner died without writing its end
     elif status == RUNNING and pid is None and _age_s(str(data.get("started", ""))) > 30:
         status = LOST  # the runner never started, so it would block the course for good
+    # QUEUED with no pid is the normal state of a task waiting its turn: never lost.
     return Task(task_id, folder, str(data.get("title", task_id)), status,
                 str(data.get("started", "")), data.get("finished"),
                 list(data.get("commands", [])), list(data.get("exit_codes", [])), pid,
@@ -135,6 +191,12 @@ def list_tasks(course_root: Path) -> list[Task]:
 
 def running(course_root: Path) -> Task | None:
     return next((t for t in list_tasks(course_root) if t.active), None)
+
+
+def pending(course_root: Path) -> list[Task]:
+    """The running task, then the queue, as a page lists what the course is doing."""
+    found = running(course_root)
+    return ([found] if found else []) + queued(course_root)
 
 
 def stop(task: Task) -> bool:
@@ -186,7 +248,7 @@ def _prune(base: Path) -> None:
     names = sorted((p.name for p in base.iterdir() if _ID.match(p.name)), reverse=True)
     for name in names[KEEP - 1:]:
         task = get(base.parent.parent, name)
-        if task is not None and not task.active:
+        if task is not None and not task.pending:  # never a running or a waiting one
             shutil.rmtree(base / name, ignore_errors=True)
 
 

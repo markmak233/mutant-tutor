@@ -464,17 +464,45 @@ def test_validate_all_starts_one_validation_per_listed_exercise(root, monkeypatc
     assert response.headers["Location"] == "/c/demo-course/tasks/20260102-100000-abcdef/"
 
 
-def test_a_second_task_goes_to_the_running_one(root, monkeypatch):
-    running = tasks.Task("20260102-100000-abcdef", root, "Validate", "running", "", None, [],
-                         [], 1)
-
-    def busy(*args, **kwargs):
-        raise tasks.TaskBusy(running)
-
-    monkeypatch.setattr(tasks, "start", busy)
+def test_a_second_task_is_queued_and_the_page_says_so(root, monkeypatch):
+    """A course runs one task at a time; a second one waits in the queue (owner,
+    2026-11-09) instead of being refused."""
+    queued = tasks.Task("20260102-100001-abcdef", root, "Validate", tasks.QUEUED, "", None, [],
+                        [], None)
+    monkeypatch.setattr(tasks, "start", lambda *a, **k: queued)
     response = post(_browser(root, FakeLauncher()), f"/c/demo-course/b/{BATCH}/validate")
 
-    assert response.headers["Location"].endswith("/tasks/20260102-100000-abcdef/?notice=busy")
+    assert response.headers["Location"].endswith("/tasks/20260102-100001-abcdef/?notice=queued")
+
+
+def test_a_queued_task_shows_its_place_and_can_be_removed(root, monkeypatch):
+    course_root = root / "demo-course"
+    running = tasks.Task("20260102-100000-abcdef", course_root, "First", tasks.RUNNING, "",
+                         None, [["x"]], [], 1)
+    waiting = tasks.Task("20260102-100001-abcdef", course_root, "Second", tasks.QUEUED, "",
+                         None, [["y"]], [], None)
+    monkeypatch.setattr(tasks, "list_tasks", lambda course_root: [waiting, running])
+    monkeypatch.setattr(tasks, "get", lambda course_root, task_id:
+                        {running.id: running, waiting.id: waiting}.get(task_id))
+    monkeypatch.setattr(tasks, "kick", lambda course_root: None)
+    client = _browser(root, FakeLauncher())
+
+    page = client.get("/c/demo-course/", base_url=BASE).get_data(as_text=True)
+    assert "<h2>Queued</h2>" in page and ">Second</a>" in page and ">Remove</button>" in page
+
+    task_page = client.get(f"/c/demo-course/tasks/{waiting.id}/",
+                           base_url=BASE).get_data(as_text=True)
+    assert "starts after 1 task: " in task_page and ">First</a>" in task_page
+    assert "Remove from the queue" in task_page and "hx-trigger" in task_page  # polls
+
+    removed = []
+    monkeypatch.setattr(tasks, "remove", lambda task: removed.append(task.id) or True)
+    response = post(client, f"/c/demo-course/tasks/{waiting.id}/remove")
+    assert removed == [waiting.id]
+    assert response.headers["Location"] == "/c/demo-course/?notice=removed"
+    monkeypatch.setattr(tasks, "remove", lambda task: False)
+    response = post(client, f"/c/demo-course/tasks/{waiting.id}/remove")
+    assert response.headers["Location"].endswith(f"/tasks/{waiting.id}/?notice=not-queued")
 
 
 def test_a_running_tasks_log_polls_and_a_finished_one_stops(client, root):

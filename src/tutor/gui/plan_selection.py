@@ -31,7 +31,7 @@ def adapt(view):
                        edited=False, plan_error=None,
                        generation_complete=state.get("generation_complete", manifest))
         # Approval may be checkpointed before the first item folder/log exists.
-        if not (view.task and view.task.active):
+        if not (view.task and view.task.pending):
             latest = {row["id"]: row for row in state.get("results", [])}
             if changes["generation_complete"]:
                 changes["state"] = gen.GENERATED

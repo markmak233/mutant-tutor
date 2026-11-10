@@ -26,8 +26,10 @@ NOTICES = {
                          "\"Shell Command: Install 'code' command in PATH\"."),
     "no-file-manager": ("bad", "No file manager command (xdg-open) was found."),
     "failed": ("bad", "It could not be started."),
-    "busy": ("bad", "This course already has a task running; it is shown here. Start the "
-                    "next one when it ends."),
+    "queued": ("ok", "Queued: it starts when the course's running task ends (a course runs "
+                     "one at a time). Until then it can be removed from the course page."),
+    "removed": ("ok", "Removed from the queue; nothing ran."),
+    "not-queued": ("bad", "That task is not waiting any more: it has started or ended."),
     "stopping": ("ok", "Stopping: every process of the task got Ctrl+C, and what is still "
                        "running after 10 s is killed."),
     "not-running": ("bad", "This task is not running."),
@@ -159,16 +161,16 @@ def act(action, back: str, done: str = "opened-folder"):
 
 def start_task(course: courses.Course, title: str, commands: list[list[str]],
                meta: dict | None = None, then: str | None = None):
-    """Start the task, then go to `then` (default: the task's page); to the running task
-    instead if the course has one. `meta`: see tasks.Task."""
+    """Start the task, or queue it behind the course's running one (tasks.start), then go
+    to `then` (default: the task's page), with a notice when it was queued. `meta`: see
+    tasks.Task."""
     env = {"WORKSPACE_DIR": str(course.workspace.root),
            "LECTURE_DIR": str(course.workspace.lecture_dir)}
-    try:
-        task = tasks.start(course.workspace.root, title, commands, env, meta=meta)
-    except tasks.TaskBusy as busy:
-        return redirect(url_for("task", name=course.folder, task_id=busy.task.id)
-                        + "?notice=busy", code=303)
-    return redirect(then or url_for("task", name=course.folder, task_id=task.id), code=303)
+    task = tasks.start(course.workspace.root, title, commands, env, meta=meta)
+    target = then or url_for("task", name=course.folder, task_id=task.id)
+    if task.queued:
+        return redirect(f"{target}{'&' if '?' in target else '?'}notice=queued", code=303)
+    return redirect(target, code=303)
 
 
 def waiting_for(course: courses.Course, task: tasks.Task) -> str:

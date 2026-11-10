@@ -39,9 +39,12 @@ def register(app: Flask) -> None:
     @app.get("/c/<name>/")
     def course(name: str):
         view = courses.course_view(course_or_404(name))
+        tasks.kick(view.course.workspace.root)  # a queue a dead runner left: it goes on
         history = tasks.list_tasks(view.course.workspace.root)
+        queue = [t for t in reversed(history) if t.queued]
         return render_template("course.html", view=view, labels=STATUS_LABELS,
-                               tasks=history[:RECENT_TASKS],
+                               tasks=[t for t in history if not t.queued][:RECENT_TASKS],
+                               queue=queue,
                                plans=generation.open_plans(view.course, history),
                                gaps=course_setup.setup_gaps(view.course,
                                                         lectures.lecture_rows(view.course)))

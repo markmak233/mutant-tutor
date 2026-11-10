@@ -161,7 +161,11 @@ def test_deferred_generate_rejects_early_busy_or_successful_row(
         _write(course.workspace.root / "batches" / draft.name / "manifest.json",
                json.dumps({"exercises": ["b"]}))
     started = _record_starts(monkeypatch)
-    monkeypatch.setattr(tasks, "running", lambda root: busy)
+    if busy:  # a task of this plan (running or queued) refuses it; another course task no longer
+        mine = tasks.Task("20260102-100000-abcdef", course.workspace.root, "Generate w9-test",
+                          tasks.QUEUED, "", None, [["x"]], [], None,
+                          {"kind": generation.APPROVE, "label": "w9-test"})
+        monkeypatch.setattr(tasks, "list_tasks", lambda course_root: [mine])
     response = post(_browser(root), PAGE + "generate-item", {"item": "b"})
     assert response.status_code == 303 and not started and not (draft / "retry-b.json").exists()
 

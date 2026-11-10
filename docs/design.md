@@ -3680,6 +3680,33 @@ late; the adaptive review screens can be built with it.
   plan was made from. Checked on the real course's New batch form: its two week 9 lectures
   are marked, weeks 2 and 8 (the one heading style and the other) are not; the waiting
   plan's notice on a test plan, as the real week 9 plan is past approval.
+- Task queue (owner, 2026-11-09 the wish, 2026-11-10 built). A course runs one task at a
+  time, for the reasons `gui/tasks.py` states (validation's own parallelism, two batches
+  pushing runs past their limits), and before this a second click was refused with "a
+  task is running" and every button of the course hidden until the task ended: the daily
+  friction while a long task ran. Now `tasks.start` writes the task as `queued` and
+  `kick` starts the oldest queued task when nothing runs; the runner kicks the queue at its
+  end, so the next task starts with no GUI around (a task already went on if the GUI
+  stopped), and a page reading the course kicks it too, for a queue a dead runner left.
+  Two processes can notice the queue at once, so a task starts only for the one that
+  creates its `claimed` file first (`O_EXCL`). Its `started` time is when it really
+  started. The course page lists the queue, next first, each with Remove (a queued task is
+  deleted whole: its log is empty); a queued task's page says what it starts after, polls
+  like a running one and has the same Remove; the notice after a click says it was queued.
+  A failed task does not hold the queue. Decided with the owner: still one at a time (the
+  queue removes the friction; parallel kinds can come later); a paid task queued runs when
+  its turn comes without a second click ("加入队列他已经点过一次了": the click that queued
+  it is the consent), so the queue shows it and Remove is there until it starts. What a
+  queue cannot do: a task's preconditions are checked at the click, not at the start (a
+  retry's item file is written at the click; the graph command refuses a plan that moved).
+  The plan page keeps its own rule: a task of this plan, running or queued, takes its
+  buttons away (one exercise is not generated twice), another course task no longer does;
+  the plan's state is "queued" and its table stays visible. Pages that disable buttons
+  while a task runs for their own reasons (the Environment page's install and build, the
+  doctor's steps) keep doing so. Clicked in headless Chrome on a scratch course with the
+  stand-in graph slowed down: a second plan queued behind the first plan's generation, the
+  course page's list and the task page's place, Remove, a third plan starting by itself
+  when the generation ended.
 - Fixing in the page, not through Claude (owner, 2026-11-06: "这些漏洞下次在网页有补充"):
   - A task that failed or was stopped has "Run again", when it is safe to run twice (reading
     lectures, transcribing, Validate all, Check, install, build, the two drafts). It posts to

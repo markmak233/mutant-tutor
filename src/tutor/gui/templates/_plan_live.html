@@ -3,8 +3,10 @@
    polling stops and the plan with its buttons appears. Every value from plan.json and the
    log is escaped like any other. #}
 {% from "_macros.html" import action, chip, log_box %}
-{% set running = plan.task is not none and plan.task.active %}
-{% set busy = course_busy or running %}
+{% set running = plan.task is not none and plan.task.pending %}
+{# Another course task no longer blocks this plan's buttons: a click queues (owner,
+   2026-11-10). A task of this plan itself, running or queued, still does. #}
+{% set busy = running %}
 <div id="plan-live"{% if running %} hx-get="{{ url_for('plan_live', name=course.folder, label=plan.label) }}" hx-trigger="every 1s" hx-swap="outerHTML"{% endif %}>
   {# The draft folder's date (DATE_p3-LABEL), as the batch folder shows it. In this part,
      not above it: right after the form is sent the draft does not exist yet, and only this
@@ -52,7 +54,7 @@
           {% if status.can_generate and plan.generation_complete and not busy and not plan.selection_error %}<form method="post" action="{{ url_for('generate_left_out', name=course.folder, label=plan.label) }}" class="action"><input type="hidden" name="item" value="{{ item.id }}"><button type="submit">Generate</button></form>{% endif %}
           {% if status.can_retry and not busy and not plan.selection_error %}<form method="post" action="{{ url_for('retry_item', name=course.folder, label=plan.label) }}" class="action"><input type="hidden" name="item" value="{{ item.id }}"><button type="submit">Try again</button></form>
           {% if status.cut_off_rounds %}<form method="post" action="{{ url_for('retry_item', name=course.folder, label=plan.label) }}" class="action"><input type="hidden" name="item" value="{{ item.id }}"><input type="hidden" name="cap" value="{{ retry_cap }}"><button type="submit">Try again with a {{ "{:,}".format(retry_cap) }} output cap</button></form>{% endif %}
-          {% elif status.can_retry %}<div class="muted">"Try again" comes back when the running task ends: a course runs one task at a time.</div>{% endif %}{% endif %}</td>{% endif %}
+          {% elif status.can_retry %}<div class="muted">"Try again" comes back when this plan's task ends.</div>{% endif %}{% endif %}</td>{% endif %}
         <td>{{ item.lecture }}<div class="muted">slides {{ item.slides }}</div></td>
         <td>{{ item.knowledge_point }}
           {% if item.notes %}<div class="muted">Checks: {{ item.notes }}</div>{% endif %}

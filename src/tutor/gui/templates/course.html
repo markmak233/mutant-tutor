@@ -54,6 +54,18 @@
 {% else %}
 <p>No batches yet.</p>
 {% endif %}
+{% if queue %}
+{# The queue (tasks.queued): next first; each can be removed until it starts. A course runs
+   one task at a time; the click that queued a task is its consent (owner, 2026-11-10). #}
+<h2>Queued</h2>
+<ol class="runs">
+{% for task in queue %}
+  <li>{{ chip(task.status) }} <a href="{{ url_for('task', name=course.folder, task_id=task.id) }}">{{ task.title }}</a>
+    <span class="muted">queued {{ task.started }}</span>
+    <form method="post" action="{{ url_for('remove_task', name=course.folder, task_id=task.id) }}" class="action"><button type="submit">Remove</button></form></li>
+{% endfor %}
+</ol>
+{% endif %}
 {% if tasks %}
 <h2>Tasks</h2>
 <ul class="runs">

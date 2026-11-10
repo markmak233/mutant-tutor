@@ -19,7 +19,15 @@ from pathlib import Path
 
 from tutor.gui import generation
 from tutor.gui.courses import Course, valid_verdict
-from tutor.gui.generation import ASSISTANT, CONTINUING, GENERATED, GENERATING, STOPPED, PlanView
+from tutor.gui.generation import (
+    ASSISTANT,
+    CONTINUING,
+    GENERATED,
+    GENERATING,
+    QUEUED,
+    STOPPED,
+    PlanView,
+)
 
 # What each exercise of an approved plan came to, shown next to it on the plan page.
 ITEM_VALID, ITEM_INVALID, ITEM_SAVED = "valid", "invalid", "saved, not validated"
@@ -63,7 +71,7 @@ def item_statuses(course: Course, view: PlanView) -> dict[str, ItemStatus]:
     validation.json verdict), discarded or failed with an error (generation.jsonl's last line
     for it, so a later try counts), or not generated yet. {} before approval."""
     if view.batch is None or view.state not in (GENERATING, CONTINUING, STOPPED, ASSISTANT,
-                                                GENERATED):
+                                                GENERATED, QUEUED):
         return {}
     batch_dir = course.workspace.root / "batches" / view.batch
     try:

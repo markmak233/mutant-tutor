@@ -17,7 +17,7 @@
 {% if running %}
 <p class="notice notice-bad">A task is running in this course:
   <a href="{{ url_for('task', name=course.folder, task_id=running.id) }}">{{ running.title }}</a>.
-  Installing or building starts when it ends.</p>
+  A task started now is queued behind it.</p>
 {% endif %}
 {% if problems %}
 <ul class="notice notice-bad form-problems">{% for line in problems %}<li>{{ line }}</li>{% endfor %}</ul>

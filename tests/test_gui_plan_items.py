@@ -99,14 +99,25 @@ def test_only_an_exercise_that_did_not_succeed_can_be_tried_again(root, course, 
     assert "notice=plan-moved" in response.headers["Location"]
 
 
-def test_while_a_task_runs_the_page_says_when_try_again_comes_back(root, course, monkeypatch):
-    """The owner saw the button gone during another retry and could not tell why."""
+def test_another_tasks_run_no_longer_hides_try_again_but_this_plans_does(root, course,
+                                                                           monkeypatch):
+    """A click during another course task queues (owner, 2026-11-10); a task of this plan,
+    running or queued, still takes the buttons away, so an exercise is not generated twice."""
     _generated(course)
-    running = _task(generation.RETRY, status=tasks.RUNNING, codes=())
-    monkeypatch.setattr(tasks, "list_tasks", lambda course_root: [running])
+    other = tasks.Task("20260102-100000-abcdef", course.workspace.root, "Read lectures",
+                       tasks.RUNNING, "", None, [["x"]], [], 1, {"kind": "read"})
+    monkeypatch.setattr(tasks, "list_tasks", lambda course_root: [other])
+    page = get(_browser(root), "/c/demo-course/plans/w9-test/").get_data(as_text=True)
+    assert page.count('name="item" value="c"') == 2  # Try again, and with a note
+
+    mine = _task(generation.RETRY, status=tasks.QUEUED, codes=())
+    monkeypatch.setattr(tasks, "list_tasks", lambda course_root: [mine, other])
     page = get(_browser(root), "/c/demo-course/plans/w9-test/").get_data(as_text=True)
     assert 'name="item" value=' not in page
-    assert page.count("comes back when the running task ends") == 2
+    assert page.count("comes back when this plan's task ends") == 2
+    monkeypatch.setattr(tasks, "start", lambda *a, **k: pytest.fail("nothing may start"))
+    response = post(_browser(root), "/c/demo-course/plans/w9-test/retry", {"item": "c"})
+    assert "notice=plan-moved" in response.headers["Location"]
 
 
 def test_the_batch_page_points_to_the_plan_for_exercises_that_did_not_come_out(root, course):

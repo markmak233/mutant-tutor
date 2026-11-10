@@ -117,7 +117,7 @@ form.action button.primary { background: var(--accent); border-color: var(--acce
 .log pre { margin: 0; padding: 0.75rem 1rem; font-size: 0.85em; white-space: pre-wrap; overflow-wrap: anywhere; }
 .chip-running { background: var(--started-bg); color: var(--started); }
 .chip-done { background: var(--passed-bg); color: var(--passed); }
-.chip-stopped, .chip-lost { background: var(--unlogged-bg); color: var(--unlogged); }
+.chip-stopped, .chip-lost, .chip-queued { background: var(--unlogged-bg); color: var(--unlogged); }
 
 /* Generation (step 4): the new-batch form, the plan table and where a plan stands */
 a.button {

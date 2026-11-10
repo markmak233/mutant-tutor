@@ -2,18 +2,25 @@
    second and swaps it in; the copy it gets once the task has ended has no trigger, so the
    polling stops by itself. Without JavaScript, reloading the page shows the same. #}
 {% from "_macros.html" import action, chip, log_box %}
-<div id="task-log"{% if task.active %} hx-get="{{ url_for('task_log', name=course.folder, task_id=task.id) }}" hx-trigger="every 1s" hx-swap="outerHTML"{% endif %}>
+<div id="task-log"{% if task.pending %} hx-get="{{ url_for('task_log', name=course.folder, task_id=task.id) }}" hx-trigger="every 1s" hx-swap="outerHTML"{% endif %}>
   <div class="facts-line">
     {{ chip(task.status) }}
+    {% if task.queued %}
+    {# Waiting its turn (tasks.kick starts it when the running task ends); the owner can
+       take it out until then. #}
+    <span class="muted">{% if ahead %}starts after {{ ahead | length }} task{{ "s" if ahead | length != 1 }}: {% for t in ahead %}<a href="{{ url_for('task', name=course.folder, task_id=t.id) }}">{{ t.title }}</a>{{ ", " if not loop.last }}{% endfor %}{% else %}about to start{% endif %}</span>
+    {{ action(url_for('remove_task', name=course.folder, task_id=task.id), "Remove from the queue") }}
+    {% else %}
     <span class="muted">{{ task.exit_codes | length }} of {{ task.commands | length }} command{{ "s" if task.commands | length != 1 }} finished{% if task.finished %}, ended {{ task.finished }}{% endif %}</span>
+    {% endif %}
     {% set failed = task.exit_codes | select("number") | reject("equalto", 0) | list %}
     {% if failed %}<span class="muted">{{ failed | length }} exited with an error</span>{% endif %}
     {% if task.active %}{{ action(url_for('stop_task', name=course.folder, task_id=task.id), "Stop") }}{% endif %}
     {# Once it ends: the page it came from (app.return_to). One that succeeded is sent there
        by the poll; one that failed or was stopped stays here, with this link. #}
-    {% if not task.active and back and not stages %}<a href="{{ back[0] }}">Back to {{ back[1] }}</a>{% endif %}
+    {% if not task.pending and back and not stages %}<a href="{{ back[0] }}">Back to {{ back[1] }}</a>{% endif %}
     {# The same action again, for one safe to run twice (app.again_url). #}
-    {% if not task.active and task.status != "done" and again %}{{ action(again, "Run again") }}{% endif %}
+    {% if not task.pending and task.status != "done" and again %}{{ action(again, "Run again") }}{% endif %}
   </div>
   {% include "_quiet.html" %}
   {% if stages %}

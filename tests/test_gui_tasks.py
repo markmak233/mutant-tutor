@@ -86,16 +86,102 @@ def test_a_task_gets_the_courses_variables(tmp_path):
     assert "/the/course" in tasks.tail(task)[0]
 
 
-def test_a_course_runs_one_task_at_a_time(tmp_path):
+def test_a_second_task_queues_and_starts_when_the_first_ends(tmp_path):
+    """A course runs one task at a time; the next waits, then the runner hands over."""
+    first = tasks.start(tmp_path, "slow", [py("import time; time.sleep(1.5)")], {})
+    wait_for(lambda: tasks.get(tmp_path, first.id).pid)
+    second = tasks.start(tmp_path, "second", [py("print('ran')")], {})
+    third = tasks.start(tmp_path, "third", [py("print('ran too')")], {})
+
+    assert first.active and second.queued and third.queued and second.pid is None
+    assert [t.id for t in tasks.queued(tmp_path)] == [second.id, third.id]  # next first
+    assert [t.id for t in tasks.pending(tmp_path)] == [first.id, second.id, third.id]
+    assert tasks.running(tmp_path).id == first.id
+    assert tasks.kick(tmp_path) is None  # nothing to do while the first runs
+
+    wait_end(tmp_path, first)
+    done = wait_for(lambda: (t := tasks.get(tmp_path, third.id)).status == tasks.DONE and t)
+    assert tasks.get(tmp_path, second.id).status == tasks.DONE
+    log = (second.folder / tasks.LOG_FILE).read_text(encoding="utf-8")
+    assert log.count("\nran\n") == 1  # ran once (the command line echoes "ran" too)
+    assert done.started >= tasks.get(tmp_path, second.id).started  # started when it did
+    assert (second.folder / tasks.CLAIM_FILE).is_file()  # claimed once, by the hand-over
+
+
+def test_a_failed_task_does_not_hold_the_queue(tmp_path):
+    first = tasks.start(tmp_path, "fails", [py("import sys; sys.exit(3)")], {})
+    second = tasks.start(tmp_path, "second", [py("pass")], {})
+
+    wait_for(lambda: tasks.get(tmp_path, second.id).status == tasks.DONE)
+    assert tasks.get(tmp_path, first.id).status == tasks.FAILED
+
+
+def test_a_queued_task_can_be_removed_but_not_a_running_one(tmp_path):
     first = tasks.start(tmp_path, "slow", [py("import time; time.sleep(30)")], {})
     wait_for(lambda: tasks.get(tmp_path, first.id).pid)
+    second = tasks.start(tmp_path, "second", [py("pass")], {})
     try:
-        with pytest.raises(tasks.TaskBusy) as busy:
-            tasks.start(tmp_path, "second", [py("pass")], {})
-        assert busy.value.task.id == first.id
+        assert tasks.remove(second) is True
+        assert tasks.get(tmp_path, second.id) is None and tasks.queued(tmp_path) == []
+        assert tasks.remove(first) is False
+        assert tasks.get(tmp_path, first.id).active
     finally:
         tasks.stop(tasks.get(tmp_path, first.id))
         wait_end(tmp_path, first)
+
+
+def test_a_claimed_task_starts_for_one_caller_only(tmp_path, monkeypatch):
+    """Two processes may notice the queue at once (a runner ending, a page loading)."""
+    launched = []
+    monkeypatch.setattr(tasks.subprocess, "Popen", lambda *a, **k: launched.append(a[0]))
+    task = tasks.start(tmp_path, "one", [py("pass")], {})  # launched by start's own kick
+    assert len(launched) == 1 and tasks.get(tmp_path, task.id).active
+
+    # Pretend the runner's end and a page both kick while the task waits: write it back
+    # as queued with its claim file in place, as a competing process would find it.
+    data = json.loads((task.folder / tasks.TASK_FILE).read_text(encoding="utf-8"))
+    data["status"] = tasks.QUEUED
+    tasks._write(task.folder, data)
+    assert tasks.kick(tmp_path) is None and len(launched) == 1  # the claim stands
+
+
+def test_a_queue_left_by_a_dead_runner_goes_on_at_the_next_kick(tmp_path):
+    """The runner hands over at its end; a runner that died (lost) cannot, so the next
+    kick, from a page reading the course, starts the queue again."""
+    folder = tmp_path / tasks.TASKS_DIR / "20260101-000000-abcdef"
+    folder.mkdir(parents=True)
+    dead = os.getpid() + 10_000_000  # not a real process: lost
+    (folder / tasks.TASK_FILE).write_text(json.dumps(
+        {"title": "x", "status": "running", "started": "2026-01-01 00:00:00", "pid": dead,
+         "commands": [], "exit_codes": [], "meta": {}}), encoding="utf-8")
+    waiting = tmp_path / tasks.TASKS_DIR / "20260101-000001-abcdef"
+    waiting.mkdir()
+    tasks._write(waiting, {"title": "second", "status": tasks.QUEUED, "started": "",
+                           "finished": None, "commands": [py("pass")], "env": {},
+                           "exit_codes": [], "pid": None, "grace_s": 1, "meta": {}})
+    assert tasks.get(tmp_path, waiting.name).queued
+
+    started = tasks.kick(tmp_path)  # what a page does when it reads the course
+
+    assert started is not None and started.id == waiting.name
+    wait_for(lambda: tasks.get(tmp_path, waiting.name).status == tasks.DONE)
+
+
+def test_pruning_never_drops_a_queued_task(tmp_path):
+    slow = tasks.start(tmp_path, "slow", [py("import time; time.sleep(30)")], {})
+    wait_for(lambda: tasks.get(tmp_path, slow.id).pid)
+    try:
+        waiting = tasks.start(tmp_path, "waiting", [py("pass")], {})
+        for n in range(tasks.KEEP + 3):  # more than KEEP finished-looking folders
+            folder = tmp_path / tasks.TASKS_DIR / f"20200101-0000{n:02d}-00000{n % 10}"
+            folder.mkdir()
+            tasks._write(folder, {"title": "old", "status": "done", "started": "", "finished": "",
+                                  "commands": [], "exit_codes": [0], "pid": None, "meta": {}})
+        tasks.start(tmp_path, "newest", [py("pass")], {})  # prunes
+        assert tasks.get(tmp_path, waiting.id) is not None and tasks.get(tmp_path, slow.id).active
+    finally:
+        tasks.stop(tasks.get(tmp_path, slow.id))
+        wait_end(tmp_path, slow)
 
 
 @POSIX_ONLY
