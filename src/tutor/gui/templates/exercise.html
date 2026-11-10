@@ -23,8 +23,10 @@
 {% set code_student %}<code>{{ student }}</code>{% endset %}
 <p class="muted">{{ _("Solve it in VS Code: it opens the course folder, so its terminal uses the course's venv, with %(student)s.", student=code_student) }}{% if in_container %} {{ _('"Run my tests" runs %(command)s on your %(student)s in the course image, as the terminal would, and records the attempt; the run shows on its task page.', command="<code>tutor test</code>" | safe, student=code_student) }}{% endif %}</p>
 {% if question %}
-{# Markdown rendered with raw HTML off (rendering.py); the only value marked safe. #}
-<article class="question">{{ question }}</article>
+{# Markdown rendered with raw HTML off (rendering.py); the only value marked safe.
+   dir="ltr": the question is the model's text, in the language it was written in, not
+   the pages' (owner, 2026-11-11: "the one exception: the question is not mirrored"). #}
+<article class="question" dir="ltr">{{ question }}</article>
 {% else %}
 <h1>{{ row.title }}</h1>
 <p>{{ _("No question.md: the question is %(where)s of %(student)s.", where=question_in, student=code_student) }}</p>

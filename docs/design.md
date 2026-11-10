@@ -3998,7 +3998,9 @@ late; the adaptive review screens can be built with it.
     with a hand-written Arabic file (nine strings, no model; `notes/gui-checks/
     rtl_click_test.py`): the header, buttons, lists, tables and forms mirrored with no
     horizontal overflow, `<code>` left to right; an arrow in a string ("Lectures →") is
-    the translator's to turn, as it is text.
+    the translator's to turn, as it is text. The question itself is not mirrored
+    (owner, 2026-11-11, the one exception): the article is `dir="ltr"`, as it is the
+    model's text in the language it was written in, not the pages'.
   - Servers on this machine in New model (owner, 2026-11-07 "WSL and Mac llama, those
     local ones, later"; 2026-11-10). models.dev lists only LM Studio of them. The form's
     provider choice now starts with an "On this machine" group (Ollama, LM Studio,

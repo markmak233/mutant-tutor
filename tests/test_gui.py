@@ -112,6 +112,8 @@ def test_generated_text_is_escaped(client):
 
     assert "<script>alert(1)</script>" not in page
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in page
+    # The question keeps its own direction when the pages are right to left (i18n.py).
+    assert '<article class="question" dir="ltr">' in page
 
 
 def test_headers_forbid_inline_scripts_and_framing(client):
