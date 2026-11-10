@@ -2,7 +2,7 @@
    Content-Security-Policy forbids inline style attributes, which a width would need. #}
 {% macro bar(done, total) -%}
 <div class="bar">
-  <progress value="{{ done }}" max="{{ total or 1 }}" aria-label="{{ done }} of {{ total }} passed"></progress>
+  <progress value="{{ done }}" max="{{ total or 1 }}" aria-label="{{ _("%(done)d of %(total)d passed", done=done, total=total) }}"></progress>
   <span class="bar-text">{{ done }} / {{ total }}</span>
 </div>
 {%- endmacro %}
@@ -15,7 +15,7 @@
 {# The end of a task's output. column-reverse keeps the box scrolled to the newest line,
    without a script. #}
 {% macro log_box(log, cut) -%}
-{% if cut %}<p class="muted">Only the end of the output is shown.</p>{% endif %}
+{% if cut %}<p class="muted">{{ _("Only the end of the output is shown.") }}</p>{% endif %}
 <div class="log"><pre>{{ log }}</pre></div>
 {%- endmacro %}
 

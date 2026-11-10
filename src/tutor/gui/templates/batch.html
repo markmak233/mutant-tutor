@@ -9,32 +9,32 @@
 <div class="title-line">
   <h1>{{ batch.name }}</h1>
   <div class="actions">
-    {{ action(url_for('validate_batch', name=course.folder, batch=batch.name), "Validate all") }}
-    {{ action(url_for('open_batch_folder', name=course.folder, batch=batch.name), "Open exercises folder") }}
+    {{ action(url_for('validate_batch', name=course.folder, batch=batch.name), _("Validate all")) }}
+    {{ action(url_for('open_batch_folder', name=course.folder, batch=batch.name), _("Open exercises folder")) }}
     {# Back to the plan this batch was made from: its notes, ticks and left-out items. #}
-    {% if plan_label %}<a class="button" href="{{ url_for('plan', name=course.folder, label=plan_label) }}">Open the plan</a>{% endif %}
+    {% if plan_label %}<a class="button" href="{{ url_for('plan', name=course.folder, label=plan_label) }}">{{ _("Open the plan") }}</a>{% endif %}
   </div>
 </div>
-<p class="muted">Mode: {{ batch.mode }}</p>
+<p class="muted">{{ _("Mode:") }} {{ batch.mode }}</p>
 {# Exercises of the plan that did not come out: they are on the plan page, with "Try again"
    (plan_items.not_succeeded; owner, 2026-11-06). #}
 {% if missing %}{% set plan, ids = missing %}
-<p class="notice notice-bad">{{ ids | length }} exercise{{ "s" if ids | length != 1 }} of the plan did not come out: {{ ids | join(", ") }}.
-  <a href="{{ url_for('plan', name=course.folder, label=plan.label) }}">Open the plan</a> to see why and try {{ "them" if ids | length != 1 else "it" }} again.</p>
+<p class="notice notice-bad">{% trans count=ids | length, ids=ids | join(", ") %}{{ count }} exercise of the plan did not come out: {{ ids }}.{% pluralize %}{{ count }} exercises of the plan did not come out: {{ ids }}.{% endtrans %}
+  <a href="{{ url_for('plan', name=course.folder, label=plan.label) }}">{{ _("Open the plan") }}</a> {{ _("to see why and try again.") }}</p>
 {% endif %}
 {{ bar(batch.count("passed"), batch.exercises | length) }}
 <table>
-  <thead><tr><th>Exercise</th><th>Priority</th><th>Progress</th>
-    <th class="num">Runs to pass</th><th>Validated</th></tr></thead>
+  <thead><tr><th>{{ _("Exercise") }}</th><th>{{ _("Priority") }}</th><th>{{ _("Progress") }}</th>
+    <th class="num">{{ _("Runs to pass") }}</th><th>{{ _("Validated") }}</th></tr></thead>
   <tbody>
   {% for row in batch.exercises %}
     <tr class="priority-{{ row.priority }}">
       <td><a href="{{ url_for('exercise', name=course.folder, batch=batch.name, exercise=row.id) }}">{{ row.title }}</a>
         <div class="muted">{{ row.id }}</div></td>
       <td>{{ row.priority }}</td>
-      <td>{{ chip(row.status, labels[row.status]) }}</td>
+      <td>{{ chip(row.status, _(labels[row.status])) }}</td>
       <td class="num">{{ row.runs_to_pass or "" }}</td>
-      <td>{% if row.valid is none %}<span class="muted">no report</span>{% elif row.valid %}valid{% else %}{{ chip("invalid") }}{% endif %}</td>
+      <td>{% if row.valid is none %}<span class="muted">{{ _("no report") }}</span>{% elif row.valid %}{{ _("valid") }}{% else %}{{ chip("invalid", _("invalid")) }}{% endif %}</td>
     </tr>
   {% endfor %}
   </tbody>

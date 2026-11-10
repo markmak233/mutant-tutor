@@ -8,33 +8,33 @@
     {% if task.queued %}
     {# Waiting its turn (tasks.kick starts it when the running task ends); the owner can
        take it out until then. #}
-    <span class="muted">{% if ahead %}starts after {{ ahead | length }} task{{ "s" if ahead | length != 1 }}: {% for t in ahead %}<a href="{{ url_for('task', name=course.folder, task_id=t.id) }}">{{ t.title }}</a>{{ ", " if not loop.last }}{% endfor %}{% else %}about to start{% endif %}</span>
-    {{ action(url_for('remove_task', name=course.folder, task_id=task.id), "Remove from the queue") }}
+    <span class="muted">{% if ahead %}{% trans count=ahead | length %}starts after {{ count }} task:{% pluralize %}starts after {{ count }} tasks:{% endtrans %} {% for t in ahead %}<a href="{{ url_for('task', name=course.folder, task_id=t.id) }}">{{ t.title }}</a>{{ ", " if not loop.last }}{% endfor %}{% else %}{{ _("about to start") }}{% endif %}</span>
+    {{ action(url_for('remove_task', name=course.folder, task_id=task.id), _("Remove from the queue")) }}
     {% else %}
-    <span class="muted">{{ task.exit_codes | length }} of {{ task.commands | length }} command{{ "s" if task.commands | length != 1 }} finished{% if task.finished %}, ended {{ task.finished }}{% endif %}</span>
+    <span class="muted">{% trans count=task.commands | length, done=task.exit_codes | length %}{{ done }} of {{ count }} command finished{% pluralize %}{{ done }} of {{ count }} commands finished{% endtrans %}{% if task.finished %}, {{ _("ended %(when)s", when=task.finished) }}{% endif %}</span>
     {% endif %}
     {% set failed = task.exit_codes | select("number") | reject("equalto", 0) | list %}
-    {% if failed %}<span class="muted">{{ failed | length }} exited with an error</span>{% endif %}
-    {% if task.active %}{{ action(url_for('stop_task', name=course.folder, task_id=task.id), "Stop") }}{% endif %}
+    {% if failed %}<span class="muted">{{ _("%(n)d exited with an error", n=failed | length) }}</span>{% endif %}
+    {% if task.active %}{{ action(url_for('stop_task', name=course.folder, task_id=task.id), _("Stop")) }}{% endif %}
     {# Once it ends: the page it came from (app.return_to). One that succeeded is sent there
        by the poll; one that failed or was stopped stays here, with this link. #}
-    {% if not task.pending and back and not stages %}<a href="{{ back[0] }}">Back to {{ back[1] }}</a>{% endif %}
+    {% if not task.pending and back and not stages %}<a href="{{ back[0] }}">{{ _("Back to %(page)s", page=back[1]) }}</a>{% endif %}
     {# The same action again, for one safe to run twice (app.again_url). #}
-    {% if not task.pending and task.status != "done" and again %}{{ action(again, "Run again") }}{% endif %}
+    {% if not task.pending and task.status != "done" and again %}{{ action(again, _("Run again")) }}{% endif %}
   </div>
   {% include "_quiet.html" %}
   {% if stages %}
   {# A new course: its stages, from the files made and the commands ended (lectures.py). #}
   {% set done = stages | selectattr("state", "equalto", "done") | list | length %}
-  <div class="bar"><progress value="{{ done }}" max="{{ stages | length }}" aria-label="{{ done }} of {{ stages | length }} stages done"></progress>
+  <div class="bar"><progress value="{{ done }}" max="{{ stages | length }}" aria-label="{{ _("%(done)d of %(total)d stages done", done=done, total=stages | length) }}"></progress>
     <span class="bar-text">{{ done }} / {{ stages | length }}</span></div>
   <ol class="stages">
   {% for stage in stages %}
     <li class="stage-{{ stage.state }}">{% if stage.state == "running" %}<span class="spinner" aria-hidden="true"></span>{% endif %}{{ stage.label }}
-      {% if stage.state == "running" and elapsed %}<span class="muted">running for {{ elapsed }}</span>{% elif stage.state == "failed" %}<span class="muted">did not finish: see the output below</span>{% endif %}</li>
+      {% if stage.state == "running" and elapsed %}<span class="muted">{{ _("running for %(time)s", time=elapsed) }}</span>{% elif stage.state == "failed" %}<span class="muted">{{ _("did not finish: see the output below") }}</span>{% endif %}</li>
   {% endfor %}
   </ol>
-  {% if task.status == "done" %}<p>The course is ready: <a href="{{ url_for('course', name=course.folder) }}">go to it</a>.</p>{% endif %}
+  {% if task.status == "done" %}<p>{{ _("The course is ready:") }} <a href="{{ url_for('course', name=course.folder) }}">{{ _("go to it") }}</a>.</p>{% endif %}
   {% endif %}
   {{ log_box(log, cut) }}
 </div>

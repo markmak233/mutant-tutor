@@ -7,10 +7,10 @@
 {% endblock %}
 {% block content %}
 <h1>{{ task.title }}</h1>
-<p class="muted">{% if task.queued %}Queued {{ task.started }}. It starts when the course's running task ends, and goes on if you close this page or the GUI.{% else %}Started {{ task.started }}. It goes on if you close this page or the GUI.{% endif %}
-  {% if task.meta.kind == "check" %}<a href="{{ url_for('models', name=course.folder) }}">Back to the models</a>
-  {% elif task.meta.kind in ("read", "vision") %}<a href="{{ url_for('lecture_list', name=course.folder) }}">Back to the lectures</a>
-  {% elif task.meta.label %}<a href="{{ url_for('plan', name=course.folder, label=task.meta.label) }}">Back to the plan</a>
-  {% elif task.meta.kind == "create" and ready %}<a href="{{ url_for('course', name=course.folder) }}">Go to the course</a>{% endif %}</p>
+<p class="muted">{% if task.queued %}{{ _("Queued %(when)s. It starts when the course's running task ends, and goes on if you close this page or the GUI.", when=task.started) }}{% else %}{{ _("Started %(when)s. It goes on if you close this page or the GUI.", when=task.started) }}{% endif %}
+  {% if task.meta.kind == "check" %}<a href="{{ url_for('models', name=course.folder) }}">{{ _("Back to the models") }}</a>
+  {% elif task.meta.kind in ("read", "vision") %}<a href="{{ url_for('lecture_list', name=course.folder) }}">{{ _("Back to the lectures") }}</a>
+  {% elif task.meta.label %}<a href="{{ url_for('plan', name=course.folder, label=task.meta.label) }}">{{ _("Back to the plan") }}</a>
+  {% elif task.meta.kind == "create" and ready %}<a href="{{ url_for('course', name=course.folder) }}">{{ _("Go to the course") }}</a>{% endif %}</p>
 {% include "_task_log.html" %}
 {% endblock %}

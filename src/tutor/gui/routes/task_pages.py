@@ -19,6 +19,7 @@ from flask import (
 )
 
 from tutor.gui import course_setup, courses, generation, tasks
+from tutor.gui.i18n import gettext_ as _
 from tutor.gui.routes.common import ENVIRONMENT_NOTICES, waiting_for
 
 
@@ -42,7 +43,7 @@ def return_to(course: courses.Course, task: tasks.Task) -> tuple[str, str, str |
     kind, name = task.meta.get("kind"), course.folder
     label, batch = task.meta.get("label"), task.meta.get("batch")
     if kind in ("read", "vision"):
-        return url_for("lecture_list", name=name), "Lectures", "lectures-read"
+        return url_for("lecture_list", name=name), _("Lectures"), "lectures-read"
     if kind == "validate" and isinstance(batch, str):
         return url_for("batch", name=name, batch=batch), batch, "validated"
     exercise = task.meta.get("exercise")
@@ -50,7 +51,7 @@ def return_to(course: courses.Course, task: tasks.Task) -> tuple[str, str, str |
         return (url_for("exercise", name=name, batch=batch, exercise=exercise), exercise,
                 "tests-passed")
     if kind == "check":
-        return url_for("models", name=name), "Models", "models-checked"
+        return url_for("models", name=name), _("Models"), "models-checked"
     if kind == "doctor":
         identifier = task.meta.get("doctor_input", "")
         if isinstance(identifier, str) and re.fullmatch(r"[0-9a-f]{32}", identifier):
@@ -60,18 +61,19 @@ def return_to(course: courses.Course, task: tasks.Task) -> tuple[str, str, str |
             if action == "preview" and task.meta.get("fix_step") == 2:
                 step = 2
             return (url_for("environment_fix", name=name, identifier=identifier, step=step),
-                    "Setup fix", None)
-        return url_for("environment_view", name=name) + "#host-install", "Environment", None
+                    _("Setup fix"), None)
+        return (url_for("environment_view", name=name) + "#host-install", _("Environment"),
+                None)
     if kind == "python-download":
         # Retry returns to a fresh catalog/confirmation form, never silently repeats a download.
-        return url_for("python_downloads", name=name), "Optional Python", None
+        return url_for("python_downloads", name=name), _("Optional Python"), None
     if kind == "coverage-draft":
-        return url_for("coverage_view", name=name), "Coverage", "coverage-drafted"
+        return url_for("coverage_view", name=name), _("Coverage"), "coverage-drafted"
     if kind in ENVIRONMENT_NOTICES:
-        return (url_for("environment_view", name=name), "Environment",
+        return (url_for("environment_view", name=name), _("Environment"),
                 ENVIRONMENT_NOTICES[kind])
     if kind in generation.KINDS and isinstance(label, str):
-        return url_for("plan", name=name, label=label), f"plan {label}", None
+        return url_for("plan", name=name, label=label), _("plan %(label)s") % {"label": label}, None
     if kind == "create":
         return url_for("course", name=name), course.workspace.course, None
     return None

@@ -15,8 +15,9 @@ from tutor.gui import courses, environment, generation, launch, lectures, tasks
 from tutor.gui.i18n import N_
 
 # How each state reads on a page, in the report's order.
-STATUS_LABELS = {report.PASSED: "passed", report.STARTED: "started",
-                 report.UNLOGGED: "changed, no run logged", report.NOT_STARTED: "not started"}
+STATUS_LABELS = {report.PASSED: N_("passed"), report.STARTED: N_("started"),
+                 report.UNLOGGED: N_("changed, no run logged"),
+                 report.NOT_STARTED: N_("not started")}  # shown through _() by the pages
 # What an action can report back, by code; nothing else is ever shown. (kind, text)
 NOTICES = {
     "bounds-saved": ("ok", N_("Package bounds saved. Install/rebuild and check the course again.")),
