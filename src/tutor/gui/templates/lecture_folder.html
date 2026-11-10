@@ -4,51 +4,49 @@
    save_staged). A file that cannot be saved as it is shows why, with no box. The tick
    buttons (all, none, invert, a subfolder's) post the ticks to /tick, which sends the page
    back with them changed: no script of our own. Save comes first in the form, so Enter
-   saves rather than ticking all. #}
+   saves rather than ticking all. Text through _() and ngettext (gui/i18n.py). #}
 {% from "_macros.html" import action %}
-{% block title %}Choose lectures · {{ course.workspace.course }}{% endblock %}
+{% block title %}{{ _("Choose lectures") }} · {{ course.workspace.course }}{% endblock %}
 {% block crumbs %}
 <a href="{{ url_for('course', name=course.folder) }}">{{ course.workspace.course }}</a>
-<a href="{{ url_for('lecture_list', name=course.folder) }}">Lectures</a>
-<span>From a folder</span>
+<a href="{{ url_for('lecture_list', name=course.folder) }}">{{ _("Lectures") }}</a>
+<span>{{ _("From a folder") }}</span>
 {% endblock %}
 {% block content %}
 {% set tick_url = url_for('tick_lecture_folder', name=course.folder, token=staged.token) %}
 {% set groups = staged.groups %}
 {% set grouped = groups | length > 1 or groups[0][0] %}
-<h1>Lectures from {{ staged.folder or "the chosen folder" }}</h1>
-<p class="muted">Nothing is saved yet. Untick what is not a lecture (exams, solutions, a
-  syllabus): every ticked file becomes a lecture that exercises can cite, and this GUI does
-  not delete lectures. A name with no number takes the one its folder starts with, so its
-  sections are numbered like its topic.</p>
+{% set folder_name = staged.folder or _("the chosen folder") %}
+<h1>{{ _("Lectures from %(folder)s", folder=folder_name) }}</h1>
+<p class="muted">{{ _("Nothing is saved yet. Untick what is not a lecture (exams, solutions, a syllabus): every ticked file becomes a lecture that exercises can cite, and this GUI does not delete lectures. A name with no number takes the one its folder starts with, so its sections are numbered like its topic.") }}</p>
 {% if staged.skipped %}
-<p class="muted">Left out: {% for kind, count in staged.skipped.items() %}{{ count }} {{ kind }}{{ ", " if not loop.last }}{% endfor %}.</p>
+<p class="muted">{{ _("Left out:") }} {% for kind, count in staged.skipped.items() %}{{ count }} {{ kind }}{{ ", " if not loop.last }}{% endfor %}.</p>
 {% endif %}
 {% if problems %}
 <ul class="notice notice-bad form-problems">{% for line in problems %}<li>{{ line }}</li>{% endfor %}</ul>
-<p class="muted">Nothing was saved.</p>
+<p class="muted">{{ _("Nothing was saved.") }}</p>
 {% endif %}
 <form method="post" action="{{ url_for('save_lecture_folder', name=course.folder, token=staged.token) }}" class="form">
   <div class="actions">
-    <button type="submit" class="primary">Save the ticked and read them</button>
-    <button type="submit" class="small" formaction="{{ tick_url }}" name="tick" value="all">Tick all</button>
-    <button type="submit" class="small" formaction="{{ tick_url }}" name="tick" value="none">Tick none</button>
-    <button type="submit" class="small" formaction="{{ tick_url }}" name="tick" value="invert">Invert</button>
-    <span class="muted">{{ picked | length }} of {{ staged.files | rejectattr("problem") | list | length }} ticked</span>
+    <button type="submit" class="primary">{{ _("Save the ticked and read them") }}</button>
+    <button type="submit" class="small" formaction="{{ tick_url }}" name="tick" value="all">{{ _("Tick all") }}</button>
+    <button type="submit" class="small" formaction="{{ tick_url }}" name="tick" value="none">{{ _("Tick none") }}</button>
+    <button type="submit" class="small" formaction="{{ tick_url }}" name="tick" value="invert">{{ _("Invert") }}</button>
+    <span class="muted">{{ _("%(picked)s of %(total)s ticked", picked=picked | length, total=staged.files | rejectattr("problem") | list | length) }}</span>
   </div>
   <table class="folder-files">
-    <thead><tr><th>Keep</th><th>Saved as</th><th class="num">Size</th><th>Why not</th></tr></thead>
+    <thead><tr><th>{{ _("Keep") }}</th><th>{{ _("Saved as") }}</th><th class="num">{{ _("Size") }}</th><th>{{ _("Why not") }}</th></tr></thead>
     <tbody>
     {% for folder, files in groups %}
       {% if grouped %}
       {% set can = files | rejectattr("problem") | map(attribute="index") | list %}
       <tr class="folder-row">
-        <td colspan="4"><strong>{{ folder or "Directly in " ~ (staged.folder or "the chosen folder") }}</strong>
+        <td colspan="4"><strong>{{ folder or _("Directly in %(folder)s", folder=folder_name) }}</strong>
           {% if can %}
             {% if can | select("in", picked) | list | length == can | length %}
-            <button type="submit" class="small" formaction="{{ tick_url }}" name="tick" value="off:{{ folder }}">Untick these {{ can | length }}</button>
+            <button type="submit" class="small" formaction="{{ tick_url }}" name="tick" value="off:{{ folder }}">{{ _("Untick these %(n)s", n=can | length) }}</button>
             {% else %}
-            <button type="submit" class="small" formaction="{{ tick_url }}" name="tick" value="on:{{ folder }}">Tick these {{ can | length }}</button>
+            <button type="submit" class="small" formaction="{{ tick_url }}" name="tick" value="on:{{ folder }}">{{ _("Tick these %(n)s", n=can | length) }}</button>
             {% endif %}
           {% endif %}
         </td>
@@ -56,8 +54,8 @@
       {% endif %}
       {% for file in files %}
       <tr>
-        <td>{% if not file.problem %}<input type="checkbox" name="pick" value="{{ file.index }}" aria-label="Keep {{ file.name }}"{% if file.index in picked %} checked{% endif %}>{% endif %}</td>
-        <td>{{ file.name }}{% if file.name != file.given %} <span class="muted">(was {{ file.given }})</span>{% endif %}</td>
+        <td>{% if not file.problem %}<input type="checkbox" name="pick" value="{{ file.index }}" aria-label="{{ _('Keep %(name)s', name=file.name) }}"{% if file.index in picked %} checked{% endif %}>{% endif %}</td>
+        <td>{{ file.name }}{% if file.name != file.given %} <span class="muted">{{ _("(was %(name)s)", name=file.given) }}</span>{% endif %}</td>
         <td class="num">{{ file.size_text }}</td>
         <td class="why">{{ file.problem or "" }}</td>
       </tr>
@@ -65,7 +63,7 @@
     {% endfor %}
     </tbody>
   </table>
-  <div class="actions"><button type="submit" class="primary">Save the ticked and read them</button></div>
+  <div class="actions"><button type="submit" class="primary">{{ _("Save the ticked and read them") }}</button></div>
 </form>
-{{ action(url_for('cancel_lecture_folder', name=course.folder, token=staged.token), "Cancel: save none") }}
+{{ action(url_for('cancel_lecture_folder', name=course.folder, token=staged.token), _("Cancel: save none")) }}
 {% endblock %}

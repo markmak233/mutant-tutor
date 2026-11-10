@@ -1,20 +1,25 @@
 {% extends "base.html" %}
-{# A course's models: [llm.profiles] and [llm.roles] in its workspace.toml (llm_settings.py). #}
+{# A course's models: [llm.profiles] and [llm.roles] in its workspace.toml (llm_settings.py).
+   Text through _() (gui/i18n.py); the role names, provider ids, model names and file names
+   stay as they are; the role groups' titles and descriptions are N_() strings in
+   llm_settings.ROLE_GROUPS, translated here with _(). #}
 {% from "_macros.html" import action, chip %}
-{% block title %}Models · {{ course.workspace.course }}{% endblock %}
+{% block title %}{{ _("Models") }} · {{ course.workspace.course }}{% endblock %}
 {% block crumbs %}
 <a href="{{ url_for('course', name=course.folder) }}">{{ course.workspace.course }}</a>
-<span>Models</span>
+<span>{{ _("Models") }}</span>
 {% endblock %}
 {% block content %}
 <div class="title-line">
-  <h1>Models</h1>
+  <h1>{{ _("Models") }}</h1>
   <div class="actions">
-    <a class="button" href="{{ url_for('new_model', name=course.folder) }}">Add a model</a>
-    {% if profiles %}{{ action(url_for('check_models', name=course.folder), "Check all") }}{% endif %}
+    <a class="button" href="{{ url_for('new_model', name=course.folder) }}">{{ _("Add a model") }}</a>
+    {% if profiles %}{{ action(url_for('check_models', name=course.folder), _("Check all")) }}{% endif %}
   </div>
 </div>
-<p class="muted">Saved in this course's <code>workspace.toml</code>; keys are on the <a href="{{ url_for('key_list') }}">Keys</a> page. "Check" sends each model one tiny request, to find a wrong key or model name before a run that spends more.</p>
+{% set code_toml %}<code>workspace.toml</code>{% endset %}
+{% set keys_link %}<a href="{{ url_for('key_list') }}">{{ _("Keys") }}</a>{% endset %}
+<p class="muted">{{ _("Saved in this course's %(file)s; keys are on the %(keys)s page. \"Check\" sends each model one tiny request, to find a wrong key or model name before a run that spends more.", file=code_toml, keys=keys_link) }}</p>
 {% if problems %}
 <ul class="notice notice-bad form-problems">{% for line in problems %}<li>{{ line }}</li>{% endfor %}</ul>
 {% endif %}
@@ -22,36 +27,36 @@
 {# The saved roles' oracle is a less independent reading (llm_settings.role_warnings): a
    reminder. Roles being chosen get theirs above Save (_role_check.html). #}
 <div class="notice notice-bad">
-  <p>The roles are saved, but:</p>
+  <p>{{ _("The roles are saved, but:") }}</p>
   <ul class="form-problems">{% for line in warnings %}<li>{{ line }}</li>{% endfor %}</ul>
-  <p>An oracle by another provider and maker, below, makes its reading independent.</p>
+  <p>{{ _("An oracle by another provider and maker, below, makes its reading independent.") }}</p>
 </div>
 {% endif %}
 {% if unsaved and check_warnings and not problems %}
-<p class="notice notice-bad">Not saved yet: read the warning above "Save the roles", and tick "Save even so" to save them as they are.</p>
+<p class="notice notice-bad">{{ _("Not saved yet: read the warning above \"Save the roles\", and tick \"Save even so\" to save them as they are.") }}</p>
 {% endif %}
 {% if not profiles %}
-<p>No models yet.</p>
+<p>{{ _("No models yet.") }}</p>
 {% if others %}
 <form method="post" action="{{ url_for('copy_models', name=course.folder) }}" class="inline-form">
-  Copy them from <select name="source">{% for other in others %}<option value="{{ other.folder }}">{{ other.workspace.course }}</option>{% endfor %}</select>
-  <button type="submit" class="primary">Copy</button>
+  {{ _("Copy them from") }} <select name="source">{% for other in others %}<option value="{{ other.folder }}">{{ other.workspace.course }}</option>{% endfor %}</select>
+  <button type="submit" class="primary">{{ _("Copy") }}</button>
 </form>
 {% endif %}
 {% else %}
 <table>
-  <thead><tr><th>Model</th><th>Provider and model</th><th>Key</th><th>Roles</th><th></th></tr></thead>
+  <thead><tr><th>{{ _("Model") }}</th><th>{{ _("Provider and model") }}</th><th>{{ _("Key") }}</th><th>{{ _("Roles") }}</th><th></th></tr></thead>
   <tbody>
   {% for p in profiles %}
     {% set key_name = p.data.api_key_env %}
     <tr>
       <td><a href="{{ url_for('edit_model', name=course.folder, profile=p.name) }}">{{ p.name }}</a></td>
-      <td>{{ p.data.provider }}: {{ p.data.model or p.name }}{% if makers.get(p.name) %} <span class="muted">by {{ makers[p.name] }}</span>{% endif %}</td>
-      <td>{% if key_name %}<code>{{ key_name }}</code> {% if key_name in key_set %}set{% else %}<a href="{{ url_for('key_list', name=key_name) }}#add-key">{{ chip("not set") }}</a>{% endif %}{% else %}<span class="muted">none needed</span>{% endif %}</td>
+      <td>{{ p.data.provider }}: {{ p.data.model or p.name }}{% if makers.get(p.name) %} <span class="muted">{{ _("by %(maker)s", maker=makers[p.name]) }}</span>{% endif %}</td>
+      <td>{% if key_name %}<code>{{ key_name }}</code> {% if key_name in key_set %}{{ _("set") }}{% else %}<a href="{{ url_for('key_list', name=key_name) }}#add-key">{{ chip("not set", _("not set")) }}</a>{% endif %}{% else %}<span class="muted">{{ _("none needed") }}</span>{% endif %}</td>
       <td class="muted">{{ p.roles | join(", ") }}</td>
       <td class="row-actions">
-        <form method="post" action="{{ url_for('check_models', name=course.folder) }}" class="action"><input type="hidden" name="profile" value="{{ p.name }}"><button type="submit">Check</button></form>
-        {% if not p.roles %}{{ action(url_for('delete_model', name=course.folder, profile=p.name), "Remove") }}{% endif %}
+        <form method="post" action="{{ url_for('check_models', name=course.folder) }}" class="action"><input type="hidden" name="profile" value="{{ p.name }}"><button type="submit">{{ _("Check") }}</button></form>
+        {% if not p.roles %}{{ action(url_for('delete_model', name=course.folder, profile=p.name), _("Remove")) }}{% endif %}
       </td>
     </tr>
   {% endfor %}
@@ -60,24 +65,24 @@
 {# htmx: a role changed asks role_check for the part above Save (hx-get on each select;
    where it goes, and the whole form's choices, from here). #}
 <form method="post" action="{{ url_for('save_roles', name=course.folder) }}" class="form" hx-target="#role-check" hx-swap="outerHTML" hx-include="closest form">
-  <h2>Roles</h2>
-  <p class="muted">Which model does each job.</p>
+  <h2>{{ _("Roles") }}</h2>
+  <p class="muted">{{ _("Which model does each job.") }}</p>
   {% for title, group in groups %}
   <fieldset>
-    <legend>{{ title }}</legend>
+    <legend>{{ _(title) }}</legend>
     {% for role, what in group %}
     <label class="role">
-      <span><strong>{{ role }}</strong> <span class="muted">{{ what }}</span></span>
+      <span><strong>{{ role }}</strong> <span class="muted">{{ _(what) }}</span></span>
       <select name="{{ role }}" hx-get="{{ url_for('role_check', name=course.folder) }}" hx-trigger="change">
-        <option value="">none</option>
-        {% for p in profiles %}<option value="{{ p.name }}"{% if roles.get(role) == p.name %} selected{% endif %}>{{ p.name }} ({{ p.data.provider }}{% if makers.get(p.name) %}, by {{ makers[p.name] }}{% endif %})</option>{% endfor %}
+        <option value="">{{ _("none") }}</option>
+        {% for p in profiles %}<option value="{{ p.name }}"{% if roles.get(role) == p.name %} selected{% endif %}>{{ p.name }} ({{ p.data.provider }}{% if makers.get(p.name) %}, {{ _("by %(maker)s", maker=makers[p.name]) }}{% endif %})</option>{% endfor %}
       </select>
     </label>
     {% endfor %}
   </fieldset>
   {% endfor %}
   {% include "_role_check.html" %}
-  <div class="actions"><button type="submit" class="primary">Save the roles</button></div>
+  <div class="actions"><button type="submit" class="primary">{{ _("Save the roles") }}</button></div>
 </form>
 {% endif %}
 {% endblock %}

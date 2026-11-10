@@ -40,6 +40,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from tutor import llm
+from tutor.gui.i18n import N_
 
 SOURCE = "https://models.dev/api.json"
 CACHE_FORMAT = 3  # what the kept file holds; a file of another format is fetched again
@@ -116,13 +117,14 @@ class Model:
 
     @property
     def thinking(self) -> str:
-        """How it thinks, as the table says it."""
+        """How it thinks, as the table says it (the fixed words marked N_(): the page
+        translates them with _(); "lowest <effort>" names a value and stays as it is)."""
         if self.reasoning is None:
-            return "not said"
+            return N_("not said")
         if not self.reasoning:
-            return "no"
-        return "can be off" if "none" in self.efforts else (
-            f"lowest {low}" if (low := self.lowest) else "always")
+            return N_("no")
+        return N_("can be off") if "none" in self.efforts else (
+            f"lowest {low}" if (low := self.lowest) else N_("always"))
 
     @property
     def context_text(self) -> str:

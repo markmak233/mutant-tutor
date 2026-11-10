@@ -337,7 +337,7 @@ def test_a_local_server_lists_its_models_on_the_page_or_says_it_is_down(root, mo
     assert "qwen3:0.6b" in text and "not said" in text and "its docs" in text
     assert "WSL 2 forwards it" in text
     text = _page(client, "/c/demo-course/models/new?catalog=ollama&model=qwen3:0.6b")
-    assert "Filled from the server's list" in text and 'value="qwen3:0.6b"' in text
+    assert "Filled from the server&#39;s list" in text and 'value="qwen3:0.6b"' in text
     assert 'value="qwen3-0.6b"' in text and "Check on the Models page tells" in text
 
     monkeypatch.setattr(catalog, "installed", lambda url: ((), f"Nothing answers at {url}"))

@@ -29,28 +29,35 @@ from tutor.config import WORKSPACE_FILE
 from tutor.gui import keys, toml_edit
 from tutor.gui.catalog import same_url
 from tutor.gui.courses import Course, find_courses
+from tutor.gui.i18n import N_
 from tutor.gui.toml_edit import put as _put
 from tutor.gui.toml_edit import spaced as _spaced
 
-# The roles a page offers, grouped by what they are for, with what each does.
+# The roles a page offers, grouped by what they are for, with what each does. The titles
+# and descriptions are marked N_(): the Models page translates them when it shows them.
 ROLE_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
-    ("Reading lectures", [("vision", "reads the slides that are pictures"),
-                          ("setup", "finds the software the lectures use, to draft "
-                                    "[requires] (empty: the plan model, else generate)")]),
-    ("Generating exercises", [
-        ("plan", "plans a batch (empty: the generate model)"),
-        ("generate", "writes each exercise"),
-        ("oracle", "writes an independent check from the question alone: best a model by "
-                   "another provider and maker than generate and repair (each model's maker "
-                   "follows its name, where models.dev knows it)"),
-        ("repair", "takes over the repairs from the second on (empty: the generate model)")]),
-    ("While you learn", [("hint", "gives hints on your attempts"),
-                         ("judge", "scores hints and questions in evaluations")]),
-    ("Setup diagnosis", [("doctor", "proposes repairs only when you explicitly request advice")]),
-    ("Experiments", [("heldout", "writes held-out test data"),
-                     ("concept", "builds the concept index for retrieval"),
-                     ("embedding", "turns pages into vectors for retrieval"),
-                     ("agent", "searches the lectures in the agentic retrieval route")]),
+    (N_("Reading lectures"), [
+        ("vision", N_("reads the slides that are pictures")),
+        ("setup", N_("finds the software the lectures use, to draft [requires] (empty: the "
+                     "plan model, else generate)"))]),
+    (N_("Generating exercises"), [
+        ("plan", N_("plans a batch (empty: the generate model)")),
+        ("generate", N_("writes each exercise")),
+        ("oracle", N_("writes an independent check from the question alone: best a model by "
+                      "another provider and maker than generate and repair (each model's "
+                      "maker follows its name, where models.dev knows it)")),
+        ("repair", N_("takes over the repairs from the second on (empty: the generate "
+                      "model)"))]),
+    (N_("While you learn"), [
+        ("hint", N_("gives hints on your attempts")),
+        ("judge", N_("scores hints and questions in evaluations"))]),
+    (N_("Setup diagnosis"), [
+        ("doctor", N_("proposes repairs only when you explicitly request advice"))]),
+    (N_("Experiments"), [
+        ("heldout", N_("writes held-out test data")),
+        ("concept", N_("builds the concept index for retrieval")),
+        ("embedding", N_("turns pages into vectors for retrieval")),
+        ("agent", N_("searches the lectures in the agentic retrieval route"))]),
 ]
 ROLES = [role for _, group in ROLE_GROUPS for role, _ in group]
 PROFILE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,39}$")
