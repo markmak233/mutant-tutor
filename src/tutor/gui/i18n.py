@@ -56,6 +56,7 @@ TRANSLATIONS = "translations"  # under the GUI's root: <language>.po, one per la
 _SLUG = re.compile(r"[^\w-]+")
 NAME_HEADER = "X-Name"  # the .po header that keeps the name as typed, for the switch
 DIRECTION_HEADER = "X-Direction"  # the .po header: "rtl" or "ltr" (else found from the text)
+NOTE_HEADER = "X-Note"  # the owner's note to the translator (register, wording), sent each run
 LTR, RTL = "ltr", "rtl"
 _ENTRY = re.compile(r'^(msgctxt|msgid_plural|msgid|msgstr\[(\d+)\]|msgstr)\s+"(.*)"$')
 _ESCAPES = {"n": "\n", "t": "\t", '"': '"', "\\": "\\"}
@@ -99,11 +100,13 @@ class Translations(gettext.NullTranslations):
     """A language's strings, from its .po file: `gettext` and `ngettext` as the standard
     library's, falling back to the English given when the file has no translation. Two
     plural forms, the first for one (every language gets both, the same text where the
-    language does not tell them apart). `direction` is "ltr" or "rtl", for `<html dir>`."""
+    language does not tell them apart). `direction` is "ltr" or "rtl", for `<html dir>`;
+    `note` is the owner's note to the translator the file keeps (X-Note), shown on the
+    Language page and sent again by `tutor.gui.translate` on every run."""
 
-    def __init__(self, catalog: dict, name: str = "", direction: str = LTR):
+    def __init__(self, catalog: dict, name: str = "", direction: str = LTR, note: str = ""):
         super().__init__()
-        self._catalog, self.name, self.direction = catalog, name, direction
+        self._catalog, self.name, self.direction, self.note = catalog, name, direction, note
 
     def gettext(self, message: str) -> str:
         return self._catalog.get(message) or message
@@ -145,7 +148,7 @@ def translations_for(language: str, root: Path | None = None) -> Translations:
     direction = headers.get(DIRECTION_HEADER, "").strip().lower()
     if direction not in (LTR, RTL):
         direction = direction_of(catalog, name)
-    found = Translations(catalog, name, direction)
+    found = Translations(catalog, name, direction, headers.get(NOTE_HEADER, ""))
     _loaded[path] = (mtime, found)
     return found
 

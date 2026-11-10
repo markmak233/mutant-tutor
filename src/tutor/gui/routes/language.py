@@ -32,11 +32,13 @@ def register(app: Flask) -> None:
         root = app.config["ROOT"]
         strings = translate.english()
         # Each language's file: (strings it has, those kept as the English), for its line.
-        counts = {code: i18n.translations_for(code, root).counts()
-                  for code in i18n.available(root) if code != i18n.ENGLISH}
+        files = {code: i18n.translations_for(code, root)
+                 for code in i18n.available(root) if code != i18n.ENGLISH}
         return render_template("language.html", chosen=i18n.chosen(root), models=with_model(),
                                strings=len(strings), tokens_k=translate.tokens_about(strings),
-                               folder=root / i18n.TRANSLATIONS, counts=counts)
+                               folder=root / i18n.TRANSLATIONS,
+                               counts={code: t.counts() for code, t in files.items()},
+                               notes={code: t.note for code, t in files.items()})
 
     @app.post("/language")
     def set_language():
@@ -63,6 +65,10 @@ def register(app: Flask) -> None:
             return redirect(url_for("language_page", notice="no-setup-model"), code=303)
         command = [sys.executable, "-m", "tutor.gui.translate",
                    "--root", str(app.config["ROOT"])]
+        # The note to the translator (register, wording): kept in the file, sent each run.
+        note = " ".join(request.form.get("note", "").split())
+        if note:
+            command += ["--note", note]
         if request.form.get("again") == "1":
             command.append("--again")
         command += ["--", name]  # after "--": a name starting with "-" is not an option

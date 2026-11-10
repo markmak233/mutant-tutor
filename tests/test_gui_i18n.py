@@ -263,11 +263,13 @@ def test_the_language_page_lists_offers_and_starts_a_translation(root, monkeypat
                         lambda course, title, commands, meta=None: started.append(
                             (course.folder, title, commands, meta)) or ("ok", 303))
     client.post("/language/translate", base_url=BASE, headers={"Origin": BASE},
-                data={"name": " Deutsch ", "course": "demo-course", "again": "1"})
+                data={"name": " Deutsch ", "course": "demo-course", "again": "1",
+                      "note": " Swiss spelling,\n no ß "})
     folder, title, commands, meta = started[0]
     assert (folder, title, meta) == ("demo-course", "Translate the GUI into Deutsch",
                                      {"kind": "translate"})
-    assert commands[0][1:] == ["-m", "tutor.gui.translate", "--root", str(root), "--again",
+    assert commands[0][1:] == ["-m", "tutor.gui.translate", "--root", str(root),
+                               "--note", "Swiss spelling, no ß", "--again",
                                "--", "Deutsch"]  # after "--": "-x" is a name, not an option
     response = client.post("/language/translate", base_url=BASE, headers={"Origin": BASE},
                            data={"name": "en", "course": "demo-course"})
@@ -395,6 +397,52 @@ def test_the_command_writes_the_file_in_batches_and_asks_only_for_what_is_missin
     assert catalog["New course"] == "新课程" and "Keys" not in catalog
     assert catalog["Courses"] == "课程"
     assert translate.main(["en", "--root", str(tmp_path)]) == 2
+
+
+def test_the_note_to_the_translator_goes_with_every_run_and_stays_in_the_file(
+        tmp_path, monkeypatch):
+    """The owner's note (register, wording) is sent before each batch's material, between
+    tags the prompt names, kept in X-Note, and a run without one sends the file's."""
+    course = tmp_path / "courses" / "demo-course"
+    (course / "lectures").mkdir(parents=True)
+    (course / "workspace.toml").write_text(
+        'course = "demo"\n\n[llm.profiles.m]\nprovider = "deepseek"\nmodel = "x"\n'
+        'api_key_env = "DEEPSEEK_API_KEY"\n\n[llm.roles]\nsetup = "m"\n', encoding="utf-8")
+    monkeypatch.setenv("WORKSPACE_DIR", str(course))
+    monkeypatch.setenv("LECTURE_DIR", str(course / "lectures"))
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-not-a-real-key")
+    strings = [translate.Message("Courses")]
+    monkeypatch.setattr(translate, "english", lambda folder=None: strings)
+    asked = []
+
+    def chat(config, messages, **kw):
+        asked.append(messages[1]["content"])
+        n = 1 if "Courses" in messages[1]["content"] else 2
+        return llm.Reply(json.dumps({"items": [{"n": 1, "text": f"譯{n}"}]}), 1, 1, 0.1, "stop")
+
+    monkeypatch.setattr(translate, "chat", chat)
+    root = tmp_path / "courses"
+    assert translate.main(["中文", "--root", str(root),
+                           "--note", "written  standard,\nHong Kong"]) == 0
+    assert asked[0].startswith("Language: 中文\n\n<note>\nwritten standard, Hong Kong\n</note>\n\n"
+                               "<material>\n")
+    path = root / i18n.TRANSLATIONS / "中文.po"
+    catalog, headers = i18n.read_po(path.read_text(encoding="utf-8"))
+    assert headers["X-Note"] == "written standard, Hong Kong"
+    assert i18n.translations_for("中文", root).note == "written standard, Hong Kong"
+    # A string the pages gained, asked for with the file's note; a new note replaces it.
+    strings.append(translate.Message("Keys"))
+    assert translate.main(["中文", "--root", str(root)]) == 0
+    assert "<note>\nwritten standard, Hong Kong\n</note>" in asked[1]
+    assert translate.main(["中文", "--root", str(root), "--again", "--note", "plain"]) == 0
+    assert "<note>\nplain\n</note>" in asked[2]
+    assert i18n.read_po(path.read_text(encoding="utf-8"))[1]["X-Note"] == "plain"
+    # Without a note, no tag and no header; the system prompt asks for one register.
+    assert translate.main(["日本語", "--root", str(root)]) == 0
+    assert asked[3].startswith("Language: 日本語\n\n<material>\n")
+    assert "X-Note" not in i18n.read_po(
+        (root / i18n.TRANSLATIONS / "日本語.po").read_text(encoding="utf-8"))[1]
+    assert "Use one register throughout" in translate.PROMPT and translate.PROMPT_VERSION == 2
 
 
 def test_strings_kept_as_the_english_are_counted_apart_and_can_be_asked_again(

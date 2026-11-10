@@ -3969,7 +3969,17 @@ late; the adaptive review screens can be built with it.
     an entry whose text is its msgid), since it may be the model declining rather than the
     word being the same (2026-11-10: a made-up language, 喵语, got all 165 strings back
     and the run said "165 of 165 translated"); `--again-unchanged` asks for those alone,
-    say on another model (2026-11-11). Jinja's new-style `_()` marks what gettext returns as safe HTML (so the
+    say on another model (2026-11-11). A note to the translator (owner, 2026-11-10: the
+    Hong Kong file came back part written Traditional Chinese, part colloquial Cantonese,
+    as each batch was asked alone; 2026-11-11): the Language page's optional box, `--note`,
+    the owner's wish about variety and register, kept in the file's `X-Note` header and
+    sent with every batch of every run (a run without one sends the file's), between
+    `<note>` tags after the language line and before the material, so the system prompt
+    stays the same for every call and the language's calls share their prefix (prompt
+    cache); the system prompt names the note as the owner's wish about wording that
+    changes none of the rules, and asks for one register throughout, the written standard
+    unless the note says otherwise (prompt version 2, in `X-Generator`; not a pinned
+    prompt). Jinja's new-style `_()` marks what gettext returns as safe HTML (so the
     values it formats in are escaped), translated or not, so the callables escape the
     text first: an English string may say `<profile>` and shows as written; a literal `%`
     in a page's English is written `%%` (a test checks every string). The language: the

@@ -18,7 +18,7 @@
     {# The file's count: translated, and apart those the model gave back as the English
        (the same word, or one it would not translate), which the file keeps (translate.py). #}
     {% set have, same = counts[code] %}
-    <span class="muted">{{ _("%(done)d of %(total)d translated", done=have - same, total=strings) }}{% if same %}; {{ _("%(same)d kept as the English by the model", same=same) }}{% endif %}</span>{% endif %}</li>
+    <span class="muted">{{ _("%(done)d of %(total)d translated", done=have - same, total=strings) }}{% if same %}; {{ _("%(same)d kept as the English by the model", same=same) }}{% endif %}{% if notes[code] %}; {{ _("note: %(note)s", note=notes[code]) }}{% endif %}</span>{% endif %}</li>
 {% endfor %}
 </ul>
 {% if not chosen %}<p class="muted">{{ _("No choice is kept yet: the browser's language is used when there is a file for it, else English.") }}</p>{% endif %}
@@ -31,6 +31,11 @@
     <input type="text" name="name" required maxlength="40" autocomplete="off"></label>
   <label class="field">{{ _("Model") }} <span class="muted">{{ _("a course's setup model and its key; the task runs in that course") }}</span>
     <select name="course">{% for course, model in models %}<option value="{{ course.folder }}">{{ course.workspace.course }}: {{ model }}</option>{% endfor %}</select></label>
+  {# The note: kept in the file's header and sent with every batch of every run, so the
+     batches and later runs keep one register (translate.py; a run without one reuses the
+     file's). #}
+  <label class="field">{{ _("Note to the translator") }} <span class="muted">{{ _("optional: the variety and register, e.g. written Traditional Chinese as used in Hong Kong, not colloquial Cantonese; kept with the file and sent with every run") }}</span>
+    <textarea name="note" rows="2" maxlength="500"></textarea></label>
   <label class="check"><input type="checkbox" name="again" value="1"> {{ _("Translate every string again (else only those the language's file lacks)") }}</label>
   <p class="muted">{{ _("%(strings)d English strings; about %(tokens)d thousand tokens in and out for all of them: a paid model charges for them. A translation that changes a placeholder or adds markup is left English.", strings=strings, tokens=tokens_k) }}</p>
   <div class="actions"><button type="submit" class="primary">{{ _("Translate") }}</button></div>

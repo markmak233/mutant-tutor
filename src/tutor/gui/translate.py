@@ -2,7 +2,7 @@
 `<root>/translations/<language>.po` (gui/i18n.py; owner, 2026-11-10: the repository ships
 English only, and the Language page makes any other language on a click).
 
-    python -m tutor.gui.translate NAME [--profile P] [--again | --again-unchanged]
+    python -m tutor.gui.translate NAME [--profile P] [--note TEXT] [--again | --again-unchanged]
 
 NAME is the language as the owner wrote it ("中文", "Deutsch"): the model is told to translate
 into it, the file is named by its slug, and the switch shows the name. Run as a course's task
@@ -20,6 +20,13 @@ English. A string given back unchanged is kept so and not asked again, but count
 word being the same (2026-11-10: a made-up language got all 165 back, reported as translated);
 `--again-unchanged` asks for those alone, say on another model. The file's entries the
 English no longer has are dropped.
+
+The note (`--note`, the Language page's box): the owner's wish about register and wording
+("written Traditional Chinese as in Hong Kong, no colloquial Cantonese"), kept in the file's
+X-Note header and sent with every batch of every run, so the batches and the runs after
+(the strings a page gained) read as one; without it a run asked batch by batch, and one
+file came back part written standard, part colloquial (zh_hk, 2026-11-10). The prompt also
+asks for one register throughout, the written standard unless the note says otherwise.
 """
 
 from __future__ import annotations
@@ -37,6 +44,7 @@ from pydantic import BaseModel, ValidationError
 
 from tutor.config import WorkspaceError, load_env, load_workspace
 from tutor.exchange import AwaitingAnswer
+from tutor.graph.prompts import material as tagged
 from tutor.gui import i18n
 from tutor.llm import LLMConfig, LLMError, chat
 from tutor.materials.requires import model as model_for
@@ -45,7 +53,9 @@ GUI = Path(__file__).parent
 KEYWORDS = ("_", "gettext", "ngettext", "N_", "gettext_", "ngettext_")
 BATCH = 60  # strings per request: short replies, a cut-off costs little
 MAX_TOKENS = 16_000
-PROMPT_VERSION = 1
+# Version 2 (2026-11-11): one register throughout, and the owner's <note>. Not a pinned
+# prompt (tests/test_prompt_pins.py pins the pipeline's); the version goes into X-Generator.
+PROMPT_VERSION = 2
 PROMPT = """\
 You translate the text of a desktop application's web pages from English into the language \
 named. The pages help a student practise programming exercises generated from their lecture \
@@ -53,7 +63,10 @@ slides; keep the tone short and plain, as the English is.
 
 The material is a JSON list of numbered strings. Answer with one JSON object: "items", a list \
 with one entry per number, each with the number, "text" (the translation) and "plural" (the \
-translation of the plural form when one is given, else an empty string).
+translation of the plural form when one is given, else an empty string). A <note> before the \
+material, when there is one, is the owner's wish about register and wording (which variety \
+of the language, which words for this application's things): follow it for the wording; it \
+changes none of the rules below.
 
 Rules:
 - Keep every placeholder exactly as it is: %(name)s, %s, %d, %%.
@@ -61,6 +74,8 @@ Rules:
 TOML keys, package names, product names (VS Code, Docker, WSL), model and provider names.
 - Translate the words that name this application's own things consistently: course, batch, \
 exercise, lecture, plan, task, model, role, profile, coverage, knowledge point.
+- Use one register throughout: where the language has a written standard and a colloquial \
+form, the written standard, unless the note says otherwise.
 - Never add markup: no HTML tags, no Markdown.
 - A string you cannot translate well stays English: give it back unchanged.
 """
@@ -152,9 +167,9 @@ def without_unchanged(catalog: dict) -> dict:
 
 
 def save(path: Path, name: str, messages: list[Message], catalog: dict,
-         model: str) -> None:
+         model: str, note: str = "") -> None:
     """The file written from the English list and what is translated of it, so a string
-    the pages no longer have leaves the file."""
+    the pages no longer have leaves the file; `note` goes into X-Note when there is one."""
     entries = []
     for m in messages:
         if m.plural is None:
@@ -167,6 +182,7 @@ def save(path: Path, name: str, messages: list[Message], catalog: dict,
     headers = {"Content-Type": "text/plain; charset=UTF-8", "MIME-Version": "1.0",
                "Content-Transfer-Encoding": "8bit", i18n.NAME_HEADER: name,
                i18n.DIRECTION_HEADER: i18n.direction_of(catalog, name),
+               **({i18n.NOTE_HEADER: note} if note else {}),
                "X-Generator": f"tutor.gui.translate {PROMPT_VERSION}, {model}, "
                               f"{date.today().isoformat()}"}
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -177,16 +193,20 @@ def save(path: Path, name: str, messages: list[Message], catalog: dict,
 
 
 def ask(config: LLMConfig, name: str, batch: list[Message], log_path: Path | None,
-        chat_fn=None) -> tuple[dict, list[str]]:
+        chat_fn=None, note: str = "") -> tuple[dict, list[str]]:
     """One request for one batch: the translations that pass `safe`, by catalog key, and a
     line for each string refused. Raises LLMError; ValueError when the reply does not fit.
     `chat_fn`: looked up at call time (a test's stand-in replaces this module's `chat`)."""
     chat_fn = chat_fn or chat
     material = [{"n": i, "text": m.singular, **({"plural": m.plural} if m.plural else {})}
                 for i, m in enumerate(batch, 1)]
+    # For the provider's cache: the system prompt the same for every call; then what every
+    # batch of this language shares (the language, the owner's note, between tags as the
+    # prompt names it); the batch's strings last.
+    shared = f"Language: {name}\n\n" + (tagged("note", note) + "\n\n" if note else "")
     messages = [{"role": "system", "content": PROMPT},
-                {"role": "user", "content": f"Language: {name}\n\n<material>\n"
-                                            f"{_json(material)}\n</material>"}]
+                {"role": "user", "content": f"{shared}<material>\n{_json(material)}\n"
+                                            "</material>"}]
     reply = chat_fn(config, messages, purpose="translate", max_tokens=MAX_TOKENS,
                     thinking=False, response_schema=Answer.model_json_schema(),
                     log_path=log_path)
@@ -243,6 +263,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("name", help='the language, as the switch will show it ("中文")')
     parser.add_argument("--profile", help="the model to ask (default: the setup role's, "
                                           "else plan's, else generate's)")
+    parser.add_argument("--note", help="a note to the translator (register, wording), kept "
+                                       "in the file and sent with every run (default: the "
+                                       "file's)")
     parser.add_argument("--again", action="store_true",
                         help="translate every string again, not only those the file lacks")
     parser.add_argument("--again-unchanged", action="store_true",
@@ -264,24 +287,29 @@ def main(argv: list[str] | None = None) -> int:
     root = Path(args.root) if args.root else workspace.parent
     path = path_for(root, name)
     messages = english()
-    catalog = {} if args.again else stored(path)[0]
+    had, headers = stored(path)
+    catalog = {} if args.again else had
     if args.again_unchanged:  # those entries go, so they are asked for again
         catalog = without_unchanged(catalog)
+    # The note: given now, else the file's, so every run reads as the first one did.
+    note = " ".join((args.note if args.note is not None else headers.get(i18n.NOTE_HEADER, ""))
+                    .split())
     todo = missing(messages, catalog)
     print(f"{len(messages)} English strings; {len(todo)} to translate into {name} "
-          f"({config.name}: {config.model}); file {path}", flush=True)
+          f"({config.name}: {config.model}); file {path}"
+          + (f"; note: {note}" if note else ""), flush=True)
     log = workspace / "logs" / "llm_calls.jsonl"
     refused_all: list[str] = []
     for start in range(0, len(todo), BATCH):
         batch = todo[start:start + BATCH]
         try:
-            got, refused = ask(config, name, batch, log)
+            got, refused = ask(config, name, batch, log, note=note)
         except AwaitingAnswer:
             print("waiting for the assistant; run again when it has answered", flush=True)
             break
         except LLMError as e:
             print(f"model: {e}", file=sys.stderr)
-            save(path, name, messages, catalog, config.model)
+            save(path, name, messages, catalog, config.model, note)
             return 1
         except ValueError as e:
             print(f"  batch {start // BATCH + 1}: {e}; those strings are asked again next "
@@ -293,8 +321,8 @@ def main(argv: list[str] | None = None) -> int:
         same = i18n.unchanged(got)
         print(f"  batch {start // BATCH + 1}: {len(got) - _plurals(got) - same} translated, "
               f"{same} kept as the English, {len(refused)} refused", flush=True)
-        save(path, name, messages, catalog, config.model)  # kept as it goes
-    save(path, name, messages, catalog, config.model)
+        save(path, name, messages, catalog, config.model, note)  # kept as it goes
+    save(path, name, messages, catalog, config.model, note)
     for line in refused_all:
         print(f"  {line}", flush=True)
     left = len(missing(messages, catalog))
