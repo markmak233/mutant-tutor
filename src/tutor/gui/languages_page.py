@@ -23,6 +23,7 @@ from tutor import languages, workspace
 from tutor.gui import toml_edit
 from tutor.gui.courses import Course
 from tutor.gui.environment import check_requires, runner, save_requires
+from tutor.gui.i18n import gettext_ as _
 from tutor.gui.toml_edit import put
 from tutor.testkit_c import DEFAULT_FLAGS, check_flags
 
@@ -61,7 +62,7 @@ def save_language(course: Course, c: bool, flags_text: str, headers_text: str) -
     go; the rest of [requires] stays."""
     data = _data(course)
     if not isinstance(data.get("languages", {}), dict):
-        return ["[languages] in workspace.toml is not a table of languages: fix it by hand."]
+        return [_("[languages] in workspace.toml is not a table of languages: fix it by hand.")]
     flags = flags_text.split()
     headers = headers_text.replace(",", " ").split()
     problems = []
@@ -200,14 +201,14 @@ def add_language(course: Course, key: str) -> list[str]:
     default), `gcc` in [requires] and VS Code's C settings; its own settings are then set
     below the list."""
     if key != languages.C.key:
-        return [f"{key!r} is not a language that can be added."]
+        return [_("%(key)r is not a language that can be added.") % {"key": key}]
     view = language_view(course)
     return save_language(course, True, view.flags, view.headers)
 
 
 def remove_language(course: Course, key: str) -> list[str]:
     if key != languages.C.key:
-        return [f"{key!r} is not a language that can be removed."]
+        return [_("%(key)r is not a language that can be removed.") % {"key": key}]
     return save_language(course, False, "", "")
 
 

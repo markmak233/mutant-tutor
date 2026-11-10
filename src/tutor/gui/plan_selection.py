@@ -10,6 +10,7 @@ import json
 from dataclasses import replace
 
 from tutor.graph.plan_selection import checkpoint_values, choose, digest, validate_selection
+from tutor.gui.i18n import gettext_
 
 
 def adapt(view):
@@ -87,7 +88,7 @@ def deferred_problem(course, view, exercise: str) -> str:
                            existing_ids(course.workspace.root), profile_of(course.workspace.root))
         row = next(row for row in view.approved_plan if row["id"] == exercise)
         if row["lecture"] not in generation.lectures(course)[0]:
-            return "The source is no longer available. Read it on the course page first."
+            return gettext_("The source is no longer available. Read it on the course page first.")
     except (ValueError, OSError, StopIteration) as exc:
         return str(exc)
     return ""

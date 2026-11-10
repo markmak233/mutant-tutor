@@ -6,6 +6,7 @@ from flask import Flask, render_template
 
 from tutor import image_records
 from tutor.gui import image_record_page, tasks
+from tutor.gui.i18n import gettext_ as _
 from tutor.gui.routes.common import course_or_404, start_task
 from tutor.image_recipe import ContainerError
 
@@ -29,7 +30,8 @@ def register(app: Flask) -> None:
         try:
             history = image_records.history(course.workspace)
         except (ContainerError, OSError):
-            history_problem = "History could not be read. Check the requirements and image first."
+            history_problem = _("History could not be read. Check the requirements and image "
+                                "first.")
         return render_template("image_record.html", course=course, view=record.view,
                                host=record.host, rows=record.rows,
                                history=history, history_problem=history_problem,

@@ -47,6 +47,7 @@ from typing import BinaryIO, Protocol
 
 from tutor.gui import toml_edit
 from tutor.gui.courses import Course
+from tutor.gui.i18n import gettext_
 from tutor.materials import cache
 from tutor.materials.html import lecture_number, looks_like_html
 
@@ -143,8 +144,8 @@ def save_lectures(folder: Path, files: Iterable[Upload]) -> tuple[list[Path], li
                 linked.append(folder / name)
     except FileExistsError as e:
         # os.link's error names the target second
-        problems.append(f"{Path(e.filename2 or '').name}: a file with this name appeared "
-                        "meanwhile; nothing was saved.")
+        problems.append(gettext_("%(name)s: a file with this name appeared meanwhile; nothing "
+                                 "was saved.") % {"name": Path(e.filename2 or "").name})
     finally:
         for part in staged:
             part.unlink(missing_ok=True)

@@ -28,6 +28,7 @@ from markupsafe import Markup
 from tutor.gui import rendering
 from tutor.gui.courses import Course
 from tutor.gui.environment import setup_model
+from tutor.gui.i18n import gettext_ as _
 from tutor.materials import cache
 from tutor.materials import coverage as coverage_draft
 from tutor.materials import coverage_store as store_module
@@ -140,12 +141,14 @@ def use_draft(course: Course) -> list[str]:
     neither; the problems, else []."""
     root = course.workspace.root
     if store_module.load(root) is not None:
-        return [f"{STORE_FILE} exists already: draft again from the lectures instead."]
+        return [_("%(file)s exists already: draft again from the lectures instead.")
+                % {"file": STORE_FILE}]
     if (root / COVERAGE_FILE).is_file():
-        return [f"{COVERAGE_FILE} exists already: convert it, then draft the lectures it lacks."]
+        return [_("%(file)s exists already: convert it, then draft the lectures it lacks.")
+                % {"file": COVERAGE_FILE}]
     found = coverage_draft.draft(root)
     if not found.sections:
-        return ["There is no draft yet: draft it from the lectures first."]
+        return [_("There is no draft yet: draft it from the lectures first.")]
     store = Store()
     for file in coverage_draft.lecture_files(root):
         name = cache.lecture_name(file) or file.name
@@ -177,7 +180,7 @@ def render_again(course: Course) -> list[str]:
     """coverage.md written again from the data (after a hand edit of the file)."""
     store = store_module.load(course.workspace.root)
     if store is None:
-        return [f"There is no {STORE_FILE} to render from."]
+        return [_("There is no %(file)s to render from.") % {"file": STORE_FILE}]
     store_module.save(course.workspace.root, store)
     return []
 
@@ -186,7 +189,7 @@ def save_lecture(course: Course, name: str, title: str, notes: str) -> list[str]
     """A lecture's title and notes, from the page."""
     store = store_module.load(course.workspace.root)
     if store is None or name not in store.lectures:
-        return ["No such lecture in the data; reload the page."]
+        return [_("No such lecture in the data; reload the page.")]
     lecture = store.lectures[name]
     lecture.title, lecture.notes = " ".join(title.split()), notes.strip()
     store_module.save(course.workspace.root, store)
@@ -200,18 +203,19 @@ def point_fields(form) -> tuple[dict, list[str]]:
     point = " ".join(form.get("point", "").split())
     status = form.get("status", "")
     if not slides:
-        problems.append("Slides: the slide range, e.g. 4.15-4.24.")
+        problems.append(_("Slides: the slide range, e.g. 4.15-4.24."))
     if not point:
-        problems.append("Point: what the slides teach, in a few words.")
+        problems.append(_("Point: what the slides teach, in a few words."))
     if status not in STATUSES:
-        problems.append(f"Status: one of {', '.join(STATUSES)}.")
+        problems.append(_("Status: one of %(statuses)s.") % {"statuses": ", ".join(STATUSES)})
     covered = store_module.parse_status(form.get("covered", "")).get("covered_by", [])
     if form.get("covered", "").strip() and not covered:
-        problems.append("Covered by: marks such as ex:some-id (batch), separated by commas, "
-                        "or nothing.")
+        problems.append(_("Covered by: marks such as ex:some-id (batch), separated by commas, "
+                          "or nothing."))
     for name in ("check", "note"):
         if "|" in form.get(name, "") or "\n" in form.get(name, "").strip():
-            problems.append(f"{name.capitalize()}: one line, with no |.")
+            problems.append(_("Check: one line, with no |.") if name == "check"
+                             else _("Note: one line, with no |."))
     values = {"slides": slides, "point": point, "status": status,
               "check": " ".join(form.get("check", "").split()),
               "note": " ".join(form.get("note", "").split()), "covered_by": covered}
@@ -224,13 +228,13 @@ def save_point(course: Course, name: str, point_id: str, values: dict) -> list[s
     store = store_module.load(course.workspace.root)
     lecture = store.lectures.get(name) if store else None
     if lecture is None:
-        return ["No such lecture in the data; reload the page."]
+        return [_("No such lecture in the data; reload the page.")]
     found = next((p for p in lecture.points if p.id == point_id), None)
     if found is None:
-        return ["No such point in the data; reload the page."]
+        return [_("No such point in the data; reload the page.")]
     new_id = store_module.point_id(name, values["slides"], values["point"])
     if new_id != point_id and any(p.id == new_id for p in lecture.points):
-        return ["The lecture has that point at those slides already."]
+        return [_("The lecture has that point at those slides already.")]
     index = lecture.points.index(found)
     lecture.points[index] = found.model_copy(update={**values, "id": new_id,
                                                      "owner_edited": True, "removed": False})
@@ -242,10 +246,10 @@ def add_point(course: Course, name: str, values: dict) -> list[str]:
     store = store_module.load(course.workspace.root)
     lecture = store.lectures.get(name) if store else None
     if lecture is None:
-        return ["No such lecture in the data; reload the page."]
+        return [_("No such lecture in the data; reload the page.")]
     new_id = store_module.point_id(name, values["slides"], values["point"])
     if any(p.id == new_id for p in lecture.points):
-        return ["The lecture has that point at those slides already."]
+        return [_("The lecture has that point at those slides already.")]
     lecture.points.append(Point(id=new_id, owner_edited=True, **values))
     store_module.save(course.workspace.root, store)
     return []
@@ -256,7 +260,7 @@ def drop_point(course: Course, name: str, point_id: str) -> list[str]:
     store = store_module.load(course.workspace.root)
     lecture = store.lectures.get(name) if store else None
     if lecture is None or not any(p.id == point_id for p in lecture.points):
-        return ["No such point in the data; reload the page."]
+        return [_("No such point in the data; reload the page.")]
     lecture.points = [p for p in lecture.points if p.id != point_id]
     store_module.save(course.workspace.root, store)
     return []
@@ -268,7 +272,7 @@ def keep_point(course: Course, name: str, point_id: str) -> list[str]:
     lecture = store.lectures.get(name) if store else None
     found = next((p for p in (lecture.points if lecture else []) if p.id == point_id), None)
     if found is None:
-        return ["No such point in the data; reload the page."]
+        return [_("No such point in the data; reload the page.")]
     found.removed, found.owner_edited = False, True
     store_module.save(course.workspace.root, store)
     return []

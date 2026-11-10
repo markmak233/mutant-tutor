@@ -49,6 +49,7 @@ from tutor.envcheck import NOT_PIP, pip_requirements, requires_problems, version
 from tutor.gui import requirement_versions, tasks, toml_edit
 from tutor.gui.courses import Course
 from tutor.gui.i18n import N_
+from tutor.gui.i18n import gettext_ as _
 from tutor.gui.toml_edit import put
 from tutor.materials import imports_found
 from tutor.materials import requires as requires_draft
@@ -217,11 +218,12 @@ def check_requires(names: list[str], versions: list[str], chosen: str | None
         # Toolchain names are lower case; pip identities also ignore -_. separators.
         name = name.lower() if name.lower() in NOT_PIP else name
         if not name:
-            problems.append(f"The version {version} has no name.")
+            problems.append(_("The version %(version)s has no name.") % {"version": version})
         elif not version:
-            problems.append(f"{name}: give a version prefix, such as 3.5 for any 3.5.x.")
+            problems.append(_("%(name)s: give a version prefix, such as 3.5 for any 3.5.x.")
+                            % {"name": name})
         elif requires_draft.pip_key(name) in {requires_draft.pip_key(n) for n in table}:
-            problems.append(f"{name} is listed twice.")
+            problems.append(_("%(name)s is listed twice.") % {"name": name})
         else:
             table[name] = version
     problems += requires_problems(table, allow_bounds=True)
@@ -235,7 +237,8 @@ def check_requires(names: list[str], versions: list[str], chosen: str | None
         try:
             image_recipe.hadoop_release(table["hadoop"])
         except container.ContainerError as e:
-            problems.append(f"{e}; the container's image could not be built.")
+            problems.append(_("%(error)s; the container's image could not be built.")
+                            % {"error": e})
     return (None if problems else table), problems
 
 
@@ -295,8 +298,9 @@ def check_imports(rows: list[tuple[str, str]], ticked: set[str], modules: dict[s
         module = modules.get(key, "").strip() or module_for(name, {})
         if key in ticked:
             if not MODULE.match(module):
-                problems.append(f"{name}: {module!r} is not a module name to import, such as "
-                                "sklearn for scikit-learn.")
+                problems.append(_("%(name)s: %(module)r is not a module name to import, such "
+                                  "as sklearn for scikit-learn.")
+                                % {"name": name, "module": module})
             elif module not in allow:
                 allow.append(module)
         elif module in allow:
@@ -323,12 +327,13 @@ def allow_found(course: Course, modules: list[str], headers: list[str]) -> list[
     headers = [h.strip() for h in headers if h.strip()]
     for module in modules:
         if not MODULE.match(module):
-            problems.append(f"{module!r} is not a module name.")
+            problems.append(_("%(module)r is not a module name.") % {"module": module})
     for header in headers:
         if not re.fullmatch(r"[\w.-]+\.h", header):
-            problems.append(f"{header!r} is not a header file name such as stack.h.")
+            problems.append(_("%(header)r is not a header file name such as stack.h.")
+                            % {"header": header})
     if not modules and not headers:
-        problems.append("Tick what the exercises may use first.")
+        problems.append(_("Tick what the exercises may use first."))
     if problems:
         return problems
     safety = toml_edit.read(course.workspace.root).get("safety", {})
@@ -362,13 +367,13 @@ def save_requires(course: Course, table: dict[str, str], allow: list[str] | None
 def save_runner(course: Course, chosen: str, understood: bool) -> list[str]:
     """[isolation] runner = chosen; the table's other keys stay."""
     if chosen not in RUNNERS:
-        return ["Choose where tests run: container or host."]
+        return [_("Choose where tests run: container or host.")]
     if chosen == "host" and languages.is_c(_data(course)):
-        return ["A C course's tests run only in a container: a static check cannot bound what "
-                "C code does (docs/design.md, \"C\")."]
+        return [_("A C course's tests run only in a container: a static check cannot bound "
+                  "what C code does (docs/design.md, \"C\").")]
     if chosen == "host" and not understood:
-        return ["To run tests on this machine, tick that you understand generated code then "
-                "runs with your rights."]
+        return [_("To run tests on this machine, tick that you understand generated code "
+                  "then runs with your rights.")]
     old = _data(course).get("isolation", {})
     expected = {**old, "runner": chosen}
 
@@ -461,7 +466,7 @@ def accept(course: Course, chosen: dict[str, str]) -> list[str]:
     """Add the ticked candidates ({name: version as typed}) to [requires], or replace the
     version of one listed already, by the same rules as the table's rows."""
     if not chosen:
-        return ["Tick the entries to add first."]
+        return [_("Tick the entries to add first.")]
     # A draft changes only its selected entries; existing comparisons must stay visible.
     table = dict(course.workspace.effective_requires)
     for name, version in chosen.items():

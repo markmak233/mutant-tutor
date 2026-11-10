@@ -41,6 +41,7 @@ from pathlib import Path
 from tutor.gui import tasks, toml_edit
 from tutor.gui.courses import Course
 from tutor.gui.i18n import N_
+from tutor.gui.i18n import gettext_ as _
 from tutor.materials import coverage_store
 from tutor.materials.cache import is_lecture, lecture_caches, lecture_name
 from tutor.materials.slides import lecture_number
@@ -275,39 +276,43 @@ def check_form(course: Course, label: str, chosen: list[str], mode: str, how: st
     problems = []
     label = label.strip()
     if not LABEL.match(label):
-        problems.append("The label takes lowercase letters, digits and '-', 40 at most, "
-                        "e.g. w9-streams.")
+        problems.append(_("The label takes lowercase letters, digits and '-', 40 at most, "
+                          "e.g. w9-streams."))
     elif (free := free_label(course, label)) is None:
-        problems.append(f"A batch labelled {label} exists already, and adding -1, -2, ... "
-                        "would pass 40 characters: choose a shorter label.")
+        problems.append(_("A batch labelled %(label)s exists already, and adding -1, -2, ... "
+                          "would pass 40 characters: choose a shorter label.")
+                        % {"label": label})
     else:
         label = free  # a taken label gets the first free -1, -2, ... (owner, 2026-11-09)
-    ready, _ = lectures(course)
+    ready, _unread = lectures(course)  # not `_`: that is gettext here
     if not chosen:
-        problems.append("Choose at least one lecture.")
+        problems.append(_("Choose at least one lecture."))
     elif any(name not in ready for name in chosen):
-        problems.append("Only lectures read into the cache can be chosen.")
+        problems.append(_("Only lectures read into the cache can be chosen."))
     if mode not in ("learn", "review"):
-        problems.append("The mode is learn or review.")
+        problems.append(_("The mode is learn or review."))
     number = limit = None
     if how == "exact":
         number = _number(count)
         if number is None:
-            problems.append(f"Exactly how many: a number from 1 to {MAX_COUNT}.")
+            problems.append(_("Exactly how many: a number from 1 to %(max)d.")
+                            % {"max": MAX_COUNT})
     elif how == "auto":
         limit = _number(max_count)
         if limit is None:
-            problems.append(f"The limit when the model decides: a number from 1 to "
-                            f"{MAX_COUNT}.")
+            problems.append(_("The limit when the model decides: a number from 1 to "
+                              "%(max)d.") % {"max": MAX_COUNT})
         if count.strip():
             # No script switches the choice when a number is typed: say so, never guess.
-            problems.append("A number is typed under \"Exactly\", but \"Let the plan model "
-                            "decide\" is chosen: choose one.")
+            problems.append(_("A number is typed under \"Exactly\", but \"Let the plan model "
+                              "decide\" is chosen: choose one."))
     else:
-        problems.append("Choose how many exercises: the model decides, or exactly a number.")
+        problems.append(_("Choose how many exercises: the model decides, or exactly a "
+                          "number."))
     text = clean_text(prefs)
     if text is None:
-        problems.append(f"Preferences: {MAX_TEXT} characters at most, plain text.")
+        problems.append(_("Preferences: %(max)d characters at most, plain text.")
+                        % {"max": MAX_TEXT})
     if problems:
         return None, problems
     return NewBatch(label, [n for n in ready if n in chosen], mode, number, limit, text or "",
