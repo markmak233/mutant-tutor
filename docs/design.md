@@ -3962,7 +3962,9 @@ late; the adaptive review screens can be built with it.
     one would fail the page; the same `<...>` pieces, so no markup of the model's own);
     a refused or unanswered string stays English and is asked again next time, as a run
     asks only for what the file lacks, so a page changed in English never breaks another
-    language. Jinja's new-style `_()` marks what gettext returns as safe HTML (so the
+    language; a string the model gives back unchanged ("Docker") is kept so, as done,
+    else it was asked again on every run and the count never reached the total
+    (2026-11-11). Jinja's new-style `_()` marks what gettext returns as safe HTML (so the
     values it formats in are escaped), translated or not, so the callables escape the
     text first: an English string may say `<profile>` and shows as written; a literal `%`
     in a page's English is written `%%` (a test checks every string). The language: the
@@ -3970,9 +3972,18 @@ late; the adaptive review screens can be built with it.
     `<root>/.tutor-gui-settings.json`, else the browser's Accept-Language when a file of
     that code exists, else English. Tried on Ollama's qwen3 0.6B for the click check
     (59 of 82 strings; the rest stayed English): the path, not the quality. Plural forms:
-    two for every language (the same text twice where a language has one). The
-    templates are wrapped page by page (82 strings on 2026-11-10: the home page, the
-    frame, the Language page and the notices).
+    two for every language (the same text twice where a language has one). Every
+    template is wrapped (2026-11-11: 880 strings), and the Python side too: the form
+    problems a module returns are looked up with `gettext_` inside the request, the
+    state words a chip shows (task statuses, plan and item states, doctor's statuses,
+    the [requires] kinds) and the explanations are `N_()` strings, so the files and the
+    comparisons keep the English and the page shows `_(state)`; every abort message is
+    `N_()` and the error handler translates it with gettext alone (a command's text may
+    carry a `%`). A sentence with a link or `<code>` inside is one string, its pieces
+    passed in as captured blocks (`{% set code_x %}<code>…</code>{% endset %}`, which
+    escape their content), so a translator sees the whole sentence. Still English:
+    the language rows' titles and roles (`tutor.languages`, a core module), a
+    throwaway `_` must not be used in a module that imports gettext as `_`.
   - Servers on this machine in New model (owner, 2026-11-07 "WSL and Mac llama, those
     local ones, later"; 2026-11-10). models.dev lists only LM Studio of them. The form's
     provider choice now starts with an "On this machine" group (Ollama, LM Studio,
