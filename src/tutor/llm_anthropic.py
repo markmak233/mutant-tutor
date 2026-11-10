@@ -156,6 +156,11 @@ def supported(schema):
             out[key] = {name: supported(sub) for name, sub in value.items()}
         else:
             out[key] = supported(value)
+    if (out.get("type") == "object" or "properties" in out) and "additionalProperties" not in out:
+        # Required by the API for every object ("must be explicitly set to false",
+        # 2026-11-10, the coverage draft's schema); pydantic writes it only for a model
+        # with extra="forbid". The caller's model still decides what it accepts.
+        out["additionalProperties"] = False
     return out
 
 

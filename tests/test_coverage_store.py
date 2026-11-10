@@ -122,8 +122,12 @@ def test_rendering_is_the_files_shape_and_reads_back_to_the_same_data():
     assert "| 8.20 | Banding | gap-code [the band count that gives the s-curve] |" in text
     assert text.rstrip().endswith("| Lab 4 | Secondary sort | ex:reverse-graph (p2-w3) |")
     again, _ = cs.from_markdown(text, KNOWN)
-    assert [x.model_dump() for x in again.lectures.values()] == [
-        x.model_dump() for x in store.lectures.values()]
+    # The same data back, but for owner_edited: the rendered file names its lectures the
+    # drafts' way, and the flag is not written into it (coverage.json keeps it).
+    assert [x.model_dump(exclude={"points": {"__all__": {"owner_edited"}}})
+            for x in again.lectures.values()] == [
+        x.model_dump(exclude={"points": {"__all__": {"owner_edited"}}})
+        for x in store.lectures.values()]
     assert cs.render(again) == text  # stable
 
 
@@ -163,20 +167,72 @@ def test_a_new_draft_keeps_the_owners_points_adds_new_ones_and_marks_vanished_on
     assert lecture.uncovered == [41]
 
 
-def test_a_practised_point_is_never_dropped_by_a_draft_and_a_found_again_one_comes_back():
-    store, _ = cs.from_markdown(HAND_WRITTEN, KNOWN)
+def test_a_hand_written_files_rows_are_the_owners_and_a_drafts_rows_are_not():
+    hand, report = cs.from_markdown(HAND_WRITTEN, KNOWN)
+    drafted, _ = cs.from_markdown(DRAFTED, KNOWN)
+
+    assert all(p.owner_edited for lecture in hand.lectures.values() for p in lecture.points)
+    assert any("hand-written file" in line for line in report)
+    assert not any(p.owner_edited for lecture in drafted.lectures.values()
+                   for p in lecture.points)
+
+
+def _model_lecture() -> tuple[str, cs.Lecture]:
+    """A lecture as a draft left it: three model rows, one practised, one edited later."""
     name = "Lecture_8.1-Similar_I"
-    lecture = store.lectures[name]
-    lecture.points[0].removed = True  # marked by an earlier draft
+    mark = cs.Covered(mark="ex:grid-knn", batch="w8")
+    rows = [("8.3-8.9", "Near-neighbour problems", {}),
+            ("8.10-8.12", "Grid index", {"covered_by": [mark]}),
+            ("8.20", "Banding", {"owner_edited": True, "check": "mine"}),
+            ("8.21", "Old wording", {})]
+    lecture = cs.Lecture(points=[cs.Point(id=cs.point_id(name, s, p), slides=s, point=p, **f)
+                                 for s, p, f in rows])
+    return name, lecture
 
-    found_again = [cs.Point(id="", slides="8.3-8.9", point="Near-neighbour problems")]
-    cs.merge_draft(name, lecture, found_again, "h", "m", [])
 
-    by_slides = {p.slides: p for p in lecture.points}
-    assert by_slides["8.3-8.9"].removed is False  # found again
-    practised = by_slides["8.10-8.12"]
-    assert practised.removed is False and practised.covered_by
-    assert by_slides["8.20"].removed is True  # a plain gap the draft no longer has
+def test_an_incremental_draft_marks_vanished_model_rows_and_keeps_the_rest():
+    name, lecture = _model_lecture()
+    lecture.points[0].removed = True  # marked by an earlier draft, found again now
+    drafted = [cs.Point(id="", slides="8.3-8.9", point="Near-neighbour problems"),
+               cs.Point(id="", slides="8.10-8.12", point="Grid index, reworded")]
+
+    counts = cs.merge_draft(name, lecture, drafted, "h", "m", [])
+
+    by_slides = {p.point: p for p in lecture.points}
+    assert by_slides["Near-neighbour problems"].removed is False  # found again
+    assert by_slides["Grid index"].removed is False and by_slides["Grid index"].covered_by
+    assert by_slides["Grid index, reworded"].removed is False  # added beside it
+    assert by_slides["Banding"].removed is False  # the owner's
+    assert by_slides["Old wording"].removed is True  # the owner confirms
+    assert counts == {"kept": 3, "added": 1, "removed": 1}
+
+
+def test_a_whole_redraft_replaces_model_rows_and_moves_the_marks_to_the_new_row():
+    name, lecture = _model_lecture()
+    drafted = [cs.Point(id="", slides="8.3-8.9", point="Near neighbours, reworded"),
+               cs.Point(id="", slides="8.10-8.12", point="Grid index, reworded"),
+               cs.Point(id="", slides="8.22", point="Something new")]
+
+    counts = cs.merge_draft(name, lecture, drafted, "h", "m", [], replace=True)
+
+    points = {p.point: p for p in lecture.points}
+    assert set(points) == {"Near neighbours, reworded", "Grid index, reworded", "Banding",
+                           "Something new"}  # "Old wording" went; no removal to confirm
+    assert not any(p.removed for p in lecture.points)
+    assert points["Grid index, reworded"].covered_by == [cs.Covered(mark="ex:grid-knn", batch="w8")]
+    assert points["Banding"].check == "mine"  # the owner's row stays
+    assert counts == {"kept": 1, "added": 3, "removed": 3}
+
+
+def test_a_whole_redraft_keeps_a_practised_row_with_no_new_row_at_its_slides():
+    name, lecture = _model_lecture()
+    drafted = [cs.Point(id="", slides="8.10-8.11", point="Grid index, other slides")]
+
+    cs.merge_draft(name, lecture, drafted, "h", "m", [], replace=True)
+
+    points = {p.point: p for p in lecture.points}
+    assert "Grid index" in points and points["Grid index"].covered_by  # kept, marks on it
+    assert "Old wording" not in points and "Banding" in points
 
 
 def test_a_batch_marks_the_one_point_its_exercise_covers_or_leaves_it_to_a_proposal():
@@ -226,6 +282,13 @@ def test_the_planner_gets_the_rendered_table_when_the_data_exists_else_the_file(
     assert (workspace / "coverage.md.bak").read_text(encoding="utf-8") == HAND_WRITTEN
     assert cs.migrate(workspace, out=lambda *a: None) == 1  # once only
     assert cs.missing_lectures(store, list(KNOWN)) == ["Lecture_8.2-Similar_II"]
+    # The file's lectures count as drafted from the current text: a draft asks only for
+    # the ones it lacks.
+    from tutor.materials import cache, coverage
+    for name, lecture in store.lectures.items():
+        current = coverage.lecture_hash(cache.load(workspace / "cache" / "lectures"
+                                                   / f"{KNOWN[name]}.md"))
+        assert lecture.source_hash == current
 
 
 def test_the_rendered_file_is_known_to_be_stale_when_edited_by_hand(tmp_path):

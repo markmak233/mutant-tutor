@@ -129,8 +129,8 @@ def test_a_schema_goes_to_output_config_as_structured_output(sent):
          thinking=False)
 
     body = json.loads(sent[0][0].data)
-    assert body["output_config"] == {"effort": "low",
-                                     "format": {"type": "json_schema", "schema": schema}}
+    assert body["output_config"] == {"effort": "low", "format": {
+        "type": "json_schema", "schema": {**schema, "additionalProperties": False}}}
     assert "response_format" not in body
     assert all("Schema" not in block["text"] for m in body["messages"] for block in m["content"])
 
@@ -152,14 +152,15 @@ def test_constraints_anthropic_refuses_are_left_out_of_the_schema_sent(sent):
     chat(config(), [{"role": "user", "content": "hi"}], purpose="generate", response_schema=schema)
 
     sent_schema = json.loads(sent[0][0].data)["output_config"]["format"]["schema"]
+    # Every object also gets additionalProperties: false, which the API requires.
     assert sent_schema == {"type": "object", "properties": {
         "timeout_s": {"type": "number", "description": "seconds"},
         "tags": {"type": "array", "items": {"type": "string"}},
         "pattern": {"type": "string"},
         "nested": {"$ref": "#/$defs/Inner"}},
         "$defs": {"Inner": {"type": "object", "properties": {"n": {"type": "integer"}},
-                            "anyOf": [{}, {"type": "null"}]}},
-        "required": ["timeout_s"]}
+                            "anyOf": [{}, {"type": "null"}], "additionalProperties": False}},
+        "required": ["timeout_s"], "additionalProperties": False}
     assert "exclusiveMinimum" in json.dumps(schema)  # the caller's schema is untouched
 
 

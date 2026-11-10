@@ -323,6 +323,18 @@ def _lecture_for(heading: str, known: dict[str, str]) -> str | None:
     return None
 
 
+def _drafts_headings(text: str, known: dict[str, str]) -> bool:
+    """Whether the file names its lectures the way a draft writes them (a lecture's name
+    or cache file name as a heading). A file that does not was written by hand, and its
+    rows are the owner's: kept by every later draft (owner_edited)."""
+    names = set(known) | set(known.values())
+    for line in text.splitlines():
+        heading = _HEADING.match(line)
+        if heading and heading.group(2).strip().strip("`") in names:
+            return True
+    return False
+
+
 def from_markdown(text: str, known: dict[str, str]) -> tuple[Store, list[str]]:
     """coverage.md read into data, and a report of what needed a decision. `known`: the
     course's lectures, name -> cache file name, which headings are mapped to. A heading
@@ -331,6 +343,7 @@ def from_markdown(text: str, known: dict[str, str]) -> tuple[Store, list[str]]:
     become points; a row that is not three cells, and any other text, is kept as notes."""
     store = Store()
     report: list[str] = []
+    hand_kept = not _drafts_headings(text, known)
     current: str | None = None
     pending: list[str] = []  # free text not yet given to a lecture
     unknown_headings: list[str] = []
@@ -393,7 +406,8 @@ def from_markdown(text: str, known: dict[str, str]) -> tuple[Store, list[str]]:
             slides, point, status = (c.replace("\\|", "|") for c in cells)
             lecture = store.lectures[current]
             lecture.points.append(Point(id=point_id(current, slides, point), slides=slides,
-                                        point=point, **parse_status(status)))
+                                        point=point, owner_edited=hand_kept,
+                                        **parse_status(status)))
             continue
         bold = re.fullmatch(r"\*\*(.+)\*\*", stripped) if current is not None else None
         if bold and not store.lectures[current].title and not store.lectures[current].points:
@@ -420,6 +434,8 @@ def from_markdown(text: str, known: dict[str, str]) -> tuple[Store, list[str]]:
         if covered:
             report.append(f"{name}: {covered} covered row(s) had no gap kind in the file; "
                           "recorded as gap-code")
+    if hand_kept and store.lectures:
+        report.append("a hand-written file: its rows are kept as the owner's by every draft")
     if unknown_headings:
         report.append("headings that name no lecture (their text went to the next lecture's "
                       "notes, or to the end of the file): " + ", ".join(unknown_headings))
@@ -433,12 +449,16 @@ def from_markdown(text: str, known: dict[str, str]) -> tuple[Store, list[str]]:
 
 
 def merge_draft(name: str, lecture: Lecture, drafted: list[Point], source_hash: str,
-                model: str, uncovered: list[int], today: str | None = None) -> dict[str, int]:
+                model: str, uncovered: list[int], today: str | None = None,
+                replace: bool = False) -> dict[str, int]:
     """A new draft of one lecture taken into its data, in place. By id: a point the draft
     has again is kept (the owner's fields untouched; its pages filled in); a point the
-    owner edited is kept whatever the draft says; any other point the draft no longer has
-    is marked removed, for the owner to confirm; a new point is added where the draft puts
-    it. Returns the counts, for the report."""
+    owner edited is kept whatever the draft says; a new point is added where the draft
+    puts it. Any other point the draft no longer has: marked removed, for the owner to
+    confirm (the incremental draft), or with `replace` (a whole lecture drafted again on
+    purpose, owner 2026-11-10) dropped, as it was the model's own earlier output, except
+    a practised one, whose `covered_by` marks move to the one new point at the same slides
+    when there is one, and which stays otherwise. Returns the counts, for the report."""
     by_id = {p.id: p for p in lecture.points}
     kept = added = removed = 0
     seen: set[str] = set()
@@ -458,13 +478,26 @@ def merge_draft(name: str, lecture: Lecture, drafted: list[Point], source_hash: 
     for old in lecture.points:
         if old.id in seen:
             continue
-        if old.owner_edited or old.covered_by:
-            merged.append(old)  # the owner's, or practised: never dropped by a draft
+        if old.owner_edited:
+            merged.append(old)  # the owner's: never dropped by a draft
             kept += 1
-        else:
-            old.removed = True
+        elif old.covered_by and replace:
+            same = [p for p in merged if p.id not in by_id
+                    and " ".join(p.slides.split()) == " ".join(old.slides.split())]
+            if len(same) == 1 and not same[0].covered_by:
+                same[0].covered_by = list(old.covered_by)  # the marks move to the new row
+                removed += 1
+            else:
+                merged.append(old)
+                kept += 1
+        elif old.covered_by or not replace:
+            if not old.covered_by:
+                old.removed = True  # for the owner to confirm
             merged.append(old)
-            removed += 1
+            kept += bool(old.covered_by)
+            removed += not old.covered_by
+        else:
+            removed += 1  # the model's own earlier row, replaced
     lecture.points = merged
     lecture.source_hash, lecture.model = source_hash, model
     lecture.drafted = today or date.today().isoformat()
@@ -510,6 +543,16 @@ def migrate(workspace: Path, out=print) -> int:
         out(f"no {COVERAGE_FILE} to migrate: draft one (python -m tutor.materials.coverage)")
         return 1
     store, report = from_markdown(path.read_text(encoding="utf-8"), known_lectures(workspace))
+    # The file's rows describe the lectures as they are now: a lecture it covers counts as
+    # drafted from the current text, so the next draft asks only for the lectures it lacks
+    # (and, later, for a lecture whose text changes); `redraft --all` asks for every one.
+    from tutor.materials import coverage
+    from tutor.materials.requires import lecture_files
+
+    for file in lecture_files(workspace):
+        name = cache.lecture_name(file) or file.name
+        if name in store.lectures:
+            store.lectures[name].source_hash = coverage.lecture_hash(cache.load(file))
     backup = workspace / f"{COVERAGE_FILE}.bak"
     if backup.exists():
         backup = workspace / f"{COVERAGE_FILE}.bak-{date.today().isoformat()}"
@@ -569,7 +612,7 @@ def redraft(workspace: Path, profile: str | None, every: bool, out=print) -> int
                          first_page=row.first_page, last_page=row.last_page)
                    for row in section.rows]
         counts = merge_draft(name, lecture, drafted, digest, str(data.get("model", "")),
-                             section.uncovered)
+                             section.uncovered, replace=every)
         save(workspace, store)
         out(f"  {name}: kept {counts['kept']}, added {counts['added']}, "
             f"removed {counts['removed']}")

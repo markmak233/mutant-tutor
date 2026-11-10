@@ -4187,9 +4187,27 @@ late; the adaptive review screens can be built with it.
     lacks is drafted into it. Clicked in headless Chrome on two scratch courses with the
     stand-in launcher: use the draft, edit a point (the rendered coverage.md shows the new
     marks), add a point; the conversion preview and Convert on a hand-written file (the
-    week's note on its lecture, `.bak` kept). Still to do: every course drafted again from
-    scratch with the Claude models, the owner's edits and marks carried over (paid; the
-    owner's go first), after each course's file is converted on its page.
+    week's note on its lecture, `.bak` kept).
+  - Drafting a lecture again (owner, 2026-11-10). Ids come from a point's slides and text,
+    so a lecture drafted again by another model matches almost none of its old rows by id;
+    under the incremental rule every old row would wait for the owner's confirmation (96,
+    220 and 276 rows on the three courses). So "Draft every lecture again" (`redraft
+    --all`, `merge_draft(replace=True)`) replaces the model's own earlier rows without
+    asking: a row the owner edited stays; a practised row's marks move to the one new row
+    at the same slides when there is one (the row itself goes), and the row stays when
+    there is none; any other old row goes. The incremental draft (new or changed lectures)
+    keeps the confirmation rule. A hand-written file's rows (one whose headings are not the
+    drafts') are read as the owner's (`owner_edited`), so a whole redraft keeps them all,
+    which would put the model's rows beside them: that course is drafted lecture by
+    lecture as the owner decides, not whole. Converting also records each covered lecture
+    as drafted from its current text, so the next draft asks only for the lectures the
+    file lacked. Done 2026-11-10 with Sonnet 5.5 (numbers in the owner's notes): the three
+    files converted on the command line (the page's own code), the course with no file
+    drafted whole, the two model-drafted courses drafted again whole, the hand-written
+    course's three missing lectures taken from their stored answers. The first run found
+    that the API wants `additionalProperties: false` on every object of a schema (the
+    draft's answer model has no `extra="forbid"`, unlike the pipeline's): the anthropic
+    module adds it to the copy it sends.
 - Packaging the GUI itself as an image (owner asked, 2026-11-05: the aim is opening it in one click,
   see "Packaging and release", which does not need this, so an image is at most a later option). The
   costs: to start test containers from inside, it needs the Docker socket, which amounts to root on
