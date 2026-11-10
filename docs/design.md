@@ -3957,9 +3957,10 @@ late; the adaptive review screens can be built with it.
     with no key (`catalog.installed`): what it has loaded or pulled, which models.dev could
     not know; that call goes only to localhost, so the page never makes the GUI's server
     call out. The server's list does not say whether a model thinks or reads images (the
-    table says "not said"). Another port or address is typed into the form by hand; a
-    server in WSL is reached from Windows at localhost too (WSL 2 forwards it; written
-    from the docs, to be clicked on the owner's PC at the packaging check).
+    table says "not said"). The address beside the choice can be changed (another port,
+    say) and the server listed again, and "Use" carries it into the form (owner,
+    2026-11-10); a server in WSL is reached from Windows at localhost too (WSL 2 forwards
+    it; written from the docs, to be clicked on the owner's PC at the packaging check).
     What makes a local server unlike a cloud one: it ignores a request field it does not
     know instead of refusing it with 400 (Ollama 0.30.2 and `think: false` on its OpenAI
     path, tried 2026-11-10), so chat()'s try-the-next-switch never runs and thinking stays

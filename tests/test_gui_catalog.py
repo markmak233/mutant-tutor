@@ -343,6 +343,29 @@ def test_a_local_server_lists_its_models_on_the_page_or_says_it_is_down(root, mo
     monkeypatch.setattr(catalog, "installed", lambda url: ((), f"Nothing answers at {url}"))
     text = _page(client, "/c/demo-course/models/new?catalog=llamacpp")
     assert "Nothing answers at http://localhost:8080/v1" in text and "<table" not in text
+    assert 'name="at" value="http://localhost:8080/v1"' in text  # the address, to change
+
+
+def test_a_local_servers_address_can_be_changed_and_listed_again(root, monkeypatch):
+    """Another port (owner, 2026-11-10): typed beside the choice, asked at that address,
+    carried by Use into the form."""
+    asked = []
+
+    def installed(url):
+        asked.append(url)
+        return (catalog.Model("m-1", "m-1", "", None, (), False, 0, None, None),), ""
+
+    monkeypatch.setattr(catalog, "installed", installed)
+    client = _browser(root)
+    text = _page(client, "/c/demo-course/models/new?catalog=ollama&at=http://localhost:11435/v1/")
+    assert asked == ["http://localhost:11435/v1"]
+    assert 'name="at" value="http://localhost:11435/v1"' in text
+    assert "model=m-1&amp;at=http://localhost:11435/v1" in text  # Use keeps it
+    text = _page(client, "/c/demo-course/models/new?catalog=ollama&model=m-1"
+                         "&at=http://localhost:11435/v1")
+    assert 'name="base_url" value="http://localhost:11435/v1"' in text
+    text = _page(client, "/c/demo-course/models/new?catalog=ollama&at=localhost:11435")
+    assert "The address starts with http://" in text and len(asked) == 2
 
 
 def test_a_providers_address_from_the_list_is_marked_and_a_moved_one_shown(root):

@@ -38,10 +38,11 @@
         {% endif %}
       </select>
     </label>
+    {% if sel in local %}<label>at <input type="text" name="at" value="{{ shelf.at or shelf.provider.base_url }}" maxlength="200" size="28" autocomplete="off" title="the server's address: change the port here, then list again"></label>{% endif %}
     <button type="submit" class="small">List its models</button>
     {% if found %}<button type="submit" class="small" formmethod="post" formaction="{{ url_for('refresh_catalog', name=course.folder) }}">Refresh the list</button>{% endif %}
   </form>
-  <p class="muted">A server on this machine (Ollama, LM Studio, llama.cpp, vLLM) lists the models it has, at its usual port; a server in WSL is reached at localhost too (WSL 2 forwards it). Another port or address: fill the form below by hand.</p>
+  <p class="muted">A server on this machine (Ollama, LM Studio, llama.cpp, vLLM) lists the models it has, at its usual port; change the address beside it for another port, then list again. A server in WSL is reached at localhost too (WSL 2 forwards it).</p>
   {% if not found %}
   {% if shelf.stale %}<p class="notice notice-bad">The list kept ({{ shelf.stale }}) came from an older version of this tool, which now keeps more of it: fetch it again.</p>{% endif %}
   <p class="muted">The cloud providers come from a public list (<a href="https://models.dev" rel="noopener noreferrer" target="_blank">models.dev</a>, MIT): base URL, key name, release dates, prices. It is downloaded only when you click, and nothing of your courses is sent. Or fill the form below by hand.</p>
@@ -75,12 +76,12 @@
         <td>{{ "yes" if m.image else "" }}</td>
         <td class="num">{{ m.context_text }}</td>
         <td class="num">{{ m.price_text }}</td>
-        <td><a href="{{ url_for('new_model', name=course.folder, catalog=p.id, model=m.id) }}#model-form">Use</a></td>
+        <td><a href="{{ url_for('new_model', name=course.folder, catalog=p.id, model=m.id, **({'at': shelf.at} if shelf.at else {})) }}#model-form">Use</a></td>
       </tr>
     {% endfor %}
     </tbody>
   </table>
-  {% if shelf.hidden %}<p><a href="{{ url_for('new_model', name=course.folder, catalog=p.id, all=1) }}">Show all {{ shelf.models | length + shelf.hidden }} models</a> <span class="muted">(the newest {{ shelf.models | length }} are listed)</span></p>{% endif %}
+  {% if shelf.hidden %}<p><a href="{{ url_for('new_model', name=course.folder, catalog=p.id, all=1, **({'at': shelf.at} if shelf.at else {})) }}">Show all {{ shelf.models | length + shelf.hidden }} models</a> <span class="muted">(the newest {{ shelf.models | length }} are listed)</span></p>{% endif %}
   {% else %}
   <p class="muted">models.dev lists no model of this provider that is still offered.</p>
   {% endif %}

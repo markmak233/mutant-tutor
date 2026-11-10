@@ -76,16 +76,23 @@ def register(app: Flask) -> None:
         """A blank form, with the models.dev catalog above it (catalog.py): `catalog` picks
         a provider, whose models are listed, `model` one of them, which fills the form, and
         `all` lists every model instead of the newest. A server on this machine (LOCAL) is
-        asked for its own models, at its default address, with no key."""
+        asked for its own models, with no key, at its default address or the one typed
+        in beside the choice (`at`: another port, say; owner, 2026-11-10), which "Use"
+        then fills into the form."""
         course = course_or_404(name)
         found = catalog.load(app.config["ROOT"])
         chosen = request.args.get("catalog", "")
         provider = catalog.local_provider(chosen) or (found.provider(chosen) if found
                                                       else None)
-        problem = ""
+        problem, at = "", " ".join(request.args.get("at", "").split()).rstrip("/")
         if provider and provider.id in catalog.LOCAL:
-            listed, problem = catalog.installed(provider.base_url)
-            provider = dataclasses.replace(provider, models=listed)
+            if at and not at.startswith(("http://", "https://")):
+                problem, at = f"The address starts with http://, not {at[:40]!r}.", ""
+            if at:
+                provider = dataclasses.replace(provider, base_url=at)
+            if not problem:
+                listed, problem = catalog.installed(provider.base_url)
+                provider = dataclasses.replace(provider, models=listed)
         model = next((m for m in provider.models if m.id == request.args.get("model")),
                      None) if provider else None
         values: dict = {"name": ""}
@@ -102,6 +109,7 @@ def register(app: Flask) -> None:
         shelf = {"catalog": found, "stale": "" if found else catalog.stale(app.config["ROOT"]),
                  "provider": provider, "model": model, "notes": notes,
                  "models": shown, "hidden": len(listed) - len(shown), "problem": problem,
+                 "at": at,  # the address typed in, carried by the page's links
                  "key_set": bool(provider and provider.key_env in key_names())}
         return profile_page(course, None, values, [], shelf=shelf)
 
