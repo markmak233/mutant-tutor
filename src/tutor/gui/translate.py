@@ -7,7 +7,7 @@ English only, and the Language page makes any other language on a click).
 
 NAME is the language as the owner wrote it ("中文", "Deutsch"): the model is told to translate
 into it, the file is named by its slug, and the switch shows the name. `--code TAG` takes the
-language from the built-in table instead (gui/language_table.py, "zh-Hant-HK"): the file is
+language from the built-in table instead (gui/language_table.py, "zh-Hant"): the file is
 named by the tag, so the browser's language finds it, and the table gives the name, the note
 and the direction where NAME and --note do not. Run as a course's task
 (the model and its key come from that course's workspace.toml, the setup role's model unless
@@ -268,7 +268,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("name", nargs="?", default="",
                         help='the language, as the switch will show it ("中文"); may be left '
                              'out with --code')
-    parser.add_argument("--code", help="the language's tag in the built-in table (zh-Hant-HK): "
+    parser.add_argument("--code", help="the language's tag in the built-in table (zh-Hant): "
                                        "names the file; gives the name, note and direction "
                                        "when they are not given")
     parser.add_argument("--profile", help="the model to ask (default: the setup role's, "

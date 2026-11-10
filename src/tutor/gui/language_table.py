@@ -1,12 +1,12 @@
 """The languages the Language page offers by name (owner, 2026-11-10: "is there a standard
 table?"; 2026-11-11). A short built-in table, standard library only: each row a BCP 47 tag
 as the IANA Language Subtag Registry spells it (language, script and region subtags:
-`zh-Hant-HK`), the language's name in itself as Unicode CLDR writes it (what the switch
+`zh-Hant`), the language's name in itself as Unicode CLDR writes it (what the switch
 shows), a sentence for the model where the tag alone leaves the variety or register open
 (the Hong Kong file came back part written standard, part colloquial Cantonese when the
 model was told only "zh_hk"), and whether it is written right to left.
 
-A language chosen from this table gets its file named by the tag (`zh-hant-hk.po`, lower
+A language chosen from this table gets its file named by the tag (`zh-hant.po`, lower
 case: gui/i18n.py's slug), so the browser's Accept-Language finds it (`i18n.from_browser`
 matches subtag by subtag), its name in the X-Name header, its sentence as the note to the
 translator when the owner wrote none, and its direction in X-Direction. A language typed
@@ -34,52 +34,48 @@ class Language:
     rtl: bool = False  # written right to left: <html dir="rtl"> (gui/i18n.py)
 
 
-# Grouped loosely by region; the order is the drop-down's. Notes only where a tag alone
-# would leave the model a choice that showed in a file (register, script, regional words).
+# In the order of the tags (owner, 2026-11-11: the drop-down alphabetical; Hong Kong and
+# Cantonese rows taken out the same day). Notes only
+# where a tag alone would leave the model a choice that showed in a file (register,
+# script, regional words).
 LANGUAGES: tuple[Language, ...] = (
+    Language("ar", "العربية", "Modern Standard Arabic.", rtl=True),
+    Language("bn", "বাংলা"),
+    Language("cs", "Čeština"),
+    Language("da", "Dansk"),
+    Language("de", "Deutsch"),
+    Language("el", "Ελληνικά"),
+    Language("es", "Español",
+             "Spanish in a neutral register readable in Spain and Latin America."),
+    Language("fa", "فارسی", rtl=True),
+    Language("fi", "Suomi"),
+    Language("fr", "Français"),
+    Language("he", "עברית", rtl=True),
+    Language("hi", "हिन्दी"),
+    Language("hu", "Magyar"),
+    Language("id", "Indonesia"),
+    Language("it", "Italiano"),
+    Language("ja", "日本語"),
+    Language("ko", "한국어"),
+    Language("ms", "Melayu"),
+    Language("nb", "Norsk bokmål"),
+    Language("nl", "Nederlands"),
+    Language("pl", "Polski"),
+    Language("pt-BR", "Português (Brasil)", "Brazilian Portuguese."),
+    Language("pt-PT", "Português (Portugal)", "European Portuguese."),
+    Language("ro", "Română"),
+    Language("ru", "Русский"),
+    Language("sv", "Svenska"),
+    Language("ta", "தமிழ்"),
+    Language("th", "ไทย"),
+    Language("tr", "Türkçe"),
+    Language("uk", "Українська"),
+    Language("ur", "اردو", rtl=True),
+    Language("vi", "Tiếng Việt"),
     Language("zh-Hans", "简体中文",
              "Simplified Chinese, the written standard as used in mainland China."),
     Language("zh-Hant", "繁體中文",
              "Traditional Chinese, the written standard as used in Taiwan."),
-    Language("zh-Hant-HK", "繁體中文（香港）",
-             "Traditional Chinese as written in Hong Kong: the standard written register "
-             "with Hong Kong wording; not colloquial Cantonese."),
-    Language("yue", "粵語",
-             "Written Cantonese: colloquial Cantonese in Chinese characters, as written in "
-             "Hong Kong."),
-    Language("ja", "日本語"),
-    Language("ko", "한국어"),
-    Language("vi", "Tiếng Việt"),
-    Language("th", "ไทย"),
-    Language("id", "Indonesia"),
-    Language("ms", "Melayu"),
-    Language("hi", "हिन्दी"),
-    Language("bn", "বাংলা"),
-    Language("ta", "தமிழ்"),
-    Language("ur", "اردو", rtl=True),
-    Language("fa", "فارسی", rtl=True),
-    Language("ar", "العربية", "Modern Standard Arabic.", rtl=True),
-    Language("he", "עברית", rtl=True),
-    Language("tr", "Türkçe"),
-    Language("el", "Ελληνικά"),
-    Language("ru", "Русский"),
-    Language("uk", "Українська"),
-    Language("pl", "Polski"),
-    Language("cs", "Čeština"),
-    Language("hu", "Magyar"),
-    Language("ro", "Română"),
-    Language("de", "Deutsch"),
-    Language("nl", "Nederlands"),
-    Language("sv", "Svenska"),
-    Language("da", "Dansk"),
-    Language("nb", "Norsk bokmål"),
-    Language("fi", "Suomi"),
-    Language("fr", "Français"),
-    Language("it", "Italiano"),
-    Language("es", "Español",
-             "Spanish in a neutral register readable in Spain and Latin America."),
-    Language("pt-BR", "Português (Brasil)", "Brazilian Portuguese."),
-    Language("pt-PT", "Português (Portugal)", "European Portuguese."),
 )
 
 # CLDR's likely script for a Chinese region tag without one: what a browser sends as
@@ -89,7 +85,7 @@ LIKELY_SCRIPT = {("zh", "tw"): "hant", ("zh", "hk"): "hant", ("zh", "mo"): "hant
 
 
 def by_code(code: str) -> Language | None:
-    """The row whose tag is `code`, case apart ("zh-hant-hk" finds zh-Hant-HK)."""
+    """The row whose tag is `code`, case apart ("zh-hant" finds zh-Hant)."""
     wanted = code.strip().lower()
     return next((x for x in LANGUAGES if x.code.lower() == wanted), None)
 
@@ -109,7 +105,7 @@ def subtags(tag: str) -> tuple[str, str | None, str | None]:
 
 def likely(tag: str) -> tuple[str, str | None]:
     """(language, script) of a tag, the script filled in from LIKELY_SCRIPT when the tag
-    has none: "zh-TW" is (zh, hant), "zh-hant-hk" (zh, hant), "de" (de, None)."""
+    has none: "zh-TW" is (zh, hant), "zh-hant" (zh, hant), "de" (de, None)."""
     language, script, region = subtags(tag)
     return language, (script or LIKELY_SCRIPT.get((language, region))
                       or LIKELY_SCRIPT.get((language, None)))

@@ -3986,16 +3986,16 @@ late; the adaptive review screens can be built with it.
     no library ships either in the standard library, and the GUI needs a few dozen rows,
     so a short table by hand: the tag as the registry spells it, the name in the language
     itself as CLDR writes it (the switch shows it), a sentence for the model where the
-    tag leaves the variety or register open (zh-Hant-HK: the written standard with Hong
-    Kong wording, not colloquial Cantonese; yue apart, as written Cantonese; es neutral;
+    tag leaves the variety or register open (zh-Hans and zh-Hant, the written standards
+    of the mainland and of Taiwan; es neutral;
     pt-BR and pt-PT), and the direction. The Language page's form offers the table in a
     drop-down and keeps the text box for a language not in it (no script of our own: the
     box is always there, the server takes the table's choice when there is one). A table
-    language is filed by its tag in lower case (`zh-hant-hk.po`; `--code TAG`), its name
+    language is filed by its tag in lower case (`zh-hant.po`; `--code TAG`), its name
     in X-Name, the table's sentence as the note when the owner wrote none, and the
     table's direction; a typed name is filed by its slug as before. The browser's
     Accept-Language is matched subtag by subtag against the files (`from_browser`): the
-    tag, then with CLDR's likely script for a Chinese region ("zh-HK" is zh-hant-hk),
+    tag, then with CLDR's likely script for a Chinese region ("zh-HK" is zh-hant),
     then shorter forms down to the language, then a file of the same language and script,
     then of the same language ("pt" finds pt-br). The files written before by name
     (`zh_hk.po`) keep working under their names; renamed to the tag, the browser finds

@@ -302,13 +302,13 @@ def test_the_language_page_lists_offers_and_starts_a_translation(root, monkeypat
     assert response.headers["Location"].endswith("notice=no-language-name")
     # A language from the table: `--code TAG`, no name; the typed name is then ignored.
     # The other course's profile: the task runs there, with its key.
-    assert "<option value=\"zh-Hant-HK\">繁體中文（香港） · zh-Hant-HK</option>" in text
+    assert "<option value=\"zh-Hant\">繁體中文 · zh-Hant</option>" in text
     client.post("/language/translate", base_url=BASE, headers={"Origin": BASE},
-                data={"code": "zh-Hant-HK", "name": "x", "model": "other-course|big"})
+                data={"code": "zh-Hant", "name": "x", "model": "other-course|big"})
     folder, title, commands, meta = started[1]
-    assert (folder, title) == ("other-course", "Translate the GUI into 繁體中文（香港）")
+    assert (folder, title) == ("other-course", "Translate the GUI into 繁體中文")
     assert commands[0][1:] == ["-m", "tutor.gui.translate", "--root", str(root),
-                               "--profile", "big", "--code", "zh-Hant-HK"]
+                               "--profile", "big", "--code", "zh-Hant"]
     # Nothing chosen and nothing typed: told so, nothing started; so with a profile the
     # course does not have (the embedding one included), or a course that is not there.
     response = client.post("/language/translate", base_url=BASE, headers={"Origin": BASE},
@@ -331,6 +331,7 @@ def test_the_language_table_is_well_formed():
     (the tag in lower case, i18n.slug), the right-to-left rows marked (language_table)."""
     rows = language_table.LANGUAGES
     assert len(rows) >= 30
+    assert [x.code for x in rows] == sorted((x.code for x in rows), key=str.lower)  # the list
     assert all(language_table.TAG.match(x.code) for x in rows), [
         x.code for x in rows if not language_table.TAG.match(x.code)]
     assert all(x.name.strip() for x in rows)
@@ -339,9 +340,9 @@ def test_the_language_table_is_well_formed():
     assert all(i18n.slug(x.code) == x.code.lower() for x in rows)
     assert {x.code for x in rows if x.rtl} == {"ar", "he", "fa", "ur"}
     assert all(i18n.direction_of({"x": x.name}) == ("rtl" if x.rtl else "ltr") for x in rows)
-    assert language_table.by_code("zh-hant-hk").name == "繁體中文（香港）"
-    assert "not colloquial Cantonese" in language_table.by_code("zh-Hant-HK").note
-    assert language_table.by_code("yue").note.startswith("Written Cantonese")
+    assert language_table.by_code("zh-hant").name == "繁體中文"
+    assert "Taiwan" in language_table.by_code("zh-Hant").note
+    assert language_table.by_code("zh-Hant-HK") is None  # taken out (owner, 2026-11-11)
     assert language_table.by_code("xx") is None and language_table.by_code("") is None
     assert language_table.subtags("zh-Hant-HK") == ("zh", "hant", "hk")
     assert language_table.subtags("pt-BR") == ("pt", None, "br")
@@ -539,15 +540,15 @@ def test_a_language_from_the_table_is_filed_by_its_tag_with_its_name_note_and_di
 
     monkeypatch.setattr(translate, "chat", chat)
     root = tmp_path / "courses"
-    assert translate.main(["--code", "zh-Hant-HK", "--root", str(root)]) == 0
-    path = root / i18n.TRANSLATIONS / "zh-hant-hk.po"  # the tag, lower case
+    assert translate.main(["--code", "zh-Hant", "--root", str(root)]) == 0
+    path = root / i18n.TRANSLATIONS / "zh-hant.po"  # the tag, lower case
     catalog, headers = i18n.read_po(path.read_text(encoding="utf-8"))
-    assert headers["X-Name"] == "繁體中文（香港）" and headers["X-Direction"] == "ltr"
-    assert headers["X-Note"] == language_table.by_code("zh-Hant-HK").note  # the table's
-    assert asked[0].startswith("Language: 繁體中文（香港）\n\n<note>\nTraditional Chinese "
-                               "as written in Hong Kong")
-    assert i18n.available(root)["zh-hant-hk"] == "繁體中文（香港）"
-    assert i18n.from_browser("zh-HK", i18n.available(root)) == "zh-hant-hk"
+    assert headers["X-Name"] == "繁體中文" and headers["X-Direction"] == "ltr"
+    assert headers["X-Note"] == language_table.by_code("zh-Hant").note  # the table's
+    assert asked[0].startswith("Language: 繁體中文\n\n<note>\nTraditional Chinese, the written "
+                               "standard as used in Taiwan.")
+    assert i18n.available(root)["zh-hant"] == "繁體中文"
+    assert i18n.from_browser("zh-HK", i18n.available(root)) == "zh-hant"  # likely script
     # Arabic: right to left by the table, whatever the strings so far say (all English here).
     assert translate.main(["--code", "ar", "--root", str(root), "--note", "formal"]) == 0
     _, headers = i18n.read_po((root / i18n.TRANSLATIONS / "ar.po").read_text(encoding="utf-8"))
