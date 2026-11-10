@@ -12,7 +12,7 @@ import pytest
 pytest.importorskip("flask")  # the `gui` extra
 
 from tutor import llm  # noqa: E402
-from tutor.gui import i18n, translate  # noqa: E402
+from tutor.gui import i18n, language_table, translate  # noqa: E402
 from tutor.gui.app import create_app  # noqa: E402
 
 TOKEN = "test-token"
@@ -142,6 +142,18 @@ def test_the_languages_are_english_and_each_file_by_its_name(root):
     assert i18n.chosen(root) == ""
     assert i18n.from_browser("zh-CN,zh;q=0.9,en;q=0.8", i18n.available(root)) == "zh"
     assert i18n.from_browser("fr-FR, de", i18n.available(root)) == "en"
+    # Files named by the table's tags are found subtag by subtag (language_table).
+    files = {"en": "English", "zh-hant-hk": "繁體中文（香港）", "zh-hans": "简体中文",
+             "pt-br": "Português (Brasil)", "中文": "中文"}
+    assert i18n.from_browser("zh-HK", files) == "zh-hant-hk"  # the likely script
+    assert i18n.from_browser("zh-TW", files) == "zh-hant-hk"  # no zh-hant: the same script
+    assert i18n.from_browser("zh-SG", files) == "zh-hans"
+    assert i18n.from_browser("zh-TW", {"en": "English", "zh-hans": "简体中文"}) == "zh-hans"
+    assert i18n.from_browser("zh-CN,en", files) == "zh-hans"
+    assert i18n.from_browser("zh", files) == "zh-hans"
+    assert i18n.from_browser("pt-PT, en", files) == "pt-br"  # the same language
+    assert i18n.from_browser("en-GB, zh-HK", files) == "en"
+    assert i18n.from_browser("中文", files) == "中文" and i18n.from_browser("", files) == "en"
     assert i18n.slug(" 日本語 ") == "日本語" and i18n.slug("Deutsch (CH)") == "deutsch-ch"
 
 
@@ -274,6 +286,47 @@ def test_the_language_page_lists_offers_and_starts_a_translation(root, monkeypat
     response = client.post("/language/translate", base_url=BASE, headers={"Origin": BASE},
                            data={"name": "en", "course": "demo-course"})
     assert response.headers["Location"].endswith("notice=no-language-name")
+    # A language from the table: `--code TAG`, no name; the typed name is then ignored.
+    assert "<option value=\"zh-Hant-HK\">繁體中文（香港） · zh-Hant-HK</option>" in text
+    client.post("/language/translate", base_url=BASE, headers={"Origin": BASE},
+                data={"code": "zh-Hant-HK", "name": "x", "course": "demo-course"})
+    folder, title, commands, meta = started[1]
+    assert title == "Translate the GUI into 繁體中文（香港）"
+    assert commands[0][1:] == ["-m", "tutor.gui.translate", "--root", str(root),
+                               "--code", "zh-Hant-HK"]
+    # Nothing chosen and nothing typed: told so, nothing started.
+    response = client.post("/language/translate", base_url=BASE, headers={"Origin": BASE},
+                           data={"code": "", "name": "", "course": "demo-course"})
+    assert response.headers["Location"].endswith("notice=no-language-name")
+    assert len(started) == 2
+
+
+# --- the language table ------------------------------------------------------------------------
+
+
+def test_the_language_table_is_well_formed():
+    """Each row a BCP 47 tag the registry's way, a name, unique tags and unique file names
+    (the tag in lower case, i18n.slug), the right-to-left rows marked (language_table)."""
+    rows = language_table.LANGUAGES
+    assert len(rows) >= 30
+    assert all(language_table.TAG.match(x.code) for x in rows), [
+        x.code for x in rows if not language_table.TAG.match(x.code)]
+    assert all(x.name.strip() for x in rows)
+    assert len({x.code for x in rows}) == len(rows)
+    assert len({i18n.slug(x.code) for x in rows}) == len(rows)
+    assert all(i18n.slug(x.code) == x.code.lower() for x in rows)
+    assert {x.code for x in rows if x.rtl} == {"ar", "he", "fa", "ur"}
+    assert all(i18n.direction_of({"x": x.name}) == ("rtl" if x.rtl else "ltr") for x in rows)
+    assert language_table.by_code("zh-hant-hk").name == "繁體中文（香港）"
+    assert "not colloquial Cantonese" in language_table.by_code("zh-Hant-HK").note
+    assert language_table.by_code("yue").note.startswith("Written Cantonese")
+    assert language_table.by_code("xx") is None and language_table.by_code("") is None
+    assert language_table.subtags("zh-Hant-HK") == ("zh", "hant", "hk")
+    assert language_table.subtags("pt-BR") == ("pt", None, "br")
+    assert language_table.subtags("es-419") == ("es", None, "419")
+    assert language_table.candidates("zh-HK") == ["zh-hk", "zh-hant-hk", "zh-hant", "zh"]
+    assert language_table.candidates("de") == ["de"]
+    assert language_table.candidates("pt-BR") == ["pt-br", "pt"]
 
 
 # --- the English strings, and a model's translation of them -----------------------------------
@@ -443,6 +496,44 @@ def test_the_note_to_the_translator_goes_with_every_run_and_stays_in_the_file(
     assert "X-Note" not in i18n.read_po(
         (root / i18n.TRANSLATIONS / "日本語.po").read_text(encoding="utf-8"))[1]
     assert "Use one register throughout" in translate.PROMPT and translate.PROMPT_VERSION == 2
+
+
+def test_a_language_from_the_table_is_filed_by_its_tag_with_its_name_note_and_direction(
+        tmp_path, monkeypatch, capsys):
+    course = tmp_path / "courses" / "demo-course"
+    (course / "lectures").mkdir(parents=True)
+    (course / "workspace.toml").write_text(
+        'course = "demo"\n\n[llm.profiles.m]\nprovider = "deepseek"\nmodel = "x"\n'
+        'api_key_env = "DEEPSEEK_API_KEY"\n\n[llm.roles]\nsetup = "m"\n', encoding="utf-8")
+    monkeypatch.setenv("WORKSPACE_DIR", str(course))
+    monkeypatch.setenv("LECTURE_DIR", str(course / "lectures"))
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test-not-a-real-key")
+    monkeypatch.setattr(translate, "english", lambda folder=None: [translate.Message("Courses")])
+    asked = []
+
+    def chat(config, messages, **kw):
+        asked.append(messages[1]["content"])
+        return llm.Reply(json.dumps({"items": [{"n": 1, "text": "Courses"}]}), 1, 1, 0.1, "stop")
+
+    monkeypatch.setattr(translate, "chat", chat)
+    root = tmp_path / "courses"
+    assert translate.main(["--code", "zh-Hant-HK", "--root", str(root)]) == 0
+    path = root / i18n.TRANSLATIONS / "zh-hant-hk.po"  # the tag, lower case
+    catalog, headers = i18n.read_po(path.read_text(encoding="utf-8"))
+    assert headers["X-Name"] == "繁體中文（香港）" and headers["X-Direction"] == "ltr"
+    assert headers["X-Note"] == language_table.by_code("zh-Hant-HK").note  # the table's
+    assert asked[0].startswith("Language: 繁體中文（香港）\n\n<note>\nTraditional Chinese "
+                               "as written in Hong Kong")
+    assert i18n.available(root)["zh-hant-hk"] == "繁體中文（香港）"
+    assert i18n.from_browser("zh-HK", i18n.available(root)) == "zh-hant-hk"
+    # Arabic: right to left by the table, whatever the strings so far say (all English here).
+    assert translate.main(["--code", "ar", "--root", str(root), "--note", "formal"]) == 0
+    _, headers = i18n.read_po((root / i18n.TRANSLATIONS / "ar.po").read_text(encoding="utf-8"))
+    assert headers["X-Direction"] == "rtl" and headers["X-Note"] == "formal"
+    assert i18n.translations_for("ar", root).direction == "rtl"
+    # A tag not in the table is refused: the name is the way for such a language.
+    assert translate.main(["--code", "tlh", "--root", str(root)]) == 2
+    assert "not in the language table" in capsys.readouterr().err
 
 
 def test_strings_kept_as_the_english_are_counted_apart_and_can_be_asked_again(

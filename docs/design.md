@@ -3979,7 +3979,27 @@ late; the adaptive review screens can be built with it.
     cache); the system prompt names the note as the owner's wish about wording that
     changes none of the rules, and asks for one register throughout, the written standard
     unless the note says otherwise (prompt version 2, in `X-Generator`; not a pinned
-    prompt). Jinja's new-style `_()` marks what gettext returns as safe HTML (so the
+    prompt). A built-in language table (owner, 2026-11-10 "is there a standard table, a
+    UN one?"; 2026-11-11, `gui/language_table.py`): the standard is BCP 47 (IETF), tags
+    made of ISO 639 language, ISO 15924 script and ISO 3166 / UN M.49 region subtags, the
+    valid ones listed in IANA's Language Subtag Registry, the names in Unicode's CLDR;
+    no library ships either in the standard library, and the GUI needs a few dozen rows,
+    so a short table by hand: the tag as the registry spells it, the name in the language
+    itself as CLDR writes it (the switch shows it), a sentence for the model where the
+    tag leaves the variety or register open (zh-Hant-HK: the written standard with Hong
+    Kong wording, not colloquial Cantonese; yue apart, as written Cantonese; es neutral;
+    pt-BR and pt-PT), and the direction. The Language page's form offers the table in a
+    drop-down and keeps the text box for a language not in it (no script of our own: the
+    box is always there, the server takes the table's choice when there is one). A table
+    language is filed by its tag in lower case (`zh-hant-hk.po`; `--code TAG`), its name
+    in X-Name, the table's sentence as the note when the owner wrote none, and the
+    table's direction; a typed name is filed by its slug as before. The browser's
+    Accept-Language is matched subtag by subtag against the files (`from_browser`): the
+    tag, then with CLDR's likely script for a Chinese region ("zh-HK" is zh-hant-hk),
+    then shorter forms down to the language, then a file of the same language and script,
+    then of the same language ("pt" finds pt-br). The files written before by name
+    (`zh_hk.po`) keep working under their names; renamed to the tag, the browser finds
+    them too. Jinja's new-style `_()` marks what gettext returns as safe HTML (so the
     values it formats in are escaped), translated or not, so the callables escape the
     text first: an English string may say `<profile>` and shows as written; a literal `%`
     in a page's English is written `%%` (a test checks every string). The language: the

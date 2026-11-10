@@ -10,7 +10,7 @@ import sys
 
 from flask import Flask, abort, redirect, render_template, request, url_for
 
-from tutor.gui import courses, environment, i18n, translate
+from tutor.gui import courses, environment, i18n, language_table, translate
 from tutor.gui.i18n import N_
 from tutor.gui.routes.common import course_or_404, start_task
 
@@ -38,7 +38,8 @@ def register(app: Flask) -> None:
                                strings=len(strings), tokens_k=translate.tokens_about(strings),
                                folder=root / i18n.TRANSLATIONS,
                                counts={code: t.counts() for code, t in files.items()},
-                               notes={code: t.note for code, t in files.items()})
+                               notes={code: t.note for code, t in files.items()},
+                               table=language_table.LANGUAGES)
 
     @app.post("/language")
     def set_language():
@@ -55,9 +56,11 @@ def register(app: Flask) -> None:
 
     @app.post("/language/translate")
     def translate_language():
-        """`python -m tutor.gui.translate NAME` as a task of the course whose model it
-        asks (paid, so only on this click); `again=1` asks for every string."""
-        name = " ".join(request.form.get("name", "").split())
+        """`python -m tutor.gui.translate NAME` (or `--code TAG`, a language from the
+        built-in table) as a task of the course whose model it asks (paid, so only on this
+        click); `again=1` asks for every string."""
+        row = language_table.by_code(request.form.get("code", ""))
+        name = row.name if row else " ".join(request.form.get("name", "").split())
         course = course_or_404(request.form.get("course", ""))
         if not i18n.slug(name) or i18n.slug(name) == i18n.ENGLISH:
             return redirect(url_for("language_page", notice="no-language-name"), code=303)
@@ -65,12 +68,15 @@ def register(app: Flask) -> None:
             return redirect(url_for("language_page", notice="no-setup-model"), code=303)
         command = [sys.executable, "-m", "tutor.gui.translate",
                    "--root", str(app.config["ROOT"])]
+        if row:  # the table's tag names the file and gives the name, note and direction
+            command += ["--code", row.code]
         # The note to the translator (register, wording): kept in the file, sent each run.
         note = " ".join(request.form.get("note", "").split())
         if note:
             command += ["--note", note]
         if request.form.get("again") == "1":
             command.append("--again")
-        command += ["--", name]  # after "--": a name starting with "-" is not an option
+        if not row:
+            command += ["--", name]  # after "--": a name starting with "-" is not an option
         return start_task(course, f"Translate the GUI into {name}", [command],
                           meta={"kind": "translate"})

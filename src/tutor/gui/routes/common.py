@@ -105,7 +105,7 @@ NOTICES = {
 }
 # What a task that succeeded reports when it goes back to its page (app.return_to).
 NOTICES.update({
-    "no-language-name": ("bad", N_("Name the language the switch should show, e.g. 中文.")),
+    "no-language-name": ("bad", N_("Choose a language from the list, or name one, e.g. 中文.")),
     "lectures-read": ("ok", N_("Finished: the table shows what the cache holds now.")),
     "validated": ("ok", N_("Validation finished: every exercise passed it.")),
     "models-checked": ("ok", N_("Every model answered the check.")),

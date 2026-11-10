@@ -2,10 +2,14 @@
 `<root>/translations/<language>.po` (gui/i18n.py; owner, 2026-11-10: the repository ships
 English only, and the Language page makes any other language on a click).
 
-    python -m tutor.gui.translate NAME [--profile P] [--note TEXT] [--again | --again-unchanged]
+    python -m tutor.gui.translate [NAME] [--code TAG] [--profile P] [--note TEXT]
+                                  [--again | --again-unchanged]
 
 NAME is the language as the owner wrote it ("中文", "Deutsch"): the model is told to translate
-into it, the file is named by its slug, and the switch shows the name. Run as a course's task
+into it, the file is named by its slug, and the switch shows the name. `--code TAG` takes the
+language from the built-in table instead (gui/language_table.py, "zh-Hant-HK"): the file is
+named by the tag, so the browser's language finds it, and the table gives the name, the note
+and the direction where NAME and --note do not. Run as a course's task
 (the model and its key come from that course's workspace.toml, the setup role's model unless
 `--profile`); the file goes beside the course folders, for every course.
 
@@ -45,7 +49,7 @@ from pydantic import BaseModel, ValidationError
 from tutor.config import WorkspaceError, load_env, load_workspace
 from tutor.exchange import AwaitingAnswer
 from tutor.graph.prompts import material as tagged
-from tutor.gui import i18n
+from tutor.gui import i18n, language_table
 from tutor.llm import LLMConfig, LLMError, chat
 from tutor.materials.requires import model as model_for
 
@@ -167,9 +171,10 @@ def without_unchanged(catalog: dict) -> dict:
 
 
 def save(path: Path, name: str, messages: list[Message], catalog: dict,
-         model: str, note: str = "") -> None:
+         model: str, note: str = "", direction: str = "") -> None:
     """The file written from the English list and what is translated of it, so a string
-    the pages no longer have leaves the file; `note` goes into X-Note when there is one."""
+    the pages no longer have leaves the file; `note` goes into X-Note when there is one;
+    `direction` is the table's when the language came from it, else read off the text."""
     entries = []
     for m in messages:
         if m.plural is None:
@@ -181,7 +186,7 @@ def save(path: Path, name: str, messages: list[Message], catalog: dict,
     # far (gui/i18n.py `direction_of`), so the pages mirror for Arabic, Hebrew, Persian...
     headers = {"Content-Type": "text/plain; charset=UTF-8", "MIME-Version": "1.0",
                "Content-Transfer-Encoding": "8bit", i18n.NAME_HEADER: name,
-               i18n.DIRECTION_HEADER: i18n.direction_of(catalog, name),
+               i18n.DIRECTION_HEADER: direction or i18n.direction_of(catalog, name),
                **({i18n.NOTE_HEADER: note} if note else {}),
                "X-Generator": f"tutor.gui.translate {PROMPT_VERSION}, {model}, "
                               f"{date.today().isoformat()}"}
@@ -260,7 +265,12 @@ def tokens_about(messages: list[Message]) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m tutor.gui.translate",
                                      description=__doc__.split("\n")[0])
-    parser.add_argument("name", help='the language, as the switch will show it ("中文")')
+    parser.add_argument("name", nargs="?", default="",
+                        help='the language, as the switch will show it ("中文"); may be left '
+                             'out with --code')
+    parser.add_argument("--code", help="the language's tag in the built-in table (zh-Hant-HK): "
+                                       "names the file; gives the name, note and direction "
+                                       "when they are not given")
     parser.add_argument("--profile", help="the model to ask (default: the setup role's, "
                                           "else plan's, else generate's)")
     parser.add_argument("--note", help="a note to the translator (register, wording), kept "
@@ -273,7 +283,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root", help="where the translations folder goes (default: the "
                                        "course folder's parent, the GUI's root)")
     args = parser.parse_args(argv)
-    name = " ".join(args.name.split())
+    row = language_table.by_code(args.code) if args.code else None
+    if args.code and row is None:
+        print(f"translate: {args.code!r} is not in the language table "
+              "(tutor/gui/language_table.py); name the language instead", file=sys.stderr)
+        return 2
+    name = " ".join(args.name.split()) or (row.name if row else "")
     if not i18n.slug(name) or i18n.slug(name) == i18n.ENGLISH:
         print(f"translate: {name!r} does not name a language file", file=sys.stderr)
         return 2
@@ -285,15 +300,17 @@ def main(argv: list[str] | None = None) -> int:
         print(f"setup: {e}", file=sys.stderr)
         return 1
     root = Path(args.root) if args.root else workspace.parent
-    path = path_for(root, name)
+    path = path_for(root, row.code if row else name)  # the table's tag names the file
+    direction = (i18n.RTL if row.rtl else i18n.LTR) if row else ""
     messages = english()
     had, headers = stored(path)
     catalog = {} if args.again else had
     if args.again_unchanged:  # those entries go, so they are asked for again
         catalog = without_unchanged(catalog)
-    # The note: given now, else the file's, so every run reads as the first one did.
+    # The note: given now, else the file's, so every run reads as the first one did;
+    # else the table's sentence for the language, where it has one.
     note = " ".join((args.note if args.note is not None else headers.get(i18n.NOTE_HEADER, ""))
-                    .split())
+                    .split()) or (row.note if row else "")
     todo = missing(messages, catalog)
     print(f"{len(messages)} English strings; {len(todo)} to translate into {name} "
           f"({config.name}: {config.model}); file {path}"
@@ -309,7 +326,7 @@ def main(argv: list[str] | None = None) -> int:
             break
         except LLMError as e:
             print(f"model: {e}", file=sys.stderr)
-            save(path, name, messages, catalog, config.model, note)
+            save(path, name, messages, catalog, config.model, note, direction)
             return 1
         except ValueError as e:
             print(f"  batch {start // BATCH + 1}: {e}; those strings are asked again next "
@@ -321,8 +338,8 @@ def main(argv: list[str] | None = None) -> int:
         same = i18n.unchanged(got)
         print(f"  batch {start // BATCH + 1}: {len(got) - _plurals(got) - same} translated, "
               f"{same} kept as the English, {len(refused)} refused", flush=True)
-        save(path, name, messages, catalog, config.model, note)  # kept as it goes
-    save(path, name, messages, catalog, config.model, note)
+        save(path, name, messages, catalog, config.model, note, direction)  # kept as it goes
+    save(path, name, messages, catalog, config.model, note, direction)
     for line in refused_all:
         print(f"  {line}", flush=True)
     left = len(missing(messages, catalog))

@@ -48,6 +48,8 @@ from pathlib import Path
 from flask import Flask, g, request
 from markupsafe import escape
 
+from tutor.gui import language_table
+
 ENGLISH = "en"
 SETTINGS = ".tutor-gui-settings.json"  # under the GUI's root, beside the launcher's state
 TRANSLATIONS = "translations"  # under the GUI's root: <language>.po, one per language
@@ -311,13 +313,25 @@ def choose(root: Path, language: str) -> None:
 
 
 def from_browser(header: str, languages: dict[str, str]) -> str:
-    """The first of the browser's languages the root has a file for ("zh-CN" counts as
-    "zh" when the file is named so), else English."""
+    """The first of the browser's languages the root has a file for, else English. A
+    file is found subtag by subtag (`language_table.candidates`): "zh-HK" finds
+    zh-hant-hk (the likely script), then zh-hant, then zh; failing those, a file of the
+    same language and script ("zh-TW" finds zh-hant-hk before zh-hans), then of the same
+    language ("pt" finds pt-br); a file named by hand ("中文") is found by that name."""
     for part in header.split(","):
-        code = part.split(";")[0].strip().lower()
-        for candidate in (code, code.split("-")[0]):
+        code = part.split(";")[0].strip()
+        if not code:
+            continue
+        for candidate in language_table.candidates(code):
             if candidate in languages:
                 return candidate
+        language, script = language_table.likely(code)
+        others = [known for known in languages if known != ENGLISH]
+        for wanted in ((language, script), (language, None)):
+            for known in others:  # the same language and script, then the language alone
+                have = language_table.likely(known)
+                if have == wanted or (wanted[1] is None and have[0] == language):
+                    return known
     return ENGLISH
 
 
