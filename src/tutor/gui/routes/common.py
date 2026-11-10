@@ -13,6 +13,7 @@ from flask import abort, current_app, redirect, url_for
 from tutor.eval import report
 from tutor.gui import courses, environment, generation, launch, lectures, tasks
 from tutor.gui.i18n import N_
+from tutor.gui.i18n import gettext_ as _
 
 # How each state reads on a page, in the report's order.
 STATUS_LABELS = {report.PASSED: N_("passed"), report.STARTED: N_("started"),
@@ -134,7 +135,7 @@ UPLOAD_LIMIT_BYTES = 500 * 1024 * 1024  # one upload request, all its files toge
 def course_or_404(name: str) -> courses.Course:
     course = courses.get_course(current_app.config["ROOT"], name)
     if course is None:
-        abort(404, "No such course.")
+        abort(404, N_("No such course."))
     return course
 
 
@@ -142,7 +143,7 @@ def batch_or_404(name: str, batch: str) -> tuple[courses.Course, courses.BatchVi
     course = course_or_404(name)
     view = courses.batch_view(course, batch)
     if view is None:
-        abort(404, "No such batch.")
+        abort(404, N_("No such batch."))
     return course, view
 
 
@@ -152,7 +153,7 @@ def exercise_or_404(name: str, batch: str, exercise: str):
     row = next((r for r in view.exercises if r.id == exercise), None)
     folder = courses.exercise_dir(course, batch, exercise)
     if row is None or folder is None:
-        abort(404, "No such exercise.")
+        abort(404, N_("No such exercise."))
     return course, view, row, folder
 
 
@@ -186,15 +187,19 @@ def waiting_for(course: courses.Course, task: tasks.Task) -> str:
     kind = task.meta.get("kind")
     models = dict(generation.models(course))
     if kind in (generation.PLAN, generation.FEEDBACK):
-        return f"the plan model, {models.get('plan', 'the generate model')}"
+        return (_("the plan model, %(model)s")
+                % {"model": models.get("plan", _("the generate model"))})
     if kind in (generation.APPROVE, generation.CONTINUE, generation.RETRY):
-        return (f"the models writing and checking exercises (generate: "
-                f"{models.get('generate', '?')})")
+        return (_("the models writing and checking exercises (generate: %(model)s)")
+                % {"model": models.get("generate", "?")})
     if kind in ("requires-draft", "coverage-draft"):
-        return f"the model reading the lectures, {environment.setup_model(course) or '?'}"
+        return (_("the model reading the lectures, %(model)s")
+                % {"model": environment.setup_model(course) or "?"})
     if kind == "vision":
-        return f"the vision model, {lectures.vision_model(course) or '?'}"
-    return {"check": "the models being checked", "install": "pip, which may be downloading",
-            "create": "pip, which may be downloading", "build": "docker build, which may be "
-            "downloading", "validate": "the exercises' test runs",
-            "read": "the lectures being read"}.get(kind, "the command")
+        return _("the vision model, %(model)s") % {"model": lectures.vision_model(course) or "?"}
+    return _({"check": N_("the models being checked"),
+              "install": N_("pip, which may be downloading"),
+              "create": N_("pip, which may be downloading"),
+              "build": N_("docker build, which may be downloading"),
+              "validate": N_("the exercises' test runs"),
+              "read": N_("the lectures being read")}.get(kind, N_("the command")))

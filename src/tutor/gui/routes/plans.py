@@ -8,6 +8,7 @@ from __future__ import annotations
 from flask import Flask, abort, redirect, render_template, request, url_for
 
 from tutor.gui import courses, environment, generation, plan_items, plan_selection, tasks
+from tutor.gui.i18n import N_
 from tutor.gui.routes.common import (
     C_NEEDS_CONTAINER,
     NOTICES,
@@ -36,7 +37,7 @@ def plan_or_404(name: str, label: str) -> tuple[courses.Course, generation.PlanV
     course = course_or_404(name)
     view = generation.plan_view(course, label)
     if view is None:
-        abort(404, "No such plan.")
+        abort(404, N_("No such plan."))
     return course, view
 
 
@@ -189,7 +190,7 @@ def register(app: Flask) -> None:
                                             note=note,
                                             max_tokens=plan_items.RETRY_CAP if cap else None)
         if commands is None:
-            abort(404, "The plan has no such exercise.")
+            abort(404, N_("The plan has no such exercise."))
         title = (f"Generate {exercise} again" + (" with a note" if note else "")
                  + (f" and a {plan_items.RETRY_CAP:,} output cap" if cap else ""))
         return start_task(course, title, commands,
@@ -213,7 +214,7 @@ def register(app: Flask) -> None:
         for exercise in failed:
             commands += plan_items.prepare_retry(course, view, exercise, python) or []
         if not commands:
-            abort(404, "The plan has none of these exercises.")
+            abort(404, N_("The plan has none of these exercises."))
         return start_task(course, f"Generate {len(failed)} exercises again", commands,
                           meta={"kind": generation.RETRY, "label": label, "items": failed},
                           then=back)
@@ -233,7 +234,7 @@ def register(app: Flask) -> None:
         # Status revalidates current schema/source/collisions against the approved snapshot.
         commands = plan_items.prepare_retry(course, view, exercise, courses.task_python(course))
         if commands is None:
-            abort(404, "The approved plan has no such item.")
+            abort(404, N_("The approved plan has no such item."))
         return start_task(course, f"Generate {exercise}", commands,
                           meta={"kind": generation.RETRY, "label": label, "item": exercise},
                           then=back)
@@ -246,7 +247,7 @@ def register(app: Flask) -> None:
             return redirect(url_for("plan", name=name, label=label) + "?notice=plan-moved",
                             code=303)
         if view.draft is None or not (view.draft / "plan.json").is_file():
-            abort(404, "This plan has no plan.json yet.")
+            abort(404, N_("This plan has no plan.json yet."))
         return act(lambda: launcher.open_in_vscode(course.workspace.root,
                                                    view.draft / "plan.json"),
                    url_for("plan", name=name, label=label), done="opened-plan")

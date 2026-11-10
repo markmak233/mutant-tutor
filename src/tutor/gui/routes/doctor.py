@@ -12,6 +12,7 @@ import sys
 from flask import Flask, abort, current_app, redirect, render_template, request, url_for
 
 from tutor.gui import doctor_page, fix_state, llm_settings, tasks
+from tutor.gui.i18n import N_
 from tutor.gui.routes.common import course_or_404, start_task
 
 
@@ -52,7 +53,7 @@ def register(app: Flask) -> None:
                 return page(course, form={"failure": failure, "module": module,
                                           "profile": role, "second": ""})
         except (OSError, ValueError, TypeError):
-            abort(404, "This setup problem changed. Return to Environment and check again.")
+            abort(404, N_("This setup problem changed. Return to Environment and check again."))
         abort(404)
 
     @app.post("/c/<name>/doctor/input")

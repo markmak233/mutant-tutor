@@ -19,6 +19,7 @@ from flask import (
 )
 
 from tutor.gui import course_setup, courses, generation, tasks
+from tutor.gui.i18n import N_
 from tutor.gui.i18n import gettext_ as _
 from tutor.gui.routes.common import ENVIRONMENT_NOTICES, waiting_for
 
@@ -28,10 +29,10 @@ def task_or_404(name: str, task_id: str) -> tuple[courses.Course, tasks.Task]:
     course = (courses.get_course(current_app.config["ROOT"], name)
               or course_setup.being_created(current_app.config["ROOT"], name))
     if course is None:
-        abort(404, "No such course.")
+        abort(404, N_("No such course."))
     task = tasks.get(course.workspace.root, task_id)
     if task is None:
-        abort(404, "No such task.")
+        abort(404, N_("No such task."))
     return course, task
 
 

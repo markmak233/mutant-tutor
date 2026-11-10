@@ -11,6 +11,7 @@ import sys
 from flask import Flask, abort, redirect, render_template, request, url_for
 
 from tutor.gui import courses, environment, i18n, translate
+from tutor.gui.i18n import N_
 from tutor.gui.routes.common import course_or_404, start_task
 
 
@@ -40,7 +41,7 @@ def register(app: Flask) -> None:
         root = app.config["ROOT"]
         language = request.form.get("language", "")
         if language not in i18n.available(root):
-            abort(400, "No such language.")
+            abort(400, N_("No such language."))
         i18n.choose(root, language)
         back = request.form.get("back", "")
         if not back.startswith("/") or back.startswith("//"):

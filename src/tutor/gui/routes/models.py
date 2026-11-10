@@ -12,6 +12,7 @@ from flask import Flask, abort, current_app, redirect, render_template, request,
 
 from tutor import llm
 from tutor.gui import catalog, courses, keys, llm_settings
+from tutor.gui.i18n import N_
 from tutor.gui.routes.common import course_or_404, start_task
 
 
@@ -146,7 +147,7 @@ def register(app: Flask) -> None:
         course = course_or_404(name)
         data = llm_settings.section(course).get("profiles", {}).get(profile)
         if not isinstance(data, dict):
-            abort(404, "No such model.")
+            abort(404, N_("No such model."))
         values = applied() or {"name": profile, **{k: str(v) for k, v in data.items()}}
         return profile_page(course, profile, values, [])
 
@@ -218,7 +219,7 @@ def register(app: Flask) -> None:
         course = course_or_404(name)
         source = courses.get_course(app.config["ROOT"], request.form.get("source", ""))
         if source is None:
-            abort(404, "No such course.")
+            abort(404, N_("No such course."))
         problems = llm_settings.copy_models(course, source)
         if problems:
             return models_page(course, problems, 400)
@@ -232,7 +233,7 @@ def register(app: Flask) -> None:
         wanted = request.form.get("profile", "")
         names = [wanted] if wanted else known
         if not names or any(n not in known for n in names):
-            abort(404, "No such model.")
+            abort(404, N_("No such model."))
         title = f"Check {wanted}" if wanted else "Check the models"
         return start_task(course, title, [llm_settings.check_command(names)],
                           meta={"kind": "check"})

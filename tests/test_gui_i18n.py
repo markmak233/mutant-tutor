@@ -34,6 +34,12 @@ msgid_plural "%(count)s batches"
 msgstr[0] "%(count)s 批"
 msgstr[1] "%(count)s 批"
 
+msgid "No such course."
+msgstr "没有这个课程。"
+
+msgid "Paste the key first."
+msgstr "先粘贴密钥。"
+
 msgid "Keys"
 msgstr ""
 
@@ -171,6 +177,20 @@ def test_a_notice_and_a_plural_are_translated(root):
     assert "Opened in the file manager." in text  # no translation in the file: English
     text = _page(client, "/")
     assert "0 批" in text  # {% trans %} with pluralize, through the file's msgstr[1]
+
+
+def test_an_error_page_and_a_form_problem_are_translated(root):
+    """The abort messages are marked N_() and translated by the error handler (gettext
+    alone: a command's text may carry a `%`); a form's problem is translated where the
+    module returns it (keys.py), inside the request."""
+    client = _browser(root)
+    i18n.choose(root, "zh")
+    assert "没有这个课程。" in _page(client, "/c/no-such-course/")
+    response = client.post("/keys/set", base_url=BASE, headers={"Origin": BASE},
+                           data={"name": "X_KEY", "value": " "})
+    assert response.status_code == 400 and "先粘贴密钥。" in response.get_data(as_text=True)
+    i18n.choose(root, "en")
+    assert "No such course." in _page(client, "/c/no-such-course/")
 
 
 def test_the_language_page_lists_offers_and_starts_a_translation(root, monkeypatch):

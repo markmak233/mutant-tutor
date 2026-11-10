@@ -17,6 +17,7 @@ from tutor.gui import (
     rendering,
     tasks,
 )
+from tutor.gui.i18n import N_
 from tutor.gui.routes.common import (
     RECENT_TASKS,
     STATUS_LABELS,
@@ -116,7 +117,7 @@ def register(app: Flask) -> None:
         course, _ = batch_or_404(name, batch)
         folder = courses.exercises_dir(course, batch)
         if folder is None:
-            abort(404, "This batch has no exercises folder.")
+            abort(404, N_("This batch has no exercises folder."))
         return act(lambda: launcher.open_folder(folder),
                    url_for("batch", name=name, batch=batch))
 
@@ -155,6 +156,6 @@ def register(app: Flask) -> None:
                 commands.append([python, "-m", "tutor.validation", str(exercise),
                                  str(solution)])
         if not commands:
-            abort(404, "This batch has no exercise to validate.")
+            abort(404, N_("This batch has no exercise to validate."))
         return start_task(course, f"Validate {batch}", commands,
                           meta={"kind": "validate", "batch": batch})

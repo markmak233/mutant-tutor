@@ -1,10 +1,11 @@
+{# A plan's page: the title, and the live part (_plan_live.html) the page polls. #}
 {% extends "base.html" %}
-{% block title %}Plan {{ plan.label }}{% endblock %}
+{% block title %}{{ _("Plan %(label)s", label=plan.label) }}{% endblock %}
 {% block crumbs %}
 <a href="{{ url_for('course', name=course.folder) }}">{{ course.workspace.course }}</a>
-<span>Plan {{ plan.label }}</span>
+<span>{{ _("Plan %(label)s", label=plan.label) }}</span>
 {% endblock %}
 {% block content %}
-<h1>Plan {{ plan.label }}</h1>
+<h1>{{ _("Plan %(label)s", label=plan.label) }}</h1>
 {% include "_plan_live.html" %}
 {% endblock %}

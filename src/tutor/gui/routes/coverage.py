@@ -8,6 +8,8 @@ from __future__ import annotations
 from flask import Flask, abort, redirect, render_template, request, url_for
 
 from tutor.gui import courses, coverage, environment, tasks
+from tutor.gui.i18n import N_
+from tutor.gui.i18n import gettext_ as _
 from tutor.gui.routes.common import act, course_or_404, start_task
 
 
@@ -88,7 +90,7 @@ def register(app: Flask) -> None:
         course = course_or_404(name)
         found = coverage.find_point(course, lecture, point_id)
         if found is None:
-            abort(404, "No such point in the data.")
+            abort(404, N_("No such point in the data."))
         return render_template("coverage_point.html", course=course, lecture=lecture,
                                point=found[1], statuses=coverage.STATUSES, problems=[],
                                covered=", ".join(f"{c.mark} ({c.batch})" if c.batch else c.mark
@@ -102,7 +104,7 @@ def register(app: Flask) -> None:
         if problems:
             found = coverage.find_point(course, lecture, point_id)
             if found is None:
-                abort(404, "No such point in the data.")
+                abort(404, N_("No such point in the data."))
             return render_template("coverage_point.html", course=course, lecture=lecture,
                                    point=found[1], statuses=coverage.STATUSES,
                                    problems=problems,
@@ -134,6 +136,6 @@ def register(app: Flask) -> None:
             which = coverage.DRAFT_FILE
         path = root / which
         if not path.is_file():
-            abort(404, f"There is no {which}.")
+            abort(404, _("There is no %(file)s.") % {"file": which})
         return act(lambda: launcher.open_in_vscode(root, path),
                    url_for("coverage_view", name=name), done="opened-coverage")

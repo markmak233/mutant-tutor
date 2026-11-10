@@ -60,6 +60,7 @@ from types import ModuleType
 from flask import Flask, abort, redirect, render_template, request, url_for
 
 from tutor.gui import i18n, launch, launcher_state, lectures, routes, tasks
+from tutor.gui.i18n import N_
 from tutor.gui.routes.common import NOTICES, UPLOAD_LIMIT_BYTES
 
 COOKIE = "tutor_token"
@@ -94,7 +95,7 @@ def create_app(root: Path, token: str, port: int | None = None,
     def check_request():
         port = app.config["PORT"]
         if request.host not in (f"127.0.0.1:{port}", f"localhost:{port}"):
-            abort(403, "This server answers only at 127.0.0.1 or localhost.")
+            abort(403, N_("This server answers only at 127.0.0.1 or localhost."))
         # The local launcher alone can challenge this endpoint, without browser cookies.
         # No other request accepts header authentication or loses its Origin check.
         if request.path == "/_launcher" and request.method == "GET":
@@ -109,9 +110,9 @@ def create_app(root: Path, token: str, port: int | None = None,
             response.set_cookie(COOKIE, token, httponly=True, samesite="Strict")
             return response
         if not hmac.compare_digest(request.cookies.get(COOKIE, ""), token):
-            abort(403, "Open the link that `python -m tutor.gui` printed.")
+            abort(403, N_("Open the link that `python -m tutor.gui` printed."))
         if request.method != "GET" and request.headers.get("Origin") != f"http://{request.host}":
-            abort(403, "An action must come from this GUI's own pages.")
+            abort(403, N_("An action must come from this GUI's own pages."))
         return None
 
     # One form for every time a page shows (tasks.TIME_FORMAT, local): `| local_time`.
@@ -144,7 +145,10 @@ def create_app(root: Path, token: str, port: int | None = None,
     @app.errorhandler(404)
     @app.errorhandler(405)
     def error(e):
-        return render_template("error.html", code=e.code, message=e.description), e.code
+        # The message, translated when it is one of the pages' own (marked N_() at the
+        # abort); gettext alone, no formatting, as a command's text may carry a `%`.
+        return render_template("error.html", code=e.code,
+                               message=i18n.gettext_(e.description)), e.code
 
     @app.errorhandler(413)
     def too_large(e):
@@ -152,13 +156,15 @@ def create_app(root: Path, token: str, port: int | None = None,
         files: said in words, with the way back to the form."""
         limit = f"{UPLOAD_LIMIT_BYTES // (1024 * 1024)} MB"
         name = (request.view_args or {}).get("name")
+        _ = i18n.gettext_
         if request.endpoint == "stage_lecture_folder":
-            message = (f"The folder was not taken: the browser sends all of it, videos and "
-                       f"images too, and it is over {limit} or "
-                       f"{lectures.MAX_FOLDER_FILES} files. Choose one of its subfolders, or "
-                       f"pick the lecture files themselves under Add lectures.")
+            message = _("The folder was not taken: the browser sends all of it, videos and "
+                        "images too, and it is over %(limit)s or %(files)d files. Choose one "
+                        "of its subfolders, or pick the lecture files themselves under Add "
+                        "lectures.") % {"limit": limit, "files": lectures.MAX_FOLDER_FILES}
         else:
-            message = f"The upload is over {limit} in all: upload fewer files at a time."
+            message = (_("The upload is over %(limit)s in all: upload fewer files at a time.")
+                       % {"limit": limit})
         back = url_for("lecture_list", name=name) if name else None
         return render_template("error.html", code=413, message=message, back=back), 413
 

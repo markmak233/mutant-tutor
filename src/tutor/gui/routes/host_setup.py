@@ -9,6 +9,7 @@ import sys
 from flask import Flask, abort, render_template, request
 
 from tutor.gui import environment
+from tutor.gui.i18n import N_
 from tutor.gui.routes.common import course_or_404
 from tutor.languages import course_languages
 
@@ -25,7 +26,7 @@ def register(app: Flask) -> None:
         actual = {"darwin": "macos", "win32": "windows"}.get(sys.platform, "linux")
         platform = request.args.get("platform", actual)
         if platform not in PLATFORMS:
-            abort(400, "Choose macOS, Linux, Windows or WSL.")
+            abort(400, N_("Choose macOS, Linux, Windows or WSL."))
         # Reuse the language registry and parsed requirements; do not infer undeclared JVMs.
         ws = course.workspace
         languages = course_languages({"languages": ws.languages})

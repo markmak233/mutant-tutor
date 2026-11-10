@@ -24,6 +24,9 @@ import secrets
 from dataclasses import dataclass, field
 from pathlib import Path
 
+# The problems a form shows, in the page's language (gui/i18n.py), looked up when returned.
+from tutor.gui.i18n import gettext_ as _
+
 NAME = re.compile(r"^[A-Z][A-Z0-9_]{1,63}$")
 _KEY_LIKE = re.compile(r"_(KEY|TOKEN|SECRET)$")
 MAX_VALUE = 500
@@ -78,12 +81,12 @@ def set_key(env_file: Path, name: str, value: str) -> str | None:
     """Add or replace one key; a problem, or None when saved."""
     value = value.strip()
     if not NAME.match(name):
-        return ("A key's name takes capital letters, digits and '_', starting with a letter, "
-                "e.g. DEEPSEEK_API_KEY.")
+        return _("A key's name takes capital letters, digits and '_', starting with a letter, "
+                 "e.g. DEEPSEEK_API_KEY.")
     if not value:
-        return "Paste the key first."
+        return _("Paste the key first.")
     if len(value) > MAX_VALUE or any(c.isspace() or c in "'\"" or ord(c) < 32 for c in value):
-        return "That does not look like a key: no spaces, quotes or line breaks."
+        return _("That does not look like a key: no spaces, quotes or line breaks.")
     lines = _lines(env_file)
     line = f"{name}={value}"
     at = next((i for i, text in enumerate(lines) if (_parse(text) or ("",))[0] == name), None)
@@ -100,11 +103,11 @@ def set_key(env_file: Path, name: str, value: str) -> str | None:
 def delete_key(env_file: Path, name: str, used_by: dict[str, list[str]]) -> str | None:
     """Remove every line setting `name`; only a key-like name or one a profile uses."""
     if not NAME.match(name) or not (_KEY_LIKE.search(name) or name in used_by):
-        return "Only keys can be removed here."
+        return _("Only keys can be removed here.")
     lines = _lines(env_file)
     kept = [t for t in lines if (_parse(t) or ("",))[0] != name]
     if len(kept) == len(lines):
-        return "This key is not in .env."
+        return _("This key is not in .env.")
     _write(env_file, kept)
     return None
 

@@ -36,16 +36,17 @@ def check_new_course(root: Path, folder: str, course_id: str) -> tuple[Path | No
     folder, course_id = folder.strip(), course_id.strip() or folder.strip()
     problems = []
     if not FOLDER.match(folder):
-        problems.append("The folder name takes lowercase letters, digits, '_' and '-', 40 at "
-                        "most, e.g. comp1234 or deep-learning.")
+        problems.append(_("The folder name takes lowercase letters, digits, '_' and '-', 40 "
+                          "at most, e.g. comp1234 or deep-learning."))
     elif (root / folder).exists():
-        problems.append(f"{folder} exists already in {root.name}: choose another name.")
+        problems.append(_("%(folder)s exists already in %(root)s: choose another name.")
+                        % {"folder": folder, "root": root.name})
     if not _COURSE_ID.match(course_id):
-        problems.append("The course id takes letters, digits, '.', '_' and '-'.")
+        problems.append(_("The course id takes letters, digits, '.', '_' and '-'."))
     if (repo := _enclosing_git_repo(root)) is not None:
-        problems.append(f"The course folder would be inside the git repository {repo.name}, "
-                        "where course material could be committed. Start the GUI with "
-                        "--root pointing elsewhere.")
+        problems.append(_("The course folder would be inside the git repository %(repo)s, "
+                          "where course material could be committed. Start the GUI with "
+                          "--root pointing elsewhere.") % {"repo": repo.name})
     return (None if problems else root / folder), course_id, problems
 
 
