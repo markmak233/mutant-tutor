@@ -499,6 +499,13 @@ def test_a_batch_is_planned_sent_back_approved_later_and_generated_in_parallel(w
     from tutor.graph.build import build_batch
 
     model = BatchModel(plan_json("first-a", "first-b"), plan_json("sum-list", "sum-squares"))
+    # coverage.json with one point at the plan items' slides: the saved exercise is marked
+    # on it at the end; the discarded one is not.
+    from tutor.materials import coverage_store as cs
+
+    store = cs.Store(lectures={"L1": cs.Lecture(points=[
+        cs.Point(id=cs.point_id("L1", "1.3-1.4", "Summing"), slides="1.3-1.4", point="Summing")])})
+    cs.save(workspace, store)
     d = Deps(workspace=workspace, batch_dir=workspace / "batches" / "2026-10-28_p3-w1",
              config=LLMConfig("glm-flash", "glm", "http://x/v1", "glm-5.3-flash"),
              chat=model, max_rounds=1,
@@ -525,7 +532,11 @@ def test_a_batch_is_planned_sent_back_approved_later_and_generated_in_parallel(w
         (d.batch_dir / "manifest.json").read_text(encoding="utf-8"))
     assert manifest.exercises == ["sum-list"] and "more debugging" in manifest.notes
     proposal = (d.batch_dir / "coverage-proposal.md").read_text(encoding="utf-8")
-    assert "gap-code -> ex:sum-list (p3-w1)" in proposal and "sum-squares" not in proposal
+    assert "Marked in coverage.json already" in proposal and "sum-squares" not in proposal
+    assert "slides 1.3-1.4: ex:sum-list" in proposal and "gap-code -> ex:" not in proposal
+    marked = cs.load(workspace).lectures["L1"].points[0].covered_by
+    assert marked == [cs.Covered(mark="ex:sum-list", batch="p3-w1")]
+    assert "ex:sum-list (p3-w1)" in (workspace / "coverage.md").read_text(encoding="utf-8")
 
 
 def test_a_save_that_fails_midway_leaves_nothing_and_a_retry_saves(tmp_path, monkeypatch):

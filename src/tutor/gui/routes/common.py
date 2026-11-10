@@ -105,10 +105,13 @@ NOTICES.update({
                              "see step 4 below for the version comparison."),
     "draft-ready": ("ok", "The lectures were looked at: tick what to add in step 1."),
     "coverage-drafted": ("ok", "The draft is ready below: check it against the slides."),
-    "coverage-used": ("ok", "coverage.md is written from the draft. Edit it as batches are made."),
+    "coverage-used": ("ok", "coverage.json is made from the draft, and coverage.md rendered "
+                            "from it. Edit points here as batches are made."),
+    "coverage-converted": ("ok", "coverage.md was read into coverage.json; the file before is "
+                                 "coverage.md.bak. Check the lines the conversion flagged."),
+    "coverage-rendered": ("ok", "coverage.md was written again from the data."),
+    "coverage-saved": ("ok", "Saved in coverage.json; coverage.md was rendered again."),
     "opened-coverage": ("ok", "Opened in VS Code. Reload this page to see your changes."),
-    "coverage-added": ("ok", "The ticked lectures were added at the end of coverage.md; nothing "
-                             "else in it changed (the file before is coverage.md.bak)."),
 })
 ENVIRONMENT_NOTICES = {"install": "installed", "build": "image-built",
                        "requires-draft": "draft-ready", "image-record": "image-recorded"}

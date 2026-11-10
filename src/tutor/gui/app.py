@@ -116,6 +116,10 @@ def create_app(root: Path, token: str, port: int | None = None,
 
     # One form for every time a page shows (tasks.TIME_FORMAT, local): `| local_time`.
     app.add_template_filter(tasks.local_time, "local_time")
+    # A coverage point's status column, as coverage.md writes it (the Coverage page).
+    from tutor.materials.coverage_store import status_cell
+
+    app.add_template_filter(status_cell, "status_cell")
 
     @app.context_processor
     def notice():

@@ -194,11 +194,29 @@ def collect(state: BatchState, deps: Deps) -> BatchState:
                    model=_models_of(deps, {i.id for i in saved}))
     if saved:
         label = deps.batch_dir.name.split("_", 1)[-1]
-        lines = ["# Proposed coverage.md changes", "",
-                 "Generated exercises; mark their knowledge points in coverage.md once the "
-                 "owner has looked at them (not applied automatically).", ""]
+        # With coverage.json (2026-11-10): an exercise whose lecture and slides match one
+        # point exactly is marked on it (the owner sees it on the Coverage page and in the
+        # rendered coverage.md); the rest, and every exercise of a course without the data,
+        # is proposed in coverage-proposal.md as before, for the owner's hand.
+        store = coverage_store.load(deps.workspace)
+        marked, proposed = [], []
+        for i in saved:
+            if store is not None and coverage_store.mark_covered(
+                    store, i.lecture, i.slides, f"ex:{i.id}", label):
+                marked.append(i)
+            else:
+                proposed.append(i)
+        if marked:
+            coverage_store.save(deps.workspace, store)
+        lines = ["# Proposed coverage changes", "",
+                 "Generated exercises; mark their knowledge points once the owner has looked "
+                 "at them (not applied automatically).", ""]
         lines += [f"- {i.lecture}, slides {i.slides} ({i.knowledge_point}): gap-code -> "
-                  f"ex:{i.id} ({label})" for i in saved]
+                  f"ex:{i.id} ({label})" for i in proposed]
+        if marked:
+            lines += ["", "Marked in coverage.json already (the lecture and slides matched "
+                      "one point):"] + [f"- {i.lecture}, slides {i.slides}: ex:{i.id}"
+                                        for i in marked]
         (deps.batch_dir / "coverage-proposal.md").write_text("\n".join(lines) + "\n",
                                                              encoding="utf-8")
     # A manifest is absent when every selected item failed; completion is still durable.

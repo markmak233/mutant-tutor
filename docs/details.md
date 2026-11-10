@@ -503,7 +503,8 @@ validate a batch in the background, upload and read lectures, create a course, c
 models and keep your API keys, check its environment, edit `[requires]` or have a model
 draft it from the lectures (each entry with the slide that shows it, added only when you
 tick it), choose where tests run, install its Python packages and build its test image, have
-a model draft `coverage.md` from the lectures and add new lectures to it as they come, plan
+a model draft the course's coverage (`coverage.json`, with `coverage.md` rendered from it)
+from the lectures, edit its points and draft new or changed lectures into it, plan
 a new batch and approve its plan; generating also needs the `gen` extra):
 
 ```bash
@@ -570,7 +571,8 @@ src/tutor/
   materials/       course PDFs and saved web pages -> a per-page (per-section) markdown cache,
                    image slides via a vision model;
                    `python -m tutor.materials`; `python -m tutor.materials.requires` drafts
-                   [requires] from the cached lectures, and `.coverage` coverage.md
+                   [requires] from the cached lectures, `.coverage` a coverage draft, and
+                   `.coverage_store` keeps coverage.json (coverage.md rendered from it)
   graph/           phase 3 generation with LangGraph: plan -> owner approves -> generate,
                    oracle by a second model, validate, repair, per exercise in parallel;
                    `python -m tutor.graph`

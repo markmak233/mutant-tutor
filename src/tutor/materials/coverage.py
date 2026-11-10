@@ -95,6 +95,8 @@ class Row:
     slides: str  # slide footers, "4.15-4.24", or "p.N" where a page has none
     point: str
     status: str  # as written in the table: "gap-code [what to check]" or a plain status
+    first_page: int | None = None  # the PDF pages the model gave (coverage_store keeps them)
+    last_page: int | None = None
 
 
 @dataclass
@@ -169,7 +171,8 @@ def section(lecture: str, points: list[Point], entries: dict[int, cache.Entry]) 
         status = p.status
         if status == "gap-code" and p.check.strip():
             status = f"gap-code [{p.check.strip()}]"
-        result.rows.append(Row(_cell(slides), _cell(p.point), _cell(status)))
+        result.rows.append(Row(_cell(slides), _cell(p.point), _cell(status), p.first_page,
+                               p.last_page))
         covered.update(range(p.first_page, p.last_page + 1))
     result.uncovered = sorted(set(entries) - covered)
     return result

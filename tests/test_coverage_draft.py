@@ -38,8 +38,9 @@ def point(**kw) -> cov.Point:
 def test_pages_become_slide_footers_and_gap_code_says_what_to_check():
     s = cov.section("L1.pdf", [point(), point(point="Admin", first_page=1, last_page=1,
                                               status="n/a", check="ignored")], by_number())
-    assert s.rows[0] == cov.Row("1.2-1.3", "Word count", "gap-code [the counts with a combiner]")
-    assert s.rows[1] == cov.Row("1.1", "Admin", "n/a")  # check only for gap-code
+    assert s.rows[0] == cov.Row("1.2-1.3", "Word count", "gap-code [the counts with a combiner]",
+                                2, 3)  # the pages stay on the row, for coverage.json
+    assert s.rows[1] == cov.Row("1.1", "Admin", "n/a", 1, 1)  # check only for gap-code
     assert s.uncovered == [4, 5] and s.gap_code == 1
 
 

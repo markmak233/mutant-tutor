@@ -4171,10 +4171,25 @@ late; the adaptive review screens can be built with it.
     course not migrated, "(none)" for one with neither, so a new course still plans. Edits
     to the rendered file do not flow back (`rendered_is_stale` tells the page). Command
     line: `python -m tutor.materials.coverage_store migrate | render | redraft [--all]`;
-    the drafting itself stays in `tutor.materials.coverage`. The Coverage page on this data
-    (editing a point, re-drafting a lecture, confirming removals, the one-click migration)
-    and the batch's direct marks are the next step; then every course is drafted again
-    from scratch with the Claude models, the owner's edits and marks carried over.
+    the drafting itself stays in `tutor.materials.coverage`. The Coverage page (same day)
+    is on this data, in three states: nothing yet (the draft, then "Use as coverage" makes
+    coverage.json); a hand-kept coverage.md (shown as it is, with what a conversion would
+    read from it, lectures, rows and the lines to look at, and one button that converts
+    it); the data (each lecture's points with an Edit page per point, Add a point, Title
+    and notes, the points a draft no longer found with Remove and Keep, "Draft N lectures"
+    for the ones not drafted yet or changed since their text's hash, "Draft every lecture
+    again" for the regeneration, and a notice when coverage.md was edited by hand, with a
+    button that writes it again). An edit, an addition or a Keep marks the point as the
+    owner's, so a draft keeps it; the Remove button is the owner's confirmation, code never
+    deletes. A finished batch marks the one point each saved exercise's lecture and slides
+    match, and `coverage-proposal.md` lists what it marked apart from what it still
+    proposes. The old "add the ticked lectures to coverage.md" is gone: a lecture the data
+    lacks is drafted into it. Clicked in headless Chrome on two scratch courses with the
+    stand-in launcher: use the draft, edit a point (the rendered coverage.md shows the new
+    marks), add a point; the conversion preview and Convert on a hand-written file (the
+    week's note on its lecture, `.bak` kept). Still to do: every course drafted again from
+    scratch with the Claude models, the owner's edits and marks carried over (paid; the
+    owner's go first), after each course's file is converted on its page.
 - Packaging the GUI itself as an image (owner asked, 2026-11-05: the aim is opening it in one click,
   see "Packaging and release", which does not need this, so an image is at most a later option). The
   costs: to start test containers from inside, it needs the Docker socket, which amounts to root on

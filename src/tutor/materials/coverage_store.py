@@ -566,7 +566,8 @@ def redraft(workspace: Path, profile: str | None, every: bool, out=print) -> int
         section = coverage.section(name, [coverage.Point.model_validate(p)
                                           for p in data.get("points", [])], entries)
         drafted = [Point(id="", slides=row.slides, point=row.point, **parse_status(row.status),
-                         first_page=None, last_page=None) for row in section.rows]
+                         first_page=row.first_page, last_page=row.last_page)
+                   for row in section.rows]
         counts = merge_draft(name, lecture, drafted, digest, str(data.get("model", "")),
                              section.uncovered)
         save(workspace, store)
