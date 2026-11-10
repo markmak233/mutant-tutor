@@ -1,20 +1,23 @@
 {# Step 4's test image, loaded by htmx (environment.docker_view); its first line says
    whether the step is done, or not needed when tests run on this machine. Build shows its
-   recipe and every download first; the recipe is ours, never a model's. #}
+   recipe and every download first; the recipe is ours, never a model's.
+   Text through _() (gui/i18n.py); the image name, the recipe, Docker's own detail and the
+   download sources stay as they are. #}
 {% from "_macros.html" import chip %}
-{% set labels = {"ready": "ready", "image-missing": "image missing or out of date",
-                 "docker-missing": "Docker not installed", "docker-stopped": "Docker not running",
-                 "cannot-build": "cannot be built"} %}
+{% set labels = {"ready": _("ready"), "image-missing": _("image missing or out of date"),
+                 "docker-missing": _("Docker not installed"), "docker-stopped": _("Docker not running"),
+                 "cannot-build": _("cannot be built")} %}
 <div id="env-docker">
-  <p class="step-state">{% if view.runner == "host" %}{{ chip("not needed") }} Tests run on this machine (step 3), so no image is needed.
-    {% elif view.state == "ready" %}{{ chip("done") }} The image is ready.
-    {% elif view.runner == "container" %}{{ chip("to do") }} Build the image below.
-    {% else %}{{ chip("to do") }} Only if tests are to run in a container (step 3).{% endif %}</p>
+  <p class="step-state">{% if view.runner == "host" %}{{ chip("not needed", _("not needed")) }} {{ _("Tests run on this machine (step 3), so no image is needed.") }}
+    {% elif view.state == "ready" %}{{ chip("done", _("done")) }} {{ _("The image is ready.") }}
+    {% elif view.runner == "container" %}{{ chip("to do", _("to do")) }} {{ _("Build the image below.") }}
+    {% else %}{{ chip("to do", _("to do")) }} {{ _("Only if tests are to run in a container (step 3).") }}{% endif %}</p>
   <p>{{ chip(view.state, labels[view.state]) }}
     {% if view.image %}<code>{{ view.image }}</code>{% endif %}
     {% if view.size %}<span class="muted">{{ "%.2f" | format(view.size / 1e9) }} GB</span>{% endif %}</p>
   {% if view.state == "docker-missing" %}
-  <p class="notice notice-bad">No <code>docker</code> command on this machine. Install Docker Desktop (docker.com) yourself, start it, then check again.</p>
+  {% set code_docker %}<code>docker</code>{% endset %}
+  <p class="notice notice-bad">{{ _("No %(command)s command on this machine. Install Docker Desktop (docker.com) yourself, start it, then check again.", command=code_docker) }}</p>
   {% elif view.state == "docker-stopped" %}
   <p class="notice notice-bad">{{ view.detail }}</p>
   {% elif view.state == "cannot-build" %}
@@ -22,20 +25,21 @@
   {% endif %}
   {% if view.state != "cannot-build" %}
   <details class="review">
-    <summary>What "Build image" does</summary>
+    <summary>{{ _("What \"Build image\" does") }}</summary>
     <dl>
-      <dt>What it does</dt><dd>Builds this course's image from the recipe below (<code>python -m tutor.container build</code>, with the course's <code>.venv</code>, so the image takes its package versions), checks [requires] inside it, then removes this course's older images.</dd>
-      <dt>Downloads</dt><dd><ul>{% for what, source in view.downloads %}<li>{{ what }} <span class="muted">from {{ source }}</span></li>{% endfor %}</ul></dd>
-      <dt>Size</dt><dd>For scale: {{ scale }}. The first build takes minutes; later ones reuse what has not changed.</dd>
-      <dt>Admin rights</dt><dd>None beyond Docker's own.</dd>
-      <dt>To undo</dt><dd><code>docker image rm {{ view.image }}</code></dd>
-      <dt>Recipe</dt><dd>{% if view.recipe %}<pre class="recipe">{{ view.recipe }}</pre>{% else %}Shown once the course has a <code>.venv</code>.{% endif %}</dd>
+      {% set code_build %}<code>python -m tutor.container build</code>{% endset %}{% set code_venv %}<code>.venv</code>{% endset %}
+      <dt>{{ _("What it does") }}</dt><dd>{{ _("Builds this course's image from the recipe below (%(command)s, with the course's %(venv)s, so the image takes its package versions), checks [requires] inside it, then removes this course's older images.", command=code_build, venv=code_venv) }}</dd>
+      <dt>{{ _("Downloads") }}</dt><dd><ul>{% for what, source in view.downloads %}<li>{{ what }} <span class="muted">{{ _("from %(source)s", source=source) }}</span></li>{% endfor %}</ul></dd>
+      <dt>{{ _("Size") }}</dt><dd>{{ _("For scale: %(scale)s. The first build takes minutes; later ones reuse what has not changed.", scale=scale) }}</dd>
+      <dt>{{ _("Admin rights") }}</dt><dd>{{ _("None beyond Docker's own.") }}</dd>
+      <dt>{{ _("To undo") }}</dt><dd><code>docker image rm {{ view.image }}</code></dd>
+      <dt>{{ _("Recipe") }}</dt><dd>{% if view.recipe %}<pre class="recipe">{{ view.recipe }}</pre>{% else %}{{ _("Shown once the course has a %(venv)s.", venv=code_venv) }}{% endif %}</dd>
     </dl>
   </details>
   {% endif %}
   <div class="actions">
     {# Match step 2's fix controls while another course task owns the environment. #}
-    {% if view.recipe and view.state in ("image-missing", "ready") %}<form method="post" class="action" action="{{ url_for('build_image', name=course.folder) }}"><button type="submit"{% if view.state != 'ready' %} class="primary"{% endif %}{% if running %} disabled{% endif %}>{{ 'Rebuild image' if view.state == 'ready' else 'Build image' }}</button></form>{% endif %}
-    <button type="button" class="small" hx-get="{{ url_for('environment_docker', name=course.folder) }}" hx-target="#env-docker" hx-swap="outerHTML">Check again</button>
+    {% if view.recipe and view.state in ("image-missing", "ready") %}<form method="post" class="action" action="{{ url_for('build_image', name=course.folder) }}"><button type="submit"{% if view.state != 'ready' %} class="primary"{% endif %}{% if running %} disabled{% endif %}>{{ _('Rebuild image') if view.state == 'ready' else _('Build image') }}</button></form>{% endif %}
+    <button type="button" class="small" hx-get="{{ url_for('environment_docker', name=course.folder) }}" hx-target="#env-docker" hx-swap="outerHTML">{{ _("Check again") }}</button>
   </div>
 </div>

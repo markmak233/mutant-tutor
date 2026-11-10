@@ -48,6 +48,7 @@ from tutor import (
 from tutor.envcheck import NOT_PIP, pip_requirements, requires_problems, version_matches
 from tutor.gui import requirement_versions, tasks, toml_edit
 from tutor.gui.courses import Course
+from tutor.gui.i18n import N_
 from tutor.gui.toml_edit import put
 from tutor.materials import imports_found
 from tutor.materials import requires as requires_draft
@@ -55,8 +56,9 @@ from tutor.materials import requires as requires_draft
 CHECK_TIMEOUT_S = 60  # java -version, in a venv that may be cold; measured 0.2 s warm
 RUNNERS = ("container", "host")
 # What each special [requires] name stands for; any other name is a pip package.
-KINDS = {"python": "Python version", "java": "JDK (Java)", "hadoop": "Hadoop",
-         "gcc": "C compiler"}
+# What each name in [requires] is, as the page says it (N_(): translated when shown).
+KINDS = {"python": N_("Python version"), "java": N_("JDK (Java)"), "hadoop": N_("Hadoop"),
+         "gcc": N_("C compiler")}
 # The gcc the test image has (Debian bookworm's), which adding C writes in [requires].
 MODULE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")  # a top-level module, as allow_imports holds
 HADOOP_DOWNLOAD = "about 730 MB"  # measured 2026-11-05, see image_recipe.HADOOP_MIRRORS
@@ -199,8 +201,8 @@ def kind(name: str) -> str:
     if name == "languages":  # envcheck's line for a language not supported yet
         return "workspace.toml [languages]"
     if name.endswith(" imports"):  # envcheck's probe: a package imports a removed module
-        return "removed standard-library module"
-    return KINDS.get(name, "pip package")
+        return N_("removed standard-library module")
+    return KINDS.get(name, N_("pip package"))
 
 
 def check_requires(names: list[str], versions: list[str], chosen: str | None
@@ -410,13 +412,13 @@ def draft_view(course: Course) -> DraftView:
             others.append(candidate)
             continue
         listed = _listed(current, candidate.name)
-        if listed is None:
-            status = "new"
+        if listed is None:  # N_(): the page shows the status translated, in a chip
+            status = N_("new")
         elif candidate.versions and not any(version_matches(v, current[listed])
                                             for v in candidate.versions):
-            status = "listed, other version"
+            status = N_("listed, other version")
         else:
-            status = "listed"
+            status = N_("listed")
         version = (prefix(candidate.kind, candidate.versions[0]) if candidate.versions
                    else current.get(listed, "") if listed else "")
         rows.append(DraftRow(candidate, status, version))

@@ -842,7 +842,7 @@ def test_the_page_lists_them_and_the_ticked_ones_go_into_safety(root, course):
 
     page = client.get("/c/demo-course/environment/", base_url=BASE).get_data(as_text=True)
 
-    assert "The lectures' code uses, and exercises may not yet" in page
+    assert "The lectures&#39; code uses, and exercises may not yet" in page
     assert '<tr class="risky">' in page and "<code>subprocess</code>" in page
     assert 'name="header" value="mylist.h"' in page and "L2 p.2: <code>#include" in page
 

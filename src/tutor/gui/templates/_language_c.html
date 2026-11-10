@@ -1,20 +1,22 @@
 {# C's settings on the Environment page, shown once C is in the language list
    (languages_page.language_view, owner 2026-11-07): [languages.c] flags and [safety]
    allow_headers. The flags start as the course's, else as the lectures' gcc lines show them.
-   Saving keeps C (the hidden "c"); removing C is the language list's button. #}
+   Saving keeps C (the hidden "c"); removing C is the language list's button.
+   Text through _() and {% trans %} (gui/i18n.py); flags, header names and the lectures'
+   lines stay as they are. #}
 {% set lv = language %}
 {% set tl = typed_language or {} %}
-<h3>C: compiler settings</h3>
+<h3>{{ _("C: compiler settings") }}</h3>
 <form method="post" action="{{ url_for('save_language', name=course.folder) }}" class="form">
   <input type="hidden" name="c" value="on">
-  <p class="muted">Exercises in C are tested by pytest, compiled with AddressSanitizer and UndefinedBehaviorSanitizer, and validated only in a container (step 3), with gcc in its image.</p>
-  <label class="field">Compiler flags
-    <span class="muted">{% if lv.suggestion %}the lectures compile with <code>{{ lv.suggestion.flags | join(" ") }}</code> ({{ lv.suggestion.count }} of {{ lv.suggestion.lines }} compile line{{ "s" if lv.suggestion.lines != 1 }}; {{ lv.suggestion.lecture }} {{ lv.suggestion.page }}: <code>{{ lv.suggestion.line }}</code>){% else %}no compile line with flags in the lectures; without any, C exercises use <code>-std=c11 -Wall</code>{% endif %}</span>
+  <p class="muted">{{ _("Exercises in C are tested by pytest, compiled with AddressSanitizer and UndefinedBehaviorSanitizer, and validated only in a container (step 3), with gcc in its image.") }}</p>
+  <label class="field">{{ _("Compiler flags") }}
+    <span class="muted">{% if lv.suggestion %}{% set code_flags %}<code>{{ lv.suggestion.flags | join(" ") }}</code>{% endset %}{% set code_line %}<code>{{ lv.suggestion.line }}</code>{% endset %}{% trans count=lv.suggestion.lines, flags=code_flags, n=lv.suggestion.count, lecture=lv.suggestion.lecture, page=lv.suggestion.page, line=code_line %}the lectures compile with {{ flags }} ({{ n }} of {{ count }} compile line; {{ lecture }} {{ page }}: {{ line }}){% pluralize %}the lectures compile with {{ flags }} ({{ n }} of {{ count }} compile lines; {{ lecture }} {{ page }}: {{ line }}){% endtrans %}{% else %}{% set code_default %}<code>-std=c11 -Wall</code>{% endset %}{{ _("no compile line with flags in the lectures; without any, C exercises use %(flags)s", flags=code_default) }}{% endif %}</span>
     <input type="text" name="flags" value="{{ tl.flags if tl else lv.flags }}" autocomplete="off" spellcheck="false">
   </label>
-  <label class="field">Other headers exercises may include
-    <span class="muted">besides the C standard library's (stdio.h, stdlib.h, string.h, math.h, ...), separated by spaces; e.g. unistd.h for getopt</span>
-    <input type="text" name="headers" value="{{ tl.headers if tl else lv.headers }}" autocomplete="off" spellcheck="false" placeholder="none">
+  <label class="field">{{ _("Other headers exercises may include") }}
+    <span class="muted">{{ _("besides the C standard library's (stdio.h, stdlib.h, string.h, math.h, ...), separated by spaces; e.g. unistd.h for getopt") }}</span>
+    <input type="text" name="headers" value="{{ tl.headers if tl else lv.headers }}" autocomplete="off" spellcheck="false" placeholder="{{ _('none') }}">
   </label>
-  <div class="actions"><button type="submit" class="primary">Save C's settings</button></div>
+  <div class="actions"><button type="submit" class="primary">{{ _("Save C's settings") }}</button></div>
 </form>

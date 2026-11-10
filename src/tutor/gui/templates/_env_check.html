@@ -1,35 +1,37 @@
 {# Environment step 2 uses doctor's structured/redacted rows. Fixed identifiers alone
-   choose existing POST actions or guide anchors; GET never sends model requests. #}
+   choose existing POST actions or guide anchors; GET never sends model requests.
+   Text through _() and {% trans %} (gui/i18n.py); a check's own text, its next step and
+   a Python's path come from doctor and stay as they are. #}
 {% from "_macros.html" import chip %}
 {% macro fix_link(href, label) -%}
 {% if running %}<button type="button" class="small" disabled>{{ label }}</button>{% else %}<a class="button" href="{{ href }}">{{ label }}</a>{% endif %}
 {%- endmacro %}
 <div id="env-check">
-  <p class="step-state">{% if needs_attention %}{{ chip("to do") }} {{ needs_attention }} {{ 'check needs attention' if needs_attention == 1 else 'checks need attention' }}.{% else %}{{ chip("done") }} All checks passed.{% endif %}</p>
-  {% if running %}<p class="notice notice-bad">A task is running in this course: <a href="{{ url_for('task', name=course.folder, task_id=running.id) }}">{{ running.title }}</a>. Finish it before another setup change.</p>{% endif %}
+  <p class="step-state">{% if needs_attention %}{{ chip("to do", _("to do")) }} {% trans count=needs_attention %}{{ count }} check needs attention.{% pluralize %}{{ count }} checks need attention.{% endtrans %}{% else %}{{ chip("done", _("done")) }} {{ _("All checks passed.") }}{% endif %}</p>
+  {% if running %}<p class="notice notice-bad">{{ _("A task is running in this course:") }} <a href="{{ url_for('task', name=course.folder, task_id=running.id) }}">{{ running.title }}</a>. {{ _("Finish it before another setup change.") }}</p>{% endif %}
   <table>
-    <thead><tr><th>Check</th><th>Result</th><th>What to do</th></tr></thead>
+    <thead><tr><th>{{ _("Check") }}</th><th>{{ _("Result") }}</th><th>{{ _("What to do") }}</th></tr></thead>
     <tbody>
     {% for row in rows %}
       <tr>
         <td>{{ row.text }}</td>
-        <td>{{ chip({'OK': 'ok', 'WARN': 'failed', 'FAIL': 'error', 'SKIP': 'skipped'}.get(row.status, 'skipped'), status_text.get(row.status, row.status)) }}</td>
+        <td>{{ chip({'OK': 'ok', 'WARN': 'failed', 'FAIL': 'error', 'SKIP': 'skipped'}.get(row.status, 'skipped'), _(status_text.get(row.status, row.status))) }}</td>
         <td>
           {% if row.next_step %}<p class="muted">{{ row.next_step }}</p>{% endif %}
           {# This is a whitelist, not a route/URL supplied by a diagnostic or request. #}
           {% if row.status in ('FAIL', 'WARN') %}
           {% if row.fix == 'install-venv' %}
-          <form method="post" class="action" action="{{ url_for('install_packages', name=course.folder) }}"><button type="submit"{% if running %} disabled{% endif %}>Install into .venv</button></form>
+          <form method="post" class="action" action="{{ url_for('install_packages', name=course.folder) }}"><button type="submit"{% if running %} disabled{% endif %}>{{ _("Install into .venv") }}</button></form>
           {% elif row.fix == 'build-image' %}
-          <form method="post" class="action" action="{{ url_for('build_image', name=course.folder) }}"><button type="submit"{% if running %} disabled{% endif %}>Build the test image</button></form>
+          <form method="post" class="action" action="{{ url_for('build_image', name=course.folder) }}"><button type="submit"{% if running %} disabled{% endif %}>{{ _("Build the test image") }}</button></form>
           {% elif row.fix == 'switch-python' %}
-          {{ fix_link('#python-switch', 'Choose another Python') }}
+          {{ fix_link('#python-switch', _('Choose another Python')) }}
           {% elif row.fix == 'host-guide' %}
-          {{ fix_link(url_for('host_setup', name=course.folder) ~ '#' ~ guide_fragment(row), 'Host installation instructions') }}
+          {{ fix_link(url_for('host_setup', name=course.folder) ~ '#' ~ guide_fragment(row), _('Host installation instructions')) }}
           {% elif row.fix == 'choose-runner' %}
-          {{ fix_link(url_for('environment_view', name=course.folder) ~ '#runner-choice', 'Choose where tests run') }}
+          {{ fix_link(url_for('environment_view', name=course.folder) ~ '#runner-choice', _('Choose where tests run')) }}
           {% elif row.fix == 'ask-model' %}
-          {% if row.status == 'FAIL' %}{{ fix_link(url_for('environment_fix', name=course.folder, identifier=row_id(row)), 'Ask a model for a fix') }}{% endif %}
+          {% if row.status == 'FAIL' %}{{ fix_link(url_for('environment_fix', name=course.folder, identifier=row_id(row)), _('Ask a model for a fix')) }}{% endif %}
           {% endif %}
           {% endif %}
         </td>
@@ -40,17 +42,17 @@
   {# Existing guarded switch action, offered only from a relevant diagnostic row. #}
   {% if switch is not none %}
   <div class="python-switch" id="python-switch">
-    <p><strong>Another Python for this course.</strong> <span class="muted">Choose an installed Python that suits the course. This makes its .venv anew, puts the original back if anything fails, then updates [requires] python (keeping workspace.toml.bak).</span></p>
+    <p><strong>{{ _("Another Python for this course.") }}</strong> <span class="muted">{{ _("Choose an installed Python that suits the course. This makes its .venv anew, puts the original back if anything fails, then updates [requires] python (keeping workspace.toml.bak).") }}</span></p>
     {% if switch %}<table class="compact"><tbody>
     {% for o in switch %}
       <tr><td>Python {{ o.found.version }} <span class="muted">{{ o.found.path }}</span></td>
-        <td>{% if o.current %}{{ chip("current", "this .venv's") }}{% elif o.problems %}<span class="muted">{{ o.problems | join("; ") }}</span>{% else %}<form method="post" action="{{ url_for('switch_python', name=course.folder) }}" class="action"><input type="hidden" name="python" value="{{ o.found.path }}"><button type="submit" class="small"{% if running %} disabled{% endif %}>Make .venv with Python {{ o.found.minor }}</button></form>{% endif %}</td></tr>
+        <td>{% if o.current %}{{ chip("current", _("this .venv's")) }}{% elif o.problems %}<span class="muted">{{ o.problems | join("; ") }}</span>{% else %}<form method="post" action="{{ url_for('switch_python', name=course.folder) }}" class="action"><input type="hidden" name="python" value="{{ o.found.path }}"><button type="submit" class="small"{% if running %} disabled{% endif %}>{{ _("Make .venv with Python %(version)s", version=o.found.minor) }}</button></form>{% endif %}</td></tr>
     {% endfor %}
     </tbody></table>{% endif %}
     {# A compatible current interpreter counts too: no alternative is not no suitable Python. #}
-    {% if not switch | rejectattr('problems') | list %}<p>No suitable Python here. {{ fix_link(url_for('python_downloads', name=course.folder), 'Download one with uv') }}.</p>
-    {% elif not switch | selectattr('offered') | list %}<p class="muted">No suitable alternative Python was found. {{ fix_link(url_for('host_setup', name=course.folder) ~ '#python', 'Install a compatible Python') }}, then check again.</p>{% endif %}
+    {% if not switch | rejectattr('problems') | list %}<p>{{ _("No suitable Python here.") }} {{ fix_link(url_for('python_downloads', name=course.folder), _('Download one with uv')) }}.</p>
+    {% elif not switch | selectattr('offered') | list %}<p class="muted">{{ _("No suitable alternative Python was found.") }} {{ fix_link(url_for('host_setup', name=course.folder) ~ '#python', _('Install a compatible Python')) }}, {{ _("then check again.") }}</p>{% endif %}
   </div>
   {% endif %}
-  <button type="button" class="small" hx-get="{{ url_for('environment_check', name=course.folder) }}" hx-target="#env-check" hx-swap="outerHTML">Check again</button>
+  <button type="button" class="small" hx-get="{{ url_for('environment_check', name=course.folder) }}" hx-target="#env-check" hx-swap="outerHTML">{{ _("Check again") }}</button>
 </div>

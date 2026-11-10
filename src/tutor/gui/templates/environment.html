@@ -4,84 +4,92 @@
    image (step 4) load with htmx after the page, since each asks a process or Docker, and
    each says there whether its step is done. Every install is shown in full before its
    button; system installs are the user's, in their terminal. A task started here comes
-   back to this page when it succeeds. #}
+   back to this page when it succeeds.
+   Text through _(), {% trans %} and ngettext (gui/i18n.py). Commands, file names, TOML
+   keys, package names and what the lectures or a model wrote stay as they are; a <code>
+   or a link inside a sentence is a captured block passed in, so the sentence is one
+   string. The language rows' titles and roles come from tutor.languages, in English. #}
 {% from "_macros.html" import action, chip %}
-{% block title %}Environment · {{ course.workspace.course }}{% endblock %}
+{% block title %}{{ _("Environment") }} · {{ course.workspace.course }}{% endblock %}
 {% block crumbs %}
 <a href="{{ url_for('course', name=course.folder) }}">{{ course.workspace.course }}</a>
-<span>Environment</span>
+<span>{{ _("Environment") }}</span>
 {% endblock %}
 {% block content %}
-<h1>Environment</h1>
-<p class="muted">Four steps: what the course needs, install on this machine and check, choose where tests run, then prepare the test image.</p>
+<h1>{{ _("Environment") }}</h1>
+<p class="muted">{{ _("Four steps: what the course needs, install on this machine and check, choose where tests run, then prepare the test image.") }}</p>
 {% if running %}
-<p class="notice notice-bad">A task is running in this course:
+<p class="notice notice-bad">{{ _("A task is running in this course:") }}
   <a href="{{ url_for('task', name=course.folder, task_id=running.id) }}">{{ running.title }}</a>.
-  A task started now is queued behind it.</p>
+  {{ _("A task started now is queued behind it.") }}</p>
 {% endif %}
 {% if problems %}
 <ul class="notice notice-bad form-problems">{% for line in problems %}<li>{{ line }}</li>{% endfor %}</ul>
-<p class="muted">Nothing was saved.</p>
+<p class="muted">{{ _("Nothing was saved.") }}</p>
 {% endif %}
 
 <section class="step" id="course-needs">
-<h2><span class="step-no">1</span>What the course needs</h2>
-<p class="muted">The course's languages and the software its tests need: <code>[requires]</code> and <code>[languages]</code> in workspace.toml. Let a model find them in the lectures, or set them in the lists below; nothing is written until you add or save.</p>
+<h2><span class="step-no">1</span>{{ _("What the course needs") }}</h2>
+{% set code_requires %}<code>[requires]</code>{% endset %}
+{% set code_languages %}<code>[languages]</code>{% endset %}
+<p class="muted">{{ _("The course's languages and the software its tests need: %(requires)s and %(languages)s in workspace.toml. Let a model find them in the lectures, or set them in the lists below; nothing is written until you add or save.", requires=code_requires, languages=code_languages) }}</p>
 
 {# 7b: a model's draft from the lectures (environment.draft_view). It costs money, so it runs
    only from its button; its entries are only candidates until ticked and added. #}
-<h3>Find it in the lectures (optional)</h3>
-<p class="muted">A model reads each lecture and lists the software its code uses, with the page and the words that show it. Entries whose words are not on that page are dropped, and so is Python's standard library.</p>
+<h3>{{ _("Find it in the lectures (optional)") }}</h3>
+<p class="muted">{{ _("A model reads each lecture and lists the software its code uses, with the page and the words that show it. Entries whose words are not on that page are dropped, and so is Python's standard library.") }}</p>
 {% set d = draft.draft %}
+{% set lectures_link %}<a href="{{ url_for('lecture_list', name=course.folder) }}">{{ _("Lectures") }}</a>{% endset %}
+{% set models_link %}<a href="{{ url_for('models', name=course.folder) }}">{{ _("Models") }}</a>{% endset %}
 {% if not (d.done or d.todo) %}
-<p>No lecture is read yet: read them on the <a href="{{ url_for('lecture_list', name=course.folder) }}">Lectures</a> page first.</p>
+<p>{{ _("No lecture is read yet: read them on the %(page)s page first.", page=lectures_link) }}</p>
 {% else %}
 {% if d.todo %}
 <div class="notice notice-ok">
-  {{ d.todo | length }} lecture{{ "s" if d.todo | length != 1 }} not looked at yet{% if d.done %}, or changed since{% endif %}.
-  {% if draft.model %}This asks {{ draft.model }}, one request per lecture, {% if draft.tokens_k %}about {{ draft.tokens_k }} thousand{% else %}under a thousand{% endif %} input tokens in all: a paid model charges for them.
-  {{ action(url_for('draft_requires', name=course.folder), "Look at " ~ (d.todo | length) ~ " lecture" ~ ("s" if d.todo | length != 1 else "")) }}
-  {% else %}No model is set for it: choose one for the setup, plan or generate role on the <a href="{{ url_for('models', name=course.folder) }}">Models</a> page.{% endif %}
+  {% if d.done %}{% trans count=d.todo | length %}{{ count }} lecture not looked at yet, or changed since.{% pluralize %}{{ count }} lectures not looked at yet, or changed since.{% endtrans %}{% else %}{% trans count=d.todo | length %}{{ count }} lecture not looked at yet.{% pluralize %}{{ count }} lectures not looked at yet.{% endtrans %}{% endif %}
+  {% if draft.model %}{% if draft.tokens_k %}{{ _("This asks %(model)s, one request per lecture, about %(k)s thousand input tokens in all: a paid model charges for them.", model=draft.model, k=draft.tokens_k) }}{% else %}{{ _("This asks %(model)s, one request per lecture, under a thousand input tokens in all: a paid model charges for them.", model=draft.model) }}{% endif %}
+  {{ action(url_for('draft_requires', name=course.folder), ngettext("Look at %(num)s lecture", "Look at %(num)s lectures", d.todo | length)) }}
+  {% else %}{{ _("No model is set for it: choose one for the setup, plan or generate role on the %(page)s page.", page=models_link) }}{% endif %}
 </div>
 {% endif %}
-{% if d.done %}<p class="muted">{{ d.done | length }} lecture{{ "s" if d.done | length != 1 }} looked at, by {{ d.models | join(", ") }}.
-  {% if draft.model %}To ask {{ "them all" if not d.todo else "every lecture" }} again (after changing the model, or to compare), this sends {% if draft.all_tokens_k %}about {{ draft.all_tokens_k }} thousand{% else %}under a thousand{% endif %} input tokens to {{ draft.model }}.{% endif %}</p>
-{% if draft.model %}<form method="post" action="{{ url_for('draft_requires', name=course.folder) }}" class="inline-form"><input type="hidden" name="again" value="1">{% set every = (d.done | length) + (d.todo | length) %}<button type="submit" class="small">{{ "Look at the lecture again" if every == 1 else "Look at all " ~ every ~ " lectures again" }}</button></form>{% endif %}
+{% if d.done %}<p class="muted">{% trans count=d.done | length, models=d.models | join(", ") %}{{ count }} lecture looked at, by {{ models }}.{% pluralize %}{{ count }} lectures looked at, by {{ models }}.{% endtrans %}
+  {% if draft.model %}{% if draft.all_tokens_k %}{{ _("To ask every lecture again (after changing the model, or to compare), this sends about %(k)s thousand input tokens to %(model)s.", k=draft.all_tokens_k, model=draft.model) }}{% else %}{{ _("To ask every lecture again (after changing the model, or to compare), this sends under a thousand input tokens to %(model)s.", model=draft.model) }}{% endif %}{% endif %}</p>
+{% if draft.model %}<form method="post" action="{{ url_for('draft_requires', name=course.folder) }}" class="inline-form"><input type="hidden" name="again" value="1">{% set every = (d.done | length) + (d.todo | length) %}<button type="submit" class="small">{{ ngettext("Look at the lecture again", "Look at all %(num)s lectures again", every) }}</button></form>{% endif %}
 {% endif %}
 {% if draft.rows %}
 <form method="post" action="{{ url_for('accept_requires', name=course.folder) }}" class="form wide">
   <table class="draft">
-    <thead><tr><th></th><th>Name</th><th>Version</th><th>Now</th><th>Where the slides show it</th></tr></thead>
+    <thead><tr><th></th><th>{{ _("Name") }}</th><th>{{ _("Version") }}</th><th>{{ _("Now") }}</th><th>{{ _("Where the slides show it") }}</th></tr></thead>
     <tbody>
     {% for row in draft.rows %}
       {% set c = row.candidate %}
       <tr>
-        <td><input type="checkbox" name="accept" value="{{ c.name }}" aria-label="Add {{ c.name }}"{% if c.name in chosen %} checked{% endif %}></td>
-        <td>{{ c.name }} <span class="muted">{{ kind(c.name) }}</span>
-          {% if c.kind == "pip" %}<br><a href="https://pypi.org/project/{{ c.name }}/" rel="noreferrer noopener" target="_blank">check it on PyPI</a>{% endif %}
-          {% if c.mapped %}<br>{{ chip("name from the model") }}{% endif %}</td>
-        <td><input type="text" name="version:{{ c.name }}" value="{{ chosen.get(c.name, row.version) }}" aria-label="Version of {{ c.name }}" autocomplete="off" spellcheck="false">
-          {% if not c.versions %}<span class="muted">the slides state none</span>{% elif c.versions | length > 1 or c.versions[0] != row.version %}<span class="muted">the slides say {{ c.versions | join(", ") }}</span>{% endif %}</td>
-        <td>{{ chip(row.status) }}</td>
-        <td><details><summary>{{ c.sources[0].lecture }} p.{{ c.sources[0].page }}{% if c.sources | length > 1 %} and {{ c.sources | length - 1 }} more{% endif %}</summary>
+        <td><input type="checkbox" name="accept" value="{{ c.name }}" aria-label="{{ _('Add %(name)s', name=c.name) }}"{% if c.name in chosen %} checked{% endif %}></td>
+        <td>{{ c.name }} <span class="muted">{{ _(kind(c.name)) }}</span>
+          {% if c.kind == "pip" %}<br><a href="https://pypi.org/project/{{ c.name }}/" rel="noreferrer noopener" target="_blank">{{ _("check it on PyPI") }}</a>{% endif %}
+          {% if c.mapped %}<br>{{ chip("name from the model", _("name from the model")) }}{% endif %}</td>
+        <td><input type="text" name="version:{{ c.name }}" value="{{ chosen.get(c.name, row.version) }}" aria-label="{{ _('Version of %(name)s', name=c.name) }}" autocomplete="off" spellcheck="false">
+          {% if not c.versions %}<span class="muted">{{ _("the slides state none") }}</span>{% elif c.versions | length > 1 or c.versions[0] != row.version %}<span class="muted">{{ _("the slides say %(versions)s", versions=c.versions | join(", ")) }}</span>{% endif %}</td>
+        <td>{{ chip(row.status, _(row.status)) }}</td>
+        <td><details><summary>{{ c.sources[0].lecture }} p.{{ c.sources[0].page }}{% if c.sources | length > 1 %} {{ _("and %(n)s more", n=c.sources | length - 1) }}{% endif %}</summary>
           <ul class="sources">{% for s in c.sources %}<li>{{ s.lecture }} p.{{ s.page }}: <code>{{ s.quote }}</code></li>{% endfor %}</ul></details></td>
       </tr>
     {% endfor %}
     </tbody>
   </table>
-  <p class="muted">"Name from the model": the slides show only the module imported, and the pip name is the model's; check it on PyPI before installing, as a made-up name can be one somebody registered. Each entry goes where it belongs below: Python's version and gcc (C) into the language list, the rest into Python's packages and tools. For exercises to import a package, tick "Exercises may import" for it there once it is added.</p>
-  <div class="actions"><button type="submit" class="primary">Add the ticked ones</button></div>
+  <p class="muted">{{ _("\"Name from the model\": the slides show only the module imported, and the pip name is the model's; check it on PyPI before installing, as a made-up name can be one somebody registered. Each entry goes where it belongs below: Python's version and gcc (C) into the language list, the rest into Python's packages and tools. For exercises to import a package, tick \"Exercises may import\" for it there once it is added.") }}</p>
+  <div class="actions"><button type="submit" class="primary">{{ _("Add the ticked ones") }}</button></div>
 </form>
 {% elif d.done %}
-<p>No software found in the lectures looked at.</p>
+<p>{{ _("No software found in the lectures looked at.") }}</p>
 {% endif %}
 {% if draft.others %}
-<p class="muted">Also named, not checked here:</p>
+<p class="muted">{{ _("Also named, not checked here:") }}</p>
 <ul class="sources">{% for c in draft.others %}<li>{{ c.name }}{% if c.versions %} {{ c.versions[0] }}{% endif %} <span class="muted">{{ c.sources[0].lecture }} p.{{ c.sources[0].page }}: <code>{{ c.sources[0].quote }}</code></span></li>{% endfor %}</ul>
 {% endif %}
 {% if d.dropped %}
 <details class="review">
-  <summary>{{ d.dropped | length }} entr{{ "ies" if d.dropped | length != 1 else "y" }} dropped by the checks</summary>
+  <summary>{% trans count=d.dropped | length %}{{ count }} entry dropped by the checks{% pluralize %}{{ count }} entries dropped by the checks{% endtrans %}</summary>
   <ul class="sources">{% for x in d.dropped %}<li>{{ x.lecture }} p.{{ x.page }} <strong>{{ x.name }}</strong>: {{ x.reason }}</li>{% endfor %}</ul>
 </details>
 {% endif %}
@@ -93,52 +101,55 @@
    list, one part each (Python's packages and tools; _language_<key>.html for the others),
    so a later language adds a row in tutor.languages and a part, not a new layout. #}
 {% set ls = languages %}
-<h3>Languages</h3>
+<h3>{{ _("Languages") }}</h3>
 {% for line in language.problems %}<p class="notice notice-bad">{{ line }}</p>{% endfor %}
 <form method="post" action="{{ url_for('save_language_versions', name=course.folder) }}" class="form">
   <table class="requires languages">
-    <thead><tr><th>Language</th><th>Version</th><th>What the course uses it for</th><th></th></tr></thead>
+    <thead><tr><th>{{ _("Language") }}</th><th>{{ _("Version") }}</th><th>{{ _("What the course uses it for") }}</th><th></th></tr></thead>
     <tbody>
     {% for row in ls.rows %}
       <tr>
         <td><strong>{{ row.language.title }}</strong>{% if row.language.toolchain != row.language.key %} <span class="muted">{{ row.language.toolchain }}</span>{% endif %}</td>
-        <td><input type="text" name="version:{{ row.language.toolchain }}" value="{{ row.version }}" aria-label="Version of {{ row.language.title }}" autocomplete="off" spellcheck="false"></td>
+        <td><input type="text" name="version:{{ row.language.toolchain }}" value="{{ row.version }}" aria-label="{{ _('Version of %(name)s', name=row.language.title) }}" autocomplete="off" spellcheck="false"></td>
         <td class="muted">{{ row.language.role }}</td>
-        <td>{% if row.removable %}<button type="submit" class="small" formaction="{{ url_for('remove_language', name=course.folder) }}" name="language" value="{{ row.language.key }}">Remove</button>{% endif %}</td>
+        <td>{% if row.removable %}<button type="submit" class="small" formaction="{{ url_for('remove_language', name=course.folder) }}" name="language" value="{{ row.language.key }}">{{ _("Remove") }}</button>{% endif %}</td>
       </tr>
     {% endfor %}
     </tbody>
   </table>
-  <div class="actions"><button type="submit" class="primary">Save the versions</button></div>
+  <div class="actions"><button type="submit" class="primary">{{ _("Save the versions") }}</button></div>
 </form>
 {% if ls.addable %}
 <form method="post" action="{{ url_for('add_language', name=course.folder) }}" class="inline-form">
-  <label>Add a language
+  <label>{{ _("Add a language") }}
     <select name="language">
       {% for lang in ls.addable %}<option value="{{ lang.key }}">{{ lang.title }}</option>{% endfor %}
-      {% for title in ls.not_yet %}<option disabled>{{ title }} (not supported yet)</option>{% endfor %}
+      {% for title in ls.not_yet %}<option disabled>{{ _("%(name)s (not supported yet)", name=title) }}</option>{% endfor %}
     </select></label>
-  <button type="submit" class="small">Add</button>
+  <button type="submit" class="small">{{ _("Add") }}</button>
 </form>
 {% else %}
-<p class="muted">Not supported yet: {{ ls.not_yet | join(", ") }}.</p>
+<p class="muted">{{ _("Not supported yet: %(names)s.", names=ls.not_yet | join(", ")) }}</p>
 {% endif %}
-{% if ls.hint %}<p class="muted">The lectures compile C: {{ ls.hint.count }} of {{ ls.hint.lines }} compile line{{ "s" if ls.hint.lines != 1 }}, e.g. {{ ls.hint.lecture }} {{ ls.hint.page }}: <code>{{ ls.hint.line }}</code>. Add C if the exercises should be in C.</p>{% endif %}
+{% if ls.hint %}{% set code_line %}<code>{{ ls.hint.line }}</code>{% endset %}<p class="muted">{% trans count=ls.hint.lines, n=ls.hint.count, lecture=ls.hint.lecture, page=ls.hint.page, line=code_line %}The lectures compile C: {{ n }} of {{ count }} compile line, e.g. {{ lecture }} {{ page }}: {{ line }}. Add C if the exercises should be in C.{% pluralize %}The lectures compile C: {{ n }} of {{ count }} compile lines, e.g. {{ lecture }} {{ page }}: {{ line }}. Add C if the exercises should be in C.{% endtrans %}</p>{% endif %}
 
-<h3>Python: packages and tools</h3>
+<h3>{{ _("Python: packages and tools") }}</h3>
 <form method="post" action="{{ url_for('save_requires', name=course.folder) }}" class="form">
-  <p class="muted"><code>java</code> and <code>hadoop</code> are checked on this machine; any other name is a pip package. Python's own version is in the language list. Adding or removing rows changes nothing until you save.</p>
+  {% set code_java %}<code>java</code>{% endset %}{% set code_hadoop %}<code>hadoop</code>{% endset %}
+  <p class="muted">{{ _("%(java)s and %(hadoop)s are checked on this machine; any other name is a pip package. Python's own version is in the language list. Adding or removing rows changes nothing until you save.", java=code_java, hadoop=code_hadoop) }}</p>
   <table class="requires">
-    <thead><tr><th>Name</th><th>Version</th><th>What it is</th><th>Exercises may import</th><th></th></tr></thead>
+    <thead><tr><th>{{ _("Name") }}</th><th>{{ _("Version") }}</th><th>{{ _("What it is") }}</th><th>{{ _("Exercises may import") }}</th><th></th></tr></thead>
     <tbody id="requires-rows">
     {% for row in rows %}{% include "_requires_row.html" %}{% endfor %}
     </tbody>
   </table>
-  <p class="muted">Use a version prefix, such as <code>3.5</code> for any 3.5.x, or a numeric comparison for a pip package, such as <code>&gt;=1,&lt;2</code>. <code>python</code>, <code>java</code>, <code>hadoop</code> and <code>gcc</code> accept prefixes only.</p>
-  <p class="muted">"Exercises may import": the generated exercises may use the package, as the module named in its box ([safety] allow_imports); untick it and they may not. Without a tick they use only Python's core modules. Widening what exercise code may import is your call, package by package.{% if others_allowed %} Also allowed, though not in the list: {{ others_allowed | join(", ") }}.{% endif %}</p>
+  {% set code_35 %}<code>3.5</code>{% endset %}{% set code_cmp %}<code>&gt;=1,&lt;2</code>{% endset %}
+  {% set code_four %}<code>python</code>, <code>java</code>, <code>hadoop</code>, <code>gcc</code>{% endset %}
+  <p class="muted">{{ _("Use a version prefix, such as %(prefix)s for any 3.5.x, or a numeric comparison for a pip package, such as %(comparison)s. %(names)s accept prefixes only.", prefix=code_35, comparison=code_cmp, names=code_four) }}</p>
+  <p class="muted">{{ _("\"Exercises may import\": the generated exercises may use the package, as the module named in its box ([safety] allow_imports); untick it and they may not. Without a tick they use only Python's core modules. Widening what exercise code may import is your call, package by package.") }}{% if others_allowed %} {{ _("Also allowed, though not in the list: %(names)s.", names=others_allowed | join(", ")) }}{% endif %}</p>
   <div class="actions">
-    <button type="button" class="small" hx-get="{{ url_for('requires_row', name=course.folder) }}" hx-target="#requires-rows" hx-swap="beforeend">+ Add a row</button>
-    <button type="submit" class="primary">Save the requirements</button>
+    <button type="button" class="small" hx-get="{{ url_for('requires_row', name=course.folder) }}" hx-target="#requires-rows" hx-swap="beforeend">{{ _("+ Add a row") }}</button>
+    <button type="submit" class="primary">{{ _("Save the requirements") }}</button>
   </div>
 </form>
 
@@ -148,22 +159,23 @@
    owner ticks what the exercises may use. #}
 {% if found_imports %}
 <form method="post" action="{{ url_for('allow_found', name=course.folder) }}" class="form wide" id="found-imports">
-  <h3>The lectures' code uses, and exercises may not yet</h3>
-  <p class="muted">Found in the cached lectures' import and include lines (no model). Tick what the exercises may use: a module goes into <code>[safety] allow_imports</code>, a header into <code>allow_headers</code>. A module marked <strong>risky</strong> starts processes, reaches the network, loads code or touches the interpreter: allowing it lets generated exercises do that too, so tick it only for a course that teaches it.</p>
+  <h3>{{ _("The lectures' code uses, and exercises may not yet") }}</h3>
+  {% set code_allow %}<code>[safety] allow_imports</code>{% endset %}{% set code_headers %}<code>allow_headers</code>{% endset %}{% set strong_risky %}<strong>{{ _("risky") }}</strong>{% endset %}
+  <p class="muted">{{ _("Found in the cached lectures' import and include lines (no model). Tick what the exercises may use: a module goes into %(allow)s, a header into %(headers)s. A module marked %(risky)s starts processes, reaches the network, loads code or touches the interpreter: allowing it lets generated exercises do that too, so tick it only for a course that teaches it.", allow=code_allow, headers=code_headers, risky=strong_risky) }}</p>
   <table class="requires">
-    <thead><tr><th></th><th>Name</th><th>Seen</th><th>Where</th></tr></thead>
+    <thead><tr><th></th><th>{{ _("Name") }}</th><th>{{ _("Seen") }}</th><th>{{ _("Where") }}</th></tr></thead>
     <tbody>
     {% for f in found_imports %}
       <tr{% if f.risky %} class="risky"{% endif %}>
-        <td><input type="checkbox" name="{{ 'module' if f.kind == 'import' else 'header' }}" value="{{ f.name }}" aria-label="Allow {{ f.name }}"></td>
-        <td><code>{{ f.name }}</code>{% if f.kind == 'include' %} <span class="muted">header</span>{% endif %}{% if f.risky %} <strong>risky</strong>{% endif %}</td>
-        <td>{{ f.sources | length }} line{{ "s" if f.sources | length != 1 }}</td>
+        <td><input type="checkbox" name="{{ 'module' if f.kind == 'import' else 'header' }}" value="{{ f.name }}" aria-label="{{ _('Allow %(name)s', name=f.name) }}"></td>
+        <td><code>{{ f.name }}</code>{% if f.kind == 'include' %} <span class="muted">{{ _("header") }}</span>{% endif %}{% if f.risky %} <strong>{{ _("risky") }}</strong>{% endif %}</td>
+        <td>{% trans count=f.sources | length %}{{ count }} line{% pluralize %}{{ count }} lines{% endtrans %}</td>
         <td class="muted">{{ f.first.lecture }} p.{{ f.first.page }}: <code>{{ f.first.line }}</code></td>
       </tr>
     {% endfor %}
     </tbody>
   </table>
-  <div class="actions"><button type="submit">Allow the ticked</button></div>
+  <div class="actions"><button type="submit">{{ _("Allow the ticked") }}</button></div>
 </form>
 {% endif %}
 
@@ -172,56 +184,62 @@
 </section>
 
 <section class="step">
-<h2 id="host-install"><span class="step-no">2</span>Install on this machine</h2>
-{% if setup_fixes %}<p>Previous setup fixes: {% for fix in setup_fixes %}<a href="{{ url_for('environment_fix', name=course.folder, identifier=fix.id, step=4) }}">Continue {{ fix.module or fix.profile }}</a>{% if not loop.last %} · {% endif %}{% endfor %}</p>{% endif %}
+<h2 id="host-install"><span class="step-no">2</span>{{ _("Install on this machine") }}</h2>
+{% if setup_fixes %}<p>{{ _("Previous setup fixes:") }} {% for fix in setup_fixes %}<a href="{{ url_for('environment_fix', name=course.folder, identifier=fix.id, step=4) }}">{{ _("Continue %(name)s", name=fix.module or fix.profile) }}</a>{% if not loop.last %} · {% endif %}{% endfor %}</p>{% endif %}
 {% if original_kept %}
-<p>Your original setup is kept until you choose Keep it.</p>
-<div class="actions">{% for action, label in [('undo', 'Undo'), ('finish', 'Keep it')] %}<form class="action" method="post" action="{{ url_for('doctor_retained', name=course.folder, action=action) }}"><label><input type="checkbox" name="confirmed" required> {{ 'Restore my original setup' if action == 'undo' else 'Permanently discard the original backups' }}</label><button type="submit"{% if running %} disabled{% endif %}>{{ label }}</button></form>{% endfor %}</div>
+<p>{{ _("Your original setup is kept until you choose Keep it.") }}</p>
+<div class="actions">{% for action, label in [('undo', _('Undo')), ('finish', _('Keep it'))] %}<form class="action" method="post" action="{{ url_for('doctor_retained', name=course.folder, action=action) }}"><label><input type="checkbox" name="confirmed" required> {{ _('Restore my original setup') if action == 'undo' else _('Permanently discard the original backups') }}</label><button type="submit"{% if running %} disabled{% endif %}>{{ label }}</button></form>{% endfor %}</div>
 {% endif %}
 {# A normal link: installation instructions remain available without htmx/JavaScript. #}
-<p><a href="{{ url_for('host_setup', name=course.folder) }}">Run tests on this machine: installation guide</a> (optional).</p>
-<p class="muted">The Python packages of step 1 go into the course's own <code>.venv</code>, where your tests run in the IDE; the check below says what this machine still lacks.</p>
-<div class="actions"><form method="post" class="action" action="{{ url_for('install_packages', name=course.folder) }}"><button type="submit" class="primary"{% if running %} disabled{% endif %}>Install into .venv</button></form></div>
+<p><a href="{{ url_for('host_setup', name=course.folder) }}">{{ _("Run tests on this machine: installation guide") }}</a> {{ _("(optional)") }}.</p>
+{% set code_venv %}<code>.venv</code>{% endset %}
+<p class="muted">{{ _("The Python packages of step 1 go into the course's own %(venv)s, where your tests run in the IDE; the check below says what this machine still lacks.", venv=code_venv) }}</p>
+<div class="actions"><form method="post" class="action" action="{{ url_for('install_packages', name=course.folder) }}"><button type="submit" class="primary"{% if running %} disabled{% endif %}>{{ _("Install into .venv") }}</button></form></div>
 <details class="review">
-  <summary>What "Install into .venv" runs</summary>
+  <summary>{{ _("What \"Install into .venv\" runs") }}</summary>
   <dl>
-    <dt>Command</dt><dd><code>python -m tutor.workspace init {{ course.workspace.root }}</code>, which {% if not has_venv %}first creates <code>.venv</code>, then {% endif %}runs<br><code class="wrap">{{ install }}</code></dd>
-    <dt>What it does</dt><dd>Installs this tool and the pip packages in [requires] into the course's <code>.venv</code>; what is there already is left as it is.</dd>
-    <dt>Where</dt><dd>Only inside <code>{{ course.workspace.root }}/.venv</code>. Nothing outside the course folder changes: no PATH, no shell profile.</dd>
-    <dt>Admin rights</dt><dd>None (no sudo).</dd>
-    <dt>Downloads from</dt><dd>PyPI, through pip.</dd>
-    <dt>To undo</dt><dd><code>.venv/bin/python -m pip uninstall NAME</code> in the course folder, or delete <code>.venv</code> and install again.</dd>
+    {% set code_init %}<code>python -m tutor.workspace init {{ course.workspace.root }}</code>{% endset %}
+    {% set code_install %}<code class="wrap">{{ install }}</code>{% endset %}
+    <dt>{{ _("Command") }}</dt><dd>{% if not has_venv %}{{ _("%(command)s, which first creates %(venv)s, then runs", command=code_init, venv=code_venv) }}{% else %}{{ _("%(command)s, which runs", command=code_init) }}{% endif %}<br>{{ code_install }}</dd>
+    <dt>{{ _("What it does") }}</dt><dd>{{ _("Installs this tool and the pip packages in [requires] into the course's %(venv)s; what is there already is left as it is.", venv=code_venv) }}</dd>
+    {% set code_venv_path %}<code>{{ course.workspace.root }}/.venv</code>{% endset %}
+    <dt>{{ _("Where") }}</dt><dd>{{ _("Only inside %(path)s. Nothing outside the course folder changes: no PATH, no shell profile.", path=code_venv_path) }}</dd>
+    <dt>{{ _("Admin rights") }}</dt><dd>{{ _("None (no sudo).") }}</dd>
+    <dt>{{ _("Downloads from") }}</dt><dd>{{ _("PyPI, through pip.") }}</dd>
+    {% set code_uninstall %}<code>.venv/bin/python -m pip uninstall NAME</code>{% endset %}
+    <dt>{{ _("To undo") }}</dt><dd>{{ _("%(command)s in the course folder, or delete %(venv)s and install again.", command=code_uninstall, venv=code_venv) }}</dd>
   </dl>
 </details>
 <div id="env-check" hx-get="{{ url_for('environment_check', name=course.folder) }}" hx-trigger="load" hx-swap="outerHTML">
-  <p class="muted"><span class="spinner-inline" aria-hidden="true"></span>Checking this course with Doctor …</p>
+  <p class="muted"><span class="spinner-inline" aria-hidden="true"></span>{{ _("Checking this course with Doctor …") }}</p>
 </div>
 </section>
 
 <section class="step">
-<h2 id="runner-choice"><span class="step-no">3</span>Where tests run {{ chip("done") if runner else chip("to do") }}</h2>
+<h2 id="runner-choice"><span class="step-no">3</span>{{ _("Where tests run") }} {{ chip("done", _("done")) if runner else chip("to do", _("to do")) }}</h2>
 <form method="post" action="{{ url_for('save_runner', name=course.folder) }}" class="form">
-  <p class="muted">For validation and generation; your own test runs in the IDE stay on this machine. Now: {% if runner %}<strong>{{ runner }}</strong>{% else %}not chosen (they run on this machine, with a warning){% endif %}.</p>
+  {% set strong_runner %}<strong>{{ runner }}</strong>{% endset %}
+  <p class="muted">{{ _("For validation and generation; your own test runs in the IDE stay on this machine.") }} {% if runner %}{{ _("Now: %(runner)s.", runner=strong_runner) }}{% else %}{{ _("Now: not chosen (they run on this machine, with a warning).") }}{% endif %}</p>
   <label class="check"><input type="radio" name="runner" value="container"{% if runner == "container" %} checked{% endif %}>
-    <strong>In a container</strong> <span class="muted">every run in a fresh Docker container with no network and no access to your files; needs Docker and the test image of step 4</span></label>
+    <strong>{{ _("In a container") }}</strong> <span class="muted">{{ _("every run in a fresh Docker container with no network and no access to your files; needs Docker and the test image of step 4") }}</span></label>
   <label class="check"><input type="radio" name="runner" value="host"{% if runner == "host" %} checked{% endif %}{% if language.c %} disabled{% endif %}>
-    <strong>On this machine</strong> <span class="muted">{% if language.c %}not for a C course: a static check cannot bound what C code does, so its tests run only in a container{% else %}no Docker needed, and step 4 is skipped{% endif %}</span></label>
+    <strong>{{ _("On this machine") }}</strong> <span class="muted">{% if language.c %}{{ _("not for a C course: a static check cannot bound what C code does, so its tests run only in a container") }}{% else %}{{ _("no Docker needed, and step 4 is skipped") }}{% endif %}</span></label>
   <label class="check warn"><input type="checkbox" name="understood">
-    I understand that on this machine, code a model generated runs with my rights: it can read and change my files.</label>
-  <div class="actions"><button type="submit" class="primary">Save</button></div>
+    {{ _("I understand that on this machine, code a model generated runs with my rights: it can read and change my files.") }}</label>
+  <div class="actions"><button type="submit" class="primary">{{ _("Save") }}</button></div>
 </form>
 </section>
 
 <section class="step{% if runner == 'host' %} step-dim{% endif %}">
-<h2 id="test-image"><span class="step-no">4</span>Test image</h2>
+<h2 id="test-image"><span class="step-no">4</span>{{ _("Test image") }}</h2>
 <div id="env-docker" hx-get="{{ url_for('environment_docker', name=course.folder) }}" hx-trigger="load" hx-swap="outerHTML">
-  <p class="muted"><span class="spinner-inline" aria-hidden="true"></span>Asking Docker …</p>
+  <p class="muted"><span class="spinner-inline" aria-hidden="true"></span>{{ _("Asking Docker …") }}</p>
 </div>
 {# Inventory reads have their own request so neither the page nor image controls wait.
    Not for a course that tests on this machine: it has no image to record. #}
 {% if runner != 'host' %}
 <div id="env-image-record" hx-get="{{ url_for('environment_image_record', name=course.folder) }}" hx-trigger="load" hx-swap="outerHTML">
-  <p class="muted"><span class="spinner-inline" aria-hidden="true"></span>Checking the image build record …</p>
+  <p class="muted"><span class="spinner-inline" aria-hidden="true"></span>{{ _("Checking the image build record …") }}</p>
 </div>
 {% endif %}
 </section>

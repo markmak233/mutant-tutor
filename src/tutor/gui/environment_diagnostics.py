@@ -5,8 +5,11 @@ model call, task, install or configuration write is started by this view.
 """
 
 from tutor.gui import doctor_page, environment, python_switch
+from tutor.gui.i18n import N_
 
-STATUS_TEXT = {"OK": "OK", "WARN": "Needs attention", "FAIL": "Problem", "SKIP": "Skipped"}
+# How each doctor status reads in the table (N_(): the page translates it when shown).
+STATUS_TEXT = {"OK": N_("OK"), "WARN": N_("Needs attention"), "FAIL": N_("Problem"),
+               "SKIP": N_("Skipped")}
 
 
 def rows(course):
