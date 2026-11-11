@@ -124,6 +124,8 @@ def test_windows_link_uses_encoded_com_script_and_argument_quoting(tmp_path, mon
     root = tmp_path / "course's folder"
 
     def run(command, **kwargs):
+        # stdin closed, else powershell.exe waits on a redirected stdin that never ends.
+        assert kwargs["stdin"] is subprocess.DEVNULL and kwargs["timeout"] >= 60
         script = base64.b64decode(command[-1]).decode("utf-16-le")
         assert "course''s folder" in script and "WScript.Shell" in script
         args = subprocess.list2cmdline(["-m", "tutor", "gui", "--root", str(root)])

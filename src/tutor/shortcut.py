@@ -39,9 +39,14 @@ def _windows(path: Path, command: list[str], run) -> None:
                   + "; $s.Save()")
         encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
         powershell = ["powershell.exe", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded]
-        done = run(powershell, capture_output=True, timeout=30)
+        # stdin closed: powershell.exe reads a redirected stdin to its end before it runs
+        # the command, and under a runner (CI's step, a GUI task) that pipe never ends, so
+        # it sat until the timeout (Windows CI, 2026-11-11: 30 s, then exit 2). A cold
+        # Windows PowerShell with a fresh profile is also slow to start: a minute's room.
+        done = run(powershell, capture_output=True, stdin=subprocess.DEVNULL, timeout=60)
         if done.returncode or not temporary.is_file() or not temporary.stat().st_size:
-            raise ValueError("Windows could not create the shortcut")
+            raise ValueError("Windows could not create the shortcut: powershell.exe exit "
+                             f"{done.returncode}, {done.stderr.decode(errors='replace')[:300]}")
         # Exclusive publication protects an existing shortcut, including a concurrent writer.
         created = False
         try:
