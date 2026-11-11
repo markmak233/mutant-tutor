@@ -4004,7 +4004,10 @@ late; the adaptive review screens can be built with it.
     profiles (`environment.chat_profiles`: the embedding role's left out), the same
     provider and model in several courses listed once under the first, the first
     course's setup model chosen; the task runs in the course that owns the profile, with
-    its key (`--profile`). Jinja's new-style `_()` marks what gettext returns as safe HTML (so the
+    its key (`--profile`). A language is deleted from the same list (owner, 2026-11-11:
+    "two clicks"): a required box then the button, as the GUI's other removals; the file
+    goes for good (a paid translation with it, hence the box), English is chosen when it
+    was the one in use. Jinja's new-style `_()` marks what gettext returns as safe HTML (so the
     values it formats in are escaped), translated or not, so the callables escape the
     text first: an English string may say `<profile>` and shows as written; a literal `%`
     in a page's English is written `%%` (a test checks every string). The language: the

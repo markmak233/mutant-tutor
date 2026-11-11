@@ -183,6 +183,28 @@ def test_a_page_shows_the_chosen_language_and_the_switch_goes_back_and_forth(roo
                        data={"language": "fr"}).status_code == 400
 
 
+def test_a_language_can_be_deleted_in_two_clicks_and_english_takes_over(root):
+    client = _browser(root)
+    i18n.choose(root, "zh")
+    text = _page(client, "/language")
+    assert 'name="language" value="zh"' in text and ">Delete<" in text  # the row's form
+    assert 'name="language" value="en"><label><input type="checkbox" name="confirm"' not in text
+    # The box unticked: refused; English: refused; a language with no file: refused.
+    assert client.post("/language/delete", base_url=BASE, headers={"Origin": BASE},
+                       data={"language": "zh"}).status_code == 400
+    for language in ("en", "fr", ""):
+        assert client.post("/language/delete", base_url=BASE, headers={"Origin": BASE},
+                           data={"language": language, "confirm": "1"}).status_code == 400
+    assert (root / i18n.TRANSLATIONS / "zh.po").is_file()
+    response = client.post("/language/delete", base_url=BASE, headers={"Origin": BASE},
+                           data={"language": "zh", "confirm": "1"})
+    assert response.status_code == 303 and "notice=language-deleted" in response.headers["Location"]
+    assert not (root / i18n.TRANSLATIONS / "zh.po").exists()
+    assert i18n.available(root) == {"en": "English"} and i18n.chosen(root) == "en"
+    text = _page(client, response.headers["Location"])  # the page the redirect names
+    assert "file is deleted" in text and "Your courses" in _page(client, "/")
+
+
 # --- right to left -----------------------------------------------------------------------------
 
 ARABIC = '''msgid ""

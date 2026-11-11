@@ -18,7 +18,10 @@
     {# The file's count: translated, and apart those the model gave back as the English
        (the same word, or one it would not translate), which the file keeps (translate.py). #}
     {% set have, same = counts[code] %}
-    <span class="muted">{{ _("%(done)d of %(total)d translated", done=have - same, total=strings) }}{% if same %}; {{ _("%(same)d kept as the English by the model", same=same) }}{% endif %}{% if notes[code] %}; {{ _("note: %(note)s", note=notes[code]) }}{% endif %}</span>{% endif %}</li>
+    <span class="muted">{{ _("%(done)d of %(total)d translated", done=have - same, total=strings) }}{% if same %}; {{ _("%(same)d kept as the English by the model", same=same) }}{% endif %}{% if notes[code] %}; {{ _("note: %(note)s", note=notes[code]) }}{% endif %}</span>
+    {# Delete: the box then the button (two clicks, as the GUI's other removals); the file
+       goes for good, so a paid translation is gone with it. #}
+    <form method="post" action="{{ url_for('delete_language') }}" class="inline-form"><input type="hidden" name="language" value="{{ code }}"><label><input type="checkbox" name="confirm" value="1" required> {{ _("Delete the file") }}</label><button type="submit" class="small">{{ _("Delete") }}</button></form>{% endif %}</li>
 {% endfor %}
 </ul>
 {% if not chosen %}<p class="muted">{{ _("No choice is kept yet: the browser's language is used when there is a file for it, else English.") }}</p>{% endif %}

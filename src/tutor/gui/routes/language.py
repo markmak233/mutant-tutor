@@ -70,6 +70,22 @@ def register(app: Flask) -> None:
             back = url_for("language_page")
         return redirect(back, code=303)
 
+    @app.post("/language/delete")
+    def delete_language():
+        """The language's file goes (owner, 2026-11-11: a way to remove a language; two
+        clicks, the box then the button, as the GUI's other removals); English is chosen
+        when it was the language in use. English itself has no file and cannot go."""
+        root = app.config["ROOT"]
+        language = request.form.get("language", "")
+        if language == i18n.ENGLISH or language not in i18n.available(root):
+            abort(400, N_("No such language."))
+        if request.form.get("confirm") != "1":
+            abort(400, N_("Tick the box to delete the language's file."))
+        if i18n.chosen(root) == language:  # asked before the file goes: `chosen` needs it
+            i18n.choose(root, i18n.ENGLISH)
+        (root / i18n.TRANSLATIONS / f"{language}.po").unlink()
+        return redirect(url_for("language_page", notice="language-deleted"), code=303)
+
     @app.post("/language/translate")
     def translate_language():
         """`python -m tutor.gui.translate NAME --profile P` (or `--code TAG`, a language
