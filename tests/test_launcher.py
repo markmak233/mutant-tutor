@@ -130,6 +130,9 @@ def test_windows_link_uses_encoded_com_script_and_argument_quoting(tmp_path, mon
         assert "course''s folder" in script and "WScript.Shell" in script
         args = subprocess.list2cmdline(["-m", "tutor", "gui", "--root", str(root)])
         assert args.replace("'", "''") in script
+        # The server's console opens minimised, its tooltip saying how to stop it
+        # (owner, 2026-11-12: a normal window "stays there the whole time").
+        assert "$s.WindowStyle=7;" in script and "close it to stop" in script
         raw = re.search(r"CreateShortcut\('((?:[^']|'')*)'\)", script)[1]
         target = Path(raw.replace("''", "'"))
         assert not target.exists() and target != tmp_path / "Tutor.lnk"

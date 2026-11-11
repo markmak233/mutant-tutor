@@ -3553,6 +3553,11 @@ mode is not done (see "Decisions not to do").
   state has an explicit reset, and no server is killed. `tutor shortcut` creates a new
   .command/.lnk/.desktop without overwriting or changing startup items. Native desktop
   trust/click and browser acceptance remain separate from platform-format unit tests.
+  The server runs in the console window the launcher opens; closing it stops the server.
+  On Windows the .lnk opens that window minimised, with a tooltip saying so (owner,
+  2026-11-12, after the first real double-click: "a terminal stays there the whole
+  time"; no trust prompt appeared). No window at all (`pythonw.exe`, no terminal on macOS
+  and Linux) waits for a Stop-server button in the pages.
   Optional Python management built 2026-11-09: existing uv-managed stable CPythons join
   interpreter discovery. The separate optional page/`tutor python` command lists uv's
   offline catalog; only a confirmed action downloads a freshly offered interpreter,
