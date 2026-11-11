@@ -3716,8 +3716,11 @@ late; the adaptive review screens can be built with it.
   value of a setting given twice and a repair round may run with thinking off. One step,
   not a free number: the one a cut-off item needs, within the settings' 128,000, and the
   route takes no other value (`cap-bad`) and none for an item whose rounds were not cut
-  off. The batch's own cap is unchanged: raising the default would pay for longer thinking
-  on every item. "Try all" keeps the batch's cap. Clicked in headless Chrome on a scratch
+  off. The batch's own cap was left at 32,000 then (raising it would pay for longer thinking
+  on every item); on 2026-11-11 the owner raised the default to 64,000 and this cap to
+  128,000 (graph/settings.py says why: DeepSeek Flash's cut-offs on the deep-learning course,
+  6 of 22 and 6 of 15 first drafts, and one of Sonnet's on a long lecture; a cap is not a
+  cost). "Try all" keeps the batch's cap. Clicked in headless Chrome on a scratch
   course with the stand-in graph (the record rewritten as the real one was): the line, the
   button, the task's command with both caps last. Both week 9 items came out VALID through
   it the same afternoon (first replies of 51,616 and 52,220 output tokens, which the old

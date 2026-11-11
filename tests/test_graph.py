@@ -1184,7 +1184,7 @@ def test_the_repair_role_takes_over_from_the_second_repair(workspace):
     assert final["outcome"] == "saved"
     assert model.configs == ["glm-flash", "glm-flash", "deepseek-pro", "deepseek-pro"]
     assert model.thinkings == [False, False, True, True]  # the repair model reasons
-    assert model.max_tokens == [16_000, 16_000, 32_000, 32_000]  # room for its reasoning
+    assert model.max_tokens == [16_000, 16_000, 64_000, 64_000]  # room for its reasoning
     assert [a["model"] for a in final["attempts"]] == model.configs
     log = json.loads((d.batch_dir / "generation.jsonl").read_text(encoding="utf-8"))
     assert log["repair_model"] == "deepseek-pro: deepseek-v4-pro"

@@ -290,8 +290,8 @@ def test_the_page_offers_the_larger_cap_only_where_a_round_was_cut_off(root, cou
     page = get(_browser(root), "/c/demo-course/plans/w9-test/").get_data(as_text=True)
 
     assert "Rounds 0, 1: the reply was cut off at the batch&#39;s output cap." in page
-    assert page.count('name="cap" value="64000"') == 2  # the button, and the note form's box
-    assert "Try again with a 64,000 output cap" in page
+    assert page.count('name="cap" value="128000"') == 2  # the button, and the note form's box
+    assert "Try again with a 128,000 output cap" in page
 
 
 def test_the_cap_retry_sets_both_caps_after_the_batchs_settings(root, course, monkeypatch):
@@ -299,12 +299,12 @@ def test_the_cap_retry_sets_both_caps_after_the_batchs_settings(root, course, mo
     _cut_off(course, batch)
     started = _record_starts(monkeypatch)
 
-    post(_browser(root), "/c/demo-course/plans/w9-test/retry", {"item": "c", "cap": "64000"})
+    post(_browser(root), "/c/demo-course/plans/w9-test/retry", {"item": "c", "cap": "128000"})
 
     title, (graph, validate), meta = started[0]
-    assert title == "Generate c again and a 64,000 output cap"
+    assert title == "Generate c again and a 128,000 output cap"
     sets = [a for a in graph if a.startswith("--set=")]
-    assert sets[-2:] == ["--set=max_tokens=64000", "--set=max_tokens_no_thinking=64000"]
+    assert sets[-2:] == ["--set=max_tokens=128000", "--set=max_tokens_no_thinking=128000"]
     assert "--set=mode=review" in sets[:-2]  # run.json's settings first; the last --set wins
     assert meta == {"kind": "retry", "label": "w9-test", "item": "c"}
     assert json.loads((draft / "retry-c.json").read_text(encoding="utf-8")).get("notes") is None
@@ -316,18 +316,18 @@ def test_a_note_and_the_cap_go_together(root, course, monkeypatch):
     started = _record_starts(monkeypatch)
 
     post(_browser(root), "/c/demo-course/plans/w9-test/retry",
-         {"item": "c", "cap": "64000", "note": "keep the tests small"})
+         {"item": "c", "cap": "128000", "note": "keep the tests small"})
 
     title, (graph, _), _ = started[0]
-    assert title == "Generate c again with a note and a 64,000 output cap"
-    assert "--set=max_tokens=64000" in graph
+    assert title == "Generate c again with a note and a 128,000 output cap"
+    assert "--set=max_tokens=128000" in graph
     assert "keep the tests small" in (draft / "retry-c.json").read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize(("item", "cap", "notice"), [
-    ("c", "128000", "cap-bad"),  # only the one offered
-    ("c", "64000; rm", "cap-bad"),
-    ("d", "64000", "plan-moved"),  # d failed with an error, no round was cut off
+    ("c", "64000", "cap-bad"),  # only the one offered (128,000; 64,000 is the batch's own now)
+    ("c", "128000; rm", "cap-bad"),
+    ("d", "128000", "plan-moved"),  # d failed with an error, no round was cut off
 ])
 def test_another_cap_or_an_item_not_cut_off_starts_nothing(root, course, monkeypatch, item, cap,
                                                            notice):
