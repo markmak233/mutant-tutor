@@ -27,7 +27,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from tutor.llm import LLMConfig, LLMError, Reply
+from tutor.llm import LLMConfig, LLMError, Reply, unfenced
 
 EXCHANGE_DIR = ".exchange"  # in the workspace, one folder per assistant profile
 
@@ -138,7 +138,7 @@ def store_answer(queue: Queue, rid: str, text: str) -> None:
     schema_file = queue.schema_file(rid)
     if schema_file.is_file():
         try:
-            data = json.loads(_unfenced(text))
+            data = json.loads(unfenced(text))
         except json.JSONDecodeError as e:
             raise ValueError(f"the reply must be one JSON object: {e}") from None
         schema = json.loads(schema_file.read_text(encoding="utf-8"))
@@ -149,15 +149,6 @@ def store_answer(queue: Queue, rid: str, text: str) -> None:
         text = json.dumps(data, ensure_ascii=False)
     queue.answers.mkdir(parents=True, exist_ok=True)
     queue.answer_file(rid).write_text(text, encoding="utf-8")
-
-
-def _unfenced(text: str) -> str:
-    """A reply wrapped in a ```json fence, as assistants often write it, without the fence."""
-    stripped = text.strip()
-    if stripped.startswith("```"):
-        stripped = stripped.split("\n", 1)[1] if "\n" in stripped else ""
-        stripped = stripped.rsplit("```", 1)[0]
-    return stripped
 
 
 def queues(workspace: Path) -> list[Queue]:

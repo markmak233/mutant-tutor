@@ -208,6 +208,53 @@ def test_pruning_never_drops_a_queued_task(tmp_path):
         wait_end(tmp_path, slow)
 
 
+def test_stop_ends_a_running_task_on_every_platform(tmp_path):
+    """The one stop test that runs on Windows too: Stop had never worked there (a venv's
+    python.exe is a launcher, a signal to its pid went to the whole console; 2026-11-11).
+    There tasks.stop writes the stop file and the runner polls for it; here Ctrl+C."""
+    task = tasks.start(tmp_path, "stop me", [py("import time; time.sleep(60)"),
+                                             py("print('never')")], {})
+    wait_for(lambda: tasks.get(tmp_path, task.id).pid)
+
+    assert tasks.stop(tasks.get(tmp_path, task.id))
+    done = wait_end(tmp_path, task)
+
+    assert done.status == tasks.STOPPED and done.exit_codes == [None]
+    assert "print('never')" not in tasks.tail(done)[0]  # the next command never started
+
+
+def test_on_windows_stop_is_a_file_the_runner_polls_for(tmp_path, monkeypatch):
+    """tasks.stop writes the stop file instead of a signal, and runner.wait_or_stop turns the
+    file into the runner's Ctrl+C; a stop before the task runs is still refused."""
+    from tutor.gui import runner
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(tasks, "_alive", lambda pid: pid == 4242)  # winjob is Windows-only
+    monkeypatch.setattr(tasks.os, "kill", lambda *a: pytest.fail("no signal on Windows"))
+    folder = tmp_path / tasks.TASKS_DIR / "20260101-000000-abcdef"
+    folder.mkdir(parents=True)
+    tasks._write(folder, {"title": "x", "status": "running", "started": "2026-01-01 00:00:00",
+                          "pid": 4242, "commands": [], "exit_codes": [], "meta": {}})
+    assert tasks.stop(tasks.get(tmp_path, folder.name)) is True
+    assert (folder / tasks.STOP_FILE).is_file()
+
+    class Child:
+        def __init__(self, codes):
+            self.codes = list(codes)
+
+        def poll(self):
+            return self.codes.pop(0)
+    assert runner.wait_or_stop(Child([None, 3]), tmp_path, poll_s=0) == 3  # ended by itself
+    with pytest.raises(KeyboardInterrupt):
+        runner.wait_or_stop(Child([None, None, None]), folder, poll_s=0)  # the file is there
+
+    queued = tmp_path / tasks.TASKS_DIR / "20260101-000001-abcdef"
+    queued.mkdir()
+    tasks._write(queued, {"title": "y", "status": tasks.QUEUED, "started": "", "pid": None,
+                          "commands": [], "exit_codes": [], "meta": {}})
+    assert tasks.stop(tasks.get(tmp_path, queued.name)) is False
+
+
 @POSIX_ONLY
 def test_stop_reaches_a_process_in_a_session_of_its_own(tmp_path):
     pid_file = tmp_path / "grandchild.pid"

@@ -161,6 +161,32 @@ class Reply:
     reasoning_chars: int | None = None
 
 
+def unfenced(text: str) -> str:
+    """A reply's text without a ```json fence around it, as assistants and chat models
+    often write one even when asked for JSON alone (Sonnet 5.5 on the generate prompt,
+    2026-11-11: two first drafts of four failed to parse at line 1, column 1; the prompt
+    cannot ask Anthropic's structured output for help, as the draft schema has a free-form
+    map). The first line of the fence goes, whatever follows the backticks ("json"), and
+    the last fence with it; text without a fence comes back stripped only."""
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        stripped = stripped.split("\n", 1)[1] if "\n" in stripped else ""
+        stripped = stripped.rsplit("```", 1)[0]
+    return stripped
+
+
+def json_body(text: str) -> str:
+    """The JSON object or array in a reply asked for JSON alone: the text without a fence,
+    and, when it still does not start with `{` or `[`, from the first `{` to the last `}`
+    (Sonnet 5.5 on the generate prompt, 2026-11-11: "Here is the exercise as one JSON
+    object. ..." and then the object). Text with no brace at all comes back as it is, so
+    the parser's error names it."""
+    stripped = unfenced(text)
+    if stripped[:1] in ("{", "[") or "{" not in stripped:
+        return stripped
+    return stripped[stripped.index("{"):stripped.rindex("}") + 1 if "}" in stripped else None]
+
+
 def config_for(role: str, profile: str | None = None, workspace: Path | None = None,
                environ: Mapping[str, str] | None = None) -> LLMConfig:
     """The model for `role`: the named `profile` if given, else the workspace's

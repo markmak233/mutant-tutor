@@ -76,7 +76,13 @@ class GenerationSettings(BaseModel):
         "The most lines of a learn-mode question's Concept section."))
 
     # --- size limits --------------------------------------------------------------------
-    max_tokens: int = Field(32_000, ge=2_000, le=128_000, description=(
+    # 64,000 since 2026-11-11 (owner): at 32,000 a quarter to a third of DeepSeek Flash's
+    # first drafts on the deep-learning course were cut off (6 of 22, 6 of 15), each a
+    # whole call again, and Sonnet 5.5 met the cap once on a long lecture; a cap is not a
+    # cost, a reply that ran away is capped at twice the old waste instead of being
+    # repeated. Every Claude 5.5 model takes 128,000 output tokens, DeepSeek V4 Flash and
+    # Pro accept 64,000 and 128,000 (probed the same day).
+    max_tokens: int = Field(64_000, ge=2_000, le=128_000, description=(
         "Output tokens per reply when the model thinks (its reasoning counts as output)."))
     # A draft without thinking is 4-7k tokens; a reply that ran away filled all 32k
     # (2026-10-29), so a lower cap halves what such a reply costs.

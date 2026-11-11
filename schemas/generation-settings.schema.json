@@ -58,7 +58,7 @@
       "type": "integer"
     },
     "max_tokens": {
-      "default": 32000,
+      "default": 64000,
       "description": "Output tokens per reply when the model thinks (its reasoning counts as output).",
       "maximum": 128000,
       "minimum": 2000,

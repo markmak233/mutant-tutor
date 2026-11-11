@@ -4,9 +4,12 @@ import json
 import re
 import subprocess
 import sys
+import threading
+import time
 
 import pytest
 
+from tutor import llm
 from tutor.graph import batch, drafts, nodes, oracle, prompts
 from tutor.graph.batch import write_manifest
 from tutor.graph.drafts import DraftError, apply_mutant, write_draft
@@ -275,6 +278,129 @@ def test_slides_the_lecture_does_not_have_stop_the_item(workspace):
         nodes.retrieve_context({"item": item}, deps(workspace, None))
 
 
+@pytest.mark.parametrize("slides, pages", [
+    ("4.3-4.4", ["## p.3 · slide 3", "## p.4 · slide 4"]),  # the lecture's number in front
+    ("4.1-2", ["## p.1 · slide 1", "## p.2 · slide 2"]),  # in front of the first end only
+    ("3", ["## p.3 · slide 3"]),  # the footers as they are
+])
+def test_single_number_footers_match_a_range_written_with_the_lecture_number(
+        workspace, slides, pages):
+    """The deep-learning course's footers are "17", and the plan model wrote "4.7-4.9" after
+    the prompt's example (2026-11-11): five items of a week found no page. The last number of
+    each end is the footer meant; footers with a dot (the Spark course) keep the exact
+    comparison."""
+    path = cache.cache_path(workspace, workspace / "lectures" / "L1.pdf")
+    entries = [cache.Entry(n, str(n), "text", f"h{n}", f"page {n} text") for n in range(1, 7)]
+    cache.save(path, cache.render("L1.pdf", entries))
+    item = ITEM.model_copy(update={"slides": slides})
+    sliced = nodes.retrieve_context({"item": item}, deps(workspace, None, context_chars=10))
+    assert [x for x in sliced["context"].splitlines() if x.startswith("##")] == pages
+    with pytest.raises(ValueError, match="no page of L1 has a slide footer in 4.9"):
+        nodes.retrieve_context({"item": ITEM.model_copy(update={"slides": "4.9"})},
+                               deps(workspace, None, context_chars=10))
+
+
+class SlowModel:
+    """A chat function that notes when each call starts and ends, and holds each call open
+    until the test lets it go (`release`), so the order of calls is the test's to see."""
+
+    def __init__(self, fail_first=False):
+        self.events, self.gates, self.fail_first = [], {}, fail_first
+        self.lock = threading.Lock()
+
+    def __call__(self, config, messages, *, purpose, **kw):
+        item = messages[1]["content"].split("Write the exercise `")[1].split("`")[0]
+        with self.lock:
+            self.events.append(("start", item))
+            gate = self.gates.setdefault(item, threading.Event())
+        gate.wait(5)
+        with self.lock:
+            self.events.append(("end", item))
+        if self.fail_first and item == "sum-list":
+            raise llm.LLMError("no reply")
+        return Reply(json.dumps(draft()), 1000, 500, 0.1)
+
+    def release(self, item):
+        with self.lock:
+            self.gates.setdefault(item, threading.Event()).set()
+
+
+def _wait_for(model, event, seconds=5):
+    deadline = time.monotonic() + seconds
+    while event not in model.events and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert event in model.events
+
+
+def _generate_in_threads(workspace, model, items):
+    """Each item's generate in its own thread; the first item's call is under way before
+    the others start, as threads do not reach the gate in the order they are started."""
+    d = deps(workspace, model)
+    results = {}
+
+    def run(item):
+        try:
+            results[item.id] = nodes.generate({"item": item, "context": "pages"}, d)
+        except llm.LLMError as e:
+            results[item.id] = e
+    threads = [threading.Thread(target=run, args=(item,)) for item in items]
+    threads[0].start()
+    _wait_for(model, ("start", items[0].id))
+    for t in threads[1:]:
+        t.start()
+    return threads, results
+
+
+def test_a_lectures_first_generate_call_goes_alone_and_the_rest_follow_it(workspace):
+    """Items sent at once each write the provider's prompt cache and none reads it (Spark
+    course, Sonnet, parallel 8, 2026-11-11): the first call of a lecture goes alone, the
+    lecture's other items start when it has returned, another lecture's first item does
+    not wait for it."""
+    model = SlowModel()
+    second = ITEM.model_copy(update={"id": "sum-pairs"})
+    other = ITEM.model_copy(update={"id": "count-words", "lecture": "L2"})
+    threads, results = _generate_in_threads(workspace, model, [ITEM, second, other])
+    _wait_for(model, ("start", "count-words"))
+    time.sleep(0.05)  # room for sum-pairs to start too, were it not held at the gate
+    started = {item for kind, item in model.events if kind == "start"}
+    assert started == {"sum-list", "count-words"}  # the first of each lecture, not the second
+    model.release("sum-list")
+    model.release("count-words")
+    model.release("sum-pairs")
+    for t in threads:
+        t.join(5)
+    assert model.events.index(("end", "sum-list")) < model.events.index(("start", "sum-pairs"))
+    assert all(r["draft"] is not None for r in results.values())
+
+
+def test_a_first_call_that_fails_frees_the_lectures_other_items(workspace):
+    model = SlowModel(fail_first=True)
+    second = ITEM.model_copy(update={"id": "sum-pairs"})
+    threads, results = _generate_in_threads(workspace, model, [ITEM, second])
+    model.release("sum-list")
+    model.release("sum-pairs")
+    for t in threads:
+        t.join(5)
+    assert isinstance(results["sum-list"], llm.LLMError)
+    assert results["sum-pairs"]["draft"] is not None and ("start", "sum-pairs") in model.events
+
+
+def test_repair_rounds_do_not_wait_at_the_gate(workspace):
+    """Only round 0 goes through the gate: a repair of one item never waits for another
+    item's first call."""
+    model = SlowModel()
+    d = deps(workspace, model)
+    state = {"item": ITEM.model_copy(update={"id": "sum-pairs"}), "context": "pages",
+             "draft_json": "{}", "failure": "rule 1 FAIL", "round": 0}
+    # Another item of the lecture holds the gate open (its first call has not returned).
+    with d.cache_gate.turn("L1"):
+        model.release("sum-pairs")
+        done = threading.Thread(target=nodes.repair, args=(state, d))
+        done.start()
+        done.join(5)
+        assert not done.is_alive() and ("end", "sum-pairs") in model.events
+
+
 def test_the_model_gets_the_rules_conventions_pages_and_the_schema(workspace):
     model = FakeModel(json.dumps(draft()))
     update = nodes.generate({"item": ITEM, "context": "## p.3 · slide 1.3\npage 3 text"},
@@ -312,6 +438,39 @@ def test_a_reply_that_does_not_parse_is_a_format_failure(workspace):
     update = nodes.generate({"item": ITEM, "context": ""}, deps(workspace, model))
     assert update["draft"] is None and update["format_error"]
     assert update["failure"].startswith("format:") and "cut off at max_tokens" in update["failure"]
+
+
+def test_a_draft_in_a_json_fence_is_parsed_and_kept_without_it(workspace):
+    """Sonnet 5.5's first drafts came back twice in four not as JSON (the deep-learning
+    course, 2026-11-11), each a format failure and a paid repair round: a fence goes before
+    parsing, and the next round is shown the JSON, not the fence."""
+    model = FakeModel("```json\n" + json.dumps(draft()) + "\n```")
+    update = nodes.generate({"item": ITEM, "context": ""}, deps(workspace, model))
+    assert update["draft"] is not None and not update["format_error"]
+    assert update["draft_json"].startswith("{") and "```" not in update["draft_json"]
+
+
+def test_a_sentence_before_the_json_is_dropped(workspace):
+    """Sonnet 5.5 (w4, 2026-11-11): "Here is the exercise as one JSON object. ..." and then
+    the object; the object alone is parsed and kept."""
+    model = FakeModel("Here is the exercise as one JSON object.\n\n" + json.dumps(draft())
+                      + "\n\nLet me know if you want changes.")
+    update = nodes.generate({"item": ITEM, "context": ""}, deps(workspace, model))
+    assert update["draft"] is not None and not update["format_error"]
+    assert update["draft_json"].startswith("{") and update["draft_json"].endswith("}")
+
+
+def test_a_reply_that_is_not_json_at_all_is_quoted_in_the_failure(workspace):
+    """The round's text is never logged, so the failure says how the reply began (the
+    reply as it came, not the part cut out for parsing); a reply merely cut short is not
+    quoted (its start is the JSON's)."""
+    model = FakeModel("Here is the exercise you asked for:\n\n{...}")
+    update = nodes.generate({"item": ITEM, "context": ""}, deps(workspace, model))
+    assert update["format_error"]
+    assert "the reply begins: 'Here is the exercise you asked for: {...}'" in update["failure"]
+    cut = nodes.generate({"item": ITEM, "context": ""},
+                         deps(workspace, FakeModel('{"metadata": {', finish_reason="length")))
+    assert "the reply begins" not in cut["failure"]
 
 
 def test_the_graph_repairs_a_failing_draft_then_saves_it(workspace):
@@ -1025,7 +1184,7 @@ def test_the_repair_role_takes_over_from_the_second_repair(workspace):
     assert final["outcome"] == "saved"
     assert model.configs == ["glm-flash", "glm-flash", "deepseek-pro", "deepseek-pro"]
     assert model.thinkings == [False, False, True, True]  # the repair model reasons
-    assert model.max_tokens == [16_000, 16_000, 32_000, 32_000]  # room for its reasoning
+    assert model.max_tokens == [16_000, 16_000, 64_000, 64_000]  # room for its reasoning
     assert [a["model"] for a in final["attempts"]] == model.configs
     log = json.loads((d.batch_dir / "generation.jsonl").read_text(encoding="utf-8"))
     assert log["repair_model"] == "deepseek-pro: deepseek-v4-pro"

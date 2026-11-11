@@ -937,12 +937,34 @@ Design approved 2026-10-28 (owner):
 - Stops: 3 repair rounds per item, a token budget per batch, an LLM error stops the current
   item and keeps the finished ones.
 - Roles in `[llm.roles]`: `plan` = GLM-5.3-Flash with thinking low (see the experiment
-  below); `generate` = DeepSeek-V4-Flash since 2026-10-29 (the week 4 rerun below), with
-  thinking on since 2026-10-30 (the week 7 comparison below); `repair` = V4-Pro from the
-  second repair on; `oracle` = a different model family (GPT, decided 2026-10-28 in place
-  of local Gemma; GLM-5.3-Flash at high effort once the OpenAI key expires, see the
-  week 4 cross experiment below), since the same
-  model writing reference and oracle is not an independent check. The CLI refuses an oracle from the generating model's provider.
+  below; Claude Sonnet 5.5 since 2026-11-10); `generate` = DeepSeek-V4-Flash since
+  2026-10-29 (the week 4 rerun below), with thinking on since 2026-10-30 (the week 7
+  comparison below), and Claude Sonnet 5.5 on the deep-learning course since 2026-11-11 (next bullet);
+  `repair` = V4-Pro from the second repair on; `oracle` = a different model family (GPT,
+  decided 2026-10-28 in place of local Gemma; GLM-5.3-Flash at high effort once the OpenAI
+  key expires, see the week 4 cross experiment below), since the same model writing
+  reference and oracle is not an independent check. The CLI refuses an oracle from the
+  generating model's provider.
+- Sonnet 5.5 as `generate` (owner, 2026-11-11, the deep-learning course: "Claude is visibly faster"). Measured
+  on that course's learn-mode weeks, the same prompts, oracle gpt-6.1-terra: DeepSeek-V4-Flash
+  with thinking (weeks 1-2, 22 items) had 13 first drafts clean of 22 and 6 cut off at the
+  32k output cap, each cut-off a whole call again, at about $0.04 an item (list prices) and
+  131 s a call (median, 36 calls; its output 23.5k tokens a call, the thinking counted in,
+  at 183 tokens/s); Sonnet 5.5 (weeks 3-4, 15 items) had 12 clean, none cut off (10.7k
+  tokens a call), about $0.15 an item and 71 s a call (median, 19 calls). An item is one
+  call and a half a minute with Sonnet against two to three calls and four to five minutes
+  with DeepSeek, and the owner waits for the batch; the dollar a week between them is
+  worth less than the time. Sonnet's generate request caches its course pages on Anthropic
+  (56-61% of the input served from the cache from the second item on, the item's own
+  part not). Two faults Sonnet exposed on the way, both on this side: three of its first
+  drafts began with a sentence ("Here is the exercise as one JSON object. ...") before the
+  object, a format failure and a paid repair each, as the draft schema's free-form
+  `data_files` map keeps Anthropic's structured output out, so the parser now takes the
+  JSON body of a reply (a fence or a sentence around it dropped, `llm.json_body`; a reply
+  with no JSON at all is quoted in the failure); and the plan model wrote slide ranges with
+  the lecture's number in front ("4.17-4.19", after the prompt's example) against footers
+  that are single numbers, so five items found no page: single-number footers now match
+  the last number of each end. Other courses keep DeepSeek until they generate next.
 - Experiment 2026-10-28, one item (a closure / accumulator debugging exercise from the
   week 4 slides), same validator:
 
@@ -1635,7 +1657,11 @@ Decided 2026-11-03 (owner): every prompt is designed for a high cache hit rate w
 allow. Providers reuse only an identical start of a prompt (OpenAI: from 1024 tokens), so stable
 content goes first: the system prompt, rules and shared course material. What varies per item goes
 last. The shared part stays the same byte for byte, with no per-item marks, dates or ids. With
-parallel calls and a large shared part, one call goes first to fill the cache. `cached_tokens` in
+parallel calls and a large shared part, one call goes first to fill the cache: the first generate
+call of each lecture goes alone and the lecture's other items wait for it (`nodes.CacheGate`, built
+2026-11-11 after a Spark batch with Sonnet at parallel 8 sent its first eight calls at once, each
+writing the course pages and none reading them, about a dollar of the batch's three; repair rounds
+do not wait, a first call that fails frees the rest, and none waits past ten minutes). `cached_tokens` in
 the call log shows the result. Meaning comes first: a short prompt gains nothing and is not
 contorted, and reordering a calibrated prompt means calibrating it again.
 
@@ -3690,8 +3716,11 @@ late; the adaptive review screens can be built with it.
   value of a setting given twice and a repair round may run with thinking off. One step,
   not a free number: the one a cut-off item needs, within the settings' 128,000, and the
   route takes no other value (`cap-bad`) and none for an item whose rounds were not cut
-  off. The batch's own cap is unchanged: raising the default would pay for longer thinking
-  on every item. "Try all" keeps the batch's cap. Clicked in headless Chrome on a scratch
+  off. The batch's own cap was left at 32,000 then (raising it would pay for longer thinking
+  on every item); on 2026-11-11 the owner raised the default to 64,000 and this cap to
+  128,000 (graph/settings.py says why: DeepSeek Flash's cut-offs on the deep-learning course,
+  6 of 22 and 6 of 15 first drafts, and one of Sonnet's on a long lecture; a cap is not a
+  cost). "Try all" keeps the batch's cap. Clicked in headless Chrome on a scratch
   course with the stand-in graph (the record rewritten as the real one was): the line, the
   button, the task's command with both caps last. Both week 9 items came out VALID through
   it the same afternoon (first replies of 51,616 and 52,220 output tokens, which the old
@@ -3755,7 +3784,18 @@ late; the adaptive review screens can be built with it.
   own Ctrl+C handler first: a process started in the background has SIGINT ignored and passes
   that on, and the first real Stop did nothing until it did. Checked by a click in Chrome on a
   copy of two examples, in containers: stopped in 7 s, no container or process left, and the
-  interrupted exercise's `validation.json` not rewritten. Windows: Ctrl+Break, not tested.
+  interrupted exercise's `validation.json` not rewritten. Windows (2026-11-11, found and
+  then verified with a Remote Control session on the owner's PC; Stop had never worked
+  there): no signal does it. A venv's python.exe is a launcher that runs the interpreter as
+  its child, so the runner's own pid is not the process group's, and CTRL_BREAK_EVENT to it
+  went to the whole console (it killed pytest; in the GUI `/stop` was a 500, WinError 87);
+  and a Python blocked in `wait()` does not wake for SIGBREAK. So there `tasks.stop` writes a
+  `stop` file in the task's folder, the runner polls the command every 0.25 s and takes the
+  file as Ctrl+C, each command runs in a process group of its own, Ctrl+Break goes to that
+  group alone, and `taskkill /T /F` ends what is left after the grace time. Verified on the
+  PC: `test_gui_tasks.py` whole (21 passed, the 3 ps-based tests skipped), `/stop` 303 and
+  the task `stopped` within 0.5 s, the server alive, the queue moving on. Not exercised
+  there: the taskkill path (no command ignored Ctrl+Break).
 - Generation (step 4, owner, 2026-11-06): no change to `graph/`. Started without a terminal,
   `python -m tutor.graph plan` already pauses at the plan and exits 0, so the GUI runs the
   CLI's commands as tasks: the new-batch form starts `plan` (lectures read into the cache,

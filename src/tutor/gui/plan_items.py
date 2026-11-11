@@ -39,10 +39,11 @@ _ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,79}$")  # a plan id, safe as a file name
 DETAIL_CHARS = 1500  # of the last round's failure shown, enough for pytest's first assertion
 NOTE_PREFIX = "The owner adds, for this try: "  # how a retry's note joins the item's notes
 # The one larger output cap a retry may ask for, in tokens: twice the pipeline's default
-# (graph/settings.py, 32,000, which a long exercise written with thinking can overrun),
-# within the settings' bound of 128,000. One step, not a free number: it is what a cut-off
-# item needs, and a reply that long costs the model's thinking as well (owner, 2026-11-10).
-RETRY_CAP = 64_000
+# (graph/settings.py; 32,000 until 2026-11-11, 64,000 since, which a long exercise written
+# with thinking can still overrun), the settings' bound of 128,000. One step, not a free
+# number: it is what a cut-off item needs, and a reply that long costs the model's thinking
+# as well (owner, 2026-11-10; raised with the default, 2026-11-11).
+RETRY_CAP = 128_000
 CUT_OFF = "cut off at max_tokens"  # how graph/nodes.py words a reply the cap ended
 
 
