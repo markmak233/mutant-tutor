@@ -6,6 +6,7 @@ import subprocess
 import sys
 import threading
 import time
+from dataclasses import replace
 
 import pytest
 
@@ -304,8 +305,9 @@ class SlowModel:
     """A chat function that notes when each call starts and ends, and holds each call open
     until the test lets it go (`release`), so the order of calls is the test's to see."""
 
-    def __init__(self, fail_first=False):
+    def __init__(self, fail_first=False, streams=False):
         self.events, self.gates, self.fail_first = [], {}, fail_first
+        self.streams = streams  # a reply that begins to stream at once (on_progress(0))
         self.lock = threading.Lock()
 
     def __call__(self, config, messages, *, purpose, **kw):
@@ -313,6 +315,8 @@ class SlowModel:
         with self.lock:
             self.events.append(("start", item))
             gate = self.gates.setdefault(item, threading.Event())
+        if self.streams and kw.get("on_progress"):  # None: nobody listens (a follower)
+            kw["on_progress"](0)  # as the stream readers do at the first event
         gate.wait(5)
         with self.lock:
             self.events.append(("end", item))
@@ -371,6 +375,47 @@ def test_a_lectures_first_generate_call_goes_alone_and_the_rest_follow_it(worksp
         t.join(5)
     assert model.events.index(("end", "sum-list")) < model.events.index(("start", "sum-pairs"))
     assert all(r["draft"] is not None for r in results.values())
+
+
+@pytest.mark.parametrize("provider, ready_s, before_end", [
+    ("anthropic", 0.0, True),  # readable at the first streamed event (measured 99.9%)
+    ("deepseek", 0.05, True),  # a margin after the first event (0% at 0.6 s, 99% at 3 s)
+    ("glm", None, False),  # readable only after the first call ended (0% at 30 s)
+])
+def test_the_gate_opens_when_the_providers_cache_is_readable(workspace, monkeypatch,
+                                                              provider, ready_s, before_end):
+    """Measured 2026-11-11, one provider at a time (nodes.CACHE_READY_S): where the cache
+    can be read while the first reply is still streaming, the lecture's other items go
+    then; elsewhere when it has returned. A reply that never streams (the test above)
+    frees them when it returns whatever the provider."""
+    monkeypatch.setitem(nodes.CACHE_READY_S, "deepseek", 0.05)  # the test's margin, not 10 s
+    assert nodes.CACHE_READY_S.get(provider) == ready_s
+    model = SlowModel(streams=True)
+    second = ITEM.model_copy(update={"id": "sum-pairs"})
+    d = deps(workspace, model)
+    d = replace(d, config=replace(d.config, provider=provider))
+    results = {}
+
+    def run(item):
+        results[item.id] = nodes.generate({"item": item, "context": "pages"}, d)
+    threads = [threading.Thread(target=run, args=(item,)) for item in (ITEM, second)]
+    threads[0].start()
+    _wait_for(model, ("start", "sum-list"))
+    threads[1].start()
+    if before_end:
+        _wait_for(model, ("start", "sum-pairs"))  # before sum-list's reply has returned
+        assert ("end", "sum-list") not in model.events
+    else:
+        time.sleep(0.2)
+        assert ("start", "sum-pairs") not in model.events  # held until sum-list returns
+    model.release("sum-list")
+    model.release("sum-pairs")
+    for t in threads:
+        t.join(5)
+    assert set(results) == {"sum-list", "sum-pairs"}
+    assert all(r["draft"] is not None for r in results.values())
+    if not before_end:
+        assert model.events.index(("end", "sum-list")) < model.events.index(("start", "sum-pairs"))
 
 
 def test_a_first_call_that_fails_frees_the_lectures_other_items(workspace):
@@ -1153,6 +1198,19 @@ def test_exercise_replies_are_streamed_with_progress_by_exercise(workspace, caps
     nodes.generate({"item": ITEM, "context": ""}, deps(workspace, model, on_stream=_receiving))
     assert seen["stream"] is True
     assert capsys.readouterr().out == "  [sum-list] receiving: 45,000 characters\n"
+
+
+def test_the_streams_first_event_prints_nothing(workspace, capsys):
+    """The readers call on_progress(0) when a stream begins (for the cache gate); the
+    progress line waits for the first RECEIVING_STEP characters."""
+    from tutor.graph.__main__ import _receiving
+
+    def model(config, messages, **kw):
+        kw["on_progress"](0)
+        return Reply(json.dumps(draft()), 1000, 500, 0.1, "stop")
+
+    nodes.generate({"item": ITEM, "context": ""}, deps(workspace, model, on_stream=_receiving))
+    assert capsys.readouterr().out == ""
 
 
 def test_when_the_reference_agrees_with_the_oracle_repair_suspects_the_tests(workspace):

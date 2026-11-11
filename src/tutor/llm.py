@@ -546,13 +546,21 @@ def reasoning_chars(message: dict) -> int:
 
 def _read_stream(response, on_progress: Callable[[int], None] | None) -> dict:
     """A streamed completion (server-sent events, one `data: {json}` line per piece) put
-    back together as the reply a call without streaming returns."""
+    back together as the reply a call without streaming returns. `on_progress(0)` at the
+    first piece says the stream has begun (as the anthropic reader does at message_start;
+    the cache gate in graph.nodes opens on it), then the characters received so far at
+    each piece of text."""
     parts, received, finish, usage, done = [], 0, None, None, False
     thought = 0  # characters of reasoning_content / reasoning in the pieces
+    begun = False
     for raw in response:
         line = raw.decode("utf-8", errors="replace").strip()
         if not line.startswith("data:"):
             continue
+        if not begun:
+            begun = True
+            if on_progress:
+                on_progress(0)
         payload = line.removeprefix("data:").strip()
         if payload == "[DONE]":
             done = True

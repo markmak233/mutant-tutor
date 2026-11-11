@@ -346,7 +346,7 @@ def test_a_streamed_reply_is_put_back_together_with_its_usage(monkeypatch):
 
     assert (reply.text, reply.finish_reason) == ('{"a": 1}', "stop")
     assert (reply.input_tokens, reply.cached_tokens, reply.output_tokens) == (900, 640, 12)
-    assert progress == [6, 8]
+    assert progress == [0, 6, 8]  # 0: the stream has begun (the cache gate opens on it)
     assert bodies[0]["stream"] is True
     assert bodies[0]["stream_options"] == {"include_usage": True}
 

@@ -245,7 +245,11 @@ def _read_stream(response, on_progress: Callable[[int], None] | None) -> dict:
     together as a Message object. Only text deltas are kept: thinking blocks are left out as
     they are from a reply sent whole. Usage arrives in two pieces: the input side in
     message_start, the output side (cumulative) in message_delta, with the stop reason.
-    `ping` and any event type this code does not know are skipped, as the docs ask."""
+    `ping` and any event type this code does not know are skipped, as the docs ask.
+    `on_progress(0)` at message_start says the stream has begun: from then on the request's
+    cached prefix is readable by other calls (the docs; measured 2026-11-11: three calls
+    sent 1 s after the first's stream began read 99.9% of its prefix), which is when
+    graph.nodes.CacheGate lets a lecture's other items go."""
     parts: list[str] = []
     received = 0
     message: dict = {"content": [], "stop_reason": None, "usage": {}}
@@ -258,6 +262,8 @@ def _read_stream(response, on_progress: Callable[[int], None] | None) -> dict:
         kind = event.get("type")
         if kind == "message_start":
             message["usage"].update((event.get("message") or {}).get("usage") or {})
+            if on_progress:
+                on_progress(0)  # the stream has begun, no text yet
         elif kind == "content_block_delta":
             delta = event.get("delta") or {}
             if delta.get("type") == "text_delta":

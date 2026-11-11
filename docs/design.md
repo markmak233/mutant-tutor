@@ -1661,8 +1661,17 @@ parallel calls and a large shared part, one call goes first to fill the cache: t
 call of each lecture goes alone and the lecture's other items wait for it (`nodes.CacheGate`, built
 2026-11-11 after a Spark batch with Sonnet at parallel 8 sent its first eight calls at once, each
 writing the course pages and none reading them, about a dollar of the batch's three; repair rounds
-do not wait, a first call that fails frees the rest, and none waits past ten minutes). `cached_tokens` in
-the call log shows the result. Meaning comes first: a short prompt gains nothing and is not
+do not wait, a first call that fails frees the rest, and none waits past ten minutes). The wait is
+not for the first call to end but for its provider's cache to be readable, which differs per
+provider (`nodes.CACHE_READY_S`; measured 2026-11-11 with a 33k / 23k-token shared prefix, one
+call started, three released at once, their cached share): Anthropic serves it from the first
+streamed event (99.9% for calls sent 1 s after it, as the docs say); DeepSeek builds it in the
+background (0% at the first event, 0.6 s in; 99% at 3, 8, 15 and 30 s), so the gate opens ten
+seconds after the first event; GLM only once the first call has ended (0% at 30 s, 99.9% after
+the end); OpenAI is not measured, so it waits for the end like any provider not in the table. On
+a deep-learning course's lecture with Sonnet (first call about 70 s) the gate therefore costs a
+few seconds instead of a call; the stream readers report the first event as `on_progress(0)`.
+`cached_tokens` in the call log shows the result. Meaning comes first: a short prompt gains nothing and is not
 contorted, and reordering a calibrated prompt means calibrating it again.
 
 Measured so far: DeepSeek hits 53-75% on generate and repair. `gpt-6.1-terra` as the judge hits 7%,

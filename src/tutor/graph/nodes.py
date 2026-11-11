@@ -61,6 +61,14 @@ def check_round(exercise: Path, solution: Path) -> ValidationReport:
 # (uncached): the first calls seen take 70-360 s; one that hangs (an Anthropic stream
 # gave nothing for 900 s, 2026-11-11) must not hold the whole lecture.
 GATE_WAIT_S = 600
+# When a provider's prompt cache can be read by the next call, in seconds after the first
+# call's reply begins to stream; a provider not here opens the gate only when its first
+# call has returned. Measured 2026-11-11 (a 33k / 23k-token shared prefix, three calls
+# released at once, their cached share): anthropic 99.9% at the first streamed event
+# (the docs: the entry is readable once the response begins streaming); deepseek 0% at the
+# first event (0.6 s) but 99% from 3 s on (its cache is built in the background), so a
+# margin; glm 0% at 30 s and 99.9% only after the first call ended. OpenAI not measured.
+CACHE_READY_S: dict[str, float] = {"anthropic": 0.0, "deepseek": 10.0}
 
 
 class CacheGate:
@@ -69,17 +77,25 @@ class CacheGate:
     longest part of the prompt) is then in the provider's prompt cache for every call
     after the first; with all of them sent at once each writes it for itself and none
     reads it (Spark course, Sonnet 5.5, parallel 8, 2026-11-11: the first eight calls hit
-    0 tokens, the next four 15,647 each, about a dollar of the batch's three). Repair rounds
+    0 tokens, the next four 15,647 each, about a dollar of the batch's three). The others
+    go as soon as the provider can serve the cache, which is before the first call ends
+    where CACHE_READY_S says so (its first reply's thinking and output take a minute or
+    more): `turn` yields a `release` for that moment, and stream_args calls it at the
+    reply's first streamed event (llm.py, llm_anthropic.py: `on_progress(0)`), at once or
+    after the provider's margin. A reply that does not stream, a provider not in the
+    table, or a call that fails or raises, frees the others when it returns. Repair rounds
     do not wait: by then the item's own first call has filled the cache. A first call that
-    fails or raises frees the others all the same, and one that outlasts GATE_WAIT_S is
-    not waited for any longer."""
+    outlasts GATE_WAIT_S is not waited for any longer."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._first: dict[str, threading.Event] = {}  # lecture -> set when its first call ends
+        # lecture -> set when its first call's stream has begun (or the call has ended)
+        self._first: dict[str, threading.Event] = {}
 
     @contextmanager
     def turn(self, key: str):
+        """Yields the gate's `release()`: for the first call of `key` it lets the others go
+        (called again, nothing happens); for every other call it is nothing to call."""
         with self._lock:
             event = self._first.get(key)
             first = event is None
@@ -88,10 +104,14 @@ class CacheGate:
         if not first:
             event.wait(GATE_WAIT_S)
         try:
-            yield
+            yield event.set if first else _nothing
         finally:
             if first:
                 event.set()
+
+
+def _nothing() -> None:
+    """A follower's `release`: its lecture's gate is not its to open."""
 
 
 @dataclass(frozen=True)
@@ -274,14 +294,17 @@ def _ask(state: ItemState, deps: Deps, user: str, purpose: str, round_: int,
     # A repair round asks a little warmer each time: at temperature 0 an unchanged prompt
     # got the identical draft back (graph/settings.py).
     # Round 0 of a lecture's items: the first call alone, the rest after it (CacheGate).
-    gate = deps.cache_gate.turn(state["item"].lecture) if round_ == 0 else nullcontext()
-    with gate:
+    # Round 0 takes the lecture's turn at the cache gate; its `release` opens the gate when
+    # the provider's cache is readable (CACHE_READY_S after the reply's first streamed
+    # event, through on_progress in stream_args), else when the call returns.
+    gate = deps.cache_gate.turn(state["item"].lecture) if round_ == 0 else nullcontext(_nothing)
+    with gate as release:
         reply = deps.chat(config, messages, purpose=purpose, log_path=deps.llm_log,
                           max_tokens=deps.max_tokens if thinking else deps.max_tokens_no_thinking,
                           response_schema=deps.profile.draft_schema,
                           thinking=thinking,
                           temperature=min(round_ * deps.repair_temperature_step, 0.8),
-                          **stream_args(state, deps))
+                          **stream_args(state, deps, release, CACHE_READY_S.get(config.provider)))
     # The draft is the JSON itself: a ```json fence or a sentence around it goes before
     # parsing and before it is kept (a chat model writes one now and then although the
     # prompt asks for JSON alone; Sonnet 5.5, 2026-11-11), so a repair round quotes JSON.
@@ -307,11 +330,29 @@ def _ask(state: ItemState, deps: Deps, user: str, purpose: str, round_: int,
     return update
 
 
-def stream_args(state: ItemState, deps: Deps) -> dict:
-    """The chat arguments for a streamed reply, with progress reported per item."""
+def stream_args(state: ItemState, deps: Deps, release: Callable[[], None] = _nothing,
+                ready_s: float | None = None) -> dict:
+    """The chat arguments for a streamed reply: progress reported per item, and the cache
+    gate's `release` called `ready_s` after the reply's first event (the readers call
+    on_progress(0) then, before any text; 0 means at once), so the lecture's other items
+    go while this reply streams. `ready_s` None: the gate opens when the call returns."""
     item_id = state["item"].id
-    progress = (lambda chars: deps.on_stream(item_id, chars)) if deps.on_stream else None
-    return {"stream": deps.stream, "on_progress": progress}
+    begun = False
+
+    def progress(chars: int) -> None:
+        nonlocal begun
+        if not begun:
+            begun = True
+            if ready_s == 0:
+                release()
+            elif ready_s is not None:
+                timer = threading.Timer(ready_s, release)
+                timer.daemon = True  # never holds the process; the gate opens at the end anyway
+                timer.start()
+        if deps.on_stream:
+            deps.on_stream(item_id, chars)
+    wanted = deps.on_stream is not None or (release is not _nothing and ready_s is not None)
+    return {"stream": deps.stream, "on_progress": progress if wanted else None}
 
 
 def tokens_spent(state: ItemState, reply: llm.Reply) -> ItemState:
