@@ -31,8 +31,10 @@ def test_registry_complete_and_examples_match_language():
                                          (None, "SKIP"), ("invalid", "SKIP")])
 def test_linux_mmap_bits_on_c_course(tmp_path, rig, monkeypatch, capsys, value, status):
     """Exercise the hook through the command, and only fake the one procfs read."""
-    root = support.course(tmp_path, declarations="[languages.c]\n")
+    # The platform first: the course's venv marker goes where a Linux doctor looks for it
+    # (.venv/bin/python), whatever the machine running the test (Windows CI, 2026-11-11).
     monkeypatch.setattr(sys, "platform", "linux")
+    root = support.course(tmp_path, declarations="[languages.c]\n")
     monkeypatch.setitem(doctor_languages.DOCTORS, "c", c.DOCTOR)
     original = Path.read_text
 

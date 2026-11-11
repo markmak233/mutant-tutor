@@ -65,7 +65,9 @@ def test_preview_preserves_other_tables_and_moves_prefix_to_explicit_bound(rig):
     before = (course.root / "workspace.toml").read_bytes()
     plan = application.prepare(course, found, record)
     assert b"[package-bounds]" in plan.after and b'demo = "<2"' in plan.after
-    assert '-demo = "1"' in plan.diff() and b'[isolation]\nrunner = "host"' in plan.after
+    # The fixture's file has the platform's line ends (CRLF on Windows), kept as they are.
+    after = plan.after.replace(b"\r\n", b"\n")
+    assert '-demo = "1"' in plan.diff() and b'[isolation]\nrunner = "host"' in after
     assert (course.root / "workspace.toml").read_bytes() == before
 
 

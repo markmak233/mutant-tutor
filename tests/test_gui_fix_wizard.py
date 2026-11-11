@@ -61,7 +61,10 @@ def test_prefill_uses_current_problem_and_last_failed_setup_tail(wizard, monkeyp
                                     base_url=support.BASE)
     fields = Fields(response.get_data(as_text=True)).fields
     assert response.status_code == 200 and fields["module"] == "demo"
-    assert row.text in fields["failure"] and fields["failure"].endswith("例子 log tail\n")
+    # The tail is the log's bytes as they are: the file the test wrote has the platform's
+    # line ends (CRLF on Windows), so the check reads them as one.
+    failure = fields["failure"].replace("\r\n", "\n")
+    assert row.text in failure and failure.endswith("例子 log tail\n")
     assert len(fields["failure"].encode("utf-8")) <= fix_state.FAILURE_LIMIT
     assert "older prefix" not in fields["failure"]
     assert before == {p.relative_to(course.workspace.root): p.read_bytes()
