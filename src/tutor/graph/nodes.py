@@ -61,16 +61,6 @@ def check_round(exercise: Path, solution: Path) -> ValidationReport:
 # (uncached): the first calls seen take 70-360 s; one that hangs (an Anthropic stream
 # gave nothing for 900 s, 2026-11-11) must not hold the whole lecture.
 GATE_WAIT_S = 600
-# When a provider's prompt cache can be read by the next call, in seconds after the first
-# call's reply begins to stream; a provider not here opens the gate only when its first
-# call has returned. Measured 2026-11-11 (a 33k / 23k-token shared prefix, three calls
-# released at once, their cached share): anthropic 99.9% at the first streamed event
-# (the docs: the entry is readable once the response begins streaming); deepseek 0% at the
-# first event (0.6 s) but 99% from 3 s on (its cache is built in the background), so a
-# margin; glm 0% at 30 s and 99.9% only after the first call ended. OpenAI not measured.
-CACHE_READY_S: dict[str, float] = {"anthropic": 0.0, "deepseek": 10.0}
-
-
 class CacheGate:
     """The first generate call of each lecture goes alone; the lecture's other items wait
     for it, then go in parallel. The call's shared part (the lecture's course pages, the
@@ -78,14 +68,15 @@ class CacheGate:
     after the first; with all of them sent at once each writes it for itself and none
     reads it (Spark course, Sonnet 5.5, parallel 8, 2026-11-11: the first eight calls hit
     0 tokens, the next four 15,647 each, about a dollar of the batch's three). The others
-    go as soon as the provider can serve the cache, which is before the first call ends
-    where CACHE_READY_S says so (its first reply's thinking and output take a minute or
+    go when the provider can serve the cache, as the profile's `parallel_start` says
+    (llm.PARALLEL_START has the measured defaults per provider): "first-event" and
+    "first-event+N" before the first call ends (its thinking and output take a minute or
     more): `turn` yields a `release` for that moment, and stream_args calls it at the
     reply's first streamed event (llm.py, llm_anthropic.py: `on_progress(0)`), at once or
-    after the provider's margin. A reply that does not stream, a provider not in the
-    table, or a call that fails or raises, frees the others when it returns. Repair rounds
-    do not wait: by then the item's own first call has filled the cache. A first call that
-    outlasts GATE_WAIT_S is not waited for any longer."""
+    N seconds later; "first-done" when the first call returns; "together" skips the gate
+    (_ask). A reply that does not stream, or a call that fails or raises, frees the others
+    when it returns. Repair rounds do not wait: by then the item's own first call has
+    filled the cache. A first call that outlasts GATE_WAIT_S is not waited for any longer."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -112,6 +103,29 @@ class CacheGate:
 
 def _nothing() -> None:
     """A follower's `release`: its lecture's gate is not its to open."""
+
+
+class CallSlots:
+    """At most a profile's `max_parallel` calls to one endpoint at once (owner, 2026-11-12:
+    a cap per provider, for an account whose quota allows few calls in parallel). Calls of
+    the run's threads that go to one (provider, base_url) share one semaphore, whichever
+    role makes them; the course's `[generation] parallel` still bounds the whole batch.
+    The cap is fixed by the first profile of that endpoint a run uses: two profiles of one
+    endpoint should name the same number (a Providers page will hold it once)."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._slots: dict[tuple[str, str], threading.Semaphore] = {}
+
+    def hold(self, config: llm.LLMConfig):
+        """A context manager around one call: a slot of the endpoint's semaphore, or
+        nothing to wait for when the profile sets no cap."""
+        if config.max_parallel is None:
+            return nullcontext()
+        key = (config.provider, config.base_url)
+        with self._lock:
+            slot = self._slots.setdefault(key, threading.Semaphore(config.max_parallel))
+        return slot
 
 
 @dataclass(frozen=True)
@@ -158,6 +172,7 @@ class Deps:
     # One per batch: the first generate call of each lecture goes alone, so the others
     # read its course pages from the prompt cache (CacheGate above).
     cache_gate: CacheGate = field(default_factory=CacheGate)
+    call_slots: CallSlots = field(default_factory=CallSlots)
 
     @property
     def profile(self) -> Profile:
@@ -293,18 +308,20 @@ def _ask(state: ItemState, deps: Deps, user: str, purpose: str, round_: int,
     ]
     # A repair round asks a little warmer each time: at temperature 0 an unchanged prompt
     # got the identical draft back (graph/settings.py).
-    # Round 0 of a lecture's items: the first call alone, the rest after it (CacheGate).
-    # Round 0 takes the lecture's turn at the cache gate; its `release` opens the gate when
-    # the provider's cache is readable (CACHE_READY_S after the reply's first streamed
-    # event, through on_progress in stream_args), else when the call returns.
-    gate = deps.cache_gate.turn(state["item"].lecture) if round_ == 0 else nullcontext(_nothing)
-    with gate as release:
+    # Round 0 of a lecture's items: the first call alone, the rest after it (CacheGate),
+    # unless the profile starts them together. Its `release` opens the gate when the
+    # provider's cache is readable: llm.start_wait seconds after the reply's first streamed
+    # event (through on_progress in stream_args), or, for "first-done", when the call
+    # returns. Then a slot of the endpoint's max_parallel (CallSlots), if it sets one.
+    gated = round_ == 0 and config.parallel_start != "together"
+    gate = deps.cache_gate.turn(state["item"].lecture) if gated else nullcontext(_nothing)
+    with gate as release, deps.call_slots.hold(config):
         reply = deps.chat(config, messages, purpose=purpose, log_path=deps.llm_log,
                           max_tokens=deps.max_tokens if thinking else deps.max_tokens_no_thinking,
                           response_schema=deps.profile.draft_schema,
                           thinking=thinking,
                           temperature=min(round_ * deps.repair_temperature_step, 0.8),
-                          **stream_args(state, deps, release, CACHE_READY_S.get(config.provider)))
+                          **stream_args(state, deps, release, llm.start_wait(config)))
     # The draft is the JSON itself: a ```json fence or a sentence around it goes before
     # parsing and before it is kept (a chat model writes one now and then although the
     # prompt asks for JSON alone; Sonnet 5.5, 2026-11-11), so a repair round quotes JSON.

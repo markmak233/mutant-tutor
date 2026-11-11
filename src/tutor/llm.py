@@ -29,6 +29,18 @@ those served from the provider's prompt cache, seconds, outcome); the key is nev
 
 `python -m tutor.llm check [PROFILE ...]` sends each profile one tiny request, so a wrong key
 or model name shows before a run that spends more.
+
+How parallel calls start (owner, 2026-11-12: "each family its own way"): a lecture's first
+generate call goes alone so its shared pages enter the provider's prompt cache, and the
+lecture's other calls start when that cache can be read, which differs by provider
+(`parallel_start`, defaults in PARALLEL_START). `max_parallel` caps the calls one endpoint
+gets at once. Both can be set per profile:
+
+    [llm.profiles.deepseek]
+    provider = "deepseek"
+    model = "deepseek-v4-flash"
+    parallel_start = "first-event+5"       # together | first-event | first-event+N | first-done
+    max_parallel = 4
 """
 
 from __future__ import annotations
@@ -91,7 +103,27 @@ _ACCEPTED: dict[tuple[str, str, str], int] = {}
 # stream_options (documented); others stream without the option, which may be refused.
 STREAM_USAGE = {"openai", "deepseek"}
 PROFILE_FIELDS = {"provider", "model", "base_url", "api_key_env", "reasoning_effort",
-                  "reasoning_effort_on", "timeout_s", "temperature"}
+                  "reasoning_effort_on", "timeout_s", "temperature", "parallel_start",
+                  "max_parallel"}
+# When a lecture's other generate calls start, after its first call (graph/nodes.py,
+# CacheGate): "together" (no wait: for a server with no prompt cache), "first-event" (as
+# soon as the first reply begins to stream), "first-event+N" (N seconds after that), or
+# "first-done" (when the first call has returned). Per provider, from measurements
+# (2026-11-11/12: a 23k-33k-token shared prefix, one call started, three released, their
+# cached share or, on a server that reports none, their time to the first text):
+#   anthropic: 99.9% at the first event (the docs: readable once the response streams);
+#   deepseek: 0% at the first event (0.6 s in), 99% at 3, 8, 15 and 30 s (owner chose 3);
+#   glm: 0% at 3 and 30 s, 99.9% after the first call ended;
+#   lmstudio (gemma 26B, 4 slots): released at the first event the others reused the
+#     prefix (first text 4 s against 78-103 s cold), but the four replies decoding together
+#     slowed the first: the whole set took 84 s against 68 s after the first ended, and 183 s
+#     all together; ollama (one request at a time by default) queues them, any choice ~16 s.
+# Every other provider (openai, custom, the other local servers) is not measured, so
+# "first-done": never slower to the cache than waiting, at worst slower to start.
+PARALLEL_START = {"anthropic": "first-event", "deepseek": "first-event+3"}
+DEFAULT_PARALLEL_START = "first-done"
+_START = re.compile(r"^(together|first-event|first-done|first-event\+(\d{1,3}(\.\d+)?))$")
+MAX_PARALLEL_LIMIT = 32  # the most a profile's max_parallel may say (a typo's guard)
 # A profile's `temperature = "default"`: the one value it takes. Requests then carry no
 # temperature, for a model that refuses one (Claude Opus 5.5 answered HTTP 400,
 # "`temperature` is deprecated for this model", 2026-11-09). Without the field every
@@ -124,6 +156,10 @@ class LLMConfig:
     queue: Path | None = None  # an assistant profile's request folder (provider "assistant")
     # False (a profile's `temperature = "default"`): no temperature in the request.
     send_temperature: bool = True
+    # How a lecture's other calls start after its first (PARALLEL_START), checked form.
+    parallel_start: str = DEFAULT_PARALLEL_START
+    # At most this many calls to this endpoint at once (None: the course's parallel only).
+    max_parallel: int | None = None
 
 
 class Prompt(str):
@@ -257,9 +293,30 @@ def _from_profile(name: str, data: dict, env: Mapping[str, str],
     if data.get("temperature", MODEL_TEMPERATURE) != MODEL_TEMPERATURE:
         raise LLMError(f'{where} temperature can only be "{MODEL_TEMPERATURE}" (none is sent, '
                        "for a model that refuses one); leave it out to send 0")
+    start = data.get("parallel_start", PARALLEL_START.get(provider, DEFAULT_PARALLEL_START))
+    if not isinstance(start, str) or not _START.match(start):
+        raise LLMError(f'{where} parallel_start must be "together", "first-event", '
+                       f'"first-event+N" (seconds, e.g. "first-event+3") or "first-done", '
+                       f"not {start!r}")
+    cap = data.get("max_parallel")
+    if cap is not None and (isinstance(cap, bool) or not isinstance(cap, int)
+                            or not 1 <= cap <= MAX_PARALLEL_LIMIT):
+        raise LLMError(f"{where} max_parallel must be a whole number from 1 to "
+                       f"{MAX_PARALLEL_LIMIT}, not {cap!r}")
     return LLMConfig(name, provider, base_url.rstrip("/"), data["model"], api_key,
                      float(data.get("timeout_s", 300)), thinking_off, thinking_on=thinking_on,
-                     send_temperature="temperature" not in data)
+                     send_temperature="temperature" not in data, parallel_start=start,
+                     max_parallel=cap)
+
+
+def start_wait(config: LLMConfig) -> float | None:
+    """The seconds after the first call's first streamed event when a lecture's other calls
+    may start: 0.0 for "first-event", N for "first-event+N"; None for "first-done" (they
+    wait for the first call's end) and for "together" (the caller skips the wait)."""
+    match = _START.match(config.parallel_start)
+    if match is None or match[1] in ("first-done", "together"):
+        return None
+    return float(match[2]) if match[2] else 0.0
 
 
 def _from_env(env: Mapping[str, str]) -> LLMConfig:
@@ -272,9 +329,7 @@ def _from_env(env: Mapping[str, str]) -> LLMConfig:
         raise LLMError("no model configured: add an [llm] section to workspace.toml "
                        "(see docs/setup) or set LLM_MODEL in .env")
     config = _from_profile("env", data, env)
-    return LLMConfig(config.name, config.provider, config.base_url, config.model,
-                     env.get("LLM_API_KEY") or None, config.timeout_s, config.thinking_off,
-                     thinking_on=config.thinking_on, send_temperature=config.send_temperature)
+    return replace(config, api_key=env.get("LLM_API_KEY") or None)
 
 
 def image_message(prompt: str, png: bytes) -> dict:

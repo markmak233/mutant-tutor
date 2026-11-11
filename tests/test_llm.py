@@ -93,11 +93,49 @@ def test_roles_pick_profiles_and_providers_fill_in_the_rest(tmp_path):
          '[llm.roles]\nvision = "p"\n', {}, "unknown fields: modle"),
         ("vision", None, '[llm.profiles.p]\nprovider = "custom"\nmodel = "m"\n'
          '[llm.roles]\nvision = "p"\n', {}, "needs a base_url"),
+        ("vision", None, '[llm.profiles.p]\nprovider = "lmstudio"\nmodel = "m"\n'
+         'parallel_start = "after-first"\n[llm.roles]\nvision = "p"\n', {},
+         'parallel_start must be "together", "first-event", "first-event+N"'),
+        ("vision", None, '[llm.profiles.p]\nprovider = "lmstudio"\nmodel = "m"\n'
+         'parallel_start = "first-event+"\n[llm.roles]\nvision = "p"\n', {},
+         "not 'first-event+'"),
+        ("vision", None, '[llm.profiles.p]\nprovider = "lmstudio"\nmodel = "m"\n'
+         'max_parallel = 0\n[llm.roles]\nvision = "p"\n', {},
+         "max_parallel must be a whole number from 1 to 32, not 0"),
+        ("vision", None, '[llm.profiles.p]\nprovider = "lmstudio"\nmodel = "m"\n'
+         'max_parallel = "4"\n[llm.roles]\nvision = "p"\n', {},
+         "max_parallel must be a whole number"),
     ],
 )
 def test_configuration_errors_say_what_to_fix(tmp_path, role, profile, llm, env, expected):
     with pytest.raises(LLMError, match=re.escape(expected)):
         config_for(role, profile, workspace(tmp_path, llm), env)
+
+
+@pytest.mark.parametrize(("provider", "setting", "start", "wait"), [
+    # The measured defaults per provider (llm.PARALLEL_START, 2026-11-11/12).
+    ("anthropic", None, "first-event", 0.0),
+    ("deepseek", None, "first-event+3", 3.0),
+    ("glm", None, "first-done", None),
+    ("lmstudio", None, "first-done", None),
+    # A profile's own choice wins over its provider's default.
+    ("deepseek", "first-event+30", "first-event+30", 30.0),
+    ("deepseek", "first-event+2.5", "first-event+2.5", 2.5),
+    ("anthropic", "first-done", "first-done", None),
+    ("lmstudio", "together", "together", None),
+])
+def test_how_parallel_calls_start_comes_from_the_provider_unless_the_profile_says(
+        tmp_path, provider, setting, start, wait):
+    """Owner, 2026-11-12: each family its own way of starting a lecture's other calls, with
+    the seconds adjustable; max_parallel is the profile's cap, absent by default."""
+    line = f'parallel_start = "{setting}"\n' if setting else ""
+    url = 'base_url = "http://x/v1"\n'
+    ws = workspace(tmp_path, f'[llm.profiles.p]\nprovider = "{provider}"\nmodel = "m"\n{url}'
+                             f'{line}max_parallel = 2\n[llm.roles]\ngenerate = "p"\n')
+    config = config_for("generate", workspace=ws, environ={})
+    assert (config.parallel_start, llm.start_wait(config), config.max_parallel) == (
+        start, wait, 2)
+    assert config_for("vision", workspace=workspace(tmp_path), environ={}).max_parallel is None
 
 
 def test_without_an_llm_section_the_environment_is_the_profile(tmp_path):

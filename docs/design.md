@@ -1663,13 +1663,24 @@ call of each lecture goes alone and the lecture's other items wait for it (`node
 writing the course pages and none reading them, about a dollar of the batch's three; repair rounds
 do not wait, a first call that fails frees the rest, and none waits past ten minutes). The wait is
 not for the first call to end but for its provider's cache to be readable, which differs per
-provider (`nodes.CACHE_READY_S`; measured 2026-11-11 with a 33k / 23k-token shared prefix, one
-call started, three released at once, their cached share): Anthropic serves it from the first
-streamed event (99.9% for calls sent 1 s after it, as the docs say); DeepSeek builds it in the
-background (0% at the first event, 0.6 s in; 99% at 3, 8, 15 and 30 s), so the gate opens ten
-seconds after the first event; GLM only once the first call has ended (0% at 30 s, 99.9% after
-the end); OpenAI is not measured, so it waits for the end like any provider not in the table. On
-a deep-learning course's lecture with Sonnet (first call about 70 s) the gate therefore costs a
+provider, so each family has its own way to start the rest (owner, 2026-11-12), a profile's
+`parallel_start`: `together` (no gate), `first-event` (when the first reply begins to stream),
+`first-event+N` (N seconds after that) or `first-done` (when the first call returns), with a
+measured default per provider in `llm.PARALLEL_START` that a profile may override. Measured
+2026-11-11/12 with a 23k-33k-token shared prefix, one call started and three released at once,
+their cached share: Anthropic serves it from the first streamed event (99.9% for calls sent
+1 s after it, as the docs say), so `first-event`; DeepSeek builds it in the background (0% at
+the first event, 0.6 s in; 99% at 3, 8, 15 and 30 s), so `first-event+3` (the owner's choice);
+GLM only once the first call has ended (0% at 30 s, 99.9% after the end), so `first-done`.
+Local servers report no cached tokens, so their time to the first text told it: LM Studio
+(gemma 26B, four slots) let the others reuse the prefix from the first event (first text in
+4 s against 78-103 s cold), but four replies decoding at once slowed the first, so the set
+took 84 s against 68 s after the first had ended and 183 s all together; Ollama answers one
+request at a time by default, so every choice took about 16 s. Both stay `first-done`, as do
+OpenAI and `custom` (not measured). A profile's `max_parallel` caps the calls one endpoint
+(provider and URL) gets at once, generate, repair and oracle alike (`nodes.CallSlots`), for an
+account whose quota allows few; absent, the course's `[generation] parallel` alone bounds
+them. On a deep-learning course's lecture with Sonnet (first call about 70 s) the gate costs a
 few seconds instead of a call; the stream readers report the first event as `on_progress(0)`.
 `cached_tokens` in the call log shows the result. Meaning comes first: a short prompt gains nothing and is not
 contorted, and reordering a calibrated prompt means calibrating it again.
