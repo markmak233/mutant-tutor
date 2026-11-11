@@ -200,6 +200,11 @@ def _form(**changes):
     ("ds", {"timeout_s": "0"}, "1 to 3600"),
     ("ds", {"reasoning_effort": "very low"}, "one word"),
     ("ds", {"temperature": "0.2"}, 'temperature can only be "default"'),
+    ("ds", {"parallel_start": "first-event+"}, "Seconds after the first reply begins"),
+    ("ds", {"parallel_start": "first-event+", "parallel_start_s": "900"}, "0.5 to 600"),
+    ("ds", {"parallel_start": "later"}, "from the list"),
+    ("ds", {"max_parallel": "0"}, "1 to 32"),
+    ("ds", {"max_parallel": "two"}, "whole number"),
 ])
 def test_a_model_is_checked_by_llm_pys_rules(course, name, changes, problem):
     data, problems = llm_settings.check_profile(course, name, _form(**changes))
@@ -253,6 +258,37 @@ def test_a_models_own_temperature_is_saved_and_kept_or_dropped_by_the_form(root,
 
     post(client, "/c/demo-course/models/save", {**claude, "original": "claude", "temperature": ""})
     assert "temperature" not in tomllib.loads(_toml(course))["llm"]["profiles"]["claude"]
+
+
+def test_how_parallel_calls_start_is_saved_shown_and_left_to_the_provider(
+        root, env_file, course):
+    """Owner, 2026-11-12: each provider its own way to start a lecture's other calls, the
+    seconds adjustable, and a cap. The choice and its seconds are one value in the file
+    and split again on the page; the provider's own (empty) writes nothing, so it follows
+    the tool; saving without the fields takes them out."""
+    client = _browser(root, env_file)
+    ds = {"name": "ds", **_form()}
+
+    new = _form_page(client, "/c/demo-course/models/new?provider=deepseek&apply=1")
+    assert "own: first-event+10</option>" in new  # deepseek's measured default, shown
+
+    post(client, "/c/demo-course/models/save", {**ds, "parallel_start": "first-event+",
+                                               "parallel_start_s": "2.5", "max_parallel": "3"})
+    saved = tomllib.loads(_toml(course))["llm"]["profiles"]["ds"]
+    assert (saved["parallel_start"], saved["max_parallel"]) == ("first-event+2.5", 3)
+    page = _form_page(client, "/c/demo-course/models/m/ds/")
+    assert '<option value="first-event+" selected>' in page
+    assert 'name="parallel_start_s" value="2.5"' in page and 'name="max_parallel" value="3"' in page
+
+    post(client, "/c/demo-course/models/save", {**ds, "original": "ds",
+                                               "parallel_start": "first-event+",
+                                               "parallel_start_s": "30"})
+    saved = tomllib.loads(_toml(course))["llm"]["profiles"]["ds"]
+    assert saved["parallel_start"] == "first-event+30" and "max_parallel" not in saved
+
+    post(client, "/c/demo-course/models/save", {**ds, "original": "ds", "parallel_start": "",
+                                               "parallel_start_s": "30"})
+    assert "parallel_start" not in tomllib.loads(_toml(course))["llm"]["profiles"]["ds"]
 
 
 def test_renaming_a_model_moves_its_roles_and_keeps_other_comments(course):

@@ -1681,7 +1681,11 @@ request at a time by default, so every choice took about 16 s. Both stay `first-
 OpenAI and `custom` (not measured). A profile's `max_parallel` caps the calls one endpoint
 (provider and URL) gets at once, generate, repair and oracle alike (`nodes.CallSlots`), for an
 account whose quota allows few; absent, the course's `[generation] parallel` alone bounds
-them. On a deep-learning course's lecture with Sonnet (first call about 70 s) the gate costs a
+them. The model form sets both under "More": a list of the four ways, its first entry the
+provider's own (which writes nothing, so the profile follows the tool's measured default),
+a seconds box for `first-event+N` (0.5 to 600; the file keeps one value, the page splits it
+again), and a cap box (1 to 32, empty for none); clicked in Chrome on a scratch course
+(`notes/gui-checks/parallel_start_click.py`). On a deep-learning course's lecture with Sonnet (first call about 70 s) the gate costs a
 few seconds instead of a call; the stream readers report the first event as `on_progress(0)`.
 `cached_tokens` in the call log shows the result. Meaning comes first: a short prompt gains nothing and is not
 contorted, and reordering a calibrated prompt means calibrating it again.

@@ -51,7 +51,7 @@ def applied() -> dict | None:
     changed), so the page shows the fields that provider needs; None without Apply."""
     if not request.args.get("apply"):
         return None
-    values = {k: request.args.get(k, "") for k in ("name", *llm_settings.FIELDS)}
+    values = {k: request.args.get(k, "") for k in llm_settings.FORM_FIELDS}
     # A provider's own address was shown for the provider before: the new one shows
     # its own instead. An address typed in (z.ai for glm, say) stays.
     if any(url and catalog.same_url(values["base_url"], url)
@@ -148,13 +148,13 @@ def register(app: Flask) -> None:
         data = llm_settings.section(course).get("profiles", {}).get(profile)
         if not isinstance(data, dict):
             abort(404, N_("No such model."))
-        values = applied() or {"name": profile, **{k: str(v) for k, v in data.items()}}
+        values = applied() or llm_settings.form_values(profile, data)
         return profile_page(course, profile, values, [])
 
     @app.post("/c/<name>/models/save")
     def save_model(name: str):
         course = course_or_404(name)
-        form = {k: request.form.get(k, "") for k in ("name", *llm_settings.FIELDS)}
+        form = {k: request.form.get(k, "") for k in llm_settings.FORM_FIELDS}
         original = request.form.get("original") or None
         profile = form["name"].strip()
         data, problems = llm_settings.check_profile(course, profile, form)

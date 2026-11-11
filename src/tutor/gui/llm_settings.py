@@ -64,7 +64,14 @@ ROLES = [role for _, group in ROLE_GROUPS for role, _ in group]
 PROFILE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,39}$")
 # A profile's fields in the order a new one is written (llm.PROFILE_FIELDS, ordered).
 FIELDS = ("provider", "model", "api_key_env", "base_url", "reasoning_effort",
-          "reasoning_effort_on", "timeout_s", "temperature")
+          "reasoning_effort_on", "timeout_s", "temperature", "parallel_start", "max_parallel")
+# The form's own box beside parallel_start: the N of "first-event+N", which the file keeps
+# inside the one value. FORM_FIELDS is everything the model form sends.
+START_SECONDS = "parallel_start_s"
+FORM_FIELDS = ("name", *FIELDS, START_SECONDS)
+# parallel_start's choices in the form; "first-event+" takes its seconds from the box.
+STARTS = ("together", "first-event", "first-event+", "first-done")
+START_SECONDS_MAX = 600  # a lecture's first call waits for no more than this (GATE_WAIT_S)
 _WORD = re.compile(r"^[a-z]+$")
 
 
@@ -112,13 +119,57 @@ NEW_TIMEOUT_S = 900
 
 def provider_defaults() -> dict[str, dict[str, str]]:
     """What each provider llm.py knows brings by itself, as the model form shows it: its
-    base URL ("" for none), and how it turns thinking off, e.g. 'thinking {"type":
-    "disabled"}, else reasoning_effort "none"' ("" for no way of its own)."""
+    base URL ("" for none), how it turns thinking off, e.g. 'thinking {"type":
+    "disabled"}, else reasoning_effort "none"' ("" for no way of its own), and how a
+    lecture's other calls start after the first (llm.PARALLEL_START, measured)."""
     return {name: {"base_url": url or "",
                    "thinking_off": ", else ".join(" ".join(f"{k} {json.dumps(v)}"
                                                           for k, v in fields.items())
-                                                 for fields in off)}
+                                                 for fields in off),
+                   "parallel_start": llm.PARALLEL_START.get(name, llm.DEFAULT_PARALLEL_START)}
             for name, (url, off) in llm.PROVIDERS.items()}
+
+
+def form_values(name: str, data: dict) -> dict[str, str]:
+    """A profile from the file as the form shows it: every value a string, and a
+    "first-event+N" parallel_start split into the choice and its seconds' box."""
+    values = {"name": name, **{k: str(v) for k, v in data.items()}}
+    start, plus = values.get("parallel_start", ""), "first-event+"
+    if start.startswith(plus):
+        values["parallel_start"], values[START_SECONDS] = plus, start[len(plus):]
+    return values
+
+
+def _check_start(data: dict, form: dict[str, str], problems: list[str]) -> None:
+    """parallel_start and max_parallel from the form into the file's form, in `data`:
+    the choice and its seconds joined ("first-event+10"); empty choice: the provider's
+    default, so nothing is written; max_parallel a whole number."""
+    choice = data.pop("parallel_start", "")
+    if choice == "first-event+":
+        try:
+            seconds = float(form.get(START_SECONDS, "").strip())
+        except ValueError:
+            seconds = 0
+        if not 0 < seconds <= START_SECONDS_MAX:
+            problems.append(_("Seconds after the first reply begins: a number from 0.5 to "
+                              "%(most)s.") % {"most": START_SECONDS_MAX})
+        else:
+            shown = int(seconds) if seconds.is_integer() else round(seconds, 1)
+            data["parallel_start"] = f"first-event+{shown}"
+    elif choice in STARTS:
+        data["parallel_start"] = choice
+    elif choice:
+        problems.append(_("Choose how a lecture's other calls start from the list."))
+    if "max_parallel" in data:
+        try:
+            cap = int(data["max_parallel"])
+        except ValueError:
+            cap = 0
+        if not 1 <= cap <= llm.MAX_PARALLEL_LIMIT:
+            problems.append(_("At most this many calls at once: a whole number from 1 to "
+                              "%(most)s, or empty for no cap.") % {"most": llm.MAX_PARALLEL_LIMIT})
+        else:
+            data["max_parallel"] = cap
 
 
 def check_profile(course: Course, name: str, form: dict[str, str]
@@ -126,6 +177,7 @@ def check_profile(course: Course, name: str, form: dict[str, str]
     """A profile's fields from a form, or the problems."""
     data = {k: v for k in FIELDS if (v := form.get(k, "").strip())}
     problems = []
+    _check_start(data, form, problems)
     if not PROFILE.match(name):
         problems.append(_("A model's name takes lowercase letters, digits, '.', '_' and "
                           "'-', e.g. deepseek-flash."))
