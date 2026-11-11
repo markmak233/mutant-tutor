@@ -1670,7 +1670,8 @@ measured default per provider in `llm.PARALLEL_START` that a profile may overrid
 2026-11-11/12 with a 23k-33k-token shared prefix, one call started and three released at once,
 their cached share: Anthropic serves it from the first streamed event (99.9% for calls sent
 1 s after it, as the docs say), so `first-event`; DeepSeek builds it in the background (0% at
-the first event, 0.6 s in; 99% at 3, 8, 15 and 30 s), so `first-event+3` (the owner's choice);
+the first event, 0.6 s in; 99% at 3, 8, 15 and 30 s), so `first-event+10` (owner, 2026-11-12:
+10 for now, as 3 s was the edge seen once);
 GLM only once the first call has ended (0% at 30 s, 99.9% after the end), so `first-done`.
 Local servers report no cached tokens, so their time to the first text told it: LM Studio
 (gemma 26B, four slots) let the others reuse the prefix from the first event (first text in

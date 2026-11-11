@@ -115,7 +115,7 @@ def test_configuration_errors_say_what_to_fix(tmp_path, role, profile, llm, env,
 @pytest.mark.parametrize(("provider", "setting", "start", "wait"), [
     # The measured defaults per provider (llm.PARALLEL_START, 2026-11-11/12).
     ("anthropic", None, "first-event", 0.0),
-    ("deepseek", None, "first-event+3", 3.0),
+    ("deepseek", None, "first-event+10", 10.0),
     ("glm", None, "first-done", None),
     ("lmstudio", None, "first-done", None),
     # A profile's own choice wins over its provider's default.

@@ -112,7 +112,8 @@ PROFILE_FIELDS = {"provider", "model", "base_url", "api_key_env", "reasoning_eff
 # (2026-11-11/12: a 23k-33k-token shared prefix, one call started, three released, their
 # cached share or, on a server that reports none, their time to the first text):
 #   anthropic: 99.9% at the first event (the docs: readable once the response streams);
-#   deepseek: 0% at the first event (0.6 s in), 99% at 3, 8, 15 and 30 s (owner chose 3);
+#   deepseek: 0% at the first event (0.6 s in), 99% at 3, 8, 15 and 30 s; 3 s was the
+#     edge seen once, so 10 s for now (owner, 2026-11-12), 7 s more for each first call;
 #   glm: 0% at 3 and 30 s, 99.9% after the first call ended;
 #   lmstudio (gemma 26B, 4 slots): released at the first event the others reused the
 #     prefix (first text 4 s against 78-103 s cold), but the four replies decoding together
@@ -120,7 +121,7 @@ PROFILE_FIELDS = {"provider", "model", "base_url", "api_key_env", "reasoning_eff
 #     all together; ollama (one request at a time by default) queues them, any choice ~16 s.
 # Every other provider (openai, custom, the other local servers) is not measured, so
 # "first-done": never slower to the cache than waiting, at worst slower to start.
-PARALLEL_START = {"anthropic": "first-event", "deepseek": "first-event+3"}
+PARALLEL_START = {"anthropic": "first-event", "deepseek": "first-event+10"}
 DEFAULT_PARALLEL_START = "first-done"
 _START = re.compile(r"^(together|first-event|first-done|first-event\+(\d{1,3}(\.\d+)?))$")
 MAX_PARALLEL_LIMIT = 32  # the most a profile's max_parallel may say (a typo's guard)
