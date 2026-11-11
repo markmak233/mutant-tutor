@@ -12,6 +12,16 @@ Ctrl+C would reach the command, and lets them finish what they do on Ctrl+C (a `
 client passes it into its container). What is still alive after the grace time is killed;
 a container left without its client ends at its own time limit, which is at most the
 exercise's limit plus 5 s.
+
+Windows (2026-11-11, found with a Remote Control session on the owner's PC: Stop had never
+worked there). No signal reaches this process reliably: a venv's python.exe is a launcher
+that runs the real interpreter as its child, so this process's pid is not the group's
+(CTRL_BREAK_EVENT to it went to the whole console), and a Python blocked in `wait()` does
+not wake for SIGBREAK anyway. So tasks.stop writes a STOP_FILE in the task's folder, the
+runner polls the running command every quarter second and treats the file as Ctrl+C; each
+command is started in a process group of its own, so Ctrl+Break can go to the command's
+group (its pid leads it) and nowhere else; what is left after the grace time goes with
+`taskkill /T /F`, which takes the command's whole tree.
 """
 
 from __future__ import annotations
@@ -25,6 +35,7 @@ import sys
 import time
 from pathlib import Path
 
+from tutor.gui import tasks
 from tutor.gui.tasks import DONE, FAILED, LOG_FILE, REPO, STOPPED, TASK_FILE, _now, _write
 
 
@@ -56,10 +67,38 @@ def _signal_all(pids: list[int], sig: int) -> None:
             pass
 
 
+POLL_S = 0.25  # Windows: how often the runner looks at the command and for the stop file
+
+
+def wait_or_stop(child, folder: Path, poll_s: float = POLL_S) -> int:
+    """Windows' wait: the command's exit code, or KeyboardInterrupt as soon as the stop
+    file is there (see the module docstring). `child` needs `poll()` only."""
+    while True:
+        code = child.poll()
+        if code is not None:
+            return code
+        if (folder / tasks.STOP_FILE).is_file():
+            raise KeyboardInterrupt
+        time.sleep(poll_s)
+
+
 def stop_tree(child: subprocess.Popen, grace_s: float) -> None:
     """Ctrl+C to the command and everything below it, then a kill after `grace_s`."""
-    if sys.platform == "win32":  # not tested: no `ps`, and no process groups to reach
-        child.terminate()
+    if sys.platform == "win32":
+        # The command leads its own process group (CREATE_NEW_PROCESS_GROUP at its start),
+        # so Ctrl+Break reaches it and its children and nothing else on this console.
+        try:
+            child.send_signal(signal.CTRL_BREAK_EVENT)
+        except OSError:
+            pass
+        deadline = time.monotonic() + grace_s
+        while time.monotonic() < deadline and child.poll() is None:
+            time.sleep(0.1)
+        if child.poll() is None:
+            # The whole tree (/T), by force (/F): a `docker run` client or a pytest that
+            # ignored Ctrl+Break. taskkill's own exit code says nothing the log needs.
+            subprocess.run(["taskkill", "/PID", str(child.pid), "/T", "/F"],
+                           capture_output=True, timeout=60)
         child.wait()
         return
     tree = descendants(os.getpid())  # taken first: an orphan leaves the tree once its parent dies
@@ -90,16 +129,21 @@ def run(folder: Path) -> int:
     child: subprocess.Popen | None = None
     with (folder / LOG_FILE).open("ab", buffering=0) as log:
         try:
+            win = sys.platform == "win32"
             for command in task["commands"]:
+                if win and (folder / tasks.STOP_FILE).is_file():  # Stop between two commands
+                    raise KeyboardInterrupt
                 log.write(f"$ {shlex.join(_shown(command, root))}\n".encode())
+                # Windows: the command in a process group of its own, for stop_tree.
+                flags = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if win else {}
                 child = subprocess.Popen(command, cwd=REPO, env=env, stdin=subprocess.DEVNULL,
-                                         stdout=log, stderr=subprocess.STDOUT)
-                code = child.wait()
+                                         stdout=log, stderr=subprocess.STDOUT, **flags)
+                code = wait_or_stop(child, folder) if win else child.wait()
                 codes.append(code)
                 log.write(f"[exit {code}]\n\n".encode())
                 task["exit_codes"] = codes
                 _write(folder, task)
-        except KeyboardInterrupt:  # tasks.stop, wherever it lands
+        except KeyboardInterrupt:  # tasks.stop, wherever it lands (Windows: the stop file)
             # A second Stop must not end the runner before it has written the task's end.
             signal.signal(signal.SIGINT, signal.SIG_IGN)
             stopped = True
@@ -112,10 +156,8 @@ def run(folder: Path) -> int:
                 status=STOPPED if stopped else DONE if all(c == 0 for c in codes) else FAILED)
     _write(folder, task)
     # The next task of the course, if one waits: the queue goes on with no GUI around.
-    from tutor.gui.tasks import kick
-
     try:
-        kick(folder.parents[2])  # <course>/logs/gui-tasks/<id>
+        tasks.kick(folder.parents[2])  # <course>/logs/gui-tasks/<id>
     except OSError:
         pass  # the page's own kick starts it when it next reads the course
     return 0
@@ -137,7 +179,9 @@ def _shown(command: list[str], root: str | None) -> list[str]:
 
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
-    if sys.platform == "win32":  # Ctrl+Break is how tasks.stop reaches it there
+    if sys.platform == "win32":
+        # tasks.stop uses the stop file, not a signal (module docstring); a Ctrl+Break that
+        # does arrive (a console's, in a terminal) still stops the task the same way.
         signal.signal(signal.SIGBREAK, signal.default_int_handler)
     return run(Path(args[0]))
 

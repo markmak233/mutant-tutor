@@ -3784,7 +3784,18 @@ late; the adaptive review screens can be built with it.
   own Ctrl+C handler first: a process started in the background has SIGINT ignored and passes
   that on, and the first real Stop did nothing until it did. Checked by a click in Chrome on a
   copy of two examples, in containers: stopped in 7 s, no container or process left, and the
-  interrupted exercise's `validation.json` not rewritten. Windows: Ctrl+Break, not tested.
+  interrupted exercise's `validation.json` not rewritten. Windows (2026-11-11, found and
+  then verified with a Remote Control session on the owner's PC; Stop had never worked
+  there): no signal does it. A venv's python.exe is a launcher that runs the interpreter as
+  its child, so the runner's own pid is not the process group's, and CTRL_BREAK_EVENT to it
+  went to the whole console (it killed pytest; in the GUI `/stop` was a 500, WinError 87);
+  and a Python blocked in `wait()` does not wake for SIGBREAK. So there `tasks.stop` writes a
+  `stop` file in the task's folder, the runner polls the command every 0.25 s and takes the
+  file as Ctrl+C, each command runs in a process group of its own, Ctrl+Break goes to that
+  group alone, and `taskkill /T /F` ends what is left after the grace time. Verified on the
+  PC: `test_gui_tasks.py` whole (21 passed, the 3 ps-based tests skipped), `/stop` 303 and
+  the task `stopped` within 0.5 s, the server alive, the queue moving on. Not exercised
+  there: the taskkill path (no command ignored Ctrl+Break).
 - Generation (step 4, owner, 2026-11-06): no change to `graph/`. Started without a terminal,
   `python -m tutor.graph plan` already pauses at the plan and exits 0, so the GUI runs the
   CLI's commands as tasks: the new-batch form starts `plan` (lectures read into the cache,

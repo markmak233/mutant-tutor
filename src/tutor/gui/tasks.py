@@ -40,6 +40,11 @@ from tutor.gui.i18n import N_
 
 TASKS_DIR = Path("logs") / "gui-tasks"
 TASK_FILE = "task.json"
+# Windows: `stop` is a file in the task's folder, which the runner polls for (runner.py).
+# A signal cannot do it there: a venv's python.exe is a launcher, so the runner's own pid is
+# not the process group's; CTRL_BREAK_EVENT to a pid that leads no group goes to the whole
+# console (it killed pytest, 2026-11-11), and os.kill raises WinError 87 on it.
+STOP_FILE = "stop"
 LOG_FILE = "output.log"
 KEEP = 20  # finished tasks kept per course; older ones are deleted when a new one starts
 TAIL_BYTES = 64_000  # how much of the end of a log a page shows
@@ -210,11 +215,19 @@ def pending(course_root: Path) -> list[Task]:
 
 def stop(task: Task) -> bool:
     """Ask the runner to stop: it passes Ctrl+C to every process of the task, then kills what
-    is left after the grace time. False if it is not running (or has not started yet)."""
+    is left after the grace time. False if it is not running (or has not started yet).
+    POSIX: SIGINT to the runner. Windows: the STOP_FILE, which the runner sees within a
+    quarter of a second (why not a signal: at STOP_FILE)."""
     if not task.active or task.pid is None:
         return False
+    if sys.platform == "win32":
+        try:
+            (task.folder / STOP_FILE).write_text(_now(), encoding="utf-8")
+        except OSError:
+            return False
+        return True
     try:
-        os.kill(task.pid, signal.CTRL_BREAK_EVENT if sys.platform == "win32" else signal.SIGINT)
+        os.kill(task.pid, signal.SIGINT)
     except (ProcessLookupError, PermissionError):
         return False
     return True
