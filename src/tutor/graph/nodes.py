@@ -23,7 +23,8 @@ import shutil
 import sys
 import threading
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from contextlib import contextmanager, nullcontext
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 
@@ -54,6 +55,43 @@ def check_round(exercise: Path, solution: Path) -> ValidationReport:
     """The validator on one round's files; rule 4 runs even when rule 1 fails, since which
     side the oracle agrees with tells repair what to fix."""
     return validate(load_exercise(exercise, solution), oracle_on_failure=True)
+
+
+# How long an item waits for the lecture's first generate call before it goes on its own
+# (uncached): the first calls seen take 70-360 s; one that hangs (an Anthropic stream
+# gave nothing for 900 s, 2026-11-11) must not hold the whole lecture.
+GATE_WAIT_S = 600
+
+
+class CacheGate:
+    """The first generate call of each lecture goes alone; the lecture's other items wait
+    for it, then go in parallel. The call's shared part (the lecture's course pages, the
+    longest part of the prompt) is then in the provider's prompt cache for every call
+    after the first; with all of them sent at once each writes it for itself and none
+    reads it (Spark course, Sonnet 5.5, parallel 8, 2026-11-11: the first eight calls hit
+    0 tokens, the next four 15,647 each, about a dollar of the batch's three). Repair rounds
+    do not wait: by then the item's own first call has filled the cache. A first call that
+    fails or raises frees the others all the same, and one that outlasts GATE_WAIT_S is
+    not waited for any longer."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._first: dict[str, threading.Event] = {}  # lecture -> set when its first call ends
+
+    @contextmanager
+    def turn(self, key: str):
+        with self._lock:
+            event = self._first.get(key)
+            first = event is None
+            if first:
+                event = self._first[key] = threading.Event()
+        if not first:
+            event.wait(GATE_WAIT_S)
+        try:
+            yield
+        finally:
+            if first:
+                event.set()
 
 
 @dataclass(frozen=True)
@@ -97,6 +135,9 @@ class Deps:
     # timeout, and on_stream gets (exercise id, characters so far) while it arrives.
     stream: bool = True
     on_stream: Callable[[str, int], None] | None = None
+    # One per batch: the first generate call of each lecture goes alone, so the others
+    # read its course pages from the prompt cache (CacheGate above).
+    cache_gate: CacheGate = field(default_factory=CacheGate)
 
     @property
     def profile(self) -> Profile:
@@ -136,6 +177,14 @@ def retrieve_context(state: ItemState, deps: Deps) -> ItemState:
     # The item's own pages: those whose slide footer falls in its range ("4.15-4.24").
     low, high = _slide_range(item.slides)
     slides = [e for e in entries if e.label and low <= _slide(e.label) <= high]
+    if not slides and all(len(_slide(e.label)) == 1 for e in entries if e.label):
+        # Footers that are single numbers ("17") against a range the plan model wrote with
+        # the lecture's number in front ("4.7-4.9", after the prompt's example; the
+        # deep-learning course, 2026-11-11: five items of a week found no page): the last
+        # number of each end is the footer meant. A lecture whose footers carry a dot (the
+        # Spark course's "4.15") is not here.
+        low, high = low[-1:], high[-1:]
+        slides = [e for e in entries if e.label and low <= _slide(e.label) <= high]
     too_long = sum(len(e.body) for e in entries) > deps.context_chars
     # A lecture without slide footers cannot be checked, only sent whole.
     if not slides and (too_long or any(e.label for e in entries)):
@@ -224,24 +273,37 @@ def _ask(state: ItemState, deps: Deps, user: str, purpose: str, round_: int,
     ]
     # A repair round asks a little warmer each time: at temperature 0 an unchanged prompt
     # got the identical draft back (graph/settings.py).
-    reply = deps.chat(config, messages, purpose=purpose, log_path=deps.llm_log,
-                      max_tokens=deps.max_tokens if thinking else deps.max_tokens_no_thinking,
-                      response_schema=deps.profile.draft_schema,
-                      thinking=thinking,
-                      temperature=min(round_ * deps.repair_temperature_step, 0.8),
-                      **stream_args(state, deps))
-    update: ItemState = {**tokens_spent(state, reply), "round": round_, "draft_json": reply.text,
+    # Round 0 of a lecture's items: the first call alone, the rest after it (CacheGate).
+    gate = deps.cache_gate.turn(state["item"].lecture) if round_ == 0 else nullcontext()
+    with gate:
+        reply = deps.chat(config, messages, purpose=purpose, log_path=deps.llm_log,
+                          max_tokens=deps.max_tokens if thinking else deps.max_tokens_no_thinking,
+                          response_schema=deps.profile.draft_schema,
+                          thinking=thinking,
+                          temperature=min(round_ * deps.repair_temperature_step, 0.8),
+                          **stream_args(state, deps))
+    # The draft is the JSON itself: a ```json fence or a sentence around it goes before
+    # parsing and before it is kept (a chat model writes one now and then although the
+    # prompt asks for JSON alone; Sonnet 5.5, 2026-11-11), so a repair round quotes JSON.
+    text = llm.json_body(reply.text)
+    update: ItemState = {**tokens_spent(state, reply), "round": round_, "draft_json": text,
                          "model": config.name,
-                         "unchanged": round_ > 0 and reply.text.strip()
-                         == state.get("draft_json", "").strip()}
+                         "unchanged": round_ > 0 and text == state.get("draft_json", "").strip()}
     try:
-        update.update(draft=deps.profile.draft.model_validate_json(reply.text), failure=None,
+        update.update(draft=deps.profile.draft.model_validate_json(text), failure=None,
                       format_error=False)
     except ValidationError as e:
         cut = " (the reply was cut off at max_tokens)" if reply.finish_reason == "length" else ""
+        # A whole reply that is not JSON (and not merely cut short): its first characters
+        # say what came instead (a sentence, a fence of another kind), as the round's text
+        # goes to the next round's prompt but never to the batch's log.
+        head = ""
+        if not cut and any(err["loc"] == () for err in e.errors()):
+            start = " ".join(reply.text[:80].split()) or "(empty)"
+            head = f"; the reply begins: {start!r}"
         update.update(draft=None, format_error=True,
                       failure=f"format: the reply does not fit the JSON schema{cut}: "
-                              + "; ".join(describe_error(err) for err in e.errors()[:10]))
+                              + "; ".join(describe_error(err) for err in e.errors()[:10]) + head)
     return update
 
 

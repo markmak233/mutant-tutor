@@ -937,12 +937,34 @@ Design approved 2026-10-28 (owner):
 - Stops: 3 repair rounds per item, a token budget per batch, an LLM error stops the current
   item and keeps the finished ones.
 - Roles in `[llm.roles]`: `plan` = GLM-5.3-Flash with thinking low (see the experiment
-  below); `generate` = DeepSeek-V4-Flash since 2026-10-29 (the week 4 rerun below), with
-  thinking on since 2026-10-30 (the week 7 comparison below); `repair` = V4-Pro from the
-  second repair on; `oracle` = a different model family (GPT, decided 2026-10-28 in place
-  of local Gemma; GLM-5.3-Flash at high effort once the OpenAI key expires, see the
-  week 4 cross experiment below), since the same
-  model writing reference and oracle is not an independent check. The CLI refuses an oracle from the generating model's provider.
+  below; Claude Sonnet 5.5 since 2026-11-10); `generate` = DeepSeek-V4-Flash since
+  2026-10-29 (the week 4 rerun below), with thinking on since 2026-10-30 (the week 7
+  comparison below), and Claude Sonnet 5.5 on the deep-learning course since 2026-11-11 (next bullet);
+  `repair` = V4-Pro from the second repair on; `oracle` = a different model family (GPT,
+  decided 2026-10-28 in place of local Gemma; GLM-5.3-Flash at high effort once the OpenAI
+  key expires, see the week 4 cross experiment below), since the same model writing
+  reference and oracle is not an independent check. The CLI refuses an oracle from the
+  generating model's provider.
+- Sonnet 5.5 as `generate` (owner, 2026-11-11, the deep-learning course: "Claude is visibly faster"). Measured
+  on that course's learn-mode weeks, the same prompts, oracle gpt-6.1-terra: DeepSeek-V4-Flash
+  with thinking (weeks 1-2, 22 items) had 13 first drafts clean of 22 and 6 cut off at the
+  32k output cap, each cut-off a whole call again, at about $0.04 an item (list prices) and
+  131 s a call (median, 36 calls; its output 23.5k tokens a call, the thinking counted in,
+  at 183 tokens/s); Sonnet 5.5 (weeks 3-4, 15 items) had 12 clean, none cut off (10.7k
+  tokens a call), about $0.15 an item and 71 s a call (median, 19 calls). An item is one
+  call and a half a minute with Sonnet against two to three calls and four to five minutes
+  with DeepSeek, and the owner waits for the batch; the dollar a week between them is
+  worth less than the time. Sonnet's generate request caches its course pages on Anthropic
+  (56-61% of the input served from the cache from the second item on, the item's own
+  part not). Two faults Sonnet exposed on the way, both on this side: three of its first
+  drafts began with a sentence ("Here is the exercise as one JSON object. ...") before the
+  object, a format failure and a paid repair each, as the draft schema's free-form
+  `data_files` map keeps Anthropic's structured output out, so the parser now takes the
+  JSON body of a reply (a fence or a sentence around it dropped, `llm.json_body`; a reply
+  with no JSON at all is quoted in the failure); and the plan model wrote slide ranges with
+  the lecture's number in front ("4.17-4.19", after the prompt's example) against footers
+  that are single numbers, so five items found no page: single-number footers now match
+  the last number of each end. Other courses keep DeepSeek until they generate next.
 - Experiment 2026-10-28, one item (a closure / accumulator debugging exercise from the
   week 4 slides), same validator:
 
@@ -1635,7 +1657,11 @@ Decided 2026-11-03 (owner): every prompt is designed for a high cache hit rate w
 allow. Providers reuse only an identical start of a prompt (OpenAI: from 1024 tokens), so stable
 content goes first: the system prompt, rules and shared course material. What varies per item goes
 last. The shared part stays the same byte for byte, with no per-item marks, dates or ids. With
-parallel calls and a large shared part, one call goes first to fill the cache. `cached_tokens` in
+parallel calls and a large shared part, one call goes first to fill the cache: the first generate
+call of each lecture goes alone and the lecture's other items wait for it (`nodes.CacheGate`, built
+2026-11-11 after a Spark batch with Sonnet at parallel 8 sent its first eight calls at once, each
+writing the course pages and none reading them, about a dollar of the batch's three; repair rounds
+do not wait, a first call that fails frees the rest, and none waits past ten minutes). `cached_tokens` in
 the call log shows the result. Meaning comes first: a short prompt gains nothing and is not
 contorted, and reordering a calibrated prompt means calibrating it again.
 
