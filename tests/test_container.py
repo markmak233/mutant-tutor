@@ -1,5 +1,7 @@
 """The image's recipe and the build's steps, with Docker's command line faked: no Docker here."""
 
+import hashlib
+import json
 import subprocess
 from pathlib import Path
 
@@ -30,6 +32,7 @@ class FakeDocker:
         self.images = images
         self.commands: list[list[str]] = []
         self.stdin: list[str] = []
+        self.manifests = {}
 
     def __call__(self, command, **kwargs):
         self.commands.append(command)
@@ -37,6 +40,20 @@ class FakeDocker:
             self.stdin.append(kwargs["input"])
         verb = " ".join(command[1:3]) if command[1] == "image" else command[1]
         out = {"info": "24.0.6\n", "image ls": self.images}.get(verb, "")
+        if verb == "build" and verb not in self.fail:
+            tag = command[command.index("--tag") + 1]
+            raw_labels = [command[i + 1] for i, p in enumerate(command) if p == "--label"]
+            labels = dict(p.split("=", 1) for p in raw_labels)
+            identity = "base" if tag.startswith("tutor-base-") else "built"
+            self.manifests[tag] = {"Id": "sha256:" + hashlib.sha256(identity.encode()).hexdigest(),
+                                   "RepoDigests": [], "Config": {"Labels": labels}}
+        if verb == "image inspect":
+            data = self.manifests.get(command[-1], {
+                "Id": "sha256:" + hashlib.sha256(b"built").hexdigest(), "Config": {"Labels": {}}})
+            out = json.dumps([data])
+        if verb == "run" and any("tutor-image-inventory-v1" in part for part in command):
+            out = json.dumps({"python": "3.11.17", "packages": [["pytest", "9.1.1"]],
+                              "java": None, "gcc": None, "hadoop": None})
         return subprocess.CompletedProcess(command, 1 if verb in self.fail else 0, out, "")
 
     def verbs(self):
@@ -173,11 +190,12 @@ def test_a_build_sends_the_recipe_with_no_context_checks_inside_and_drops_older_
     older = "tutor-run-demo:0123456789ab"
     docker = FakeDocker(images=f"{image}\n{older}\n")
     assert build(ws, docker, say=lambda text: None) == image
-    assert docker.verbs() == ["info", "build", "run", "image ls", "image rm"]
-    assert docker.commands[1][-1] == "-"  # the recipe from stdin: no files of this machine
-    assert docker.stdin[0].startswith("FROM python:3.11")
+    builds = [c for c in docker.commands if c[1] == "build"]
+    assert len(builds) == 2 and all(c[-1] == "-" for c in builds)  # no build context/files
+    assert docker.stdin[0] == "FROM python:3.11-slim-bookworm\n"
+    assert docker.stdin[1].startswith("FROM tutor-base-")
     assert docker.commands[-1] == ["docker", "image", "rm", older]
-    check = docker.commands[2]
+    check = next(c for c in docker.commands if c[1] == "run" and "tutor.envcheck" in c[-1])
     assert "--network" in check and "tutor.envcheck" in check[-1]
     mounts = [check[i + 1] for i, flag in enumerate(check) if flag == "-v"]
     assert all(mount.endswith(":ro") for mount in mounts)
@@ -188,7 +206,9 @@ def test_a_failed_build_stops_there_and_keeps_the_older_image(tmp_path):
     docker = FakeDocker(fail={"build"}, images="tutor-run-demo:0123456789ab\n")
     with pytest.raises(ContainerError, match="build failed"):
         build(workspace(tmp_path), docker, say=lambda text: None)
-    assert docker.verbs() == ["info", "build"]
+    assert "image ls" not in docker.verbs()
+    removed = [c[-1] for c in docker.commands if c[1:3] == ["image", "rm"]]
+    assert all(name.startswith("tutor-base-") for name in removed)
 
 
 def test_an_image_that_fails_its_check_is_removed(tmp_path):
@@ -196,7 +216,7 @@ def test_an_image_that_fails_its_check_is_removed(tmp_path):
     docker = FakeDocker(fail={"run"})
     with pytest.raises(ContainerError, match="was removed"):
         build(ws, docker, say=lambda text: None)
-    assert docker.commands[-1] == ["docker", "image", "rm", image_name(ws.course, ws.requires)]
+    assert ["docker", "image", "rm", image_name(ws.course, ws.requires)] in docker.commands
 
 
 def test_build_refuses_when_docker_is_not_running(tmp_path):

@@ -5,12 +5,14 @@ Routes are registered on the app by `register` (see gui/routes/__init__.py)."""
 
 from __future__ import annotations
 
+import dataclasses
 import os
 
 from flask import Flask, abort, current_app, redirect, render_template, request, url_for
 
 from tutor import llm
 from tutor.gui import catalog, courses, keys, llm_settings
+from tutor.gui.i18n import N_
 from tutor.gui.routes.common import course_or_404, start_task
 
 
@@ -40,7 +42,7 @@ def profile_page(course: courses.Course, original: str | None, values: dict,
     return render_template("profile.html", course=course, original=original,
                            values=values, problems=problems, fields=llm_settings.FIELDS,
                            providers=list(llm.PROVIDERS), shelf=shelf,
-                           common=catalog.COMMON,
+                           common=catalog.COMMON, local=catalog.LOCAL,
                            defaults=llm_settings.provider_defaults()), code
 
 
@@ -74,10 +76,26 @@ def register(app: Flask) -> None:
     def new_model(name: str):
         """A blank form, with the models.dev catalog above it (catalog.py): `catalog` picks
         a provider, whose models are listed, `model` one of them, which fills the form, and
-        `all` lists every model instead of the newest."""
+        `all` lists every model instead of the newest. A server on this machine (LOCAL) is
+        asked for its own models, with no key, at its default address or the one typed
+        in beside the choice (`at`: another port, say; owner, 2026-11-10), which "Use"
+        then fills into the form."""
         course = course_or_404(name)
         found = catalog.load(app.config["ROOT"])
-        provider = found.provider(request.args.get("catalog", "")) if found else None
+        chosen = request.args.get("catalog", "")
+        provider = catalog.local_provider(chosen) or (found.provider(chosen) if found
+                                                      else None)
+        problem, at = "", " ".join(request.args.get("at", "").split()).rstrip("/")
+        if request.args.get("at_for", chosen) != chosen:
+            at = ""  # the address shown for another provider (the choice changed since)
+        if provider and provider.id in catalog.LOCAL:
+            if at and not at.startswith(("http://", "https://")):
+                problem, at = f"The address starts with http://, not {at[:40]!r}.", ""
+            if at:
+                provider = dataclasses.replace(provider, base_url=at)
+            if not problem:
+                listed, problem = catalog.installed(provider.base_url)
+                provider = dataclasses.replace(provider, models=listed)
         model = next((m for m in provider.models if m.id == request.args.get("model")),
                      None) if provider else None
         values: dict = {"name": ""}
@@ -93,9 +111,18 @@ def register(app: Flask) -> None:
             shown.append(model)
         shelf = {"catalog": found, "stale": "" if found else catalog.stale(app.config["ROOT"]),
                  "provider": provider, "model": model, "notes": notes,
-                 "models": shown, "hidden": len(listed) - len(shown),
+                 "models": shown, "hidden": len(listed) - len(shown), "problem": problem,
+                 "at": at,  # the address typed in, carried by the page's links
                  "key_set": bool(provider and provider.key_env in key_names())}
         return profile_page(course, None, values, [], shelf=shelf)
+
+    @app.get("/c/<name>/models/new/at")
+    def local_address(name: str):
+        """The address box beside the provider choice (_local_at.html), for the provider
+        `catalog` names: htmx asks for it whenever the choice changes. Reads nothing."""
+        course_or_404(name)
+        provider = catalog.local_provider(request.args.get("catalog", ""))
+        return render_template("_local_at.html", at_provider=provider, at="")
 
     @app.post("/c/<name>/models/catalog")
     def refresh_catalog(name: str):
@@ -105,12 +132,13 @@ def register(app: Flask) -> None:
         root = app.config["ROOT"]
         if problem := catalog.refresh(root):
             shelf = {"catalog": catalog.load(root), "stale": catalog.stale(root),
-                     "provider": None, "model": None,
+                     "provider": None, "model": None, "problem": "",
                      "notes": [], "models": [], "hidden": 0, "key_set": False}
             return profile_page(course, None, {"name": ""}, [problem], 502, shelf=shelf)
         found = catalog.load(root)
         chosen = request.form.get("catalog", "")
-        args = {"catalog": chosen} if found and found.provider(chosen) else {}
+        args = ({"catalog": chosen} if chosen in catalog.LOCAL
+                or (found and found.provider(chosen)) else {})
         return redirect(url_for("new_model", name=name, notice="catalog-fetched", **args),
                         code=303)
 
@@ -119,7 +147,7 @@ def register(app: Flask) -> None:
         course = course_or_404(name)
         data = llm_settings.section(course).get("profiles", {}).get(profile)
         if not isinstance(data, dict):
-            abort(404, "No such model.")
+            abort(404, N_("No such model."))
         values = applied() or {"name": profile, **{k: str(v) for k, v in data.items()}}
         return profile_page(course, profile, values, [])
 
@@ -131,6 +159,10 @@ def register(app: Flask) -> None:
         profile = form["name"].strip()
         data, problems = llm_settings.check_profile(course, profile, form)
         if data is not None:
+            # A key name used at another host, in any course, is refused (catalog.py: a
+            # changed URL must not send a key elsewhere).
+            problems = llm_settings.key_elsewhere(app.config["ROOT"], course, profile, data)
+        if data is not None and not problems:
             problems = llm_settings.save_profile(course, original, profile, data)
         if problems:
             return profile_page(course, original, form, problems, 400)
@@ -187,7 +219,7 @@ def register(app: Flask) -> None:
         course = course_or_404(name)
         source = courses.get_course(app.config["ROOT"], request.form.get("source", ""))
         if source is None:
-            abort(404, "No such course.")
+            abort(404, N_("No such course."))
         problems = llm_settings.copy_models(course, source)
         if problems:
             return models_page(course, problems, 400)
@@ -201,7 +233,7 @@ def register(app: Flask) -> None:
         wanted = request.form.get("profile", "")
         names = [wanted] if wanted else known
         if not names or any(n not in known for n in names):
-            abort(404, "No such model.")
+            abort(404, N_("No such model."))
         title = f"Check {wanted}" if wanted else "Check the models"
         return start_task(course, title, [llm_settings.check_command(names)],
                           meta={"kind": "check"})

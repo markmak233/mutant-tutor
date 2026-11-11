@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{# The GUI's languages (gui/i18n.py): the switch (also in every page's footer), and
+   "Translate into", which has a course's model write a new language's file as a task
+   (gui/translate.py; paid, so only on its click). English is built in; the others are
+   files under <root>/translations, one per language, which the owner may edit. #}
+{% block title %}{{ _("Language") }}{% endblock %}
+{% block crumbs %}<span>{{ _("Language") }}</span>{% endblock %}
+{% block content %}
+<h1>{{ _("Language") }}</h1>
+<p class="muted">{{ _("The pages' own text, in the language chosen here for every course. What a task prints, what a model wrote and the exercise files stay as they are.") }}</p>
+<section class="step">
+<h2>{{ _("Choose") }}</h2>
+<ul class="sources">
+{% for code, name in gui_languages.items() %}
+  <li>{% if code == gui_language %}<strong>{{ name }}</strong> <span class="muted">{{ _("(in use)") }}</span>{% else %}
+    <form method="post" action="{{ url_for('set_language') }}" class="action"><input type="hidden" name="language" value="{{ code }}"><input type="hidden" name="back" value="{{ url_for('language_page') }}"><button type="submit">{{ name }}</button></form>{% endif %}
+    {% if code != "en" %}<code class="muted">{{ folder / (code ~ ".po") }}</code>
+    {# The file's count: translated, and apart those the model gave back as the English
+       (the same word, or one it would not translate), which the file keeps (translate.py). #}
+    {% set have, same = counts[code] %}
+    <span class="muted">{{ _("%(done)d of %(total)d translated", done=have - same, total=strings) }}{% if same %}; {{ _("%(same)d kept as the English by the model", same=same) }}{% endif %}{% if notes[code] %}; {{ _("note: %(note)s", note=notes[code]) }}{% endif %}</span>
+    {# Delete: the box then the button (two clicks, as the GUI's other removals); the file
+       goes for good, so a paid translation is gone with it. #}
+    <form method="post" action="{{ url_for('delete_language') }}" class="inline-form row-end"><input type="hidden" name="language" value="{{ code }}"><label><input type="checkbox" name="confirm" value="1" required> {{ _("Delete the file") }}</label><button type="submit" class="small">{{ _("Delete") }}</button></form>{% endif %}</li>
+{% endfor %}
+</ul>
+{% if not chosen %}<p class="muted">{{ _("No choice is kept yet: the browser's language is used when there is a file for it, else English.") }}</p>{% endif %}
+</section>
+<section class="step">
+<h2>{{ _("Translate into another language") }}</h2>
+{% if models %}
+<form method="post" action="{{ url_for('translate_language') }}" class="form">
+  {# The language: one of the built-in table (gui/language_table.py: its tag names the
+     file, so the browser's language finds it; its name, note and direction come with it),
+     or typed, as before (a language not in the table, or a made-up one). No script: the
+     text box is always there, and the server takes the table's choice when there is one. #}
+  <label class="field">{{ _("Language") }} <span class="muted">{{ _("from the list: its file is named by the tag, so the browser's language finds it") }}</span>
+    <select name="code"><option value="">{{ _("(typed below)") }}</option>{% for x in table %}<option value="{{ x.code }}">{{ x.name }} · {{ x.code }}</option>{% endfor %}</select></label>
+  <label class="field">{{ _("Or a language not in the list") }} <span class="muted">{{ _("as the switch will show it, e.g. Esperanto, 喵语; a tag such as zh-Hant lets the browser's language pick it") }}</span>
+    <input type="text" name="name" maxlength="40" autocomplete="off"></label>
+  {# Every course's chat profiles (routes/language.py `models`), the first course's setup
+     model chosen; the task runs in the course that owns the profile, with its key. #}
+  <label class="field">{{ _("Model") }} <span class="muted">{{ _("any course's model, with that course's key; the task runs in that course") }}</span>
+    <select name="model">{% for value, label, chosen in models %}<option value="{{ value }}"{% if chosen %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+  {# The note: kept in the file's header and sent with every batch of every run, so the
+     batches and later runs keep one register (translate.py; a run without one reuses the
+     file's). #}
+  <label class="field">{{ _("Note to the translator") }} <span class="muted">{{ _("optional: the variety and register, e.g. written Traditional Chinese as used in Hong Kong, not colloquial Cantonese; kept with the file and sent with every run; empty, the list's own sentence for the language is sent, where it has one") }}</span>
+    <textarea name="note" rows="2" maxlength="500"></textarea></label>
+  <label class="check"><input type="checkbox" name="again" value="1"> {{ _("Translate every string again (else only those the language's file lacks)") }}</label>
+  <p class="muted">{{ _("%(strings)d English strings; about %(tokens)d thousand tokens in and out for all of them: a paid model charges for them. A translation that changes a placeholder or adds markup is left English.", strings=strings, tokens=tokens_k) }}</p>
+  <div class="actions"><button type="submit" class="primary">{{ _("Translate") }}</button></div>
+</form>
+{% else %}
+<p>{{ _("No course has a model yet: add one on a course's Models page first.") }}</p>
+{% endif %}
+</section>
+{% endblock %}

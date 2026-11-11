@@ -432,9 +432,11 @@ def test_the_owner_may_edit_the_plan_before_approving():
     state = {"plan": plan, "lectures": ["L1"]}
     edited = [{**plan[0], "id": "a-better-name"}]
     assert batch.apply_decision(state, {"action": "approve", "plan": edited}, []) == {
-        "plan": edited, "approved": True}
+        "plan": edited, "approved": True, "selected_ids": ["a-better-name"],
+        "plan_digest": None, "generation_complete": False}
     assert batch.apply_decision(state, {"action": "revise", "feedback": "harder"}, []) == {
-        "feedback": "harder", "approved": False}
+        "feedback": "harder", "approved": False, "selected_ids": None,
+        "plan_digest": None, "generation_complete": False}
 
 
 def test_a_plan_with_a_repeated_or_taken_id_is_never_approved():
@@ -451,7 +453,7 @@ def test_a_plan_with_a_repeated_or_taken_id_is_never_approved():
 
 
 def test_a_resume_keeps_the_owners_edits_to_the_plan_until_the_model_plans_again(tmp_path):
-    from tutor.graph.__main__ import _owner_plan
+    from tutor.graph.plan_review import _owner_plan
 
     model_plan = json.loads(plan_json("a"))["items"]
     assert _owner_plan(tmp_path, model_plan) == (model_plan, False)  # first pause: written
@@ -465,21 +467,21 @@ def test_a_resume_keeps_the_owners_edits_to_the_plan_until_the_model_plans_again
 
 def test_the_approval_prompt_pauses_when_stdin_is_closed(monkeypatch):
     """On Windows stdin from NUL passes isatty(), then input() meets end of file."""
-    from tutor.graph import __main__ as cli
+    from tutor.graph import plan_review
 
-    monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: True, raising=False)
+    monkeypatch.setattr(plan_review.sys.stdin, "isatty", lambda: True, raising=False)
 
     def closed(prompt):
         raise EOFError
 
     monkeypatch.setattr("builtins.input", closed)
-    assert cli._ask() is None  # None: pause, as Enter does
+    assert plan_review._ask() is None  # None: pause, as Enter does
     monkeypatch.setattr("builtins.input", lambda prompt: "y")
-    assert cli._ask() == {"approve": True}
+    assert plan_review._ask() == {"approve": True}
 
 
 def test_a_batch_paused_before_the_model_plan_was_kept_keeps_the_owners_plan(tmp_path):
-    from tutor.graph.__main__ import _owner_plan
+    from tutor.graph.plan_review import _owner_plan
 
     model_plan = json.loads(plan_json("a"))["items"]
     edited = [{**model_plan[0], "id": "a-better-name"}]
@@ -497,6 +499,13 @@ def test_a_batch_is_planned_sent_back_approved_later_and_generated_in_parallel(w
     from tutor.graph.build import build_batch
 
     model = BatchModel(plan_json("first-a", "first-b"), plan_json("sum-list", "sum-squares"))
+    # coverage.json with one point at the plan items' slides: the saved exercise is marked
+    # on it at the end; the discarded one is not.
+    from tutor.materials import coverage_store as cs
+
+    store = cs.Store(lectures={"L1": cs.Lecture(points=[
+        cs.Point(id=cs.point_id("L1", "1.3-1.4", "Summing"), slides="1.3-1.4", point="Summing")])})
+    cs.save(workspace, store)
     d = Deps(workspace=workspace, batch_dir=workspace / "batches" / "2026-10-28_p3-w1",
              config=LLMConfig("glm-flash", "glm", "http://x/v1", "glm-5.3-flash"),
              chat=model, max_rounds=1,
@@ -523,7 +532,11 @@ def test_a_batch_is_planned_sent_back_approved_later_and_generated_in_parallel(w
         (d.batch_dir / "manifest.json").read_text(encoding="utf-8"))
     assert manifest.exercises == ["sum-list"] and "more debugging" in manifest.notes
     proposal = (d.batch_dir / "coverage-proposal.md").read_text(encoding="utf-8")
-    assert "gap-code -> ex:sum-list (p3-w1)" in proposal and "sum-squares" not in proposal
+    assert "Marked in coverage.json already" in proposal and "sum-squares" not in proposal
+    assert "slides 1.3-1.4: ex:sum-list" in proposal and "gap-code -> ex:" not in proposal
+    marked = cs.load(workspace).lectures["L1"].points[0].covered_by
+    assert marked == [cs.Covered(mark="ex:sum-list", batch="p3-w1")]
+    assert "ex:sum-list (p3-w1)" in (workspace / "coverage.md").read_text(encoding="utf-8")
 
 
 def test_a_save_that_fails_midway_leaves_nothing_and_a_retry_saves(tmp_path, monkeypatch):
@@ -564,6 +577,21 @@ def test_an_item_saved_before_is_not_saved_again_nor_overwritten(tmp_path):
     (d.batch_dir / "generation.jsonl").unlink()  # not saved by this pipeline: refuse
     with pytest.raises(FileExistsError, match="never overwrite"):
         nodes.save(state, d)
+
+
+def test_a_broken_line_in_the_batch_log_does_not_stop_a_resume(tmp_path, capsys):
+    """A run killed while writing a line (Stop after its grace time) leaves half a line;
+    the records around it still count, and the line is reported, not fatal."""
+    d = deps(tmp_path, None)
+    round_dir = tmp_path / "round-0"
+    write_draft(ExerciseDraft.model_validate(draft()), "sum-list", round_dir)
+    nodes.save({"item": ITEM, "round_dir": str(round_dir)}, d)
+    with d.generation_log.open("a", encoding="utf-8") as f:
+        f.write('{"time": "2026-11-11T10:00:00", "exercise": "other", "outco')  # cut off
+    assert nodes._saved_before(d, "sum-list")
+    assert len(nodes.log_lines(d.generation_log)) == 1
+    assert "generation.jsonl: 1 unreadable line(s) left out" in capsys.readouterr().err
+    assert batch._models_of(d, {"sum-list"}) == nodes.model_label(d.config)
 
 
 def test_hide_answers_keeps_a_failing_test_from_printing_the_answer(tmp_path):

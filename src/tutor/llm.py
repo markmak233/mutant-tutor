@@ -1,5 +1,5 @@
 """A thin client for OpenAI-compatible chat and embedding APIs (docs/design.md, [3] model
-access).
+access), plus Anthropic's own Messages API (tutor/llm_anthropic.py, provider "anthropic").
 
 Standard library only. Models are named profiles in the workspace's workspace.toml, and
 roles (vision, generate, ...) say which profile a task uses:
@@ -42,7 +42,7 @@ import tomllib
 import urllib.error
 import urllib.request
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from pathlib import Path
 
@@ -50,7 +50,19 @@ from pathlib import Path
 # in order (a model that rejects one with HTTP 400 gets the next). GLM-5.3 models refuse
 # `thinking: disabled` and accept only reasoning_effort low / high / max.
 PROVIDERS = {
+    # Servers on this machine (owner, 2026-11-10; LM Studio since 2026-10): each at the port
+    # its docs give, with the request field its docs give for thinking off. A local server
+    # may ignore a field it does not know instead of refusing it, so a switch that did not
+    # take is not noticed here: `check` reports thinking that stayed on (Reply.reasoning_chars).
     "lmstudio": ("http://localhost:1234/v1", ({"reasoning_effort": "none"},)),
+    # Ollama's OpenAI layer takes reasoning_effort ("none": off; tried 2026-11-10 on 0.30.2,
+    # where its native `think: false` is ignored on this path, with no error).
+    "ollama": ("http://localhost:11434/v1", ({"reasoning_effort": "none"},)),
+    # llama-server: the chat template's switch (Qwen's name for it), else its budget.
+    "llamacpp": ("http://localhost:8080/v1",
+                 ({"chat_template_kwargs": {"enable_thinking": False}},
+                  {"reasoning_budget": 0})),
+    "vllm": ("http://localhost:8000/v1", ({"chat_template_kwargs": {"enable_thinking": False}},)),
     "glm": ("https://open.bigmodel.cn/api/paas/v4",
             ({"thinking": {"type": "disabled"}}, {"reasoning_effort": "low"})),
     # Reasoning models differ in their lowest setting; the first one accepted is used.
@@ -61,6 +73,9 @@ PROVIDERS = {
     "deepseek": ("https://api.deepseek.com",
                  ({"thinking": {"type": "disabled"}}, {"reasoning_effort": "none"})),
     "custom": (None, ()),  # any other OpenAI-compatible server; base_url required
+    # Claude through its own Messages API (tutor/llm_anthropic.py): no thinking switches
+    # here, as the depth is part of that request body (`output_config.effort`).
+    "anthropic": ("https://api.anthropic.com/v1", ()),
     # No server: a coding assistant answers request files (tutor/exchange.py). Its "model"
     # names the assistant (default: the profile name), so two profiles of one assistant
     # (one for the oracle) are recognised as the same reader.
@@ -76,7 +91,16 @@ _ACCEPTED: dict[tuple[str, str, str], int] = {}
 # stream_options (documented); others stream without the option, which may be refused.
 STREAM_USAGE = {"openai", "deepseek"}
 PROFILE_FIELDS = {"provider", "model", "base_url", "api_key_env", "reasoning_effort",
-                  "reasoning_effort_on", "timeout_s"}
+                  "reasoning_effort_on", "timeout_s", "temperature"}
+# A profile's `temperature = "default"`: the one value it takes. Requests then carry no
+# temperature, for a model that refuses one (Claude Opus 5.5 answered HTTP 400,
+# "`temperature` is deprecated for this model", 2026-11-09). Without the field every
+# request asks for 0, as before, so no other profile's requests change.
+MODEL_TEMPERATURE = "default"
+# The line that puts a schema into the prompt for a provider that cannot take it as a request
+# field (DeepSeek's JSON mode; Anthropic for a schema its structured output refuses). Byte
+# for byte: DeepSeek's generate and repair prompts, pinned, are built from it.
+SCHEMA_IN_PROMPT = "Reply with one JSON object that fits this JSON Schema:\n"
 KEY_LIKE = re.compile(r"^(sk-[\w-]{16,}|[0-9a-f]{32}\.\w{8,})$")
 
 
@@ -98,6 +122,24 @@ class LLMConfig:
     # "low" (its default is "high"). Empty: the model's default depth.
     thinking_on: dict = field(default_factory=dict)
     queue: Path | None = None  # an assistant profile's request folder (provider "assistant")
+    # False (a profile's `temperature = "default"`): no temperature in the request.
+    send_temperature: bool = True
+
+
+class Prompt(str):
+    """A prompt given in parts, the part every call of a kind shares first (a lecture's
+    pages, say), then what this call adds. To every reader it is the one string the parts
+    make: every OpenAI-shaped provider, the assistant's request files and their ids, the
+    tests' fakes and the prompt pins see exactly the bytes a plain string would give. Only
+    the anthropic provider looks at `parts`, to put a cache breakpoint after each shared
+    part (docs/design.md, "Prompt layout for caching"). Equal to its plain string."""
+
+    __slots__ = ("parts",)
+
+    def __new__(cls, *parts: str) -> Prompt:
+        prompt = super().__new__(cls, "".join(parts))
+        prompt.parts = parts
+        return prompt
 
 
 @dataclass(frozen=True)
@@ -109,6 +151,14 @@ class Reply:
     finish_reason: str | None = None  # "length": cut off at max_tokens
     # Input tokens served from the provider's prompt cache (cheaper), when it reports them.
     cached_tokens: int | None = None
+    # Input tokens written to that cache this call (Anthropic prices them above base),
+    # when the provider reports them apart; counted in input_tokens as well.
+    cache_write_tokens: int | None = None
+    # Characters of hidden thinking the reply carried (`reasoning_content` or `reasoning`
+    # beside the content, or a <think> block inside it): 0 when none came, None when the
+    # provider's shape is not read for it. A call with thinking off that carries some shows
+    # the switch did not take (a local server that ignores a field it does not know).
+    reasoning_chars: int | None = None
 
 
 def config_for(role: str, profile: str | None = None, workspace: Path | None = None,
@@ -176,8 +226,14 @@ def _from_profile(name: str, data: dict, env: Mapping[str, str],
         thinking_off = ({"reasoning_effort": data["reasoning_effort"]},)
     thinking_on = ({"reasoning_effort": data["reasoning_effort_on"]}
                    if "reasoning_effort_on" in data else {})
+    # Only the one value: a number here would look like a setting the calls then ignore
+    # (callers choose the temperature; the profile only says the model takes none).
+    if data.get("temperature", MODEL_TEMPERATURE) != MODEL_TEMPERATURE:
+        raise LLMError(f'{where} temperature can only be "{MODEL_TEMPERATURE}" (none is sent, '
+                       "for a model that refuses one); leave it out to send 0")
     return LLMConfig(name, provider, base_url.rstrip("/"), data["model"], api_key,
-                     float(data.get("timeout_s", 300)), thinking_off, thinking_on=thinking_on)
+                     float(data.get("timeout_s", 300)), thinking_off, thinking_on=thinking_on,
+                     send_temperature="temperature" not in data)
 
 
 def _from_env(env: Mapping[str, str]) -> LLMConfig:
@@ -192,7 +248,7 @@ def _from_env(env: Mapping[str, str]) -> LLMConfig:
     config = _from_profile("env", data, env)
     return LLMConfig(config.name, config.provider, config.base_url, config.model,
                      env.get("LLM_API_KEY") or None, config.timeout_s, config.thinking_off,
-                     thinking_on=config.thinking_on)
+                     thinking_on=config.thinking_on, send_temperature=config.send_temperature)
 
 
 def image_message(prompt: str, png: bytes) -> dict:
@@ -208,7 +264,8 @@ def chat(config: LLMConfig, messages: list[dict], *, purpose: str,
          log_path: Path | None = None, max_tokens: int | None = None,
          temperature: float = 0.0, thinking: bool = True,
          response_schema: dict | None = None, stream: bool = False,
-         on_progress: Callable[[int], None] | None = None) -> Reply:
+         on_progress: Callable[[int], None] | None = None,
+         schema_first: bool = False) -> Reply:
     """One chat completion. `purpose` names the caller in the call log (e.g. "vision").
     An assistant profile answers from its request files instead (tutor/exchange.py): the
     stored answer, or AwaitingAnswer after writing the request.
@@ -218,6 +275,8 @@ def chat(config: LLMConfig, messages: list[dict], *, purpose: str,
     JSON fitting the schema. GLM-5.3-Flash and LM Studio enforce it (tested 2026-10-28: keys
     the prompt asked for but the schema forbids were left out); the caller still parses and
     validates it, since a cut-off reply is not valid JSON.
+    `schema_first=True` places DeepSeek's shared schema before variable messages. Existing
+    callers keep the original layout; doctor uses the pure payload builder for preview.
     `stream=True` receives the reply in pieces: `timeout_s` then bounds each pause, not the
     whole reply, and `on_progress` is called with the characters received so far."""
     if config.provider == "assistant":
@@ -227,10 +286,56 @@ def chat(config: LLMConfig, messages: list[dict], *, purpose: str,
         reply = exchange.ask(config, messages, purpose, response_schema)  # or AwaitingAnswer
         _log(log_path, purpose, config, reply, time.monotonic() - start, None)
         return reply
+    if config.provider == "anthropic":
+        from tutor import llm_anthropic  # imported here: it builds on this module
+
+        return llm_anthropic.chat(config, messages, purpose=purpose, log_path=log_path,
+                                  max_tokens=max_tokens, response_schema=response_schema,
+                                  stream=stream, on_progress=on_progress, thinking=thinking)
+    body = chat_payload(config, messages, max_tokens=max_tokens, temperature=temperature,
+                        response_schema=response_schema, stream=stream, schema_first=schema_first)
+    key = (config.provider, config.base_url, config.model)
+    if thinking:
+        variants, first = [config.thinking_on], 0
+    else:
+        variants = list(config.thinking_off) or [{}]
+        first = min(_ACCEPTED.get(key, 0), len(variants) - 1)  # the switch it took before
+    for number in range(first, len(variants)):
+        try:
+            reply = _post(config, {**body, **variants[number]}, purpose, log_path, on_progress)
+        except Rejected as e:
+            if number == len(variants) - 1:
+                raise LLMError(str(e)) from None
+            continue
+        if not thinking:
+            _ACCEPTED[key] = number
+        return reply
+    raise AssertionError("unreachable")
+
+
+def chat_payload(config: LLMConfig, messages: list[dict], *, max_tokens: int | None = None,
+                 temperature: float = 0.0, response_schema: dict | None = None,
+                 stream: bool = False, schema_first: bool = False,
+                 thinking: bool = True) -> dict:
+    """Pure provider payload layout, shared by sending and doctor preview/size checks.
+
+    The default is the original chat payload byte for byte. Provider compatibility
+    variants are added by chat; no credential headers, network or file access happens here.
+    `thinking` matters only to an anthropic profile, whose depth is part of the body
+    (the others add it as a variant in chat); `schema_first` and `temperature` do not
+    apply there (the schema is a field of its own, and it sends no temperature).
+    """
+    if config.provider == "anthropic":
+        from tutor import llm_anthropic  # imported here: it builds on this module
+
+        return llm_anthropic.payload(config, messages, max_tokens=max_tokens,
+                                     response_schema=response_schema, stream=stream,
+                                     thinking=thinking)
     openai = config.provider == "openai"
     body = {"model": config.model, "messages": messages}
-    if not openai:
-        # OpenAI reasoning models accept only their default temperature.
+    if not openai and config.send_temperature:
+        # OpenAI reasoning models accept only their default temperature, and so does a
+        # profile that says `temperature = "default"`.
         body["temperature"] = temperature
     if max_tokens is not None:
         # OpenAI reasoning models refuse max_tokens; the limit there includes reasoning.
@@ -239,9 +344,14 @@ def chat(config: LLMConfig, messages: list[dict], *, purpose: str,
         # DeepSeek's chat API documents only JSON mode, and only with thinking off: the
         # schema goes into the prompt instead, and the caller's validation still decides.
         body["response_format"] = {"type": "json_object"}
-        body["messages"] = [*messages, {"role": "user", "content": (
-            "Reply with one JSON object that fits this JSON Schema:\n"
-            + json.dumps(response_schema))}]
+        schema_message = {"role": "system" if schema_first else "user",
+                          "content": SCHEMA_IN_PROMPT + json.dumps(response_schema)}
+        # Put shared instructions and schema ahead of dynamic facts only when requested.
+        if schema_first:
+            at = next((i for i, m in enumerate(messages) if m["role"] != "system"), len(messages))
+            body["messages"] = [*messages[:at], schema_message, *messages[at:]]
+        else:
+            body["messages"] = [*messages, schema_message]
     elif response_schema is not None:
         # OpenAI's strict mode needs every field required, which a schema with defaults
         # (optional fields) is not; without it the schema still guides the reply, and the
@@ -252,23 +362,7 @@ def chat(config: LLMConfig, messages: list[dict], *, purpose: str,
         body["stream"] = True
         if config.provider in STREAM_USAGE:
             body["stream_options"] = {"include_usage": True}
-    key = (config.provider, config.base_url, config.model)
-    if thinking:
-        variants, first = [config.thinking_on], 0
-    else:
-        variants = list(config.thinking_off) or [{}]
-        first = min(_ACCEPTED.get(key, 0), len(variants) - 1)  # the switch it took before
-    for number in range(first, len(variants)):
-        try:
-            reply = _post(config, {**body, **variants[number]}, purpose, log_path, on_progress)
-        except _Rejected as e:
-            if number == len(variants) - 1:
-                raise LLMError(str(e)) from None
-            continue
-        if not thinking:
-            _ACCEPTED[key] = number
-        return reply
-    raise AssertionError("unreachable")
+    return body
 
 
 def embed(config: LLMConfig, texts: list[str], *, purpose: str, log_path: Path | None = None,
@@ -280,6 +374,9 @@ def embed(config: LLMConfig, texts: list[str], *, purpose: str, log_path: Path |
     if config.provider == "assistant":
         raise LLMError(f"profile {config.name!r} has no API to embed with: use a provider "
                        f"with an /embeddings endpoint")
+    if config.provider == "anthropic":
+        raise LLMError(f"profile {config.name!r}: Anthropic offers no embedding model; use an "
+                       f"lmstudio, openai or glm profile for the embedding role")
     body: dict = {"model": config.model, "input": texts}
     if dimensions is not None:
         body["dimensions"] = dimensions
@@ -311,41 +408,68 @@ def embed(config: LLMConfig, texts: list[str], *, purpose: str, log_path: Path |
     return vectors
 
 
-class _StreamCut(Exception):
-    """A stream ended with neither [DONE] nor a finish reason: the reply may be incomplete."""
+class StreamCut(Exception):
+    """A stream ended before its end mark ([DONE], or Anthropic's message_stop): the reply
+    may be incomplete. Raised by a stream reader; exchange() turns it into an LLMError."""
 
 
-class _Rejected(Exception):
+class Rejected(Exception):
     """HTTP 400: the request (often a thinking switch) was refused; another variant may work."""
 
 
 def _headers(config: LLMConfig) -> dict[str, str]:
     headers = {"Content-Type": "application/json"}
-    if config.api_key:
+    if config.provider == "anthropic":
+        from tutor import llm_anthropic
+
+        headers["anthropic-version"] = llm_anthropic.VERSION
+        if config.api_key:
+            headers["x-api-key"] = config.api_key
+    elif config.api_key:
         headers["Authorization"] = f"Bearer {config.api_key}"
     return headers
 
 
 def _post(config: LLMConfig, body: dict, purpose: str, log_path: Path | None,
           on_progress: Callable[[int], None] | None = None) -> Reply:
-    request = urllib.request.Request(f"{config.base_url}/chat/completions",
+    """One chat completion request, read in the OpenAI shape."""
+    def read(response) -> Reply:
+        # A stray byte that is not UTF-8 in a long reply should cost one character
+        # (the caller validates the text), not the whole call.
+        data = (_read_stream(response, on_progress) if body.get("stream")
+                else json.loads(response.read().decode("utf-8", errors="replace")))
+        choice = data["choices"][0]
+        usage = data.get("usage") or {}
+        message = choice["message"]
+        return Reply(message["content"] or "", usage.get("prompt_tokens"),
+                     usage.get("completion_tokens"), 0.0, choice.get("finish_reason"),
+                     (usage.get("prompt_tokens_details") or {}).get("cached_tokens"),
+                     reasoning_chars=reasoning_chars(message))
+
+    return exchange(config, "/chat/completions", body, purpose, log_path, read)
+
+
+def exchange(config: LLMConfig, path: str, body: dict, purpose: str, log_path: Path | None,
+             read: Callable[[object], Reply]) -> Reply:
+    """POST `body` to the profile's server at `path` and return `read(response)` with its
+    seconds filled in, logged. Every way the call can fail becomes a logged LLMError whose
+    message says what to do, with the key never in it: an HTTP error (400 is Rejected, so
+    chat() can try its next thinking switch), a reply slower than timeout_s, an unreachable
+    server, a stream cut short, or a body of another shape than `read` expects. The
+    anthropic module shares this; only `path`, the headers and `read` differ."""
+    request = urllib.request.Request(f"{config.base_url}{path}",
                                      data=json.dumps(body).encode(), headers=_headers(config))
     start = time.monotonic()
     try:
         with urllib.request.urlopen(request, timeout=config.timeout_s) as response:
-            # A stray byte that is not UTF-8 in a long reply should cost one character
-            # (the caller validates the text), not the whole call.
-            data = (_read_stream(response, on_progress) if body.get("stream")
-                    else json.loads(response.read().decode("utf-8", errors="replace")))
-        choice = data["choices"][0]
-        text = choice["message"]["content"] or ""
+            reply = read(response)
     except urllib.error.HTTPError as e:
         # Redacted before it is cut, so a key on the cut cannot be left half there.
         body = _redact(e.read()[:4000].decode(errors="replace"), config)
         error = f"HTTP {e.code} from {config.base_url}: {body[:300]}"
         _log(log_path, purpose, config, None, time.monotonic() - start, error)
         if e.code == 400:
-            raise _Rejected(error) from None
+            raise Rejected(error) from None
         raise LLMError(error) from e
     except TimeoutError as e:
         # The server answers but the reply takes longer than timeout_s (a long generation
@@ -358,18 +482,15 @@ def _post(config: LLMConfig, body: dict, purpose: str, log_path: Path | None,
         error = _redact(f"cannot reach {config.base_url} ({e}); is the server running?", config)
         _log(log_path, purpose, config, None, time.monotonic() - start, error)
         raise LLMError(error) from e
-    except _StreamCut as e:
+    except StreamCut as e:
         error = f"{e} from {config.base_url}; try again"
         _log(log_path, purpose, config, None, time.monotonic() - start, error)
         raise LLMError(error) from e
-    except (KeyError, IndexError, json.JSONDecodeError) as e:
+    except (KeyError, IndexError, TypeError, json.JSONDecodeError) as e:
         error = _redact(f"unexpected reply from {config.base_url}: {e!r}", config)
         _log(log_path, purpose, config, None, time.monotonic() - start, error)
         raise LLMError(error) from e
-    usage = data.get("usage") or {}
-    reply = Reply(text, usage.get("prompt_tokens"), usage.get("completion_tokens"),
-                  time.monotonic() - start, choice.get("finish_reason"),
-                  (usage.get("prompt_tokens_details") or {}).get("cached_tokens"))
+    reply = replace(reply, seconds=time.monotonic() - start)
     _log(log_path, purpose, config, reply, reply.seconds, None)
     return reply
 
@@ -385,10 +506,23 @@ def _redact(text: str, config: LLMConfig) -> str:
 _SECRET = re.compile(r"(?<=Bearer )\S+|sk-[\w-]{16,}")
 
 
+THINK_BLOCK = re.compile(r"<think>.*?(?:</think>|$)", re.DOTALL)
+
+
+def reasoning_chars(message: dict) -> int:
+    """How much hidden thinking a reply's message carried: the `reasoning_content` field
+    (DeepSeek, vLLM, llama.cpp, LM Studio) or `reasoning` (Ollama) beside the content, and
+    a <think> block a server left inside the content (one that did not parse it out)."""
+    apart = message.get("reasoning_content") or message.get("reasoning") or ""
+    inside = THINK_BLOCK.match(message.get("content") or "")
+    return len(apart) + (len(inside.group(0)) if inside else 0)
+
+
 def _read_stream(response, on_progress: Callable[[int], None] | None) -> dict:
     """A streamed completion (server-sent events, one `data: {json}` line per piece) put
     back together as the reply a call without streaming returns."""
     parts, received, finish, usage, done = [], 0, None, None, False
+    thought = 0  # characters of reasoning_content / reasoning in the pieces
     for raw in response:
         line = raw.decode("utf-8", errors="replace").strip()
         if not line.startswith("data:"):
@@ -402,7 +536,9 @@ def _read_stream(response, on_progress: Callable[[int], None] | None) -> dict:
             raise KeyError(f"error in the stream: {chunk['error']}")
         usage = chunk.get("usage") or usage  # the last piece, when the provider sends it
         for choice in chunk.get("choices") or []:
-            text = (choice.get("delta") or {}).get("content")
+            delta = choice.get("delta") or {}
+            thought += len(delta.get("reasoning_content") or delta.get("reasoning") or "")
+            text = delta.get("content")
             if text:
                 parts.append(text)
                 received += len(text)
@@ -411,9 +547,9 @@ def _read_stream(response, on_progress: Callable[[int], None] | None) -> dict:
             finish = choice.get("finish_reason") or finish
     if not done and finish is None:
         # The connection closed early; what arrived must not pass for a whole reply.
-        raise _StreamCut(f"the stream ended after {received} characters without finishing")
-    return {"choices": [{"message": {"content": "".join(parts)}, "finish_reason": finish}],
-            "usage": usage or {}}
+        raise StreamCut(f"the stream ended after {received} characters without finishing")
+    return {"choices": [{"message": {"content": "".join(parts), "reasoning": "x" * thought},
+                         "finish_reason": finish}], "usage": usage or {}}
 
 
 def _log(path: Path | None, purpose: str, config: LLMConfig, reply: Reply | None,
@@ -428,9 +564,11 @@ def _log(path: Path | None, purpose: str, config: LLMConfig, reply: Reply | None
         "base_url": config.base_url,
         "input_tokens": reply.input_tokens if reply else None,
         "cached_tokens": reply.cached_tokens if reply else None,
+        "cache_write_tokens": reply.cache_write_tokens if reply else None,
         "output_tokens": reply.output_tokens if reply else None,
         "seconds": round(seconds, 2),
         "finish_reason": reply.finish_reason if reply else None,
+        "reasoning_chars": reply.reasoning_chars if reply else None,
         "outcome": "ok" if error is None else "error",
         "error": error,
     }
@@ -458,7 +596,14 @@ def check(config: LLMConfig, log_path: Path | None = None, embedding: bool = Fal
     reply = chat(config, [{"role": "user", "content": CHECK_PROMPT}], purpose="check",
                  log_path=log_path, max_tokens=32, thinking=False)
     said = " ".join(reply.text.split())[:40] or "(an empty reply)"
-    return f"ok, answered {said!r} in {reply.seconds:.1f} s"
+    line = f"ok, answered {said!r} in {reply.seconds:.1f} s"
+    if reply.reasoning_chars:
+        # The switch for thinking off did not take: a local server ignores a field it does
+        # not know instead of refusing it (which would have made chat() try the next one).
+        line += (f"; but thinking stayed on ({reply.reasoning_chars} characters of it): the "
+                 "provider's switch for thinking off was ignored. Set reasoning_effort in the "
+                 "profile to what this model takes, or start the server with thinking off.")
+    return line
 
 
 def main(argv: list[str] | None = None) -> int:

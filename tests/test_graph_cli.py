@@ -15,6 +15,7 @@ import pytest
 from tutor.exchange import AwaitingAnswer
 from tutor.graph import __main__ as cli
 from tutor.graph.languages import PYTHON
+from tutor.graph.plan_selection import digest
 
 pytest.importorskip("langgraph.checkpoint.sqlite")
 from langgraph.graph import END, START, StateGraph  # noqa: E402
@@ -193,7 +194,9 @@ def test_approve_generates_the_plan_as_the_owner_left_it(course, fake, capsys):
     assert "plan.json differs from the model's latest plan; approving uses plan.json" in out
     assert "generating 1 items" in out
     assert "saved     count-words: 1 round(s), 100 tokens" in out
-    assert ("decision", {"action": "approve", "plan": edited}) in fake.calls
+    assert ("decision", {"action": "approve", "plan": edited,
+                         "selected_ids": ["count-words"],
+                         "plan_digest": digest(plan_file.read_bytes())}) in fake.calls
     assert ("item", "sum-values") not in fake.calls
 
 
@@ -203,7 +206,7 @@ def test_an_edited_plan_with_a_blocking_problem_is_not_approved(course, fake, ca
     plan_file.write_text(json.dumps([plan_item("count-words", lecture="L9")]), encoding="utf-8")
     assert resume("--approve") == 1
     err = capsys.readouterr().err
-    assert "plan.json cannot be approved: count-words: lecture 'L9' is not one of ['L1']" in err
+    assert "selected plan cannot run: count-words: lecture 'L9' is not one of ['L1']" in err
     assert not any(call[0] == "decision" for call in fake.calls)
 
 

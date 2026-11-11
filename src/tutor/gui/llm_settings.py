@@ -19,6 +19,8 @@ import sys
 import tomllib
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from pathlib import Path
+from urllib.parse import urlsplit
 
 import tomlkit
 
@@ -26,34 +28,43 @@ from tutor import llm
 from tutor.config import WORKSPACE_FILE
 from tutor.gui import keys, toml_edit
 from tutor.gui.catalog import same_url
-from tutor.gui.courses import Course
+from tutor.gui.courses import Course, find_courses
+from tutor.gui.i18n import N_, ngettext_
+from tutor.gui.i18n import gettext_ as _
 from tutor.gui.toml_edit import put as _put
 from tutor.gui.toml_edit import spaced as _spaced
 
-# The roles a page offers, grouped by what they are for, with what each does.
+# The roles a page offers, grouped by what they are for, with what each does. The titles
+# and descriptions are marked N_(): the Models page translates them when it shows them.
 ROLE_GROUPS: list[tuple[str, list[tuple[str, str]]]] = [
-    ("Reading lectures", [("vision", "reads the slides that are pictures"),
-                          ("setup", "finds the software the lectures use, to draft "
-                                    "[requires] (empty: the plan model, else generate)")]),
-    ("Generating exercises", [
-        ("plan", "plans a batch (empty: the generate model)"),
-        ("generate", "writes each exercise"),
-        ("oracle", "writes an independent check from the question alone: best a model by "
-                   "another provider and maker than generate and repair (each model's maker "
-                   "follows its name, where models.dev knows it)"),
-        ("repair", "takes over the repairs from the second on (empty: the generate model)")]),
-    ("While you learn", [("hint", "gives hints on your attempts"),
-                         ("judge", "scores hints and questions in evaluations")]),
-    ("Experiments", [("heldout", "writes held-out test data"),
-                     ("concept", "builds the concept index for retrieval"),
-                     ("embedding", "turns pages into vectors for retrieval"),
-                     ("agent", "searches the lectures in the agentic retrieval route")]),
+    (N_("Reading lectures"), [
+        ("vision", N_("reads the slides that are pictures")),
+        ("setup", N_("finds the software the lectures use, to draft [requires] (empty: the "
+                     "plan model, else generate)"))]),
+    (N_("Generating exercises"), [
+        ("plan", N_("plans a batch (empty: the generate model)")),
+        ("generate", N_("writes each exercise")),
+        ("oracle", N_("writes an independent check from the question alone: best a model by "
+                      "another provider and maker than generate and repair (each model's "
+                      "maker follows its name, where models.dev knows it)")),
+        ("repair", N_("takes over the repairs from the second on (empty: the generate "
+                      "model)"))]),
+    (N_("While you learn"), [
+        ("hint", N_("gives hints on your attempts")),
+        ("judge", N_("scores hints and questions in evaluations"))]),
+    (N_("Setup diagnosis"), [
+        ("doctor", N_("proposes repairs only when you explicitly request advice"))]),
+    (N_("Experiments"), [
+        ("heldout", N_("writes held-out test data")),
+        ("concept", N_("builds the concept index for retrieval")),
+        ("embedding", N_("turns pages into vectors for retrieval")),
+        ("agent", N_("searches the lectures in the agentic retrieval route"))]),
 ]
 ROLES = [role for _, group in ROLE_GROUPS for role, _ in group]
 PROFILE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,39}$")
 # A profile's fields in the order a new one is written (llm.PROFILE_FIELDS, ordered).
 FIELDS = ("provider", "model", "api_key_env", "base_url", "reasoning_effort",
-          "reasoning_effort_on", "timeout_s")
+          "reasoning_effort_on", "timeout_s", "temperature")
 _WORD = re.compile(r"^[a-z]+$")
 
 
@@ -116,15 +127,16 @@ def check_profile(course: Course, name: str, form: dict[str, str]
     data = {k: v for k in FIELDS if (v := form.get(k, "").strip())}
     problems = []
     if not PROFILE.match(name):
-        problems.append("A model's name takes lowercase letters, digits, '.', '_' and '-', "
-                        "e.g. deepseek-flash.")
+        problems.append(_("A model's name takes lowercase letters, digits, '.', '_' and "
+                          "'-', e.g. deepseek-flash."))
     if data.get("provider") not in llm.PROVIDERS:
-        problems.append(f"Choose a provider: {', '.join(llm.PROVIDERS)}.")
+        problems.append(_("Choose a provider: %(providers)s.")
+                        % {"providers": ", ".join(llm.PROVIDERS)})
     if "api_key_env" in data and not keys.NAME.match(data["api_key_env"]):
-        problems.append("The key's name is a variable in .env, e.g. DEEPSEEK_API_KEY: "
-                        "capital letters, digits and '_'.")
+        problems.append(_("The key's name is a variable in .env, e.g. DEEPSEEK_API_KEY: "
+                          "capital letters, digits and '_'."))
     if "base_url" in data and not data["base_url"].startswith(("http://", "https://")):
-        problems.append("The base URL starts with http:// or https://.")
+        problems.append(_("The base URL starts with http:// or https://."))
     elif "base_url" in data and (provider := data.get("provider")) in llm.PROVIDERS:
         # The form shows a known provider's own URL (owner, 2026-11-07); kept out of the
         # file, it follows llm.py if that changes. Another known provider's own URL here
@@ -134,20 +146,21 @@ def check_profile(course: Course, name: str, form: dict[str, str]
         elif other := next((p for p, (url, _) in llm.PROVIDERS.items()
                             if url and p != provider and same_url(data["base_url"], url)),
                            None):
-            problems.append(f"The base URL is {other}'s own address, but the provider is "
-                            f"{provider}: choose {other} as the provider (it knows how to "
-                            "turn its thinking off), or after changing the provider click "
-                            "Apply, which puts that provider's own address here.")
+            problems.append(_("The base URL is %(other)s's own address, but the provider "
+                              "is %(provider)s: choose %(other)s as the provider (it knows "
+                              "how to turn its thinking off), or after changing the "
+                              "provider click Apply, which puts that provider's own address "
+                              "here.") % {"other": other, "provider": provider})
     for effort in ("reasoning_effort", "reasoning_effort_on"):
         if effort in data and not _WORD.match(data[effort]):
-            problems.append(f"{effort}: one word such as low or high.")
+            problems.append(_("%(field)s: one word such as low or high.") % {"field": effort})
     if "timeout_s" in data:
         try:
             seconds = float(data["timeout_s"])
         except ValueError:
             seconds = 0
         if not 0 < seconds <= 3600:
-            problems.append("The time limit is a number of seconds, 1 to 3600.")
+            problems.append(_("The time limit is a number of seconds, 1 to 3600."))
         else:
             data["timeout_s"] = int(seconds) if seconds.is_integer() else seconds
     if not problems:
@@ -164,9 +177,9 @@ def save_profile(course: Course, original: str | None, name: str, data: dict) ->
     old = section(course)
     names = set(old.get("profiles", {}))
     if original is not None and original not in names:
-        return ["That model is no longer in workspace.toml; reload the page."]
+        return [_("That model is no longer in workspace.toml; reload the page.")]
     if name != original and name in names:
-        return [f"A model named {name} exists already."]
+        return [_("A model named %(name)s exists already.") % {"name": name}]
     expected = copy.deepcopy(old)
     expected.setdefault("profiles", {}).pop(original or name, None)
     expected["profiles"][name] = data
@@ -205,11 +218,12 @@ def save_profile(course: Course, original: str | None, name: str, data: dict) ->
 def delete_profile(course: Course, name: str) -> list[str]:
     old = section(course)
     if name not in old.get("profiles", {}):
-        return ["That model is no longer in workspace.toml."]
+        return [_("That model is no longer in workspace.toml.")]
     used = sorted(r for r, p in old.get("roles", {}).items() if p == name)
     if used:
-        return [f"{name} is used by {', '.join(used)}: choose another model for "
-                f"{'them' if len(used) > 1 else 'it'} first."]
+        return [ngettext_("%(name)s is used by %(roles)s: choose another model for it first.",
+                          "%(name)s is used by %(roles)s: choose another model for them "
+                          "first.", len(used)) % {"name": name, "roles": ", ".join(used)}]
     expected = copy.deepcopy(old)
     del expected["profiles"][name]
     def change(doc) -> None:
@@ -316,10 +330,10 @@ def save_roles(course: Course, chosen: dict[str, str], dry_run: bool = False) ->
         # oracle close to a writer is a warning (role_warnings), as in the graph.
         if oracle and roles.get(writer) == oracle and known[oracle].get(
                 "provider") == "assistant":
-            problems.append(f"The oracle and {writer} are one assistant profile ({oracle}), "
-                            "whose requests would mix: give the oracle a second profile of "
-                            "the assistant, answered in a fresh context "
-                            "(docs/assistant-mode.md).")
+            problems.append(_("The oracle and %(writer)s are one assistant profile "
+                              "(%(profile)s), whose requests would mix: give the oracle a "
+                              "second profile of the assistant, answered in a fresh context "
+                              "(docs/assistant-mode.md).") % {"writer": writer, "profile": oracle})
     if problems or dry_run:
         return problems
     expected = copy.deepcopy(old)
@@ -339,10 +353,10 @@ def save_roles(course: Course, chosen: dict[str, str], dry_run: bool = False) ->
 def copy_models(course: Course, source: Course) -> list[str]:
     """The other course's profiles and roles, into a course that has none yet."""
     if section(course).get("profiles"):
-        return ["This course has models already; change them one by one."]
+        return [_("This course has models already; change them one by one.")]
     data = section(source)
     if not data.get("profiles"):
-        return [f"{source.folder} has no models to copy."]
+        return [_("%(course)s has no models to copy.") % {"course": source.folder}]
     expected = copy.deepcopy(section(course))
     expected["profiles"] = copy.deepcopy(data["profiles"])
     expected["roles"] = copy.deepcopy(data.get("roles", {}))
@@ -358,6 +372,38 @@ def copy_models(course: Course, source: Course) -> list[str]:
             _put(roles, role, name)
 
     return _edit(course, change, expected)
+
+
+def key_elsewhere(root: Path, course: Course, name: str, data: dict) -> list[str]:
+    """The problem when the profile's key name is used by a profile of any course under
+    `root` at another host: one key belongs to one provider, and a profile that sends it
+    elsewhere (a changed URL in the models.dev list, say) would give it away on every call.
+    The same host at another path (z.ai's two sites are two keys) passes; so does a profile
+    with no key (a server on this machine)."""
+    key, url = data.get("api_key_env"), data.get("base_url")
+    if not key:
+        return []
+    host = _host(url or llm.PROVIDERS[data["provider"]][0] or "")
+    for other in find_courses(root)[0]:
+        for p_name, p_data in section(other).get("profiles", {}).items():
+            if not isinstance(p_data, dict) or p_data.get("api_key_env") != key:
+                continue
+            if other.folder == course.folder and p_name == name:
+                continue  # the profile being saved, as it was
+            there = _host(p_data.get("base_url")
+                          or (llm.PROVIDERS.get(p_data.get("provider"), (None,))[0] or ""))
+            if there and host and there != host:
+                return [_("%(key)s is the key %(profile)s (%(course)s) sends to %(there)s; "
+                          "this model would send it to %(host)s. One key goes to one "
+                          "provider: give this model's key another name, or check the base "
+                          "URL (a key sent to the wrong host is given away).")
+                        % {"key": key, "profile": p_name, "course": other.workspace.course,
+                           "there": there, "host": host}]
+    return []
+
+
+def _host(url: str) -> str:
+    return (urlsplit(url).hostname or "").lower()
 
 
 def check_command(names: list[str]) -> list[str]:

@@ -8,21 +8,47 @@
 {% endblock %}
 {% block content %}
 <div class="facts-line">
-  {{ chip(row.status, labels[row.status]) }}
+  {{ chip(row.status, _(labels[row.status])) }}
   <span>{{ row.priority }}</span>
-  {% if row.runs_to_pass %}<span class="muted">passed in {{ row.runs_to_pass }} logged run{{ "s" if row.runs_to_pass > 1 }}</span>{% endif %}
-  <span class="muted">{% if row.valid is none %}no validation report{% elif row.valid %}validated{% else %}invalid{% endif %}</span>
+  {% if row.runs_to_pass %}<span class="muted">{% trans count=row.runs_to_pass %}passed in {{ count }} logged run{% pluralize %}passed in {{ count }} logged runs{% endtrans %}</span>{% endif %}
+  <span class="muted">{% if row.valid is none %}{{ _("no validation report") }}{% elif row.valid %}{{ _("validated") }}{% else %}{{ _("invalid") }}{% endif %}</span>
 </div>
 <div class="actions">
-  {{ action(url_for('open_exercise_in_ide', name=course.folder, batch=batch.name, exercise=row.id), "Open in VS Code", primary=True) }}
-  {{ action(url_for('open_exercise_folder', name=course.folder, batch=batch.name, exercise=row.id), "Open folder") }}
+  {{ action(url_for('open_exercise_in_ide', name=course.folder, batch=batch.name, exercise=row.id), _("Open in VS Code"), primary=True) }}
+  {{ action(url_for('open_exercise_folder', name=course.folder, batch=batch.name, exercise=row.id), _("Open folder")) }}
+  {% if in_container %}{{ action(url_for('test_exercise', name=course.folder, batch=batch.name, exercise=row.id), _("Run my tests in the container")) }}{% endif %}
 </div>
-<p class="muted">Solve it in VS Code: it opens the course folder, so its terminal uses the course's venv, with <code>{{ student }}</code>.</p>
+{# A block captured under autoescape is safe markup: a translation keeps the <code> tags
+   through %(student)s, while the file name in them is escaped. #}
+{% set code_student %}<code>{{ student }}</code>{% endset %}
+<p class="muted">{{ _("Solve it in VS Code: it opens the course folder, so its terminal uses the course's venv, with %(student)s.", student=code_student) }}{% if in_container %} {{ _('"Run my tests" runs %(command)s on your %(student)s in the course image, as the terminal would, and records the attempt; the run shows on its task page.', command="<code>tutor test</code>" | safe, student=code_student) }}{% endif %}</p>
 {% if question %}
-{# Markdown rendered with raw HTML off (rendering.py); the only value marked safe. #}
-<article class="question">{{ question }}</article>
+{# Markdown rendered with raw HTML off (rendering.py); the only value marked safe.
+   dir="ltr": the question is the model's text, in the language it was written in, not
+   the pages' (owner, 2026-11-11: "the one exception: the question is not mirrored"). #}
+<article class="question" dir="ltr">{{ question }}</article>
 {% else %}
 <h1>{{ row.title }}</h1>
-<p>No question.md: the question is {{ question_in }} of <code>{{ student }}</code>.</p>
+<p>{{ _("No question.md: the question is %(where)s of %(student)s.", where=question_in, student=code_student) }}</p>
+{% endif %}
+{# This exercise's runs, so the record is here and not only on the course page (owner,
+   2026-11-10): every logged attempt (attempts.jsonl), and the "Run my tests" tasks with
+   their logs. Never the first error (courses.Attempt): a task's log has it. #}
+{% if attempts or test_tasks %}
+<h2>{{ _("Runs") }}</h2>
+{% if test_tasks %}
+<p class="muted">{{ _("From this page:") }}
+  {% for t in test_tasks %}<a href="{{ url_for('task', name=course.folder, task_id=t.id) }}">{{ t.started }}</a> {{ chip(t.status) }}{{ " · " if not loop.last }}{% endfor %}</p>
+{% endif %}
+{% if attempts %}
+<ul class="runs">
+{% for a in attempts %}
+  <li>{{ chip(a.result) }} <span>{{ a.time }}</span>
+    <span class="muted">{{ _("%(passed)d passed, %(failed)d failed", passed=a.passed, failed=a.failed) }}{% if a.errors %}, {% trans count=a.errors %}{{ count }} error{% pluralize %}{{ count }} errors{% endtrans %}{% endif %}{% if a.skipped %}, {{ _("%(n)d skipped", n=a.skipped) }}{% endif %}{% if a.duration_s is not none %}, {{ "%.1f" | format(a.duration_s) }} s{% endif %}{% if a.code %} · {{ _("snapshot") }} <code>{{ a.code.rsplit("/", 1)[-1] }}</code>{% endif %}</span></li>
+{% endfor %}
+</ul>
+{% else %}
+<p class="muted">{{ _("No logged run yet.") }}</p>
+{% endif %}
 {% endif %}
 {% endblock %}

@@ -111,6 +111,13 @@ def run(folder: Path) -> int:
     task.update(exit_codes=codes, finished=_now(),
                 status=STOPPED if stopped else DONE if all(c == 0 for c in codes) else FAILED)
     _write(folder, task)
+    # The next task of the course, if one waits: the queue goes on with no GUI around.
+    from tutor.gui.tasks import kick
+
+    try:
+        kick(folder.parents[2])  # <course>/logs/gui-tasks/<id>
+    except OSError:
+        pass  # the page's own kick starts it when it next reads the course
     return 0
 
 

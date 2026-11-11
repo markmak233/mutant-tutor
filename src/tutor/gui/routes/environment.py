@@ -9,8 +9,17 @@ import secrets
 
 from flask import Flask, redirect, render_template, request, url_for
 
-from tutor import pythons, workspace
-from tutor.gui import courses, environment, languages_page, python_switch, tasks
+from tutor import workspace
+from tutor.gui import (
+    courses,
+    doctor_page,
+    environment,
+    environment_diagnostics,
+    fix_state,
+    languages_page,
+    python_switch,
+    tasks,
+)
 from tutor.gui.routes.common import course_or_404, start_task
 
 
@@ -23,7 +32,7 @@ def environment_page(course: courses.Course, problems: list[str], code: int = 20
     shown back as typed."""
     draft = environment.draft_view(course)
     if rows is None:
-        # The packages and tools list: [requires] without the language list's rows.
+        # The one package version list combines prefixes/bounds, excluding toolchains.
         rows = environment.list_rows(course, languages_page.package_rows(course)
                                      or [("", "")], draft.draft)
     allowed = environment.allowed(course)
@@ -32,12 +41,15 @@ def environment_page(course: courses.Course, problems: list[str], code: int = 20
                            chosen=chosen or {},
                            others_allowed=[m for m in allowed
                                            if m not in {r.module for r in rows}],
+                           found_imports=environment.found_imports(course),
                            not_pip=environment.NOT_PIP, runner=environment.runner(course),
                            has_venv=environment.venv_python(course).exists(),
                            install=environment.install_shown(course),
                            running=tasks.running(course.workspace.root),
                            language=languages_page.language_view(course),
                            languages=languages_page.languages_view(course),
+                           setup_fixes=doctor_page.inputs(course),
+                           original_kept=fix_state.retained(course),
                            typed_language=typed_language), code
 
 
@@ -58,21 +70,16 @@ def register(app: Flask) -> None:
 
     @app.get("/c/<name>/environment/check")
     def environment_check(name: str):
-        """The part htmx loads: envcheck in the course's venv (a process, 0.2 s warm), and
-        when it finds what another Python could fix, the Pythons on this machine."""
+        """The same redacted diagnostic rows as CLI doctor, without smoke/model work."""
         course = course_or_404(name)
-        check = environment.check(course)
-        return render_template("_env_check.html", course=course, check=check,
-                               kind=environment.kind, differs=environment.differs,
-                               switch=switch_options(course, check))
-
-    def switch_options(course: courses.Course, check: environment.Check):
-        """The Pythons to offer, or [] when the check found nothing another one could fix."""
-        if check.problem or not python_switch.related(check.results):
-            return []
-        current = pythons.ask(environment.venv_python(course))
-        return python_switch.options(course.workspace.requires, check.results,
-                                     current.version if current else None)
+        rows = environment_diagnostics.rows(course)
+        return render_template("_env_check.html", course=course, rows=rows,
+                               needs_attention=sum(r.status in {"WARN", "FAIL"} for r in rows),
+                               status_text=environment_diagnostics.STATUS_TEXT,
+                               guide_fragment=environment_diagnostics.guide_fragment,
+                               row_id=fix_state.row_id,
+                               running=tasks.running(course.workspace.root),
+                               switch=environment_diagnostics.switches(course, rows))
 
     @app.post("/c/<name>/environment/python")
     def switch_python(name: str):
@@ -80,7 +87,8 @@ def register(app: Flask) -> None:
         again here, so a form cannot name any other program to run."""
         course = course_or_404(name)
         chosen = request.form.get("python", "")
-        offered = [o.found for o in switch_options(course, environment.check(course))
+        offered = [o.found for o in environment_diagnostics.switch_options(
+            course, environment.check(course))
                    if o.offered]
         found = next((f for f in offered if str(f.path) == chosen), None)
         if found is None:
@@ -96,6 +104,7 @@ def register(app: Flask) -> None:
         course = course_or_404(name)
         return render_template("_env_docker.html", course=course,
                                view=environment.docker_view(course),
+                               running=tasks.running(course.workspace.root),
                                scale=environment.IMAGE_SCALE)
 
     @app.post("/c/<name>/environment/requires")
@@ -121,6 +130,18 @@ def register(app: Flask) -> None:
                      for n, v, k in zip(names, versions, keys, strict=False) if n or v]
             return environment_page(course, problems, 400, typed)
         return redirect(url_for("environment_view", name=name) + "?notice=requires-saved",
+                        code=303)
+
+    @app.post("/c/<name>/environment/allow-found")
+    def allow_found(name: str):
+        """The ticked modules and headers the lectures' code uses go into [safety]
+        allow_imports / allow_headers (owner, 2026-11-10): the owner's tick, one by one."""
+        course = course_or_404(name)
+        problems = environment.allow_found(course, request.form.getlist("module"),
+                                           request.form.getlist("header"))
+        if problems:
+            return environment_page(course, problems, 400)
+        return redirect(url_for("environment_view", name=name) + "?notice=found-allowed",
                         code=303)
 
     @app.post("/c/<name>/environment/draft")

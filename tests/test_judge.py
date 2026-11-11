@@ -2,6 +2,7 @@
 verdicts are kept, and how calibration scores them against the owner's ratings."""
 
 import json
+from dataclasses import replace
 
 import pytest
 
@@ -91,10 +92,33 @@ def test_the_judge_sees_what_the_student_reads_and_the_reference(tmp_path):
     assert "return sum([a, b])" in prompt  # the reference, for "targets"
     assert "Batch mode: review" in prompt
     assert "taught so far, in order: Lecture_2.1-Intro, Lecture_2.2-Demo\n" in prompt
-    assert "p.2 · slide 2.2.2 · this exercise's page" in prompt
+    assert "## Lecture_2.2-Demo p.2 · slide 2.2.2\n" in prompt  # no per-exercise mark
+    assert "this exercise's page" not in prompt
+    assert "This exercise's own pages: Lecture_2.2-Demo p.2" in prompt
     assert "## Useful functions" in prompt and "## not a heading in code" in prompt
     for hidden in ("the owner's", "def test_add", "the hint text", "Lecture_3.1-Later page"):
         assert hidden not in prompt
+
+
+def test_the_prompt_is_in_two_parts_the_lectures_shared_the_exercise_last(tmp_path):
+    """For the anthropic provider's cache: the first part is the same for every exercise
+    of the lecture in the batch (mode, lectures taught, the pages), the second the
+    exercise's own (its pages named, question, skeleton, Useful functions, reference)."""
+    workspace, batch = make_workspace(tmp_path)
+    inputs = gather(batch, "demo", workspace)
+    prompt = user_prompt(inputs)
+    other = user_prompt(replace(inputs, question="Another question.", skeleton="def other(): ...",
+                                pages=["Lecture_2.2-Demo p.3"], reference="def other(): return 1"))
+
+    assert isinstance(prompt, llm.Prompt) and len(prompt.parts) == 2
+    shared, own = prompt.parts
+    assert shared == other.parts[0]  # byte for byte, whatever the exercise
+    assert shared.startswith("Batch mode: review\n\nLectures taught so far")
+    assert "## Lecture_2.2-Demo p.2 · slide 2.2.2" in shared and shared.endswith("\n\n")
+    for exercise_only in ("Add `a` and `b`.", "raise NotImplementedError", "return sum([a, b])",
+                          "This exercise's own pages", "Useful functions"):
+        assert exercise_only in own and exercise_only not in shared
+    assert own.startswith("This exercise's own pages: Lecture_2.2-Demo p.2\n\n")
 
 
 def test_a_rated_text_can_stand_in_for_question_md(tmp_path):

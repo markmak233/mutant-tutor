@@ -73,8 +73,8 @@ two).
 ## How exercises are generated
 
 ```
-plan (reads the course's coverage table) -> the owner approves or sends it back
-  -> for each exercise, in parallel:
+plan (reads the course's coverage table) -> the owner selects items and approves, or sends back
+  -> for each selected exercise, in parallel:
      generate -> oracle (a second model) -> validate --VALID--> save
         ^                                     |
         +------------ repair <---- failed ----+   (up to 3 rounds, then discard)
@@ -98,8 +98,8 @@ each added after a measured failure (details and numbers in [`docs/design.md`](d
   prompt, course pages, example exercise): 54-93% of input tokens per batch.
 
 Each role (plan, generate, repair, oracle, and vision for reading slides) is a profile in
-the workspace's `workspace.toml`, so any OpenAI-compatible models can be combined, local or
-cloud. The oracle is best another provider's, by another maker, than the models that
+the workspace's `workspace.toml`, so any OpenAI-compatible models, and Claude through its
+own API, can be combined, local or cloud. The oracle is best another provider's, by another maker, than the models that
 write the exercise; with one key, one provider still works, with a warning that its check is
 less independent. In the GUI, New model can fill the form from the public
 [models.dev](https://models.dev) catalog (base URL, key name, models newest first, prices),
@@ -229,9 +229,81 @@ runner = "container"   # or "host"
   **not a sandbox**: the code runs with your user's permissions and can read or write other
   files and use the network. Use it only for exercises you wrote or reviewed.
 
-The GUI's Environment page sets this for a course, and builds its image after showing the
-recipe and what it downloads. `python -m tutor.workspace init DIR`, run again after changing
-`[requires]`, installs its pip packages into the course's own `.venv`.
+The GUI's Environment page groups course setup into four numbered steps:
+
+1. **What the course needs.** Set the language versions and packages. Each package has one
+   version cell: a prefix such as `3.5`, or a numeric comparison such as `>=1,<2`. Saving
+   stores prefixes in `[requires]` and comparisons in `[package-bounds]`, moving an entry
+   when its form changes. Python, Java, Hadoop and gcc accept prefixes only. Invalid package
+   entries stay in the form for correction; unrelated comments and a previous-file backup
+   are kept. The separate language list holds Python/C versions.
+2. **Install on this machine and check.** The same deterministic Doctor rows as the CLI
+   load automatically, with OK, Needs attention, Problem or Skipped results and a fix on
+   each row where one is known. Install, image build, Python switch, runner selection and
+   host-guide actions reuse the existing controls. A running task disables fix controls.
+3. **Where tests run.** Choose the course's runner with its existing confirmation for host
+   execution. Selecting a runner does not install its requirements or build an image.
+4. **Test image.** Inspect Docker/image readiness and the recipe before building. The
+   image record below shows build time and version differences, with Refresh and full history.
+
+`python -m tutor.workspace init DIR`, run again after changing requirements, installs the
+declared pip packages into the course's own `.venv`. A missing or broken venv also has a
+Python recreation path in step 2. If recovery finds no compatible installed Python, it
+shows **No suitable Python here. Download one with uv**. That page keeps its explicit
+download consent; choosing the downloaded interpreter for a venv is a separate action.
+
+Environment step 2 also links to **Run tests on this machine**, an optional manual setup
+guide. Choose macOS, Linux, Windows or WSL; the page shows the course's declared versions,
+Python setup, applicable Java/Hadoop instructions and links to existing C settings.
+It neither installs system tools nor checks them on page load. Return to Environment for
+the existing check. Recipes not covered are marked explicitly; Linux/WSL fresh installs
+remain untested. Container practice through `tutor test` does not require host JVM/compiler
+installation. The longer big-data walkthrough remains in [setup/bigdata.md](setup/bigdata.md).
+
+Doctor is now step 2's check; old Doctor bookmarks return there. For a Problem without a
+known rule-based fix, **Ask a model for a fix** opens a four-step page:
+
+1. Review the pre-filled failure (the row and latest failed install/build log tail, at most
+   64 KiB) and its module, edit as needed, and choose a model profile. **Preview what will
+   be sent** shows the complete sanitized data and destination. Only **Send to the model**
+   makes the advice request.
+2. Read the advice. A newly proposed package alone offers the independent second-provider
+   and PyPI review. For a permitted repair, confirm **Test it in a temporary environment**;
+   the consent covers up to three model-assisted rounds and temporary public-PyPI installs.
+3. Read the verification result. A passed check enables **Show the exact changes**; a failed
+   check offers **Back to step 1**. This check does not prove every course exercise works.
+4. Review the complete diff and confirm **Apply**. Afterwards, **Undo** restores the original
+   setup, or **Keep it** explicitly discards its backups. Both require confirmation.
+
+Selected inputs are kept privately under `logs/doctor`. Current input, destination,
+configuration and facts must match the preview before sending/applying; changed data needs
+a new preview. New packages are never automatically installed. Oversized previews/diffs
+are refused rather than silently cut. Successful worker tasks return to the appropriate
+wizard step. Model credentials stay in the worker's private mapping, never the GUI server's
+environment. Undo refuses changed configuration; Keep it preserves later owner edits while
+discarding originals. Automated tests use model/installer stand-ins.
+
+Environment step 4's **Image build record** shows build time and packages/tools whose
+versions differ between the course's venv and image. Differences are informational; missing
+measurements stay unknown. **Full image record and history** shows exact image/base content
+IDs, available registry digests, build/record times and all recorded distributions. Builds
+keep private historical snapshots under `logs/image-builds`; refreshing does not erase
+prior builds. A changed image ID or recipe makes the record old, with no current comparison.
+Missing or old records retain the **Refresh current image record** action.
+
+New builds capture their actual base through a temporary local snapshot tag; it is removed
+afterwards and does not permanently pin course configuration. Old images without provenance
+labels have unknown base/build facts; refresh does not infer them from a mutable tag.
+The page's refresh action, or `python -m tutor.image_records "$WORKSPACE_DIR"`, reads the
+existing image in a network-disabled/read-only temporary container and writes a record.
+It never builds, pulls, installs or reads the GUI interpreter's packages as course facts.
+
+Wheels include the GUI assets and shipped synthetic smoke examples. Creating/replacing a
+course environment from an installed wheel uses this tool's bundled public source and a
+noneditable install; it does not depend on the original checkout or a temporary editable
+path, and does not look up an unrelated public package named `tutor`. Source checkouts
+retain their existing editable course installs. Private notes/configuration/caches and
+linked files are excluded from the controlled source bundle.
 
 A course that has not chosen runs on the host and prints a warning. For container courses,
 `tutor test` also runs the learner's tests in that image; ordinary `pytest` stays on the
@@ -242,6 +314,146 @@ Before generated exercises are published, a static check reads every exercise fi
 code outside an allowlist (modules, `os` / `sys` attributes, `eval` / `exec`, paths outside
 the exercise, shell commands through Spark or MRJob). It stops the obvious, but Python is too
 dynamic for a static check to prove code safe; the container is the boundary.
+
+### Checking your setup
+
+`tutor doctor [FOLDER] [--smoke]` and `python -m tutor doctor` use the same command.
+FOLDER defaults to the current directory; the nearest ancestor containing workspace.toml
+is the course. Outside a course, only tool checks run; finding no course is not a failure.
+
+Checks run in this order:
+
+1. Tool Python (3.11+), installed tutor version, and optional gen/gui extras (without
+   importing those heavy packages).
+2. Docker availability/version. A problem is a warning for host practice or no course,
+   a failure for a container course. No Docker build or pull is started.
+3. Registered languages' machine checks: currently C's Linux mmap randomisation warning
+   for AddressSanitizer. Python-only courses have no C checks.
+4. Course loading and declarations, including unsupported languages/toolchains, then the
+   runner choice. A broken workspace skips all remaining course checks.
+5. Course venv interpreter/import and sibling tutor command. A broken venv suggests
+   replacement; an older venv missing only the script gets a warning.
+6. Host platform support and requirements, reusing envcheck and its compatibility rules.
+   These check the interpreter running doctor, not a different course venv's packages;
+   run doctor from the course venv to check that environment. Container courses skip host
+   tool requirements because `tutor test` uses the image.
+7. Container image readiness (host courses skip it); Docker failure skips another probe.
+8. With `--smoke`, validate a shipped synthetic example on a temporary course copy, then
+   remove it, including on failure/interruption. Python uses station-longest-rise; C uses
+   station-above-average-c. C smoke needs a container even when host student tests can run.
+   Missing packaged examples skip smoke. Validator output appears above its result; no
+   report file is written. The current runner is never changed.
+
+Rows are OK, WARN, FAIL or SKIP, followed by a concrete `next:` for each warning/failure.
+Checks flush their output and continue past individual errors. Exit codes: **0** no failures
+(warnings allowed), **1** at least one failure, **2** usage/nonexistent folder, **130** Ctrl+C.
+Default doctor does not load `.env` or check API credentials; export runtime settings in
+the calling terminal. It neither installs nor applies fixes. Model-proposed installation
+repairs and the optional host setup page belong to doctor step 2.
+
+Optional model advice is now available as an explicitly requested, unverified step:
+
+```bash
+tutor doctor --preview-advice --failure failure.log
+tutor doctor --advise --failure failure.log
+```
+
+Select and review a UTF-8 failure record yourself. Preview displays the sanitized request
+without contacting a model; `--advise` sends that record and distribution/Python facts to
+the displayed provider/model. Redaction removes known credentials, common auth/URL data,
+paths and controls, but cannot prove arbitrary logs are free of private material. No
+lectures, student answers or neighbouring files are discovered or added to the request.
+The record is limited to 64 KiB, the complete request to 128 KiB; input is never silently
+truncated. These advice modes cannot be combined with `--smoke`.
+
+For a course, configure `[llm.roles] doctor = "your-profile"`, or pass `--profile NAME`.
+Outside a course, use the existing exported `LLM_*` settings. Only an explicit
+`--env-file FILE` reads credentials, into a private mapping where exported values win;
+it does not change the process environment or pass keys to child programs. Default checks
+still do not read it. Assistant exchange profiles are refused in this read-only mode.
+
+Facts come from the host course's own venv, the container course's ready image, or the
+tool interpreter when there is no course. Missing course environments never fall back to
+the tool. The image probe uses no course mount, network, build or pull. Image Python is
+locked for advice until disposable image/Python verification is implemented. Advice facts
+are distinct from the ordinary host check's interpreter, labelled above.
+
+The doctor prompt is new; calibrated generation/judge prompts are unchanged. Requests use
+`thinking=False`; a truncated reply gets one retry (2048 then 4096 output tokens). Compatibility
+retries may add HTTP calls. Every reply passes the deterministic permission gate. Permitted
+changes are WARN, model-proposed and unverified, and never clear earlier FAILs. Unknown
+package candidates are withheld pending independent review. No repair is installed,
+applied or verified, and no call log or assistant request file is written. Provider/gate
+errors are FAIL; invalid inputs exit 2, Ctrl+C 130. The same normal exit/summary rules apply.
+
+Explicit disposable verification checks a selected import and `pip check` before asking
+for repairs, then runs that same fixed check in fresh temporary environments:
+
+```bash
+tutor doctor --verify-advice --failure failure.log --module your_package
+```
+
+This mode downloads public PyPI wheels into temporary venvs (host) or an owned temporary
+image (container), never into the original environment. Host package code runs with your
+user rights; a venv is not a security sandbox. Container probes retain the isolated
+runner's network/filesystem limits. No model-written program or shell command runs.
+Only an original failure followed by the same check passing is verified; this does not
+prove every course exercise works. A passing baseline spends no model request. Trials
+are cumulative, capped at three, stop on repeated proposals/the same missing module
+twice, and clean temporary resources on failure/interruption. Image Python stays locked.
+Missing wheels/private-index packages are reported; source builds are not enabled.
+
+New-package review is a separate explicit operation, with an independently configured
+second provider/model (choose actual independent identities, not proxy aliases):
+
+```bash
+tutor doctor --review-new-package --failure failure.log --profile first --second-profile second
+```
+
+Both models independently receive the same sanitized facts, with thinking enabled and
+without the other's answer. A same-provider or same-host pair is refused. Only matching
+normalized names with PyPI release files are displayed, along with release count and
+first upload. Agreement/existence is not a security endorsement; no new name is installed.
+Tests replace model, HTTP, environment installer and probe callbacks. Original course
+files/venv/runner are unchanged by verification or independent review.
+
+To retain a verified proposal, add `--save-repair repair.json` to verification. The new
+private file contains structured changes and freshness hashes, without failure text or
+paths. It cannot overwrite an existing file or live inside a git repository. Then:
+
+```bash
+tutor doctor --preview-repair repair.json
+tutor doctor --apply-repair repair.json --confirm
+tutor doctor --undo-repair
+# After accepting the result, explicitly discard the retained backups instead:
+tutor doctor --finish-repair --confirm
+```
+
+Application requires the `doctor` extra (TOML comment preservation), gates the saved
+changes against current facts, rejects stale hashes and repeats verification before
+mutating anything. Host replacement keeps the previous `.venv` and builds at the actual
+path (venvs are not relocatable). A failed install/check or interruption restores it.
+Container application builds/checks the new image while retaining the old one, then
+promotes configuration. Answers, lectures, model settings and runner policy are not edited.
+The single retained repair can be undone or finished before another one is applied.
+Undo refuses configuration/backup text changed after application. Diagnostics printed
+before an apply are retained; run doctor again to check the resulting live environment.
+
+Package comparisons live in a separate optional table:
+
+```toml
+[package-bounds]
+demo = ">=1,<2"
+```
+
+`[requires]` keeps numeric version prefixes. Environment step 1 shows both declarations
+in one version table: changing a cell between prefix and comparison moves its entry on Save.
+A package identity may occur in only one declaration table; repair preview likewise moves
+an affected package into `package-bounds`. Runtimes/toolchains keep prefixes. Bounds use
+only numeric `== != >= <= > < ~=` comparisons and comma intersections;
+no URLs, wildcard, markers, extras or options. Checks fail conservatively on nonnumeric
+installed releases for a bound; pip remains the resolver. Venv installs, image recipes,
+doctor and environment checks use both tables. Empty bounds preserve existing image names.
 
 ### Testing your work in the course image
 
@@ -291,7 +503,8 @@ validate a batch in the background, upload and read lectures, create a course, c
 models and keep your API keys, check its environment, edit `[requires]` or have a model
 draft it from the lectures (each entry with the slide that shows it, added only when you
 tick it), choose where tests run, install its Python packages and build its test image, have
-a model draft `coverage.md` from the lectures and add new lectures to it as they come, plan
+a model draft the course's coverage (`coverage.json`, with `coverage.md` rendered from it)
+from the lectures, edit its points and draft new or changed lectures into it, plan
 a new batch and approve its plan; generating also needs the `gen` extra):
 
 ```bash
@@ -301,6 +514,23 @@ python -m tutor.gui             # every course folder next to WORKSPACE_DIR's, o
 
 It listens on 127.0.0.1 only and opens a link with a token for this launch; other pages
 in the browser cannot use it.
+
+On the Plan page all proposed items start checked. Uncheck anything to defer, then use
+**Approve and generate selected**; at least one item is required. Every note stays visible.
+The selection is saved with the full approved plan, so Stop/Continue and assistant resumes
+keep that subset. A changed plan requires a fresh review. Deferred rows say **Left out by
+you**. After the run finishes and the course is idle, **Generate** starts one deferred item
+as a new paid generation, using its approved notes and the saved settings. The page shows
+the effective models from current course settings. **Try all again** includes failures only.
+
+From a terminal, choose IDs with:
+
+```bash
+python -m tutor.graph resume --batch demo --approve --only=alpha,charlie
+```
+
+Omit --only to approve all items. Supply it only at the approval pause, never on Continue;
+an empty, repeated or unknown ID list is refused. plan.json remains the full plan.
 
 A gitleaks pre-commit hook blocks secrets and absolute home-directory paths
 (`pre-commit install` once per clone; needs `gitleaks` installed).
@@ -337,10 +567,12 @@ src/tutor/
                    `python -m tutor.container build | status`
   llm.py           a small client for OpenAI-compatible APIs (LM Studio, GLM, OpenAI,
                    DeepSeek): roles -> profiles, structured output, streaming, call log
+  llm_anthropic.py Claude's own Messages API behind the same llm.chat (provider "anthropic")
   materials/       course PDFs and saved web pages -> a per-page (per-section) markdown cache,
                    image slides via a vision model;
                    `python -m tutor.materials`; `python -m tutor.materials.requires` drafts
-                   [requires] from the cached lectures, and `.coverage` coverage.md
+                   [requires] from the cached lectures, `.coverage` a coverage draft, and
+                   `.coverage_store` keeps coverage.json (coverage.md rendered from it)
   graph/           phase 3 generation with LangGraph: plan -> owner approves -> generate,
                    oracle by a second model, validate, repair, per exercise in parallel;
                    `python -m tutor.graph`

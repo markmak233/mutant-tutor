@@ -1,0 +1,32 @@
+{# Step 4's asynchronous, read-only summary. Currency is checked by image_records;
+   only current inventories are compared. Missing/old facts have an explicit fix action.
+   Text through _() (gui/i18n.py); the record's detail and the names stay as they are. #}
+<div id="env-image-record">
+  <h3>{{ _("Image build record") }}</h3>
+  {% set view = record.view %}
+  {% set labels = {'current': _('Current image record'), 'missing': _('No image record yet'), 'stale': _('Old image record'), 'unavailable': _('Image record unavailable'), 'invalid': _('Image record unreadable')} %}
+  <p><strong>{{ labels.get(view.status, view.status) }}</strong>. {{ view.detail }}</p>
+  {% if view.data %}
+    {% if view.status != 'current' %}<p>{{ _("This stored snapshot is old or unavailable for comparison; it does not describe the current image.") }}</p>{% endif %}
+    <dl>
+      <dt>{{ _('Built at') if view.status == 'current' else _('Stored build time') }}</dt><dd>{% if view.data.provenance %}{{ view.data.provenance.built_at | local_time }}{% else %}{{ _("Unknown for this older image. Rebuild to record the build time.") }}{% endif %}</dd>
+      <dt>{{ _("Recorded at") }}</dt><dd>{{ view.data.recorded_at | local_time }}</dd>
+    </dl>
+  {% endif %}
+  {% if view.status == 'current' %}
+    {% set code_venv %}<code>.venv</code>{% endset %}
+    <p>{{ _("Different versions are information, not a setup failure. The host column uses this course's %(venv)s.", venv=code_venv) }}</p>
+    {% if record.host.problem %}<p>{{ record.host.problem }} <a href="#host-install">{{ _("Check or create the course venv in step 2") }}</a>.</p>{% endif %}
+    {% if record.differences %}
+    <table><thead><tr><th>{{ _("Requirement") }}</th><th>{{ _("Course venv/host tool") }}</th><th>{{ _("Image") }}</th></tr></thead><tbody>
+      {% for row in record.differences %}<tr><td>{{ row.name }}</td><td>{{ row.host }}</td><td>{{ row.image }}</td></tr>{% endfor %}
+    </tbody></table>
+    {% elif not record.unknown %}<p>{{ _("No version differences found in declared requirements.") }}</p>{% endif %}
+    {% if record.unknown %}<p>{{ _("Versions unavailable for comparison: %(names)s. Check step 2 and refresh the image record.", names=record.unknown | map(attribute='name') | join(', ')) }}</p>{% endif %}
+  {% endif %}
+  <form method="post" class="form" action="{{ url_for('refresh_image_record', name=course.folder) }}">
+    <p>{{ _("Refresh reads the existing image in a temporary network-disabled container and writes a private record. It does not build, pull or install packages.") }}</p>
+    <div class="actions"><button type="submit"{% if running %} disabled{% endif %}>{{ _("Refresh current image record") }}</button></div>
+  </form>
+  <p><a href="{{ url_for('image_record_view', name=course.folder) }}">{{ _("Full image record and history") }}</a></p>
+</div>

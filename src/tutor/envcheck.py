@@ -20,19 +20,18 @@ import platform
 import re
 import subprocess
 import sys
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 from importlib import metadata
 from pathlib import Path
 
-from tutor import compat, languages
+from tutor import compat, languages, package_bounds
 from tutor.config import Workspace, WorkspaceError, load_env, load_workspace
+from tutor.package_bounds import NOT_PIP, VERSION
 
 # The names checked by their own rule below; any other name is a pip package.
-NOT_PIP = ("python", "java", "hadoop", "gcc")
 NEEDS_JAVA = ("pyspark", "hadoop")
 PACKAGE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
-VERSION = re.compile(r"^\d+(\.\d+)*$")  # a prefix of dotted numbers: "3.5" means 3.5.x
 
 
 @dataclass(frozen=True)
@@ -52,11 +51,13 @@ class CheckResult:
 
 def version_matches(found: str, required: str) -> bool:
     """`required` is a prefix of dotted parts: "3.5" matches "3.5.9" but not "3.50.1"."""
+    if required.startswith(("=", "!", "<", ">", "~")):
+        return package_bounds.matches(found, required)
     want = required.split(".")
     return found.split(".")[: len(want)] == want
 
 
-def requires_problems(requires: Mapping[str, str]) -> list[str]:
+def requires_problems(requires: Mapping[str, str], *, allow_bounds: bool = False) -> list[str]:
     """What is wrong with a [requires] table, one line each; [] when nothing. A name or a
     version goes into a pip command and an image recipe, so only plain ones pass."""
     problems = []
@@ -66,8 +67,16 @@ def requires_problems(requires: Mapping[str, str]) -> list[str]:
         elif not PACKAGE.match(name):
             problems.append(f"[requires] {name!r} is not a package name")
         elif not VERSION.match(version):
-            problems.append(f"[requires] {name} = {version!r}: use a version prefix such as "
-                            '"3.5"')
+            try:
+                if not allow_bounds or name in NOT_PIP:
+                    raise ValueError
+                package_bounds.numeric_specifier(version)
+            except ValueError:
+                # python, java, hadoop and gcc take a prefix only; a pip package also a bound.
+                bound = allow_bounds and name not in NOT_PIP
+                other = ' or a numeric package bound such as ">=1,<2"' if bound else ""
+                problems.append(f"[requires] {name} = {version!r}: use a version prefix such as "
+                                f'"3.5"{other}')
     problems += [f"[requires] has {name} but no java, and {name} needs a JVM"
                  for name in NEEDS_JAVA if name in requires and "java" not in requires]
     # A package version known not to work on the course's Python (tutor.compat).
@@ -81,7 +90,8 @@ def pip_requirements(requires: Mapping[str, str]) -> list[str]:
     which is what version_matches accepts; then each one's companion packages, with a marker
     so pip adds them only on the Pythons that need them (tutor.compat). Call
     requires_problems first."""
-    return ([f"{name}=={prefix}.*" for name, prefix in requires.items() if name not in NOT_PIP]
+    return ([name + (f"=={prefix}.*" if VERSION.fullmatch(prefix) else prefix)
+             for name, prefix in requires.items() if name not in NOT_PIP]
             + compat.companions(requires))
 
 
@@ -105,11 +115,15 @@ def parse_hadoop_version(jar_names: list[str]) -> str | None:
     return None
 
 
-def check_workspace(ws: Workspace) -> list[CheckResult]:
+def check_workspace(ws: Workspace, *, run: Callable | None = None) -> list[CheckResult]:
     """Check every [requires] entry of the workspace, in the order they are written, plus
     Hadoop's native files on Windows when the course needs Spark or Hadoop."""
-    results = [_check(name, required, ws) for name, required in ws.requires.items()]
-    if sys.platform == "win32" and ({"pyspark", "hadoop"} & set(ws.requires)):
+    # Resolve at call time so doctor can inject bounded stand-in probes without changing
+    # the existing CLI/GUI callers, which still use subprocess.run.
+    run = subprocess.run if run is None else run
+    effective = ws.effective_requires
+    results = [_check(name, required, ws, run) for name, required in effective.items()]
+    if sys.platform == "win32" and ({"pyspark", "hadoop"} & set(effective)):
         results.append(check_winutils(os.environ.get("HADOOP_HOME"), os.environ.get("PATH", "")))
     # A language not supported yet, or a malformed [languages.c], fails here like a missing
     # requirement, so the command line and the GUI both say so.
@@ -119,7 +133,7 @@ def check_workspace(ws: Workspace) -> list[CheckResult]:
     # must be there (it installs and imports cleanly without, then a job fails), and a
     # package version that does not work on it at all.
     python = platform.python_version()
-    for rule in compat.needed(ws.requires, python):
+    for rule in compat.needed(effective, python):
         try:
             found = metadata.version(rule.needs)
         except metadata.PackageNotFoundError:
@@ -128,7 +142,7 @@ def check_workspace(ws: Workspace) -> list[CheckResult]:
                                    f"{rule.why}: install it into the course's .venv: "
                                    f"python -m tutor.workspace init {ws.root}"))
     results += [CheckResult("python", f"not {python}", None, problem)
-                for problem in compat.conflicts(ws.requires, python)]
+                for problem in compat.conflicts(effective, python)]
     results += _removed_imports(ws, python)
     return results
 
@@ -139,7 +153,7 @@ def _removed_imports(ws: Workspace, python: str) -> list[CheckResult]:
     this interpreter still finds (a companion or a backport brings it back) is fine, and so
     is one a companion rule provides: the companion's own check reports it missing."""
     found = []
-    for name in ws.requires:
+    for name in ws.effective_requires:
         if name in NOT_PIP:
             continue
         try:
@@ -178,7 +192,7 @@ def check_winutils(hadoop_home: str | None, path: str) -> CheckResult:
     return CheckResult(name, required, "present")
 
 
-def _check(name: str, required: str, ws: Workspace) -> CheckResult:
+def _check(name: str, required: str, ws: Workspace, run: Callable) -> CheckResult:
     """Dispatch on the requirement name.
 
     python, java and hadoop are special; any other name is a pip package, so a new
@@ -195,7 +209,7 @@ def _check(name: str, required: str, ws: Workspace) -> CheckResult:
         )
     if name == "java":
         return CheckResult(
-            name, required, _java_version(), f"set JAVA_HOME in .env to a JDK {required}"
+            name, required, _java_version(run), f"set JAVA_HOME in .env to a JDK {required}"
         )
     if name == "hadoop":
         return CheckResult(
@@ -204,7 +218,7 @@ def _check(name: str, required: str, ws: Workspace) -> CheckResult:
         )
     if name == "gcc":
         return CheckResult(
-            name, required, _gcc_version(),
+            name, required, _gcc_version(run),
             f"install gcc {required}; C exercises are validated in the course's container, "
             "where it is, and a learner's own runs here compile with this machine's `cc`",
         )
@@ -217,14 +231,15 @@ def _check(name: str, required: str, ws: Workspace) -> CheckResult:
                        f"{ws.root}")
 
 
-def _java_version() -> str | None:
+def _java_version(run: Callable | None = None) -> str | None:
     """Ask $JAVA_HOME/bin/java for its version. JAVA_HOME, not PATH, because that is
     the JDK Spark and Hadoop will actually use."""
+    run = subprocess.run if run is None else run
     java_home = os.environ.get("JAVA_HOME")
     if not java_home:
         return None
     try:
-        proc = subprocess.run(
+        proc = run(
             [str(Path(java_home) / "bin" / "java"), "-version"],
             capture_output=True, text=True, timeout=10,
         )
@@ -234,15 +249,16 @@ def _java_version() -> str | None:
     return parse_java_version(proc.stderr + proc.stdout)
 
 
-def _gcc_version() -> str | None:
+def _gcc_version(run: Callable | None = None) -> str | None:
     """`gcc`'s version, e.g. "12.2.0"; "clang-21.0.0" where `gcc` is clang (macOS), which
     then does not match a gcc version; None when there is none."""
+    run = subprocess.run if run is None else run
     try:
-        first = subprocess.run(["gcc", "--version"], capture_output=True, text=True,
+        first = run(["gcc", "--version"], capture_output=True, text=True,
                                timeout=10).stdout.splitlines()[:1]
         # -dumpfullversion: gcc 7 and later print the whole version; clang does not know it.
         flag = "-dumpversion" if first and "clang" in first[0] else "-dumpfullversion"
-        version = subprocess.run(["gcc", flag], capture_output=True, text=True,
+        version = run(["gcc", flag], capture_output=True, text=True,
                                  timeout=10).stdout.strip()
     except (OSError, subprocess.TimeoutExpired):
         return None

@@ -12,7 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from tutor.config import Workspace
+from tutor import image_records
+from tutor.config import Workspace, load_workspace
 from tutor.container import build, docker_problem
 from tutor.execution import REPORT_FILE, Outcome, run_pytest, run_script
 
@@ -31,6 +32,15 @@ def course(tmp_path_factory) -> Path:
     build(Workspace(root=root, course="dockertest", requires=requires, lecture_dir=root / "l"),
           say=lambda text: None)
     return root
+
+
+def test_build_record_is_bound_to_actual_image_and_base(course):
+    ws = load_workspace({"WORKSPACE_DIR": str(course)})
+    view = image_records.view(ws)
+    assert view.status == "current", view.detail
+    assert view.data["provenance"]["base"]["id"].startswith("sha256:")
+    assert view.data["provenance"]["base"]["name"] == "python:3.11-slim-bookworm"
+    assert view.data["inventory"]["python"].startswith("3.11")
 
 
 def exercise(course: Path, name: str, test_body: str) -> dict[str, Path]:

@@ -53,12 +53,14 @@ The checks that ask a process or Docker load into the page with htmx, so it open
 from __future__ import annotations
 
 import hmac
+import re
 from pathlib import Path
 from types import ModuleType
 
 from flask import Flask, abort, redirect, render_template, request, url_for
 
-from tutor.gui import launch, lectures, routes, tasks
+from tutor.gui import i18n, launch, launcher_state, lectures, routes, tasks, theme
+from tutor.gui.i18n import N_
 from tutor.gui.routes.common import NOTICES, UPLOAD_LIMIT_BYTES
 
 COOKIE = "tutor_token"
@@ -80,7 +82,8 @@ def create_app(root: Path, token: str, port: int | None = None,
     """`root`: the folder holding the course folders. `port`: the one the server listens on,
     for the Host check; set later through app.config["PORT"] when the server picks it.
     `launcher`: what opens folders and VS Code (tests pass a stand-in). `env_file`: where
-    the Keys page keeps keys, by default the repository's .env, which the commands read."""
+    the Keys page keeps keys, by default the command config folder's .env (checkout or
+    private packaged app config), which only the child commands read."""
     app = Flask(__name__)
     # MAX_CONTENT_LENGTH: a request larger than this gets 413 before it is read; each lecture
     # file has its own limit (lectures.MAX_LECTURE_BYTES).
@@ -92,7 +95,14 @@ def create_app(root: Path, token: str, port: int | None = None,
     def check_request():
         port = app.config["PORT"]
         if request.host not in (f"127.0.0.1:{port}", f"localhost:{port}"):
-            abort(403, "This server answers only at 127.0.0.1 or localhost.")
+            abort(403, N_("This server answers only at 127.0.0.1 or localhost."))
+        # The local launcher alone can challenge this endpoint, without browser cookies.
+        # No other request accepts header authentication or loses its Origin check.
+        if request.path == "/_launcher" and request.method == "GET":
+            if not hmac.compare_digest(request.headers.get("X-Tutor-Launch", "").encode(),
+                                       token.encode()):
+                abort(403)
+            return None
         given = request.args.get("token")
         if given is not None and hmac.compare_digest(given, token):
             # Swap the token in the URL for the cookie, and show the page without it.
@@ -100,15 +110,33 @@ def create_app(root: Path, token: str, port: int | None = None,
             response.set_cookie(COOKIE, token, httponly=True, samesite="Strict")
             return response
         if not hmac.compare_digest(request.cookies.get(COOKIE, ""), token):
-            abort(403, "Open the link that `python -m tutor.gui` printed.")
+            abort(403, N_("Open the link that `python -m tutor.gui` printed."))
         if request.method != "GET" and request.headers.get("Origin") != f"http://{request.host}":
-            abort(403, "An action must come from this GUI's own pages.")
+            abort(403, N_("An action must come from this GUI's own pages."))
         return None
+
+    # One form for every time a page shows (tasks.TIME_FORMAT, local): `| local_time`.
+    app.add_template_filter(tasks.local_time, "local_time")
+    # A coverage point's status column, as coverage.md writes it (the Coverage page).
+    from tutor.materials.coverage_store import status_cell
+
+    app.add_template_filter(status_cell, "status_cell")
+    # The pages in the owner's language (gui/i18n.py): `_()` and {% trans %} in templates;
+    # light or dark by choice (gui/theme.py): <html data-theme>.
+    i18n.install(app)
+    theme.install(app)
 
     @app.context_processor
     def notice():
         found = NOTICES.get(request.args.get("notice", ""))
         return {"notice": {"kind": found[0], "text": found[1]} if found else None}
+
+    @app.get("/_launcher")
+    def launcher_identity():
+        challenge = request.args.get("challenge", "")
+        if not re.fullmatch(r"[0-9a-f]{32}", challenge):
+            abort(403)
+        return {"proof": launcher_state.proof(token, root, challenge)}
 
     @app.after_request
     def add_headers(response):
@@ -119,7 +147,10 @@ def create_app(root: Path, token: str, port: int | None = None,
     @app.errorhandler(404)
     @app.errorhandler(405)
     def error(e):
-        return render_template("error.html", code=e.code, message=e.description), e.code
+        # The message, translated when it is one of the pages' own (marked N_() at the
+        # abort); gettext alone, no formatting, as a command's text may carry a `%`.
+        return render_template("error.html", code=e.code,
+                               message=i18n.gettext_(e.description)), e.code
 
     @app.errorhandler(413)
     def too_large(e):
@@ -127,13 +158,15 @@ def create_app(root: Path, token: str, port: int | None = None,
         files: said in words, with the way back to the form."""
         limit = f"{UPLOAD_LIMIT_BYTES // (1024 * 1024)} MB"
         name = (request.view_args or {}).get("name")
+        _ = i18n.gettext_
         if request.endpoint == "stage_lecture_folder":
-            message = (f"The folder was not taken: the browser sends all of it, videos and "
-                       f"images too, and it is over {limit} or "
-                       f"{lectures.MAX_FOLDER_FILES} files. Choose one of its subfolders, or "
-                       f"pick the lecture files themselves under Add lectures.")
+            message = _("The folder was not taken: the browser sends all of it, videos and "
+                        "images too, and it is over %(limit)s or %(files)d files. Choose one "
+                        "of its subfolders, or pick the lecture files themselves under Add "
+                        "lectures.") % {"limit": limit, "files": lectures.MAX_FOLDER_FILES}
         else:
-            message = f"The upload is over {limit} in all: upload fewer files at a time."
+            message = (_("The upload is over %(limit)s in all: upload fewer files at a time.")
+                       % {"limit": limit})
         back = url_for("lecture_list", name=name) if name else None
         return render_template("error.html", code=413, message=message, back=back), 413
 

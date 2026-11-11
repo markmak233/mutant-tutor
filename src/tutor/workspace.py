@@ -30,8 +30,10 @@ import venv
 from collections.abc import Callable
 from pathlib import Path
 
+from tutor import project_source
 from tutor.config import WORKSPACE_FILE, WorkspaceError, _enclosing_git_repo
 from tutor.envcheck import pip_requirements, requires_problems
+from tutor.package_bounds import merge
 
 DEFAULT_EXTRAS = "gen,dev"  # generating exercises, and pytest + hypothesis to validate them
 REPO = Path(__file__).resolve().parents[2]
@@ -204,8 +206,14 @@ def init(root: Path, course: str | None = None, extras: str = DEFAULT_EXTRAS,
     if (repo := _enclosing_git_repo(root)) is not None:
         raise WorkspaceError(f"{root} is inside the git repository {repo}; choose a folder "
                              "outside it, so course material is never committed")
-    if not (REPO / "pyproject.toml").is_file():
-        raise WorkspaceError(f"no pyproject.toml in {REPO}: run this from a source checkout")
+    # Preflight the actual source provider before creating files or moving an old venv.
+    # An installed wheel has its own bundle, rather than a checkout beside site-packages.
+    try:
+        with project_source.source():
+            pass
+    except ValueError:
+        raise WorkspaceError("current tutor source could not be used; "
+                             "reinstall a complete tutor wheel") from None
     if replace_venv and python is None:
         raise WorkspaceError("--replace-venv makes the .venv with another Python: give --python")
     # [requires] as it will be: a switch to another Python is checked against that one, as a
@@ -257,8 +265,14 @@ def init(root: Path, course: str | None = None, extras: str = DEFAULT_EXTRAS,
         # resolves this package's own dependencies and the course's together.
         what = ", ".join([f"tutor[{extras}]", *packages])
         say(f"installing {what} into .venv (a few minutes the first time) ...")
-        result = run(install_command(venv_dir, extras, packages), capture_output=True,
-                     text=True)
+        try:
+            with project_source.source() as source:
+                command = install_command(venv_dir, extras, packages, source=source.path,
+                                          editable=source.editable)
+                result = run(command, capture_output=True, text=True)
+        except ValueError:
+            raise WorkspaceError("current tutor source could not be used; "
+                                 "reinstall a complete tutor wheel") from None
         if result.returncode != 0:
             raise WorkspaceError("pip install failed, run this again once fixed:\n"
                                  f"{result.stderr}")
@@ -275,10 +289,11 @@ def init(root: Path, course: str | None = None, extras: str = DEFAULT_EXTRAS,
     return steps
 
 
-def install_command(venv_dir: Path, extras: str, packages: list[str]) -> list[str]:
+def install_command(venv_dir: Path, extras: str, packages: list[str], *,
+                    source: Path | None = None, editable: bool = True) -> list[str]:
     """The pip command init runs; the GUI shows it before its Install button."""
-    return [str(venv_python(venv_dir)), "-m", "pip", "install", "-q", "-e", f"{REPO}[{extras}]",
-            *packages]
+    return [str(venv_python(venv_dir)), "-m", "pip", "install", "-q",
+            *(["-e"] if editable else []), f"{source or REPO}[{extras}]", *packages]
 
 
 def _requires(root: Path, python_version: str | None = None) -> dict[str, str]:
@@ -295,8 +310,12 @@ def _requires(root: Path, python_version: str | None = None) -> dict[str, str]:
         raise WorkspaceError(f"{path}: {e}") from e
     # str(), as load_workspace does: a version written unquoted would load as a number.
     requires = {name: str(version) for name, version in data.get("requires", {}).items()}
+    try:
+        requires = merge(requires, data.get("package-bounds", {}))
+    except ValueError as exc:
+        raise WorkspaceError(str(exc)) from None
     checked = {**requires, "python": python_version} if python_version else requires
-    if problems := requires_problems(checked):
+    if problems := requires_problems(checked, allow_bounds=True):
         raise WorkspaceError(f"{path}: {problems[0]}; fix it, then run this again")
     return requires
 

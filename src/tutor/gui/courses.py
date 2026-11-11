@@ -72,6 +72,47 @@ class Run:
 
 
 @dataclass(frozen=True)
+class Attempt:
+    """One logged run of one exercise, for its page (owner, 2026-11-10: the runs were only
+    on the course page, a step away from the exercise). Never `first_error`, as for Run: a
+    hand-calculation exercise's answer can sit in it; the task's log or the terminal has
+    it where the learner ran the tests."""
+
+    time: str  # local time, "2026-11-04 12:09:33"
+    result: str  # passed or failed
+    passed: int
+    failed: int
+    errors: int
+    skipped: int
+    duration_s: float | None
+    code: str | None  # the snapshot of the learner's file, relative to attempts/
+
+
+def exercise_attempts(course: Course, batch: str, exercise: str) -> list[Attempt]:
+    """The exercise's logged runs, newest first; a hint request (no result) is not a run."""
+    records = report.collect(course.workspace.root)
+    found = []
+    for line in records.attempts:
+        if (line.get("batch"), line.get("exercise")) != (batch, exercise) or not line.get("result"):
+            continue
+        if not isinstance(line.get("time"), str):
+            continue
+        found.append(Attempt(line["time"][:19].replace("T", " "), str(line["result"]),
+                             _count(line, "passed"), _count(line, "failed"),
+                             _count(line, "errors"), _count(line, "skipped"),
+                             line.get("duration_s") if isinstance(line.get("duration_s"),
+                                                                  (int, float)) else None,
+                             str(line["code"]) if isinstance(line.get("code"), str) else None))
+    found.sort(key=lambda a: a.time, reverse=True)
+    return found
+
+
+def _count(line: dict, key: str) -> int:
+    value = line.get(key)
+    return value if isinstance(value, int) else 0
+
+
+@dataclass(frozen=True)
 class CourseView:
     course: Course
     batches: list[BatchView]  # newest first
@@ -178,7 +219,7 @@ def container_problem(course: Course) -> str | None:
         return None  # the command reports it
     if runner != "container":
         return None
-    image = image_recipe.image_name(course.workspace.course, course.workspace.requires)
+    image = image_recipe.image_name(course.workspace.course, course.workspace.effective_requires)
     if container.image_problem(image) is None:  # waits while a stopped VM wakes
         return None
     if shutil.which("docker") is None:

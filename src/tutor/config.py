@@ -8,9 +8,11 @@ from __future__ import annotations
 
 import os
 import tomllib
-from collections.abc import Mapping
+from collections.abc import Mapping, MutableMapping
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from tutor import package_bounds
 
 WORKSPACE_FILE = "workspace.toml"
 
@@ -36,6 +38,12 @@ class Workspace:
     requires: dict[str, str]
     lecture_dir: Path
     languages: object = field(default_factory=dict)
+    bounds: dict[str, str] = field(default_factory=dict)
+
+    @property
+    def effective_requires(self) -> dict[str, str]:
+        """Prefixes and explicitly separate numeric package bounds, never hidden overrides."""
+        return package_bounds.merge(self.requires, self.bounds)
 
     # Subfolders are only computed here; code that writes into them creates them on demand.
     @property
@@ -49,11 +57,14 @@ class Workspace:
         return self.root / "attempts"
 
 
-def load_env(path: Path | None = None) -> None:
+def load_env(path: Path | None = None, *, environ: MutableMapping[str, str] | None = None) -> None:
     """Load KEY=VALUE lines from `.env` (default: current directory) into os.environ.
 
     Variables already set in the environment win, so a shell export overrides `.env`.
+    An explicit target mapping lets an opt-in caller read credentials without changing
+    the process environment inherited by tools it launches.
     """
+    target = os.environ if environ is None else environ
     path = Path(".env") if path is None else path
     if not path.is_file():
         return
@@ -63,7 +74,7 @@ def load_env(path: Path | None = None) -> None:
             continue
         key, value = line.split("=", 1)
         # setdefault: only fill in variables the shell has not set already.
-        os.environ.setdefault(key.strip(), value.strip().strip("'\""))
+        target.setdefault(key.strip(), value.strip().strip("'\""))
 
 
 def load_workspace(environ: Mapping[str, str] | None = None) -> Workspace:
@@ -92,6 +103,10 @@ def load_workspace(environ: Mapping[str, str] | None = None) -> Workspace:
         raise WorkspaceError(f"{toml_path} has no `course` entry.")
     # str(): a version written unquoted in TOML (java = 17) would load as an int.
     requires = {name: str(version) for name, version in data.get("requires", {}).items()}
+    try:
+        package_bounds.merge(requires, data.get("package-bounds", {}))
+    except ValueError as exc:
+        raise WorkspaceError(str(exc)) from None
 
     raw_lectures = env.get("LECTURE_DIR")
     if raw_lectures:
@@ -103,7 +118,7 @@ def load_workspace(environ: Mapping[str, str] | None = None) -> Workspace:
     else:
         lecture_dir = root / "lectures"  # not created yet: nothing to check
     return Workspace(root=root, course=data["course"], requires=requires, lecture_dir=lecture_dir,
-                     languages=data.get("languages", {}))
+                     languages=data.get("languages", {}), bounds=data.get("package-bounds", {}))
 
 
 def _private_dir(raw: str, var: str) -> Path:

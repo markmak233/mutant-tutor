@@ -6,14 +6,30 @@ from __future__ import annotations
 
 from flask import Flask, current_app, redirect, render_template, request, url_for
 
-from tutor.gui import courses, keys, llm_settings
+from tutor.gui import catalog, courses, keys, llm_settings
 
 
-def keys_page(problems: list[str], code: int = 200, name: str = ""):
-    found = courses.find_courses(current_app.config["ROOT"])[0]
-    return render_template("keys.html", problems=problems, name=name,
-                           rows=keys.rows(current_app.config["ENV_FILE"],
-                                          llm_settings.key_users(found))), code
+def keys_page(problems: list[str], code: int = 200, name: str = "", provider: str = ""):
+    """The page. `provider`: an id from the kept models.dev list (catalog.py, the one the
+    Models page fills a new model from); choosing it fills the Add form's name with the
+    variable that provider's key goes in (owner, 2026-11-10). Only an id found in the list
+    is used, and nothing is asked of the network here. `name`: a name to start the form
+    with, as the Models page's "not set" links give it."""
+    root = current_app.config["ROOT"]
+    found = courses.find_courses(root)[0]
+    rows = keys.rows(current_app.config["ENV_FILE"], llm_settings.key_users(found))
+    listed = catalog.load(root)
+    # A server on this machine has no key; a variable name the form would refuse is left out.
+    providers = [p for p in listed.providers if keys.NAME.match(p.key_env)] if listed else []
+    chosen = next((p for p in providers if p.id == provider), None)
+    if chosen:
+        name = chosen.key_env
+    # The chosen name's key is in .env already: the form says so and replaces it, instead
+    # of looking as if a second key were being added.
+    existing = next((r for r in rows if r.name == name and r.is_set), None)
+    return render_template("keys.html", problems=problems, name=name, rows=rows,
+                           providers=providers, chosen=chosen, existing=existing,
+                           first_course=found[0].folder if found else None), code
 
 
 def register(app: Flask) -> None:
@@ -21,7 +37,11 @@ def register(app: Flask) -> None:
 
     @app.get("/keys/")
     def key_list():
-        return keys_page([])
+        """?provider=ID fills the Add form's name from the kept list; ?name=NAME starts it
+        with that name (a valid one only). Neither changes anything."""
+        name = request.args.get("name", "")
+        return keys_page([], name=name if keys.NAME.match(name) else "",
+                         provider=request.args.get("provider", ""))
 
     @app.post("/keys/set")
     def set_key():

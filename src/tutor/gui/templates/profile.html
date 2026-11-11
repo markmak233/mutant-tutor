@@ -2,79 +2,102 @@
 {# One model: a profile in [llm.profiles]. The key itself stays in .env; this names it.
    A new one can be filled from the models.dev catalog above the form (catalog.py): choose
    a provider (GET, so the page can be reloaded), then "Use" on one of its models fills the
-   form, which is saved only by its own Save. The catalog is downloaded on a click only. #}
+   form, which is saved only by its own Save. The catalog is downloaded on a click only.
+   A server on this machine (catalog.LOCAL) is listed without the catalog: its models are
+   asked of the server itself, at its default address.
+   Text through _() (gui/i18n.py): provider ids, model names, URLs, variable names and
+   file names stay as they are; a link or <code> inside a sentence is passed in as a
+   captured block, so the sentence is one string for the translator. #}
 {% from "_macros.html" import action, chip %}
-{% block title %}{{ original or "New model" }} · {{ course.workspace.course }}{% endblock %}
+{% set page_title = original or _("New model") %}
+{% block title %}{{ page_title }} · {{ course.workspace.course }}{% endblock %}
 {% block crumbs %}
 <a href="{{ url_for('course', name=course.folder) }}">{{ course.workspace.course }}</a>
-<a href="{{ url_for('models', name=course.folder) }}">Models</a>
-<span>{{ original or "New model" }}</span>
+<a href="{{ url_for('models', name=course.folder) }}">{{ _("Models") }}</a>
+<span>{{ page_title }}</span>
 {% endblock %}
 {% block content %}
-<h1>{{ original or "New model" }}</h1>
+<h1>{{ page_title }}</h1>
 {% if problems %}
 <ul class="notice notice-bad form-problems">{% for line in problems %}<li>{{ line }}</li>{% endfor %}</ul>
 {% endif %}
+{% set models_dev %}<a href="https://models.dev" rel="noopener noreferrer" target="_blank">models.dev</a>{% endset %}
 {% if shelf %}
 <section class="catalog">
-  <h2>Fill from models.dev</h2>
+  <h2>{{ _("Fill from a list") }}</h2>
   {% set found = shelf.catalog %}
-  {% if not found %}
-  {% if shelf.stale %}<p class="notice notice-bad">The list kept ({{ shelf.stale }}) came from an older version of this tool, which now keeps more of it (who made each model): fetch it again.</p>{% endif %}
-  <p class="muted">A public list of AI providers and their models (<a href="https://models.dev" rel="noopener noreferrer" target="_blank">models.dev</a>, MIT): base URL, key name, release dates, prices. It is downloaded only when you click, and nothing of your courses is sent. Or fill the form below by hand.</p>
-  {{ action(url_for('refresh_catalog', name=course.folder), "Fetch the list") }}
-  {% else %}
+  {% set sel = shelf.provider.id if shelf.provider else "" %}
   <form method="get" action="{{ url_for('new_model', name=course.folder) }}" class="catalog-pick">
-    <label>Provider
-      <select name="catalog">
-        <optgroup label="Common">
-        {% for p in found.providers if p.id in common %}<option value="{{ p.id }}"{% if shelf.provider and shelf.provider.id == p.id %} selected{% endif %}>{{ p.name }} ({{ p.id }})</option>{% endfor %}
+    <label>{{ _("Provider") }}
+      <select name="catalog" hx-get="{{ url_for('local_address', name=course.folder) }}" hx-trigger="change" hx-target="#local-at" hx-swap="outerHTML">
+        <optgroup label="{{ _('On this machine') }}">
+        {% for id, label in local.items() %}<option value="{{ id }}"{% if sel == id %} selected{% endif %}>{{ label }} ({{ id }})</option>{% endfor %}
         </optgroup>
-        <optgroup label="All the others">
-        {% for p in found.providers if p.id not in common %}<option value="{{ p.id }}"{% if shelf.provider and shelf.provider.id == p.id %} selected{% endif %}>{{ p.name }} ({{ p.id }})</option>{% endfor %}
+        {% if found %}
+        <optgroup label="{{ _('Common') }}">
+        {% for p in found.providers if p.id in common %}<option value="{{ p.id }}"{% if sel == p.id %} selected{% endif %}>{{ p.name }} ({{ p.id }})</option>{% endfor %}
         </optgroup>
+        <optgroup label="{{ _('All the others') }}">
+        {% for p in found.providers if p.id not in common %}<option value="{{ p.id }}"{% if sel == p.id %} selected{% endif %}>{{ p.name }} ({{ p.id }})</option>{% endfor %}
+        </optgroup>
+        {% endif %}
       </select>
     </label>
-    <button type="submit" class="small">List its models</button>
-    <button type="submit" class="small" formmethod="post" formaction="{{ url_for('refresh_catalog', name=course.folder) }}">Refresh the list</button>
+    {% with at_provider=(shelf.provider if sel in local else none), at=shelf.at %}{% include "_local_at.html" %}{% endwith %}
+    <button type="submit" class="small">{{ _("List its models") }}</button>
+    {% if found %}<button type="submit" class="small" formmethod="post" formaction="{{ url_for('refresh_catalog', name=course.folder) }}">{{ _("Refresh the list") }}</button>{% endif %}
   </form>
-  <p class="muted">From <a href="https://models.dev" rel="noopener noreferrer" target="_blank">models.dev</a>, fetched {{ found.fetched }}: {{ found.providers | length }} providers this tool can call; {{ found.left_out }} more need their own SDK and are not listed.</p>
+  <p class="muted">{{ _("A server on this machine (Ollama, LM Studio, llama.cpp, vLLM) lists the models it has, at its usual port; change the address beside it for another port, then list again. A server in WSL is reached at localhost too (WSL 2 forwards it).") }}</p>
+  {% if not found %}
+  {% if shelf.stale %}<p class="notice notice-bad">{{ _("The list kept (%(when)s) came from an older version of this tool, which now keeps more of it: fetch it again.", when=shelf.stale) }}</p>{% endif %}
+  <p class="muted">{{ _("The cloud providers come from a public list (%(site)s, MIT): base URL, key name, release dates, prices. It is downloaded only when you click, and nothing of your courses is sent. Or fill the form below by hand.", site=models_dev) }}</p>
+  {{ action(url_for('refresh_catalog', name=course.folder), _("Fetch the list")) }}
+  {% else %}
+  <p class="muted">{{ _("From %(site)s, fetched %(when)s: %(n)s providers this tool can call; %(left)s more need their own SDK and are not listed.", site=models_dev, when=found.fetched, n=found.providers | length, left=found.left_out) }}</p>
+  {% if found.url_changes %}
+  <p class="notice notice-bad">{{ _("Since the fetch before, the list gives another address for:") }}
+    {% for id, before, now in found.url_changes %}<br><code>{{ id }}</code>: <code>{{ before }}</code> → <code>{{ now }}</code>{% endfor %}
+    <br>{{ _("A provider does move; a list can also be tampered with. Check the new domain on the provider's own site before using it.") }}</p>
+  {% endif %}
+  {% endif %}
   {% set p = shelf.provider %}
   {% if p %}
-  <p><strong>{{ p.name }}</strong> · <code>{{ p.base_url }}</code> ·
-    {% if p.key_env %}key <code>{{ p.key_env }}</code>
-      {% if shelf.key_set %}{{ chip("ok", "in .env") }}{% else %}{{ chip("missing", "not in .env") }} <a href="{{ url_for('key_list') }}">add it on the Keys page</a>{% endif %}
-    {% else %}no key: a server on this machine{% endif %}
-    {% if p.doc %}· <a href="{{ p.doc }}" rel="noopener noreferrer" target="_blank">its models and prices</a>{% endif %}</p>
-  {% if shelf.models %}
+  <p><strong>{{ p.name }}</strong> · <code>{{ p.base_url }}</code>{% if not p.own_url %} <span class="muted">{{ _("(address from models.dev: check the domain before saving)") }}</span>{% endif %} ·
+    {% if p.key_env %}{{ _("key") }} <code>{{ p.key_env }}</code>
+      {% if shelf.key_set %}{{ chip("ok", _("in .env")) }}{% else %}{{ chip("missing", _("not in .env")) }} <a href="{{ url_for('key_list', provider=p.id) }}#add-key">{{ _("add it on the Keys page") }}</a>{% endif %}
+    {% else %}{{ _("no key: a server on this machine") }}{% endif %}
+    {% if p.doc %}· <a href="{{ p.doc }}" rel="noopener noreferrer" target="_blank">{% if p.id in local %}{{ _("its docs") }}{% else %}{{ _("its models and prices") }}{% endif %}</a>{% endif %}</p>
+  {% if shelf.problem %}
+  <p class="notice notice-bad">{{ shelf.problem }}</p>
+  {% elif shelf.models %}
   <table class="catalog-models">
-    <thead><tr><th>Model</th><th>Released</th><th>Thinking</th><th>Reads images</th><th class="num">Context</th><th class="num">USD per 1M tokens, in · out</th><th></th></tr></thead>
+    <thead><tr><th>{{ _("Model") }}</th><th>{{ _("Released") }}</th><th>{{ _("Thinking") }}</th><th>{{ _("Reads images") }}</th><th class="num">{{ _("Context") }}</th><th class="num">{{ _("USD per 1M tokens, in · out") }}</th><th></th></tr></thead>
     <tbody>
     {% for m in shelf.models %}
       <tr{% if shelf.model and shelf.model.id == m.id %} class="chosen"{% endif %}>
         <td><code>{{ m.id }}</code>{% if m.name != m.id %} <span class="muted">{{ m.name }}</span>{% endif %}</td>
         <td>{{ m.released }}</td>
-        <td>{{ m.thinking }}</td>
-        <td>{{ "yes" if m.image else "" }}</td>
+        <td>{{ _(m.thinking) }}</td>
+        <td>{{ _("yes") if m.image else "" }}</td>
         <td class="num">{{ m.context_text }}</td>
         <td class="num">{{ m.price_text }}</td>
-        <td><a href="{{ url_for('new_model', name=course.folder, catalog=p.id, model=m.id) }}#model-form">Use</a></td>
+        <td><a href="{{ url_for('new_model', name=course.folder, catalog=p.id, model=m.id, **({'at': shelf.at} if shelf.at else {})) }}#model-form">{{ _("Use") }}</a></td>
       </tr>
     {% endfor %}
     </tbody>
   </table>
-  {% if shelf.hidden %}<p><a href="{{ url_for('new_model', name=course.folder, catalog=p.id, all=1) }}">Show all {{ shelf.models | length + shelf.hidden }} models</a> <span class="muted">(the newest {{ shelf.models | length }} are listed)</span></p>{% endif %}
+  {% if shelf.hidden %}<p><a href="{{ url_for('new_model', name=course.folder, catalog=p.id, all=1, **({'at': shelf.at} if shelf.at else {})) }}">{{ _("Show all %(n)s models", n=shelf.models | length + shelf.hidden) }}</a> <span class="muted">{{ _("(the newest %(n)s are listed)", n=shelf.models | length) }}</span></p>{% endif %}
   {% else %}
-  <p class="muted">models.dev lists no model of this provider that is still offered.</p>
-  {% endif %}
+  <p class="muted">{{ _("models.dev lists no model of this provider that is still offered.") }}</p>
   {% endif %}
   {% endif %}
 </section>
 {% if shelf.model %}
-<div class="notice notice-ok">Filled from models.dev with <code>{{ shelf.model.id }}</code>: check it, change what you like (a newer model's name, say), then Save.
+{% set code_model %}<code>{{ shelf.model.id }}</code>{% endset %}
+<div class="notice notice-ok">{% if shelf.provider.id in local %}{{ _("Filled from the server's list with %(model)s: check it, change what you like (a newer model's name, say), then Save.", model=code_model) }}{% else %}{{ _("Filled from models.dev with %(model)s: check it, change what you like (a newer model's name, say), then Save.", model=code_model) }}{% endif %}
   {% for note in shelf.notes %}<br>{{ note }}{% endfor %}</div>
 {% endif %}
-<h2>{{ "Or by hand" if not shelf.model else "The model" }}</h2>
+<h2>{{ _("Or by hand") if not shelf.model else _("The model") }}</h2>
 {% endif %}
 {# The fields follow the provider (owner, 2026-11-07): a provider llm.py knows shows its own
    base URL (saving leaves it out of the file) and its way to turn thinking off in grey;
@@ -86,72 +109,78 @@
 <form method="post" action="{{ url_for('save_model', name=course.folder) }}" class="form" id="model-form">
   {# Enter in a field presses the form's first submit button: this Save, off screen, so
      Enter still saves although Apply comes before the visible Save. #}
-  <button type="submit" class="enter-saves" tabindex="-1" aria-hidden="true">Save</button>
+  <button type="submit" class="enter-saves" tabindex="-1" aria-hidden="true">{{ _("Save") }}</button>
   {% if original %}<input type="hidden" name="original" value="{{ original }}">{% endif %}
-  <label class="field">Name
-    <span class="muted">what the roles call it, any short name, e.g. ds-flash{% if original %}; renaming moves its roles with it{% endif %}</span>
+  <label class="field">{{ _("Name") }}
+    <span class="muted">{{ _("what the roles call it, any short name, e.g. ds-flash") }}{% if original %}{{ _("; renaming moves its roles with it") }}{% endif %}</span>
     <input type="text" name="name" value="{{ values.name }}" required maxlength="40" pattern="[a-z0-9][a-z0-9._\-]*" autocomplete="off">
   </label>
   <div class="field">
-    <label for="provider">Provider</label>
-    <span class="muted">deepseek, glm, openai, lmstudio bring their own address and way to turn thinking off; custom: any other OpenAI-compatible server; assistant: a coding assistant answers request files. The fields below follow it (Apply, if they do not).</span>
+    <label for="provider">{{ _("Provider") }}</label>
+    <span class="muted">{{ _("deepseek, glm, openai, lmstudio bring their own address and way to turn thinking off; custom: any other OpenAI-compatible server; assistant: a coding assistant answers request files. The fields below follow it (Apply, if they do not).") }}</span>
     <span class="inline-form">
-      <select name="provider" id="provider" hx-get="{{ apply_url }}" hx-trigger="change" hx-target="#provider-fields" hx-select="#provider-fields" hx-swap="outerHTML" hx-include="closest form" hx-vals='{"apply": "1"}'>{% if not chosen %}<option value="" selected>choose one</option>{% endif %}{% for p in providers %}<option value="{{ p }}"{% if chosen == p %} selected{% endif %}>{{ p }}</option>{% endfor %}</select>
-      <button type="submit" formmethod="get" formaction="{{ apply_url }}" formnovalidate name="apply" value="1">Apply</button>
+      <select name="provider" id="provider" hx-get="{{ apply_url }}" hx-trigger="change" hx-target="#provider-fields" hx-select="#provider-fields" hx-swap="outerHTML" hx-include="closest form" hx-vals='{"apply": "1"}'>{% if not chosen %}<option value="" selected>{{ _("choose one") }}</option>{% endif %}{% for p in providers %}<option value="{{ p }}"{% if chosen == p %} selected{% endif %}>{{ p }}</option>{% endfor %}</select>
+      <button type="submit" formmethod="get" formaction="{{ apply_url }}" formnovalidate name="apply" value="1">{{ _("Apply") }}</button>
     </span>
   </div>
   {# The fields that follow the provider: htmx swaps this part when it changes (the page
      as Apply would send it, cut to this part), so no click is needed. #}
   <div id="provider-fields">
-  <label class="field">Model
-    <span class="muted">{% if chosen == "assistant" %}the assistant's name; empty: this model's name{% else %}the provider's exact name for it, e.g. deepseek-flash; the list above has each provider's current names{% endif %}</span>
+  <label class="field">{{ _("Model") }}
+    <span class="muted">{% if chosen == "assistant" %}{{ _("the assistant's name; empty: this model's name") }}{% else %}{{ _("the provider's exact name for it, e.g. deepseek-flash; the list above has each provider's current names") }}{% endif %}</span>
     <input type="text" name="model" value="{{ values.model }}" maxlength="120" autocomplete="off">
   </label>
   {% if chosen == "assistant" %}
-  <label class="field">Key's name <span class="muted">not used: an assistant answers files, with no key</span>
+  <label class="field">{{ _("Key's name") }} <span class="muted">{{ _("not used: an assistant answers files, with no key") }}</span>
     <input type="text" name="api_key_env" value="" disabled></label>
-  <label class="field">Base URL <span class="muted">not used: no server</span>
+  <label class="field">{{ _("Base URL") }} <span class="muted">{{ _("not used: no server") }}</span>
     <input type="text" name="base_url" value="" disabled></label>
   {% else %}
-  <label class="field">Key's name
-    <span class="muted">the variable in .env that holds its key, e.g. DEEPSEEK_API_KEY; empty for a model on this machine. Never the key itself.</span>
+  <label class="field">{{ _("Key's name") }}
+    <span class="muted">{{ _("the variable in .env that holds its key, e.g. DEEPSEEK_API_KEY; empty for a model on this machine. Never the key itself.") }}</span>
     <input type="text" name="api_key_env" value="{{ values.api_key_env }}" maxlength="64" pattern="[A-Z][A-Z0-9_]*" autocomplete="off">
   </label>
-  <label class="field">Base URL
+  <label class="field">{{ _("Base URL") }}
     {% if builtin and builtin.base_url %}
-    <span class="muted">{{ chosen }}'s own address; change it only for another site of the same provider, such as z.ai for glm</span>
+    <span class="muted">{{ _("%(provider)s's own address; change it only for another site of the same provider, such as z.ai for glm", provider=chosen) }}</span>
     <input type="text" name="base_url" value="{{ values.base_url or builtin.base_url }}" maxlength="200" autocomplete="off">
     {% elif chosen == "custom" %}
-    <span class="muted">the server's OpenAI-compatible address: the part before /chat/completions</span>
+    <span class="muted">{{ _("the server's OpenAI-compatible address: the part before /chat/completions") }}</span>
     <input type="text" name="base_url" value="{{ values.base_url }}" placeholder="https://api.example.com/v1" required maxlength="200" autocomplete="off">
     {% else %}
-    <span class="muted">choose a provider and click Apply: a provider this tool knows fills in its own</span>
+    <span class="muted">{{ _("choose a provider and click Apply: a provider this tool knows fills in its own") }}</span>
     <input type="text" name="base_url" value="{{ values.base_url }}" maxlength="200" autocomplete="off">
     {% endif %}
   </label>
   {% endif %}
-  <details{% if values.reasoning_effort or values.reasoning_effort_on or values.timeout_s %} open{% endif %}>
-    <summary>More</summary>
+  <details{% if values.reasoning_effort or values.reasoning_effort_on or values.timeout_s or values.temperature %} open{% endif %}>
+    <summary>{{ _("More") }}</summary>
     {% if chosen == "assistant" %}
-    <p class="muted">Thinking and the time limit are the assistant's own: nothing to set here.</p>
+    <p class="muted">{{ _("Thinking and the time limit are the assistant's own: nothing to set here.") }}</p>
     {% else %}
-    <label class="field">Reasoning effort with thinking off
+    <label class="field">{{ _("Reasoning effort with thinking off") }}
       {% if builtin and builtin.thinking_off %}
-      <span class="muted">empty: {{ chosen }}'s own way, in grey; fill only to send another</span>
-      <input type="text" name="reasoning_effort" value="{{ values.reasoning_effort }}" placeholder="built in: {{ builtin.thinking_off }}" maxlength="20" autocomplete="off">
+      <span class="muted">{{ _("empty: %(provider)s's own way, in grey; fill only to send another", provider=chosen) }}</span>
+      <input type="text" name="reasoning_effort" value="{{ values.reasoning_effort }}" placeholder="{{ _('built in: %(way)s', way=builtin.thinking_off) }}" maxlength="20" autocomplete="off">
       {% else %}
-      <span class="muted">the lowest reasoning_effort the model takes, e.g. none or low; empty: nothing is sent, so a thinking model thinks on every call</span>
-      <input type="text" name="reasoning_effort" value="{{ values.reasoning_effort }}" placeholder="none or low" maxlength="20" autocomplete="off">
+      <span class="muted">{{ _("the lowest reasoning_effort the model takes, e.g. none or low; empty: nothing is sent, so a thinking model thinks on every call") }}</span>
+      <input type="text" name="reasoning_effort" value="{{ values.reasoning_effort }}" placeholder="{{ _('none or low') }}" maxlength="20" autocomplete="off">
       {% endif %}
     </label>
-    <label class="field">Reasoning effort with thinking on <span class="muted">empty: the model's default depth</span>
+    <label class="field">{{ _("Reasoning effort with thinking on") }} <span class="muted">{{ _("empty: the model's default depth") }}</span>
       <input type="text" name="reasoning_effort_on" value="{{ values.reasoning_effort_on }}" maxlength="20" autocomplete="off"></label>
-    <label class="field">Time limit per call, seconds <span class="muted">empty: 300; a new model starts at 900, as plan and generate calls with thinking can run long</span>
+    <label class="field">{{ _("Time limit per call, seconds") }} <span class="muted">{{ _("empty: 300; a new model starts at 900, as plan and generate calls with thinking can run long") }}</span>
       <input type="number" name="timeout_s" value="{{ values.timeout_s }}" min="1" max="3600"></label>
+    {# llm.MODEL_TEMPERATURE: the profile's one value; empty leaves the field out of the file. #}
+    <label class="field">{{ _("Temperature") }} <span class="muted">{{ _("a model that refuses a temperature (its error says so, e.g. Claude Opus 5.5) needs \"the model's own\"") }}</span>
+      <select name="temperature">
+        <option value=""{% if not values.temperature %} selected{% endif %}>{{ _("0: the steadiest answers (sent with every call)") }}</option>
+        <option value="default"{% if values.temperature == "default" %} selected{% endif %}>{{ _("the model's own: no temperature is sent") }}</option>
+      </select></label>
     {% endif %}
   </details>
   </div>
-  <div class="actions"><button type="submit" class="primary">Save</button>
-    <a class="button" href="{{ url_for('models', name=course.folder) }}">Cancel</a></div>
+  <div class="actions"><button type="submit" class="primary">{{ _("Save") }}</button>
+    <a class="button" href="{{ url_for('models', name=course.folder) }}">{{ _("Cancel") }}</a></div>
 </form>
 {% endblock %}

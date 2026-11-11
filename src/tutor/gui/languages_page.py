@@ -23,6 +23,7 @@ from tutor import languages, workspace
 from tutor.gui import toml_edit
 from tutor.gui.courses import Course
 from tutor.gui.environment import check_requires, runner, save_requires
+from tutor.gui.i18n import gettext_ as _
 from tutor.gui.toml_edit import put
 from tutor.testkit_c import DEFAULT_FLAGS, check_flags
 
@@ -61,7 +62,7 @@ def save_language(course: Course, c: bool, flags_text: str, headers_text: str) -
     go; the rest of [requires] stays."""
     data = _data(course)
     if not isinstance(data.get("languages", {}), dict):
-        return ["[languages] in workspace.toml is not a table of languages: fix it by hand."]
+        return [_("[languages] in workspace.toml is not a table of languages: fix it by hand.")]
     flags = flags_text.split()
     headers = headers_text.replace(",", " ").split()
     problems = []
@@ -165,9 +166,9 @@ def toolchains(course: Course) -> set[str]:
 
 
 def package_rows(course: Course) -> list[tuple[str, str]]:
-    """[requires] without the language list's rows: Python's packages and tools."""
+    """Both declaration tables, without toolchains already shown in the language list."""
     shown = toolchains(course)
-    return [(n, v) for n, v in course.workspace.requires.items() if n not in shown]
+    return [(n, v) for n, v in course.workspace.effective_requires.items() if n not in shown]
 
 
 def with_toolchains(course: Course, names: list[str], versions: list[str]
@@ -186,7 +187,8 @@ def with_toolchains(course: Course, names: list[str], versions: list[str]
 def save_language_versions(course: Course, versions: dict[str, str]) -> list[str]:
     """The language list's versions ({toolchain: version as typed}) into [requires], by the
     same rules as the packages list."""
-    table = dict(course.workspace.requires)
+    # Editing a toolchain cannot remove bounds in the packages-and-tools list.
+    table = dict(course.workspace.effective_requires)
     for toolchain, version in versions.items():
         if toolchain in toolchains(course):
             table[toolchain] = version.strip()
@@ -199,14 +201,14 @@ def add_language(course: Course, key: str) -> list[str]:
     default), `gcc` in [requires] and VS Code's C settings; its own settings are then set
     below the list."""
     if key != languages.C.key:
-        return [f"{key!r} is not a language that can be added."]
+        return [_("%(key)r is not a language that can be added.") % {"key": key}]
     view = language_view(course)
     return save_language(course, True, view.flags, view.headers)
 
 
 def remove_language(course: Course, key: str) -> list[str]:
     if key != languages.C.key:
-        return [f"{key!r} is not a language that can be removed."]
+        return [_("%(key)r is not a language that can be removed.") % {"key": key}]
     return save_language(course, False, "", "")
 
 

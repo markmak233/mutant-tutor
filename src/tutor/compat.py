@@ -27,6 +27,8 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from tutor import package_bounds
+
 
 @dataclass(frozen=True)
 class Companion:
@@ -102,9 +104,18 @@ def conflicts(requires: Mapping[str, str], python: str) -> list[str]:
             f"{rule.why}"
             for rule in CONFLICTS
             if rule.package in requires
-            and requires[rule.package].split(".")[:len(rule.version.split("."))]
-            == rule.version.split(".")
+            and _family(requires[rule.package], rule.version)
             and _minor(python) >= _minor(rule.python)]
+
+
+def _family(required: str, prefix: str) -> bool:
+    """Numeric bounds cannot bypass a known bad family that they still admit."""
+    if required.startswith(("=", "!", "<", ">", "~")):
+        try:
+            return package_bounds.intersects_prefix(required, prefix)
+        except ValueError:
+            return False  # malformed declarations are reported by requires_problems
+    return required.split(".")[:len(prefix.split("."))] == prefix.split(".")
 
 
 # Standard-library modules each Python removed, by the version that removed them (What's New

@@ -1,4 +1,4 @@
-"""Wire the nodes into LangGraph graphs. The only module that imports langgraph.
+"""Wire nodes into LangGraph graphs; model-facing nodes stay independent of the scheduler.
 
 One item (`oracle` passes the draft through when no `oracle` role is set, and goes
 straight to repair or discard when the oracle model could not write the oracle):
@@ -33,6 +33,7 @@ from tutor.container import check_course
 from tutor.exchange import AwaitingAnswer
 from tutor.graph import batch, drafts, nodes, oracle
 from tutor.graph.nodes import Deps
+from tutor.graph.plan_selection import selected_rows
 from tutor.graph.state import BatchState, ItemState
 
 
@@ -80,7 +81,7 @@ def build_batch(deps: Deps, checkpointer):
         # One lecture, then one kind of exercise, after another: an item started after
         # another with the same course pages (and example) finds them in the provider's
         # prompt cache.
-        ordered = sorted(state["plan"], key=lambda p: (p["lecture"], p["framework"],
+        ordered = sorted(selected_rows(state), key=lambda p: (p["lecture"], p["framework"],
                                                        p["interface"]))
         return [Send("item", {"item": p}) for p in ordered]
 
@@ -121,7 +122,7 @@ def build_batch(deps: Deps, checkpointer):
     def after_answers(state: BatchState):
         if found := waiting(state):
             ids = {r["id"] for r in found}
-            return [Send("item", {"item": p}) for p in state["plan"] if p["id"] in ids]
+            return [Send("item", {"item": p}) for p in selected_rows(state) if p["id"] in ids]
         return "collect"
 
     graph = StateGraph(BatchState)

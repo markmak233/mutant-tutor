@@ -112,6 +112,8 @@ def test_generated_text_is_escaped(client):
 
     assert "<script>alert(1)</script>" not in page
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in page
+    # The question keeps its own direction when the pages are right to left (i18n.py).
+    assert '<article class="question" dir="ltr">' in page
 
 
 def test_headers_forbid_inline_scripts_and_framing(client):
@@ -464,17 +466,45 @@ def test_validate_all_starts_one_validation_per_listed_exercise(root, monkeypatc
     assert response.headers["Location"] == "/c/demo-course/tasks/20260102-100000-abcdef/"
 
 
-def test_a_second_task_goes_to_the_running_one(root, monkeypatch):
-    running = tasks.Task("20260102-100000-abcdef", root, "Validate", "running", "", None, [],
-                         [], 1)
-
-    def busy(*args, **kwargs):
-        raise tasks.TaskBusy(running)
-
-    monkeypatch.setattr(tasks, "start", busy)
+def test_a_second_task_is_queued_and_the_page_says_so(root, monkeypatch):
+    """A course runs one task at a time; a second one waits in the queue (owner,
+    2026-11-09) instead of being refused."""
+    queued = tasks.Task("20260102-100001-abcdef", root, "Validate", tasks.QUEUED, "", None, [],
+                        [], None)
+    monkeypatch.setattr(tasks, "start", lambda *a, **k: queued)
     response = post(_browser(root, FakeLauncher()), f"/c/demo-course/b/{BATCH}/validate")
 
-    assert response.headers["Location"].endswith("/tasks/20260102-100000-abcdef/?notice=busy")
+    assert response.headers["Location"].endswith("/tasks/20260102-100001-abcdef/?notice=queued")
+
+
+def test_a_queued_task_shows_its_place_and_can_be_removed(root, monkeypatch):
+    course_root = root / "demo-course"
+    running = tasks.Task("20260102-100000-abcdef", course_root, "First", tasks.RUNNING, "",
+                         None, [["x"]], [], 1)
+    waiting = tasks.Task("20260102-100001-abcdef", course_root, "Second", tasks.QUEUED, "",
+                         None, [["y"]], [], None)
+    monkeypatch.setattr(tasks, "list_tasks", lambda course_root: [waiting, running])
+    monkeypatch.setattr(tasks, "get", lambda course_root, task_id:
+                        {running.id: running, waiting.id: waiting}.get(task_id))
+    monkeypatch.setattr(tasks, "kick", lambda course_root: None)
+    client = _browser(root, FakeLauncher())
+
+    page = client.get("/c/demo-course/", base_url=BASE).get_data(as_text=True)
+    assert "<h2>Queued</h2>" in page and ">Second</a>" in page and ">Remove</button>" in page
+
+    task_page = client.get(f"/c/demo-course/tasks/{waiting.id}/",
+                           base_url=BASE).get_data(as_text=True)
+    assert "starts after 1 task: " in task_page and ">First</a>" in task_page
+    assert "Remove from the queue" in task_page and "hx-trigger" in task_page  # polls
+
+    removed = []
+    monkeypatch.setattr(tasks, "remove", lambda task: removed.append(task.id) or True)
+    response = post(client, f"/c/demo-course/tasks/{waiting.id}/remove")
+    assert removed == [waiting.id]
+    assert response.headers["Location"] == "/c/demo-course/?notice=removed"
+    monkeypatch.setattr(tasks, "remove", lambda task: False)
+    response = post(client, f"/c/demo-course/tasks/{waiting.id}/remove")
+    assert response.headers["Location"].endswith(f"/tasks/{waiting.id}/?notice=not-queued")
 
 
 def test_a_running_tasks_log_polls_and_a_finished_one_stops(client, root):
@@ -584,3 +614,89 @@ def test_a_c_exercise_opens_and_names_its_student_c(root):
     assert "student.py" not in page
     course = (root / "demo-course").resolve()
     assert launcher.calls == [("vscode", course, folder.resolve() / "student.c")]
+
+
+# --- "Run my tests in the container" on an exercise page (owner, 2026-11-10) -----------------
+
+
+def test_a_host_course_has_no_run_my_tests_button_and_the_route_says_why(root, monkeypatch):
+    client = _browser(root, FakeLauncher())
+    page = get(client, f"/c/demo-course/b/{BATCH}/e/ex-one/").get_data(as_text=True)
+    assert "Run my tests" not in page
+    monkeypatch.setattr(tasks, "start", lambda *a, **k: pytest.fail("nothing may start"))
+
+    response = post(client, f"/c/demo-course/b/{BATCH}/e/ex-one/test")
+
+    assert response.headers["Location"].endswith("/e/ex-one/?notice=tests-host-course")
+
+
+def test_run_my_tests_starts_tutor_test_on_the_exercise_in_the_image(root, monkeypatch):
+    _container_course(root)
+    monkeypatch.setattr(courses, "container_problem", lambda course: None)
+    started = []
+    monkeypatch.setattr(tasks, "start", lambda course_root, title, commands, env, meta=None:
+                        started.append((title, commands, meta)) or tasks.Task(
+                            "20260102-100000-abcdef", course_root, title, "running", "", None,
+                            commands, [], 1, meta or {}))
+    client = _browser(root, FakeLauncher())
+    page = get(client, f"/c/demo-course/b/{BATCH}/e/ex-one/").get_data(as_text=True)
+    assert "Run my tests in the container" in page and "<code>tutor test</code>" in page
+
+    response = post(client, f"/c/demo-course/b/{BATCH}/e/ex-one/test")
+
+    title, (command,), meta = started[0]
+    folder = (root / "demo-course" / "batches" / BATCH / "exercises" / "ex-one").resolve()
+    assert title == "Run my tests: ex-one"
+    assert command[1:] == ["-m", "tutor", "test", str(folder)]
+    assert meta == {"kind": "learner-test", "batch": BATCH, "exercise": "ex-one"}
+    assert response.headers["Location"] == "/c/demo-course/tasks/20260102-100000-abcdef/"
+    # Docker not running: nothing starts, the exercise page says so.
+    monkeypatch.setattr(courses, "container_problem", lambda course: "docker-stopped")
+    response = post(client, f"/c/demo-course/b/{BATCH}/e/ex-one/test")
+    assert response.headers["Location"].endswith("/e/ex-one/?notice=docker-stopped")
+    assert len(started) == 1
+
+
+def test_a_test_run_goes_back_to_its_exercise_and_can_run_again(root, monkeypatch):
+    """Passed: back to the exercise with a notice. Failed (tests failed): stays on its log,
+    where the failures are, with "Run again"."""
+    course_root = root / "demo-course"
+    meta = {"kind": "learner-test", "batch": BATCH, "exercise": "ex-one"}
+    passed = tasks.Task("20260102-100000-abcdef", course_root, "Run my tests: ex-one",
+                        tasks.DONE, "", "", [["x"]], [0], None, meta)
+    failed = tasks.Task("20260102-100001-abcdef", course_root, "Run my tests: ex-one",
+                        tasks.FAILED, "", "", [["x"]], [1], None, meta)
+    monkeypatch.setattr(tasks, "get", lambda root_, task_id:
+                        {passed.id: passed, failed.id: failed}.get(task_id))
+    monkeypatch.setattr(tasks, "tail", lambda task, limit=0: ("1 failed", False))
+    client = _browser(root, FakeLauncher())
+
+    polled = client.get(f"/c/demo-course/tasks/{passed.id}/log", base_url=BASE,
+                        headers={"HX-Request": "true"})
+    assert polled.headers["HX-Redirect"] == (
+        f"/c/demo-course/b/{BATCH}/e/ex-one/?notice=tests-passed")
+    page = get(client, f"/c/demo-course/tasks/{failed.id}/").get_data(as_text=True)
+    assert f'action="/c/demo-course/b/{BATCH}/e/ex-one/test"' in page  # Run again
+    assert f'href="/c/demo-course/b/{BATCH}/e/ex-one/"' in page  # Back to ex-one
+
+
+def test_an_exercise_page_lists_its_own_runs_and_the_tasks_that_ran_them(root, monkeypatch):
+    """The record is on the exercise, not only on the course page (owner, 2026-11-10)."""
+    mine = tasks.Task("20260102-100000-abcdef", root / "demo-course", "Run my tests: ex-one",
+                      tasks.DONE, "2026-01-02 10:04:00", "", [["x"]], [0], None,
+                      {"kind": "learner-test", "batch": BATCH, "exercise": "ex-one"})
+    other = tasks.Task("20260102-100001-abcdef", root / "demo-course", "Run my tests: ex-two",
+                       tasks.FAILED, "2026-01-02 10:06:00", "", [["x"]], [1], None,
+                       {"kind": "learner-test", "batch": BATCH, "exercise": "ex-two"})
+    monkeypatch.setattr(tasks, "list_tasks", lambda course_root: [other, mine])
+    client = _browser(root, FakeLauncher())
+
+    page = get(client, f"/c/demo-course/b/{BATCH}/e/ex-one/").get_data(as_text=True)
+
+    assert "<h2>Runs</h2>" in page
+    assert page.index("2026-01-02 10:05:00") < page.index("2026-01-02 10:00:00")  # newest first
+    assert "0 passed, 0 failed" in page and SECRET not in page  # counts, never the first error
+    assert f'href="/c/demo-course/tasks/{mine.id}/"' in page  # this exercise's task
+    assert mine.id in page and other.id not in page
+    course = courses.get_course(root, "demo-course")
+    assert courses.exercise_attempts(course, BATCH, "ex-two") == []  # never run

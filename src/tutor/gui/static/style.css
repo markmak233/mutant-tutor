@@ -1,18 +1,24 @@
-/* The GUI's one stylesheet, hand-written: no build step, no framework (docs/design.md). */
+/* The GUI's one stylesheet, hand-written: no build step, no framework (docs/design.md).
+   Sides are logical (start/end, inline-start, inset-inline-start), never left/right: a
+   language written right to left sets <html dir="rtl"> (gui/i18n.py) and the browser
+   mirrors the pages from that; tests/test_gui_i18n.py refuses a physical side. */
+/* Colours: each defined once as light-dark(light, dark); `color-scheme` picks the side.
+   By default both, so the system's choice applies; the footer's Theme switch (gui/theme.py)
+   sets <html data-theme="light|dark">, which fixes one side. color-scheme also turns the
+   browser's own parts (form controls, scrollbars) to match. */
 :root {
-  --bg: #f7f6f3; --card: #ffffff; --fg: #1d1d1b; --muted: #6b6b66; --line: #e3e2de;
-  --accent: #2d5fa8; --track: #e9e7e1; --code-bg: #f1f0ec;
-  --passed: #2f7a3e; --passed-bg: #e3f1e5; --started: #9a5f0c; --started-bg: #fbeedb;
-  --unlogged: #7d4291; --unlogged-bg: #f2e6f6; --bad: #b3261e; --bad-bg: #fbe4e2;
+  color-scheme: light dark;
+  --bg: light-dark(#f7f6f3, #161615); --card: light-dark(#ffffff, #1f1f1d);
+  --fg: light-dark(#1d1d1b, #e8e7e3); --muted: light-dark(#6b6b66, #9d9c96);
+  --line: light-dark(#e3e2de, #34332f); --accent: light-dark(#2d5fa8, #8ab4f0);
+  --track: light-dark(#e9e7e1, #34332f); --code-bg: light-dark(#f1f0ec, #2a2a27);
+  --passed: light-dark(#2f7a3e, #8fd19c); --passed-bg: light-dark(#e3f1e5, #20352a);
+  --started: light-dark(#9a5f0c, #f0b660); --started-bg: light-dark(#fbeedb, #3a2c16);
+  --unlogged: light-dark(#7d4291, #d7a6e6); --unlogged-bg: light-dark(#f2e6f6, #33233b);
+  --bad: light-dark(#b3261e, #f5978f); --bad-bg: light-dark(#fbe4e2, #40211e);
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #161615; --card: #1f1f1d; --fg: #e8e7e3; --muted: #9d9c96; --line: #34332f;
-    --accent: #8ab4f0; --track: #34332f; --code-bg: #2a2a27;
-    --passed: #8fd19c; --passed-bg: #20352a; --started: #f0b660; --started-bg: #3a2c16;
-    --unlogged: #d7a6e6; --unlogged-bg: #33233b; --bad: #f5978f; --bad-bg: #40211e;
-  }
-}
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
 * { box-sizing: border-box; }
 body {
   margin: 0; background: var(--bg); color: var(--fg);
@@ -31,6 +37,9 @@ h2 { font-size: 1.1rem; margin: 2rem 0 0.75rem; }
 h3 { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin: 1.25rem 0 0.5rem; }
 a { color: var(--accent); }
 code { background: var(--code-bg); padding: 0 0.25em; border-radius: 3px; font-size: 0.92em; }
+/* Code, paths, commands and a task's output read left to right in every language;
+   isolated, so a line of code beside Arabic text does not reorder it. */
+code, pre, kbd, .log { direction: ltr; unicode-bidi: isolate; text-align: start; }
 .muted { color: var(--muted); font-size: 0.9em; }
 
 /* Course cards on the home page */
@@ -68,9 +77,9 @@ code { background: var(--code-bg); padding: 0 0.25em; border-radius: 3px; font-s
 
 /* Tables */
 table { width: 100%; border-collapse: collapse; background: var(--card); border-radius: 10px; }
-th, td { text-align: left; padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+th, td { text-align: start; padding: 0.5rem 0.6rem; border-bottom: 1px solid var(--line); vertical-align: top; }
 th { font-weight: 600; font-size: 0.82em; color: var(--muted); }
-.num { text-align: right; font-variant-numeric: tabular-nums; }
+.num { text-align: end; font-variant-numeric: tabular-nums; }
 .priority-skip { opacity: 0.5; }
 
 /* The exercise page */
@@ -83,7 +92,7 @@ th { font-weight: 600; font-size: 0.82em; color: var(--muted); }
 .question h2 { border-bottom: 1px solid var(--line); padding-bottom: 0.25rem; }
 .question pre { background: var(--code-bg); padding: 0.75rem 1rem; border-radius: 6px; overflow-x: auto; }
 .question pre code { background: none; padding: 0; }
-.question blockquote { margin: 0; padding: 0.25rem 1rem; border-left: 3px solid var(--line); color: var(--muted); }
+.question blockquote { margin: 0; padding: 0.25rem 1rem; border-inline-start: 3px solid var(--line); color: var(--muted); }
 .question table { width: auto; }
 .question th, .question td { border: 1px solid var(--line); }
 .problems { color: var(--muted); }
@@ -117,7 +126,7 @@ form.action button.primary { background: var(--accent); border-color: var(--acce
 .log pre { margin: 0; padding: 0.75rem 1rem; font-size: 0.85em; white-space: pre-wrap; overflow-wrap: anywhere; }
 .chip-running { background: var(--started-bg); color: var(--started); }
 .chip-done { background: var(--passed-bg); color: var(--passed); }
-.chip-stopped, .chip-lost { background: var(--unlogged-bg); color: var(--unlogged); }
+.chip-stopped, .chip-lost, .chip-queued { background: var(--unlogged-bg); color: var(--unlogged); }
 
 /* Generation (step 4): the new-batch form, the plan table and where a plan stands */
 a.button {
@@ -136,16 +145,16 @@ a.button:hover { border-color: var(--accent); }
   border: 1px solid var(--line); background: var(--card); color: var(--fg);
 }
 .form input[type="number"] { max-width: 8rem; }
-.form .check input[type="number"] { width: 5rem; padding: 0.15rem 0.4rem; margin-left: 0.25rem; }
+.form .check input[type="number"] { width: 5rem; padding: 0.15rem 0.4rem; margin-inline-start: 0.25rem; }
 .form h2 { margin: 0.5rem 0 0; }
 .form button {
   font: inherit; font-size: 0.9em; padding: 0.4rem 0.9rem; border-radius: 6px; cursor: pointer;
   border: 1px solid var(--line); background: var(--card); color: var(--fg);
 }
 .form button.primary { background: var(--accent); border-color: var(--accent); color: var(--bg); }
-.form-problems { padding-left: 2rem; }
+.form-problems { padding-inline-start: 2rem; }
 table.compact { width: auto; }
-table.compact th { padding-right: 1.5rem; }
+table.compact th { padding-inline-end: 1.5rem; }
 table.plan { margin: 1rem 0; }
 .task-output { margin-top: 1.5rem; }
 .task-output summary { cursor: pointer; }
@@ -157,23 +166,23 @@ table.plan { margin: 1rem 0; }
 
 /* Lectures and new courses (step 5) */
 .form input[type="file"] { font: inherit; font-weight: 400; }
-.setup { padding-left: 1.25rem; color: var(--muted); }
+.setup { padding-inline-start: 1.25rem; color: var(--muted); }
 .setup li { margin: 0.2rem 0; }
 .chip-read { background: var(--passed-bg); color: var(--passed); }
 .chip-image-pages-waiting { background: var(--started-bg); color: var(--started); }
-.notice form.action { display: inline-block; margin-left: 0.5rem; }
+.notice form.action { display: inline-block; margin-inline-start: 0.5rem; }
 
 /* A new course's stages; the spinner turns from this stylesheet, so no inline style */
 .stages { list-style: none; padding: 0; margin: 0.75rem 0; }
-.stages li { padding: 0.25rem 0 0.25rem 1.6rem; position: relative; }
-.stages li::before { position: absolute; left: 0.2rem; }
+.stages li { padding-block: 0.25rem; padding-inline: 0 1.6rem; position: relative; }
+.stages li::before { position: absolute; inset-inline-start: 0.2rem; }
 .stage-done::before { content: "✓"; color: var(--passed); }
 .stage-waiting { color: var(--muted); }
 .stage-waiting::before { content: "○"; color: var(--muted); }
 .stage-failed::before { content: "✗"; color: var(--bad); }
 .stage-running { font-weight: 600; }
 .spinner {
-  position: absolute; left: 0.1rem; top: 0.5rem; width: 0.85rem; height: 0.85rem;
+  position: absolute; inset-inline-start: 0.1rem; top: 0.5rem; width: 0.85rem; height: 0.85rem;
   border: 2px solid var(--track); border-top-color: var(--accent); border-radius: 50%;
   animation: spin 0.9s linear infinite;
 }
@@ -181,7 +190,7 @@ table.plan { margin: 1rem 0; }
 @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
 
 /* Settings (step 6): keys and models */
-.header-link { margin-left: auto; color: var(--muted); }
+.header-link { margin-inline-start: auto; color: var(--muted); }
 .inline-form { display: inline-flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; margin: 0.15rem 0; }
 .inline-form input, .inline-form select, .form select {
   font: inherit; padding: 0.3rem 0.5rem; border-radius: 6px; border: 1px solid var(--line);
@@ -205,7 +214,7 @@ button.small {
 }
 button.small:hover { border-color: var(--accent); }
 .spinner-inline {
-  display: inline-block; width: 0.8rem; height: 0.8rem; margin-right: 0.4rem; vertical-align: -0.1rem;
+  display: inline-block; width: 0.8rem; height: 0.8rem; margin-inline-end: 0.4rem; vertical-align: -0.1rem;
   border: 2px solid var(--track); border-top-color: var(--accent); border-radius: 50%;
   animation: spin 0.9s linear infinite;
 }
@@ -217,7 +226,7 @@ table.requires input[type="text"] { width: 100%; }
 .review dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.4rem 1rem; margin: 0.75rem 0 0.25rem; }
 .review dt { font-weight: 600; color: var(--muted); }
 .review dd { margin: 0; min-width: 0; }
-.review ul { margin: 0; padding-left: 1.1rem; }
+.review ul { margin: 0; padding-inline-start: 1.1rem; }
 code.wrap { overflow-wrap: anywhere; }
 pre.recipe { margin: 0; padding: 0.6rem 0.8rem; background: var(--code-bg); border-radius: 6px; font-size: 0.85em; white-space: pre-wrap; overflow-wrap: anywhere; }
 .chip-ok, .chip-ready { background: var(--passed-bg); color: var(--passed); }
@@ -230,7 +239,7 @@ table.requires td.row-remove { width: 1%; white-space: nowrap; }
 .form.wide { max-width: none; }
 table.draft input[type="text"] { width: 7rem; }
 table.draft details summary { cursor: pointer; }
-ul.sources { margin: 0.3rem 0 0; padding-left: 1.1rem; }
+ul.sources { margin: 0.3rem 0 0; padding-inline-start: 1.1rem; }
 ul.sources li { margin: 0.15rem 0; overflow-wrap: anywhere; }
 .chip-new { background: var(--started-bg); color: var(--started); }
 .chip-listed { background: var(--passed-bg); color: var(--passed); }
@@ -254,7 +263,7 @@ table.coverage td:first-child { white-space: nowrap; }
 .coverage-file { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 0.25rem 1.25rem 1rem; }
 .coverage-file table { margin: 0.5rem 0 1rem; }
 table.requires td.row-import { white-space: nowrap; }
-table.requires td.row-import input[type="text"] { width: 8rem; margin-left: 0.25rem; }
+table.requires td.row-import input[type="text"] { width: 8rem; margin-inline-start: 0.25rem; }
 /* Each exercise's status on the plan page (owner, 2026-11-06) */
 td.item-status { white-space: normal; min-width: 9rem; }
 td.item-status form.action { margin-top: 0.3rem; }
@@ -269,12 +278,27 @@ pre.failure { margin: 0.4rem 0; padding: 0.6rem 0.8rem; max-height: 20rem; overf
 table.folder-files td.why { color: var(--bad); }
 table.folder-files td.num { white-space: nowrap; }
 table.folder-files tr.folder-row td { background: var(--track); }
-table.folder-files tr.folder-row button { margin-left: 0.6rem; }
+table.folder-files tr.folder-row button { margin-inline-start: 0.6rem; }
 /* New model: the models.dev catalog above the form (profile.html). */
 section.catalog { margin-bottom: 1.5rem; }
 form.catalog-pick { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; margin: 0.6rem 0; }
-form.catalog-pick select { margin-left: 0.4rem; max-width: 28rem; }
+form.catalog-pick select { margin-inline-start: 0.4rem; max-width: 28rem; }
 table.catalog-models td.num, table.catalog-models td:nth-child(2), table.catalog-models td:nth-child(3) { white-space: nowrap; }
 table.catalog-models tr.chosen td { background: var(--track); }
 /* The model form's off-screen Save, which Enter presses (profile.html). */
-.enter-saves { position: absolute; left: -10000px; width: 1px; height: 1px; overflow: hidden; }
+.enter-saves { position: absolute; inset-inline-start: -10000px; width: 1px; height: 1px; overflow: hidden; }
+
+/* The language switch at the foot of every page (gui/i18n.py): the one in use in bold,
+   the others as small buttons in one line. */
+footer.language-switch {
+  max-width: 64rem; margin: 1rem auto; padding: 0.5rem 1rem; color: var(--muted);
+  display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; font-size: 0.9rem;
+}
+footer.language-switch form.action { display: inline; }
+footer.language-switch .switch { display: inline-flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; margin-inline-end: 1rem; }
+
+/* Tick boxes: the accent colour, a little larger, on the text's baseline. */
+input[type="checkbox"] { accent-color: var(--accent); width: 1.05rem; height: 1.05rem; vertical-align: -0.2rem; margin: 0 0.35rem 0 0; margin-inline: 0 0.35rem; }
+
+/* A row's own action (delete a language) on a line of its own, at the end side. */
+.inline-form.row-end { display: flex; justify-content: flex-end; margin: 0.3rem 0 0.5rem; }

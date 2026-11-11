@@ -199,6 +199,7 @@ def _form(**changes):
     ("ds", {"base_url": "ftp://x"}, "http"),
     ("ds", {"timeout_s": "0"}, "1 to 3600"),
     ("ds", {"reasoning_effort": "very low"}, "one word"),
+    ("ds", {"temperature": "0.2"}, 'temperature can only be "default"'),
 ])
 def test_a_model_is_checked_by_llm_pys_rules(course, name, changes, problem):
     data, problems = llm_settings.check_profile(course, name, _form(**changes))
@@ -231,6 +232,27 @@ def test_a_new_model_is_set_apart_from_the_table_after_it(root):
     llm_settings.save_profile(bare, None, "b", data)
 
     assert 'model = "x"\n\n[llm.roles]' in _toml(bare)
+
+
+def test_a_models_own_temperature_is_saved_and_kept_or_dropped_by_the_form(root, env_file, course):
+    """The form's choice writes `temperature = "default"`; saving the model again keeps it,
+    and choosing 0 takes the line out (an edit drops what the form does not send)."""
+    client = _browser(root, env_file)
+    claude = {"name": "claude", "provider": "anthropic", "model": "claude-opus-5-5",
+              "api_key_env": "ANTHROPIC_API_KEY"}
+
+    post(client, "/c/demo-course/models/save", {**claude, "temperature": "default"})
+    assert tomllib.loads(_toml(course))["llm"]["profiles"]["claude"]["temperature"] == "default"
+    page = client.get("/c/demo-course/models/m/claude/", base_url=BASE).get_data(as_text=True)
+    assert '<option value="default" selected>' in page
+
+    post(client, "/c/demo-course/models/save",
+         {**claude, "original": "claude", "temperature": "default", "timeout_s": "900"})
+    saved = tomllib.loads(_toml(course))["llm"]["profiles"]["claude"]
+    assert saved["temperature"] == "default" and saved["timeout_s"] == 900
+
+    post(client, "/c/demo-course/models/save", {**claude, "original": "claude", "temperature": ""})
+    assert "temperature" not in tomllib.loads(_toml(course))["llm"]["profiles"]["claude"]
 
 
 def test_renaming_a_model_moves_its_roles_and_keeps_other_comments(course):
@@ -368,6 +390,45 @@ def test_saving_the_shown_own_url_writes_none(root, env_file, course):
     assert "base_url" not in tomllib.loads(_toml(course))["llm"]["profiles"]["ds"]
 
 
+def test_a_key_name_used_at_another_host_in_any_course_is_refused(root, env_file, course):
+    """A changed URL (a moved provider, or a tampered list) must not send a key elsewhere:
+    one key name goes to one host, across the courses. The same host passes, as does
+    saving a profile again, and a key name at a local server with no key is not one."""
+    client = _browser(root, env_file)
+    _write(root / "bare" / "workspace.toml", 'course = "bare"\n\n[llm.profiles.o]\n'
+           'provider = "custom"\nmodel = "m"\napi_key_env = "ACME_API_KEY"\n'
+           'base_url = "https://api.acme.example/v1"\n')
+
+    # OPENAI_API_KEY goes to api.openai.com from `other`: a custom server with it is refused.
+    bad = post(client, "/c/demo-course/models/save",
+               {"name": "x", **_form(provider="custom", base_url="https://evil.example/v1",
+                                     api_key_env="OPENAI_API_KEY")})
+    assert bad.status_code == 400
+    text = bad.get_data(as_text=True)
+    assert "OPENAI_API_KEY is the key other (demo) sends to api.openai.com" in text
+    assert "would send it to evil.example" in text
+    assert "x" not in tomllib.loads(_toml(course))["llm"]["profiles"]
+    # Across courses too: bare's ACME_API_KEY goes to api.acme.example.
+    bad = post(client, "/c/demo-course/models/save",
+               {"name": "y", **_form(provider="custom", base_url="https://api.other.example/v1",
+                                     api_key_env="ACME_API_KEY")})
+    assert "ACME_API_KEY is the key o (bare) sends to api.acme.example" in bad.get_data(
+        as_text=True)
+    # The same host (another path), a profile saved again, and no key: all pass.
+    ok = post(client, "/c/demo-course/models/save",
+              {"name": "z", **_form(provider="custom", base_url="https://api.openai.com/v2",
+                                    api_key_env="OPENAI_API_KEY")})
+    assert ok.status_code == 303
+    again = post(client, "/c/demo-course/models/save",
+                 {"name": "other", "original": "other", **_form(provider="openai",
+                                                                model="gpt-6.1-terra",
+                                                                api_key_env="OPENAI_API_KEY")})
+    assert again.status_code == 303
+    local = post(client, "/c/demo-course/models/save",
+                 {"name": "q", **_form(provider="ollama", model="qwen3:0.6b", api_key_env="")})
+    assert local.status_code == 303
+
+
 def test_the_models_page_shows_each_key_set_or_not(root, env_file, monkeypatch):
     monkeypatch.delenv("ZHIPU_API_KEY", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
@@ -411,3 +472,42 @@ def test_check_starts_one_task_for_the_models_named(root, env_file, monkeypatch)
     assert started[0][1][0][1:] == ["-m", "tutor.llm", "check", "cheap", "other"]
     assert started[1][1][0][-1] == "other" and started[1][2] == {"kind": "check"}
     assert post(client, "/c/demo-course/models/check", {"profile": "-x"}).status_code == 404
+
+
+# --- keys: one line per course, and the provider that fills the name --------------------------
+
+
+def test_a_key_lists_each_course_once_with_its_models_after_it():
+    row = keys.KeyRow("A_KEY", None, ["first: fast", "first: slow", "second: fast"])
+    assert row.by_course == [("first", ["fast", "slow"]), ("second", ["fast"])]
+
+
+def test_choosing_a_provider_fills_the_name_and_says_when_its_key_is_set(root, env_file):
+    import test_gui_catalog as catalog_support
+
+    catalog_support._catalog(root)  # the kept models.dev list, as the Models page leaves it
+    client = _browser(root, env_file)
+
+    page = client.get("/keys/?provider=deepseek", base_url=BASE).get_data(as_text=True)
+    assert 'name="name" value="DEEPSEEK_API_KEY"' in page and "for DeepSeek" in page
+    assert '<option value="deepseek" selected>' in page and "is set already" not in page
+
+    # Its key is in .env already: the form replaces it, and still shows no key.
+    page = client.get("/keys/?provider=zhipuai", base_url=BASE).get_data(as_text=True)
+    assert 'name="name" value="ZHIPU_API_KEY"' in page and "is set already" in page
+    form = page.split('id="add-key"')[1]
+    assert 'class="primary">Replace</button>' in form and 'value="short"' not in page
+
+    # An id that is not in the list, and a name the form would refuse, fill nothing.
+    for query in ("?provider=nobody", "?name=lower%22%3E", "?provider=lmstudio"):
+        page = client.get("/keys/" + query, base_url=BASE).get_data(as_text=True)
+        assert 'name="name" value=""' in page
+    page = client.get("/keys/?name=ACME_API_KEY", base_url=BASE).get_data(as_text=True)
+    assert 'name="name" value="ACME_API_KEY"' in page
+    assert env_file.read_text(encoding="utf-8") == ENV  # looking changes nothing
+
+
+def test_without_the_provider_list_the_form_takes_a_typed_name(root, env_file):
+    page = _browser(root, env_file).get("/keys/", base_url=BASE).get_data(as_text=True)
+    assert 'name="provider"' not in page and "No provider list yet" in page
+    assert "/c/bare/models/new" in page or "/c/demo-course/models/new" in page

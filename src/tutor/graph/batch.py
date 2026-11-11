@@ -16,9 +16,10 @@ from pydantic import ValidationError
 
 from tutor.graph import prompts
 from tutor.graph.languages import PYTHON, Profile
-from tutor.graph.nodes import Deps, describe_error, model_label
+from tutor.graph.nodes import Deps, describe_error, log_lines, model_label
+from tutor.graph.plan_selection import validate_selection
 from tutor.graph.state import BatchState, ItemState, PlanItem
-from tutor.materials import cache
+from tutor.materials import cache, coverage_store
 from tutor.schema import Manifest, SourceRef
 
 REPO = Path(__file__).resolve().parents[3]  # for the manifest's git commit
@@ -107,10 +108,11 @@ def plan_batch(state: BatchState, deps: Deps) -> BatchState:
     (at most PLAN_RETRIES times) with the problems found."""
     lectures, count = state["lectures"], state.get("count")
     max_count = state.get("max_count", 6)
-    coverage = deps.workspace / "coverage.md"
     inputs = dict(
         lectures=lectures,
-        coverage=coverage.read_text(encoding="utf-8") if coverage.is_file() else "(none)",
+        # The coverage table: rendered from coverage.json when the course has one (the
+        # same bytes for the same data), else coverage.md as written, else "(none)".
+        coverage=coverage_store.planner_text(deps.workspace),
         pages="\n".join(page_titles(deps.workspace, lecture) for lecture in lectures),
         existing=existing_exercises(deps.workspace), preferences=state.get("preferences", ""),
         count=count, max_count=max_count, feedback=state.get("feedback", ""),
@@ -136,7 +138,8 @@ def plan_batch(state: BatchState, deps: Deps) -> BatchState:
         if not problems:
             break
         inputs["previous"] = json.dumps(plan, indent=1)
-    return {"plan": plan, "plan_problems": problems, "feedback": "", "approved": False}
+    return {"plan": plan, "plan_problems": problems, "feedback": "", "approved": False,
+            "selected_ids": None, "plan_digest": None, "generation_complete": False}
 
 
 def plan_problems(items: list[PlanItem], lectures: list[str], count: int | None,
@@ -173,11 +176,13 @@ def apply_decision(state: BatchState, decision: dict, existing: list[str],
     this check is for any other caller."""
     if decision.get("action") == "approve":
         plan = decision.get("plan", state["plan"])
-        items = profile.batch_plan.model_validate({"items": plan}).items  # an edited plan must fit
-        if found := blocking_problems(items, state["lectures"], existing):
-            raise ValueError("the approved plan cannot run: " + "; ".join(found))
-        return {"plan": plan, "approved": True}
-    return {"feedback": decision.get("feedback", ""), "approved": False}
+        # Retain every proposed row; only the selected subset is eligible for dispatch.
+        selected = validate_selection(plan, decision.get("selected_ids"),
+                                      state["lectures"], existing, profile)
+        return {"plan": plan, "approved": True, "selected_ids": selected,
+                "plan_digest": decision.get("plan_digest"), "generation_complete": False}
+    return {"feedback": decision.get("feedback", ""), "approved": False,
+            "selected_ids": None, "plan_digest": None, "generation_complete": False}
 
 
 def collect(state: BatchState, deps: Deps) -> BatchState:
@@ -189,24 +194,41 @@ def collect(state: BatchState, deps: Deps) -> BatchState:
                    model=_models_of(deps, {i.id for i in saved}))
     if saved:
         label = deps.batch_dir.name.split("_", 1)[-1]
-        lines = ["# Proposed coverage.md changes", "",
-                 "Generated exercises; mark their knowledge points in coverage.md once the "
-                 "owner has looked at them (not applied automatically).", ""]
+        # With coverage.json (2026-11-10): an exercise whose lecture and slides match one
+        # point exactly is marked on it (the owner sees it on the Coverage page and in the
+        # rendered coverage.md); the rest, and every exercise of a course without the data,
+        # is proposed in coverage-proposal.md as before, for the owner's hand.
+        store = coverage_store.load(deps.workspace)
+        marked, proposed = [], []
+        for i in saved:
+            if store is not None and coverage_store.mark_covered(
+                    store, i.lecture, i.slides, f"ex:{i.id}", label):
+                marked.append(i)
+            else:
+                proposed.append(i)
+        if marked:
+            coverage_store.save(deps.workspace, store)
+        lines = ["# Proposed coverage changes", "",
+                 "Generated exercises; mark their knowledge points once the owner has looked "
+                 "at them (not applied automatically).", ""]
         lines += [f"- {i.lecture}, slides {i.slides} ({i.knowledge_point}): gap-code -> "
-                  f"ex:{i.id} ({label})" for i in saved]
+                  f"ex:{i.id} ({label})" for i in proposed]
+        if marked:
+            lines += ["", "Marked in coverage.json already (the lecture and slides matched "
+                      "one point):"] + [f"- {i.lecture}, slides {i.slides}: ex:{i.id}"
+                                        for i in marked]
         (deps.batch_dir / "coverage-proposal.md").write_text("\n".join(lines) + "\n",
                                                              encoding="utf-8")
-    return {}
+    # A manifest is absent when every selected item failed; completion is still durable.
+    return {"generation_complete": True}
 
 
 def _models_of(deps: Deps, ids: set[str]) -> str | None:
     """The models that generated the saved `ids`, from the batch log: a batch resumed with
     another --profile mixes models, and the manifest names them all."""
-    if not deps.generation_log.is_file():
-        return None
-    lines = [json.loads(line)
-             for line in deps.generation_log.read_text(encoding="utf-8").splitlines()]
-    saved = [x for x in lines if x["exercise"] in ids and x["outcome"] == "saved"]
+    lines = log_lines(deps.generation_log)  # a broken line is skipped, not fatal
+    saved = [x for x in lines if x.get("exercise") in ids and x.get("outcome") == "saved"
+             and isinstance(x.get("model"), str)]
     models = ([x["model"] for x in saved]
               + [f"repair {x['repair_model']}" for x in saved if x.get("repair_model")]
               + [f"oracle {x['oracle_model']}" for x in saved if x.get("oracle_model")])

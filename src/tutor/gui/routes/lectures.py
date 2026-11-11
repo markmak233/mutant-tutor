@@ -10,6 +10,7 @@ from pathlib import Path
 from flask import Flask, abort, redirect, render_template, request, url_for
 
 from tutor.gui import courses, lectures, tasks
+from tutor.gui.i18n import N_
 from tutor.gui.routes.common import UPLOAD_LIMIT_BYTES, course_or_404, start_task
 
 
@@ -32,8 +33,8 @@ def read_saved(course: courses.Course, saved: list[Path]):
 def staged_or_404(course: courses.Course, token: str) -> lectures.StagedFolder:
     staged = lectures.staged_folder(course.workspace.root, token)
     if staged is None:
-        abort(404, "This folder's files are no longer kept: they were saved, or another "
-                   "folder was chosen since. Choose it again on the Lectures page.")
+        abort(404, N_("This folder's files are no longer kept: they were saved, or another "
+                   "folder was chosen since. Choose it again on the Lectures page."))
     return staged
 
 
@@ -118,7 +119,7 @@ def register(app: Flask) -> None:
         course = course_or_404(name)
         rows = lectures.lecture_rows(course)
         if not rows:
-            abort(404, "This course has no lectures yet.")
+            abort(404, N_("This course has no lectures yet."))
         folder = course.workspace.lecture_dir
         return start_task(course, "Read the lectures",
                           [lectures.read_command(folder / r.name for r in rows)],

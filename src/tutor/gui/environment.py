@@ -1,12 +1,12 @@
 """A course's environment (GUI step 7a): what its tests need, whether this machine has it,
 and the two installs the GUI may start (docs/design.md, "Local GUI", Environment page).
 
-- The check is `python -m tutor.envcheck --json`, run with the course's own .venv: envcheck
-  checks the interpreter that runs it, and the learner's tests run in that venv. It runs
-  from the repository, as tasks do, so it reads .env itself (JAVA_HOME, HADOOP_HOME); the
-  GUI never loads .env into its own environment.
-- [requires] is edited here as a table, by envcheck's rules (plus a Hadoop release the
-  image can build when tests run in the container), and written through toml_edit.
+- The shared course_requirements probe uses the course's .venv, rather than the GUI/tool
+  interpreter. This GUI keeps its existing child-only .env lookup for JAVA_HOME/HADOOP_HOME;
+  doctor's default worker does not load .env. JSON decoding and errors are shared.
+- Prefixes and numeric package comparisons share one table, checked by envcheck's rules
+  (plus a Hadoop release the image can build). requirement_versions writes the existing
+  [requires]/[package-bounds] tables together through toml_edit.
 - Installs (owner, 2026-11-06): Python packages into the course's .venv, by running
   `tutor.workspace init` again, which installs [requires] too; and the test image, by
   `tutor.container build` with the course's venv, so the image's packages match the venv's.
@@ -23,7 +23,6 @@ and the two installs the GUI may start (docs/design.md, "Local GUI", Environment
 
 from __future__ import annotations
 
-import json
 import os
 import re
 import shlex
@@ -36,18 +35,31 @@ from pathlib import Path
 
 import tomlkit
 
-from tutor import compat, container, image_recipe, languages, workspace
+from tutor import (
+    compat,
+    container,
+    course_requirements,
+    image_recipe,
+    languages,
+    package_bounds,
+    project_source,
+    workspace,
+)
 from tutor.envcheck import NOT_PIP, pip_requirements, requires_problems, version_matches
-from tutor.gui import tasks, toml_edit
+from tutor.gui import requirement_versions, tasks, toml_edit
 from tutor.gui.courses import Course
+from tutor.gui.i18n import N_
+from tutor.gui.i18n import gettext_ as _
 from tutor.gui.toml_edit import put
+from tutor.materials import imports_found
 from tutor.materials import requires as requires_draft
 
 CHECK_TIMEOUT_S = 60  # java -version, in a venv that may be cold; measured 0.2 s warm
 RUNNERS = ("container", "host")
 # What each special [requires] name stands for; any other name is a pip package.
-KINDS = {"python": "Python version", "java": "JDK (Java)", "hadoop": "Hadoop",
-         "gcc": "C compiler"}
+# What each name in [requires] is, as the page says it (N_(): translated when shown).
+KINDS = {"python": N_("Python version"), "java": N_("JDK (Java)"), "hadoop": N_("Hadoop"),
+         "gcc": N_("C compiler")}
 # The gcc the test image has (Debian bookworm's), which adding C writes in [requires].
 MODULE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")  # a top-level module, as allow_imports holds
 HADOOP_DOWNLOAD = "about 730 MB"  # measured 2026-11-05, see image_recipe.HADOOP_MIRRORS
@@ -111,30 +123,17 @@ def runner(course: Course) -> str | None:
     return _data(course).get("isolation", {}).get("runner")
 
 
-def check(course: Course, run: Callable = subprocess.run) -> Check:
-    """Run envcheck in the course's venv. `run` is a parameter so tests need no venv."""
-    python = venv_python(course)
-    if not python.exists():
-        return Check(None, problem="This course has no .venv yet: \"Install into .venv\" "
-                                   "above creates it.")
-    try:
-        done = _run_in_venv(course, python, ["-m", "tutor.envcheck", "--json"], run)
-    except (OSError, subprocess.TimeoutExpired) as e:
-        return Check(str(python), problem=f"The check did not finish: {e}")
-    try:
-        data = json.loads(done.stdout)
-        results = [r for r in data["results"] if isinstance(r, dict)]
-    except (ValueError, KeyError, TypeError):
-        return Check(str(python), problem="The check could not run in this course's .venv: "
-                                          f"{_last_line(done.stderr)}")
-    return Check(str(python), results)
+def check(course: Course, run: Callable | None = None) -> Check:
+    """The same course interpreter/probe as doctor; retain consumers' Check interface."""
+    found = course_requirements.check(course.workspace, run=run, settings_dir=tasks.REPO)
+    return Check(found.python, found.results, found.problem)
 
 
 def docker_view(course: Course, run: Callable = subprocess.run) -> DockerView:
     """Where the image stands, with Build's recipe and what it downloads. Asking Docker
     waits while a stopped VM wakes (container.image_problem), hence its own htmx part."""
     chosen = runner(course)
-    requires = course.workspace.requires
+    requires = course.workspace.effective_requires
     try:
         image = image_recipe.image_name(course.workspace.course, requires)
     except container.ContainerError as e:
@@ -180,9 +179,12 @@ def downloads(requires: dict[str, str]) -> list[tuple[str, str]]:
 
 def install_shown(course: Course) -> str:
     """The pip command `init` runs, as the page shows it before its button."""
+    if project_source.checkout() is None:
+        # Show the actual bundled-source installer, without inventing a checkout root.
+        return shlex.join(install_command(course))
     command = workspace.install_command(course.workspace.root / ".venv",
                                         workspace.DEFAULT_EXTRAS,
-                                        pip_requirements(course.workspace.requires))
+                                        pip_requirements(course.workspace.effective_requires))
     return shlex.join(command)
 
 
@@ -200,35 +202,43 @@ def kind(name: str) -> str:
     if name == "languages":  # envcheck's line for a language not supported yet
         return "workspace.toml [languages]"
     if name.endswith(" imports"):  # envcheck's probe: a package imports a removed module
-        return "removed standard-library module"
-    return KINDS.get(name, "pip package")
+        return N_("removed standard-library module")
+    return KINDS.get(name, N_("pip package"))
 
 
 def check_requires(names: list[str], versions: list[str], chosen: str | None
                    ) -> tuple[dict[str, str] | None, list[str]]:
-    """The table from the form's rows (blank rows skipped), or the problems."""
+    """The complete version list, accepting the existing prefix/comparison grammars."""
     table: dict[str, str] = {}
     problems = []
     for raw_name, raw_version in zip(names, versions, strict=False):
         name, version = raw_name.strip(), raw_version.strip()
         if not name and not version:
             continue
-        # python, java and hadoop are special only in lower case; pip ignores case.
+        # Toolchain names are lower case; pip identities also ignore -_. separators.
         name = name.lower() if name.lower() in NOT_PIP else name
         if not name:
-            problems.append(f"The version {version} has no name.")
+            problems.append(_("The version %(version)s has no name.") % {"version": version})
         elif not version:
-            problems.append(f"{name}: give a version prefix, such as 3.5 for any 3.5.x.")
-        elif name.lower() in {n.lower() for n in table}:
-            problems.append(f"{name} is listed twice.")
+            problems.append(_("%(name)s: give a version prefix, such as 3.5 for any 3.5.x.")
+                            % {"name": name})
+        elif requires_draft.pip_key(name) in {requires_draft.pip_key(n) for n in table}:
+            problems.append(_("%(name)s is listed twice.") % {"name": name})
         else:
             table[name] = version
-    problems += requires_problems(table)
+    problems += requires_problems(table, allow_bounds=True)
+    if not problems:
+        try:
+            prefixes, bounds = requirement_versions.partition(table)
+            table = package_bounds.merge(prefixes, bounds)
+        except ValueError as exc:
+            problems.append(str(exc))
     if not problems and chosen == "container" and "hadoop" in table:
         try:
             image_recipe.hadoop_release(table["hadoop"])
         except container.ContainerError as e:
-            problems.append(f"{e}; the container's image could not be built.")
+            problems.append(_("%(error)s; the container's image could not be built.")
+                            % {"error": e})
     return (None if problems else table), problems
 
 
@@ -288,8 +298,9 @@ def check_imports(rows: list[tuple[str, str]], ticked: set[str], modules: dict[s
         module = modules.get(key, "").strip() or module_for(name, {})
         if key in ticked:
             if not MODULE.match(module):
-                problems.append(f"{name}: {module!r} is not a module name to import, such as "
-                                "sklearn for scikit-learn.")
+                problems.append(_("%(name)s: %(module)r is not a module name to import, such "
+                                  "as sklearn for scikit-learn.")
+                                % {"name": name, "module": module})
             elif module not in allow:
                 allow.append(module)
         elif module in allow:
@@ -297,51 +308,72 @@ def check_imports(rows: list[tuple[str, str]], ticked: set[str], modules: dict[s
     return (None if problems else allow), problems
 
 
-def save_requires(course: Course, table: dict[str, str], allow: list[str] | None = None
-                  ) -> list[str]:
-    """Write [requires] as `table`: changed values, new names after the last one, removed
-    names gone, comments kept. Versions are written as strings, as they are read. With
-    `allow`, [safety] allow_imports too, in the same checked write."""
-    expected: dict[str, dict] = {"requires": table}
-    safety = _data(course).get("safety", {})
-    if allow is not None and allow != safety.get("allow_imports", []):
-        expected["safety"] = {**{k: v for k, v in safety.items() if k != "allow_imports"},
-                              **({"allow_imports": allow} if allow else {})}
+def found_imports(course: Course) -> list[imports_found.Found]:
+    """The modules and headers the lectures' code uses that exercises may not use yet, each
+    with where it was seen (materials/imports_found; owner, 2026-11-10). [] with no lecture
+    read, or a workspace.toml whose [safety] lists are not lists (the page says so there)."""
+    try:
+        return imports_found.found_in_lectures(course.workspace.root)
+    except (OSError, ValueError):
+        return []
+
+
+def allow_found(course: Course, modules: list[str], headers: list[str]) -> list[str]:
+    """Add the ticked modules to [safety] allow_imports and the ticked headers to
+    allow_headers, each checked as a name of its kind; nothing else in the table moves.
+    The problems, else []."""
+    problems = []
+    modules = [m.strip() for m in modules if m.strip()]
+    headers = [h.strip() for h in headers if h.strip()]
+    for module in modules:
+        if not MODULE.match(module):
+            problems.append(_("%(module)r is not a module name.") % {"module": module})
+    for header in headers:
+        if not re.fullmatch(r"[\w.-]+\.h", header):
+            problems.append(_("%(header)r is not a header file name such as stack.h.")
+                            % {"header": header})
+    if not modules and not headers:
+        problems.append(_("Tick what the exercises may use first."))
+    if problems:
+        return problems
+    safety = toml_edit.read(course.workspace.root).get("safety", {})
+    current_modules = [m for m in safety.get("allow_imports", []) if isinstance(m, str)]
+    current_headers = [h for h in safety.get("allow_headers", []) if isinstance(h, str)]
+    new_modules = current_modules + [m for m in modules if m not in current_modules]
+    new_headers = current_headers + [h for h in headers if h not in current_headers]
+    expected = {k: v for k, v in safety.items() if k not in ("allow_imports", "allow_headers")}
+    if new_modules:
+        expected["allow_imports"] = new_modules
+    if new_headers:
+        expected["allow_headers"] = new_headers
 
     def change(doc) -> None:
-        if "requires" not in doc and table:
-            doc["requires"] = tomlkit.table()
-        if "requires" in doc:
-            section = doc["requires"]
-            for name in list(section.keys()):
-                if name not in table:
-                    del section[name]
-            for name, version in table.items():
-                if section.get(name) != version:
-                    put(section, name, version)
-        if "safety" in expected:
-            if "safety" not in doc:
-                new = tomlkit.table()
-                new.comment("modules exercises may import besides the core ones")
-                doc["safety"] = new
-            if allow:
-                put(doc["safety"], "allow_imports", allow)
-            elif "allow_imports" in doc["safety"]:
-                del doc["safety"]["allow_imports"]
+        if "safety" not in doc:
+            doc["safety"] = tomlkit.table()
+        if new_modules:
+            put(doc["safety"], "allow_imports", new_modules)
+        if new_headers:
+            put(doc["safety"], "allow_headers", new_headers)
 
-    return toml_edit.edit_tables(course.workspace.root, change, expected)
+    return toml_edit.edit(course.workspace.root, "safety", change, expected)
+
+
+def save_requires(course: Course, table: dict[str, str], allow: list[str] | None = None
+                  ) -> list[str]:
+    """Save the complete list in the two existing tables, with optional import consent."""
+    return requirement_versions.save(course, table, allow)
 
 
 def save_runner(course: Course, chosen: str, understood: bool) -> list[str]:
     """[isolation] runner = chosen; the table's other keys stay."""
     if chosen not in RUNNERS:
-        return ["Choose where tests run: container or host."]
+        return [_("Choose where tests run: container or host.")]
     if chosen == "host" and languages.is_c(_data(course)):
-        return ["A C course's tests run only in a container: a static check cannot bound what "
-                "C code does (docs/design.md, \"C\")."]
+        return [_("A C course's tests run only in a container: a static check cannot bound "
+                  "what C code does (docs/design.md, \"C\").")]
     if chosen == "host" and not understood:
-        return ["To run tests on this machine, tick that you understand generated code then "
-                "runs with your rights."]
+        return [_("To run tests on this machine, tick that you understand generated code "
+                  "then runs with your rights.")]
     old = _data(course).get("isolation", {})
     expected = {**old, "runner": chosen}
 
@@ -378,20 +410,20 @@ class DraftView:
 def draft_view(course: Course) -> DraftView:
     """The stored answers, checked and merged, against [requires] as it is."""
     found = requires_draft.draft(course.workspace.root)
-    current = course.workspace.requires
+    current = course.workspace.effective_requires
     rows, others = [], []
     for candidate in found.candidates:
         if candidate.kind == "other":
             others.append(candidate)
             continue
         listed = _listed(current, candidate.name)
-        if listed is None:
-            status = "new"
+        if listed is None:  # N_(): the page shows the status translated, in a chip
+            status = N_("new")
         elif candidate.versions and not any(version_matches(v, current[listed])
                                             for v in candidate.versions):
-            status = "listed, other version"
+            status = N_("listed, other version")
         else:
-            status = "listed"
+            status = N_("listed")
         version = (prefix(candidate.kind, candidate.versions[0]) if candidate.versions
                    else current.get(listed, "") if listed else "")
         rows.append(DraftRow(candidate, status, version))
@@ -413,6 +445,17 @@ def setup_model(course: Course) -> str | None:
     """The model a draft would ask (requires_draft.model's choice), as a page names it;
     None when the course has no models, as the page then cannot tell whether a run
     could ask any (the LLM_* variables of .env, which the GUI does not read)."""
+    found = setup_profile(course)
+    if found is None:
+        return None
+    profile, role, data = found
+    return (f"{profile} ({data.get('provider', '?')}: "
+            f"{data.get('model') or data.get('provider')}), the {role} model")
+
+
+def setup_profile(course: Course) -> tuple[str, str, dict] | None:
+    """(profile name, the role that names it, its [llm.profiles] table) of the model a
+    draft would ask: the setup role's, else plan's, else generate's; None without one."""
     llm = _data(course).get("llm", {})
     if not llm:
         return None
@@ -421,8 +464,22 @@ def setup_model(course: Course) -> str | None:
     data = llm.get("profiles", {}).get(named[role]) if role else None
     if not isinstance(data, dict):
         return None
-    return (f"{named[role]} ({data.get('provider', '?')}: "
-            f"{data.get('model') or data.get('provider')}), the {role} model")
+    return named[role], role, data
+
+
+def chat_profiles(course: Course) -> list[tuple[str, str, str]]:
+    """Every profile of the course a chat request could go to, as (name, provider,
+    model), in the file's order; the one the embedding role names is left out (an
+    embedding model answers no chat). For the Language page's model choice (owner,
+    2026-11-10: every course's setup model was the same Sonnet, so the choice was none)."""
+    llm = _data(course).get("llm", {})
+    embedding = llm.get("roles", {}).get("embedding") if isinstance(llm, dict) else None
+    found = []
+    for name, data in (llm.get("profiles", {}) if isinstance(llm, dict) else {}).items():
+        if name != embedding and isinstance(data, dict):
+            provider = str(data.get("provider", "?"))
+            found.append((name, provider, str(data.get("model") or provider)))
+    return found
 
 
 def draft_command(again: bool = False) -> list[str]:
@@ -434,8 +491,9 @@ def accept(course: Course, chosen: dict[str, str]) -> list[str]:
     """Add the ticked candidates ({name: version as typed}) to [requires], or replace the
     version of one listed already, by the same rules as the table's rows."""
     if not chosen:
-        return ["Tick the entries to add first."]
-    table = dict(course.workspace.requires)
+        return [_("Tick the entries to add first.")]
+    # A draft changes only its selected entries; existing comparisons must stay visible.
+    table = dict(course.workspace.effective_requires)
     for name, version in chosen.items():
         table[_listed(table, name) or name] = version
     checked, problems = check_requires(list(table), list(table.values()), runner(course))
@@ -463,11 +521,6 @@ def _run_in_venv(course: Course, python: Path, args: list[str], run: Callable):
            "LECTURE_DIR": str(course.workspace.lecture_dir)}
     return run([str(python), *args], capture_output=True, text=True,
                timeout=CHECK_TIMEOUT_S, cwd=tasks.REPO, env=env)
-
-
-def _last_line(text: str) -> str:
-    lines = [line for line in (text or "").splitlines() if line.strip()]
-    return lines[-1] if lines else "no output"
 
 
 def _data(course: Course) -> dict:

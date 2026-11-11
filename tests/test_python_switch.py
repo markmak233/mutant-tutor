@@ -12,6 +12,7 @@ import pytest
 
 from tutor import pythons, workspace
 from tutor.config import WorkspaceError
+from tutor.doctor_rows import Row
 
 # --- finding Pythons -------------------------------------------------------------------------
 
@@ -160,7 +161,7 @@ def test_record_sets_requires_python_and_keeps_the_rest(course_dir):
 def page(tmp_path, monkeypatch):
     """A course whose check reports pydub's removed import, the Pythons stand-ins, and tasks
     recorded instead of started."""
-    from tutor.gui import environment, tasks
+    from tutor.gui import doctor_page, environment, tasks
     from tutor.gui.app import create_app
 
     root = tmp_path / "root"
@@ -168,6 +169,9 @@ def page(tmp_path, monkeypatch):
     (root / "c313" / "workspace.toml").write_text(
         'course = "c313"\n\n[requires]\npython = "3.13"\npydub = "0.25"\n', encoding="utf-8")
     monkeypatch.setattr(environment, "check", lambda course: environment.Check("/v", [AUDIOOP]))
+    monkeypatch.setattr(doctor_page, "report", lambda course: [
+        Row("FAIL", "host pydub imports: required audioop, found not found",
+            "use an earlier Python", "switch-python")])
     monkeypatch.setattr(pythons, "find", lambda: FOUND)
     monkeypatch.setattr(pythons, "ask", lambda path, run=None: FOUND[1])
     started = []

@@ -1,6 +1,7 @@
 """What each exercise of an approved plan came to, shown next to it on the plan page, and
 trying one that did not come out again (owner, 2026-11-06), with a note for that try
-(owner, 2026-11-07).
+(owner, 2026-11-07) or a larger output cap when its replies were cut off (owner,
+2026-11-10).
 
 A status is read from files only: the batch's manifest and each exercise's validation.json
 (saved: valid, invalid or not validated yet), else generation.jsonl's last line for it
@@ -18,14 +19,31 @@ from pathlib import Path
 
 from tutor.gui import generation
 from tutor.gui.courses import Course, valid_verdict
-from tutor.gui.generation import ASSISTANT, CONTINUING, GENERATED, GENERATING, STOPPED, PlanView
+from tutor.gui.generation import (
+    ASSISTANT,
+    CONTINUING,
+    GENERATED,
+    GENERATING,
+    QUEUED,
+    STOPPED,
+    PlanView,
+)
+from tutor.gui.i18n import N_
 
 # What each exercise of an approved plan came to, shown next to it on the plan page.
-ITEM_VALID, ITEM_INVALID, ITEM_SAVED = "valid", "invalid", "saved, not validated"
-ITEM_DISCARDED, ITEM_ERROR, ITEM_PENDING = "discarded", "error", "not generated yet"
+# N_(): the page shows them translated; the values stay English (CSS classes, comparisons).
+ITEM_VALID, ITEM_INVALID, ITEM_SAVED = N_("valid"), N_("invalid"), N_("saved, not validated")
+ITEM_DISCARDED, ITEM_ERROR, ITEM_PENDING = N_("discarded"), N_("error"), N_("not generated yet")
+ITEM_LEFT_OUT = N_("Left out by you")
 _ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,79}$")  # a plan id, safe as a file name
 DETAIL_CHARS = 1500  # of the last round's failure shown, enough for pytest's first assertion
 NOTE_PREFIX = "The owner adds, for this try: "  # how a retry's note joins the item's notes
+# The one larger output cap a retry may ask for, in tokens: twice the pipeline's default
+# (graph/settings.py, 32,000, which a long exercise written with thinking can overrun),
+# within the settings' bound of 128,000. One step, not a free number: it is what a cut-off
+# item needs, and a reply that long costs the model's thinking as well (owner, 2026-11-10).
+RETRY_CAP = 64_000
+CUT_OFF = "cut off at max_tokens"  # how graph/nodes.py words a reply the cap ended
 
 
 @dataclass(frozen=True)
@@ -36,10 +54,18 @@ class ItemStatus:
     # the next try; "" when the batch hides answers, as it can quote expected values.
     detail: str = ""
     note: str = ""  # the note the last "Try again with a note" used, to start the next from
+    # Rounds whose reply the output cap ended (generation.jsonl's attempts, any round, not
+    # only the last: the last round is often a later model's real failure, which hid the
+    # cut-offs of week 9's two items). Non-empty: the page offers a retry with RETRY_CAP.
+    cut_off_rounds: tuple[int, ...] = ()
 
     @property
     def can_retry(self) -> bool:
         return self.state in (ITEM_DISCARDED, ITEM_ERROR)
+
+    @property
+    def can_generate(self) -> bool:
+        return self.state == ITEM_LEFT_OUT and not self.reason
 
 
 def item_statuses(course: Course, view: PlanView) -> dict[str, ItemStatus]:
@@ -47,7 +73,7 @@ def item_statuses(course: Course, view: PlanView) -> dict[str, ItemStatus]:
     validation.json verdict), discarded or failed with an error (generation.jsonl's last line
     for it, so a later try counts), or not generated yet. {} before approval."""
     if view.batch is None or view.state not in (GENERATING, CONTINUING, STOPPED, ASSISTANT,
-                                                GENERATED):
+                                                GENERATED, QUEUED):
         return {}
     batch_dir = course.workspace.root / "batches" / view.batch
     try:
@@ -85,7 +111,13 @@ def item_statuses(course: Course, view: PlanView) -> dict[str, ItemStatus]:
         elif exercise in outcomes:
             detail = "" if view.hides_answers else _failure_text(outcomes[exercise])
             statuses[exercise] = ItemStatus(ITEM_DISCARDED, _failure(outcomes[exercise]),
-                                            detail[:DETAIL_CHARS], last_note(view, exercise))
+                                            detail[:DETAIL_CHARS], last_note(view, exercise),
+                                            cut_off_rounds=_cut_off_rounds(outcomes[exercise]))
+        elif view.selected_ids is not None and exercise not in view.selected_ids:
+            from tutor.gui.plan_selection import deferred_problem
+
+            statuses[exercise] = ItemStatus(ITEM_LEFT_OUT,
+                                            deferred_problem(course, view, exercise))
         else:
             statuses[exercise] = ItemStatus(ITEM_PENDING)
     return statuses
@@ -95,6 +127,17 @@ def _failure_text(line: dict) -> str:
     """The last round's failure as generation.jsonl keeps it (the check and its output)."""
     attempts = [a for a in line.get("attempts", []) if isinstance(a, dict)]
     return str(attempts[-1].get("failure") or "") if attempts else ""
+
+
+def _cut_off_rounds(line: dict) -> tuple[int, ...]:
+    """The rounds (0-based, as the attempts record them) whose failure says the reply was
+    cut off at max_tokens, in order."""
+    found = []
+    for number, attempt in enumerate(line.get("attempts", [])):
+        if isinstance(attempt, dict) and CUT_OFF in str(attempt.get("failure") or ""):
+            round_ = attempt.get("round")
+            found.append(round_ if isinstance(round_, int) else number)
+    return tuple(found)
 
 
 def _failure(line: dict) -> str:
@@ -136,7 +179,8 @@ def not_succeeded(course: Course, batch: str) -> tuple[PlanView, list[str]] | No
 
 
 def prepare_retry(course: Course, view: PlanView, exercise: str,
-                  python: str | None = None, note: str = "") -> list[list[str]] | None:
+                  python: str | None = None, note: str = "",
+                  max_tokens: int | None = None) -> list[list[str]] | None:
     """The commands that generate one exercise of the plan again and validate it: the graph's
     `item` command, which adds a saved exercise to the batch's manifest, run with what the
     batch was planned with (run.json's models and settings), so it matches the others.
@@ -145,11 +189,18 @@ def prepare_retry(course: Course, view: PlanView, exercise: str,
     A note (already checked by clean_text) is added to the item's notes for this try only:
     plan.json keeps the plan as approved. The notes are the generate prompt's last line, so
     the cached part before them (the lecture's pages, the example) is unchanged. The note is
-    kept beside the item, so the page can start the next note from it."""
+    kept beside the item, so the page can start the next note from it.
+
+    `max_tokens` (RETRY_CAP, for an item whose replies were cut off) raises both output caps
+    for this try only, as `--set`s after run.json's: the command keeps the last value of a
+    setting given twice (graph/__main__.py, `_given`). Both caps, since a repair round may
+    run with thinking off and would hit the other one."""
     if view.draft is None or view.batch is None or not _ID.match(exercise):
         return None
     try:
-        plan = json.loads((view.draft / "plan.json").read_text(encoding="utf-8"))
+        # New approvals own a frozen full snapshot; later file edits cannot replace it.
+        plan = (view.approved_plan if view.approved_plan is not None else
+                json.loads((view.draft / "plan.json").read_text(encoding="utf-8")))
         run = json.loads((view.draft / "run.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
@@ -168,6 +219,8 @@ def prepare_retry(course: Course, view: PlanView, exercise: str,
     for name, value in run.get("settings", {}).items():
         if value is not None:
             flags.append(f"--set={name}={str(value).lower() if isinstance(value, bool) else value}")
+    if max_tokens is not None:
+        flags += [f"--set=max_tokens={max_tokens}", f"--set=max_tokens_no_thinking={max_tokens}"]
     batch_dir = course.workspace.root / "batches" / view.batch
     return [[*generation.graph_command(python), "item", str(path), f"--batch={view.label}", *flags],
             validate_one_command(python, batch_dir / "exercises" / exercise,

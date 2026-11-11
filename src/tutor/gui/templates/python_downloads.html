@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{# Catalog listing is read-only; each download has its own explicit consent and fresh checks.
+   Text through _() (gui/i18n.py); uv's identifiers, versions and reasons stay as they are. #}
+{% block title %}{{ _("Optional Python") }} · {{ course.workspace.course }}{% endblock %}
+{% block crumbs %}<a href="{{ url_for('course', name=course.folder) }}">{{ course.workspace.course }}</a><a href="{{ url_for('environment_view', name=course.folder) }}">{{ _("Environment") }}</a><span>{{ _("Optional Python") }}</span>{% endblock %}
+{% block content %}
+<h1>{{ _("Optional Python interpreter") }}</h1>
+<p>{{ _("This list does not download Python. An explicit download below uses uv's standard CPython distributions in its per-user directory, without admin rights or PATH aliases. It does not replace this course's venv or change its runner.") }}</p>
+<p><a href="{{ install_url }}" target="_blank" rel="noreferrer">{{ _("Install uv yourself if needed") }}</a> · <a href="{{ url_for('environment_view', name=course.folder) }}#host-install">{{ _("Return to Environment and check again") }}</a></p>
+{% if error %}<p class="problem">{{ error }} {{ _("Fix uv or the course venv, then reload this page.") }}</p>{% endif %}
+{% if rows %}<table><thead><tr><th>CPython</th><th>{{ _("Course compatibility") }}</th><th>{{ _("Action") }}</th></tr></thead><tbody>
+{% for entry, reasons in rows %}<tr><td>{{ entry.version }}<br><code>{{ entry.identifier }}</code></td><td>{{ reasons | join('; ') if reasons else _('No known conflict found') }}</td><td>{% if not reasons %}<form method="post" action="{{ url_for('download_python', name=course.folder) }}"><input type="hidden" name="identifier" value="{{ entry.identifier }}"><label><input type="checkbox" name="confirm" value="yes" required> {{ _("Download this interpreter into uv's user directory") }}</label><button type="submit">{{ _("Download Python %(version)s", version=entry.version) }}</button></form>{% endif %}</td></tr>{% endfor %}
+</tbody></table>{% elif not error %}<p>{{ _("No supported stable CPython downloads were listed for this platform. Check uv's version and platform support, or install Python yourself.") }}</p>{% endif %}
+{% set code_uninstall %}<code>uv python uninstall IDENTIFIER</code>{% endset %}
+<p>{{ _("After download, Environment → Check again offers the interpreter. Choosing “Make .venv” there is a separate action with rollback. To remove an unused interpreter, use %(command)s; first check no course still uses it.", command=code_uninstall) }}</p>
+{% endblock %}

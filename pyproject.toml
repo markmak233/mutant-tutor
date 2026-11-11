@@ -17,11 +17,13 @@ requires-python = ">=3.11"
 # reading course PDFs into the materials cache (docs/design.md, "Reading files").
 dependencies = ["pydantic>=2,<3", "pypdfium2>=5,<6", "pillow>=10"]
 
-# The learner command shares its dispatcher with python -m tutor. GUI packaging is later.
+# Installed learner, diagnostic and local GUI commands share python -m tutor's dispatcher.
 [project.scripts]
 tutor = "tutor.__main__:main"
 
 [project.optional-dependencies]
+# Explicit repair application preserves workspace comments; ordinary doctor stays stdlib.
+doctor = ["tomlkit>=0.13,<1"]
 bigdata = [
     "pyspark>=3.5,<3.6",
     "mrjob==0.7.4",
@@ -69,7 +71,7 @@ where = ["src"]
 # The GUI's pages and stylesheet are not Python files, so a built package must be told to
 # include them.
 [tool.setuptools.package-data]
-"tutor.gui" = ["templates/*.html", "static/*"]
+"tutor.gui" = ["templates/*.html", "static/*", "translations/*.po"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

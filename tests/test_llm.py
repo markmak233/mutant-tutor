@@ -131,6 +131,21 @@ def test_chat_sends_an_openai_request_and_logs_without_the_key(sent, tmp_path):
     assert SECRET not in log.read_text(encoding="utf-8")
 
 
+def test_a_prompt_in_parts_is_one_plain_string_to_an_openai_shaped_provider(sent):
+    """llm.Prompt marks where the anthropic provider's cache breakpoints go; everyone else
+    gets the parts joined, byte for byte the string a caller would have sent before."""
+    prompt = llm.Prompt("shared pages\n\n", "the item")
+
+    chat(LLMConfig("p", "deepseek", "https://api.deepseek.com", "deepseek-v4-flash"),
+         [{"role": "user", "content": prompt}], purpose="generate",
+         response_schema={"type": "object"})
+
+    body = json.loads(sent[0][0].data)
+    assert body["messages"][0]["content"] == "shared pages\n\nthe item"
+    assert isinstance(body["messages"][0]["content"], str)
+    assert "shared pages" in prompt and prompt.split("\n")[0] == "shared pages"  # a str
+
+
 def test_no_authorization_header_without_a_key(sent):
     chat(LLMConfig("p", "custom", "http://x/v1", "gemma"), [], purpose="test")
     assert sent[0][0].get_header("Authorization") is None
@@ -180,6 +195,34 @@ def test_openai_gets_its_own_parameter_names(sent):
     assert body["max_completion_tokens"] == 1000 and "max_tokens" not in body
     assert "temperature" not in body
     assert body["response_format"]["json_schema"]["strict"] is False
+
+
+def test_a_profile_can_say_its_model_takes_no_temperature(sent, tmp_path):
+    """`temperature = "default"`: none is sent (Claude Opus 5.5 refuses one). Any other
+    profile keeps asking for 0, so its requests are what they were."""
+    ws = workspace(tmp_path, WORKSPACE_LLM + '\n[llm.profiles.claude]\nprovider = "custom"\n'
+                   'model = "claude-opus-5-5"\nbase_url = "https://api.anthropic.com/v1"\n'
+                   'temperature = "default"\n')
+    own = config_for("oracle", "claude", workspace=ws, environ={})
+    usual = config_for("vision", workspace=ws, environ={})
+    assert (own.send_temperature, usual.send_temperature) == (False, True)
+
+    chat(own, [], purpose="oracle", max_tokens=100)
+    chat(usual, [], purpose="vision")
+
+    by_model = {json.loads(request.data)["model"]: json.loads(request.data)
+                for request, _ in sent}
+    assert "temperature" not in by_model["claude-opus-5-5"]
+    assert by_model["claude-opus-5-5"]["max_tokens"] == 100
+    assert by_model["google/gemma-4-26b-a4b-qat"]["temperature"] == 0.0
+
+
+def test_a_profiles_temperature_takes_only_the_one_value(tmp_path):
+    """A number there would look like a setting, and the calls would ignore it."""
+    ws = workspace(tmp_path, '[llm.profiles.p]\nprovider = "lmstudio"\nmodel = "m"\n'
+                   'temperature = "0.2"\n')
+    with pytest.raises(LLMError, match='temperature can only be "default"'):
+        config_for("generate", "p", workspace=ws, environ={})
 
 
 def test_a_slow_reply_says_timeout_not_unreachable(monkeypatch):
@@ -444,6 +487,42 @@ def test_check_sends_one_tiny_request_with_thinking_off(sent):
     assert line.startswith("ok, answered '## Mean v1'") and len(sent) == 1
     assert body["max_tokens"] == 32 and body["reasoning_effort"] == "none"
     assert body["messages"][0]["content"] == llm.CHECK_PROMPT
+
+
+def test_check_says_when_thinking_stayed_on(monkeypatch):
+    """A local server ignores a switch it does not know instead of refusing it (Ollama
+    0.30 and `think`, 2026-11-10), so the reply carries thinking: the line says so, as the
+    400-and-next-switch path never runs. The thinking is read beside the content
+    (`reasoning`, Ollama's name; `reasoning_content`, the others') or as a <think> block
+    inside it, and logged."""
+    replies = iter([
+        {"choices": [{"message": {"content": "", "reasoning": "Okay, the user wants"},
+                      "finish_reason": "length"}]},
+        {"choices": [{"message": {"content": "<think>\nhmm\n</think>\n\nok"}}]},
+        {"choices": [{"message": {"content": "ok", "reasoning_content": ""}}]},
+    ])
+    monkeypatch.setattr(llm.urllib.request, "urlopen",
+                        lambda request, timeout: FakeResponse(json.dumps(next(replies)).encode()))
+    config = LLMConfig("q", "ollama", "http://localhost:11434/v1", "qwen3:0.6b",
+                       thinking_off=({"reasoning_effort": "none"},))
+    line = llm.check(config)
+    assert line.startswith("ok, answered '(an empty reply)'")
+    assert "thinking stayed on (20 characters of it)" in line
+    assert "Set reasoning_effort in the profile" in line
+    assert "thinking stayed on (20 characters" in llm.check(config)  # the <think> block
+    assert "thinking stayed on" not in llm.check(config)
+
+
+def test_reasoning_in_a_stream_is_counted_too(monkeypatch, tmp_path):
+    monkeypatch.setattr(llm.urllib.request, "urlopen", lambda request, timeout: FakeResponse(
+        stream_of({"choices": [{"delta": {"reasoning": "Okay, "}}]},
+                  {"choices": [{"delta": {"reasoning_content": "so"}}]},
+                  {"choices": [{"delta": {"content": "ok"}, "finish_reason": "stop"}]})))
+    log = tmp_path / "calls.jsonl"
+    reply = chat(LLMConfig("p", "vllm", "http://localhost:8000/v1", "m"), [],
+                 purpose="generate", stream=True, log_path=log)
+    assert (reply.text, reply.reasoning_chars) == ("ok", 8)
+    assert json.loads(log.read_text(encoding="utf-8"))["reasoning_chars"] == 8
 
 
 def test_check_skips_an_assistant(sent):

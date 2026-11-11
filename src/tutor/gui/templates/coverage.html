@@ -1,87 +1,156 @@
 {% extends "base.html" %}
-{# A course's coverage.md and a model's draft of it (gui/coverage.py). The draft runs only
-   from its button, as it may cost money; it never writes over coverage.md: it becomes
-   coverage.md only for a course that has none, and adds only the lectures one lacks, at its
-   end. Its run comes back to this page when it succeeds. #}
+{# A course's coverage as data (gui/coverage.py): coverage.json, with coverage.md rendered from
+   it. Three states: nothing yet (draft, then "Use as coverage"); a hand-kept coverage.md
+   (shown, with one button that converts it); the data (each lecture's points, edited one by
+   one, drafted again when a lecture changes). A draft runs only from its button, as it may
+   cost money. Its run comes back to this page when it succeeds.
+   Text through _(), {% trans %} and ngettext (gui/i18n.py); file names, the status
+   words (gap-code, ... as coverage.md writes them), lecture names and what a model wrote
+   stay as they are. #}
 {% from "_macros.html" import action, chip %}
-{% block title %}Coverage · {{ course.workspace.course }}{% endblock %}
+{% block title %}{{ _("Coverage") }} · {{ course.workspace.course }}{% endblock %}
 {% block crumbs %}
 <a href="{{ url_for('course', name=course.folder) }}">{{ course.workspace.course }}</a>
-<span>Coverage</span>
+<span>{{ _("Coverage") }}</span>
 {% endblock %}
 {% block content %}
 <div class="title-line">
-  <h1>Coverage</h1>
+  <h1>{{ _("Coverage") }}</h1>
   <div class="actions">
-    {% if view.exists %}<form method="post" action="{{ url_for('edit_coverage', name=course.folder) }}" class="action"><input type="hidden" name="file" value="coverage"><button type="submit">Edit coverage.md in VS Code</button></form>{% endif %}
+    {% if view.store or view.file_exists %}<form method="post" action="{{ url_for('edit_coverage', name=course.folder) }}" class="action"><input type="hidden" name="file" value="data"><button type="submit">{{ _("Open %(file)s in VS Code", file="coverage.json" if view.store else "coverage.md") }}</button></form>{% endif %}
   </div>
 </div>
-<p class="muted"><code>coverage.md</code> lists what each lecture teaches and how it is practised. A new batch's plan chooses its knowledge points from the rows marked <code>gap-code</code>; without the file it chooses from the slides' titles alone.</p>
+{% set code_gap %}<code>gap-code</code>{% endset %}{% set code_json %}<code>coverage.json</code>{% endset %}{% set code_md %}<code>coverage.md</code>{% endset %}
+<p class="muted">{{ _("What each lecture teaches and how it is practised. A new batch's plan chooses its knowledge points from the rows marked %(gap)s of the lectures it is given; without any coverage it chooses from the slides' titles alone. The data is %(json)s; %(md)s is written from it on every save.", gap=code_gap, json=code_json, md=code_md) }}</p>
 {% if running %}
-<p class="notice notice-bad">A task is running in this course:
+<p class="notice notice-bad">{{ _("A task is running in this course:") }}
   <a href="{{ url_for('task', name=course.folder, task_id=running.id) }}">{{ running.title }}</a>.
-  A draft starts when it ends.</p>
+  {{ _("A task started now is queued behind it.") }}</p>
 {% endif %}
 {% if problems %}
 <ul class="notice notice-bad form-problems">{% for line in problems %}<li>{{ line }}</li>{% endfor %}</ul>
-<p class="muted">Nothing was written.</p>
+<p class="muted">{{ _("Nothing was written.") }}</p>
 {% endif %}
+{% set lectures_link %}<a href="{{ url_for('lecture_list', name=course.folder) }}">{{ _("Lectures") }}</a>{% endset %}
+{% set models_link %}<a href="{{ url_for('models', name=course.folder) }}">{{ _("Models") }}</a>{% endset %}
 
+{% if view.store is none %}
+{# --- no data yet: a hand-kept file to convert, or a draft to make and use --- #}
+{% if view.file_exists %}
+<section class="step">
+<h2>{{ _("Convert coverage.md") }}</h2>
+{% set code_bak %}<code>coverage.md.bak</code>{% endset %}
+<p>{{ _("This course keeps its coverage in %(md)s by hand. Converting reads it once into %(json)s, which the page then edits and a changed lecture can be drafted into again; the file before is kept as %(bak)s, and %(md)s is written from the data from then on.", md=code_md, json=code_json, bak=code_bak) }}</p>
+{% set c = view.conversion %}
+<p class="muted">{{ _("The conversion would read %(lectures)s and %(points)s from it.", lectures=ngettext("%(num)s lecture", "%(num)s lectures", c.lectures), points=ngettext("%(num)s point", "%(num)s points", c.points)) }}{% if c.report %} {{ _("It would need a look at:") }}{% endif %}</p>
+{% if c.report %}<ul class="sources">{% for line in c.report %}<li class="muted">{{ line }}</li>{% endfor %}</ul>{% endif %}
+<div class="actions">{{ action(url_for('convert_coverage', name=course.folder), _("Convert coverage.md to coverage.json"), primary=True) }}</div>
+</section>
+<h2>coverage.md</h2>
+<div class="coverage-file">{{ view.file_html }}</div>
+{% else %}
 {% set d = view.draft %}
 <section class="step">
-<h2>Draft from the lectures</h2>
-<p class="muted">A model splits each lecture into its knowledge points, with their slides and the kind of practice that fits. Lectures asked before and unchanged are not asked again, so a new lecture costs only itself. Points whose pages are not in the lecture are dropped.</p>
+<h2>{{ _("Draft from the lectures") }}</h2>
+<p class="muted">{{ _("A model splits each lecture into its knowledge points, with their slides and the kind of practice that fits. Lectures asked before and unchanged are not asked again, so a new lecture costs only itself. Points whose pages are not in the lecture are dropped.") }}</p>
 {% if not (d.sections or d.todo) %}
-<p>No lecture is read yet: read them on the <a href="{{ url_for('lecture_list', name=course.folder) }}">Lectures</a> page first.</p>
+<p>{{ _("No lecture is read yet: read them on the %(page)s page first.", page=lectures_link) }}</p>
 {% else %}
 {% if d.todo %}
 <div class="notice notice-ok">
-  {{ d.todo | length }} lecture{{ "s" if d.todo | length != 1 }} not drafted yet{% if d.sections %}, or changed since{% endif %}.
-  {% if view.model %}This asks {{ view.model }}, one request per lecture, {% if view.tokens_k %}about {{ view.tokens_k }} thousand{% else %}under a thousand{% endif %} input tokens in all: a paid model charges for them.
-  {{ action(url_for('draft_coverage', name=course.folder), "Draft " ~ (d.todo | length) ~ " lecture" ~ ("s" if d.todo | length != 1 else "")) }}
-  {% else %}No model is set for it: choose one for the setup, plan or generate role on the <a href="{{ url_for('models', name=course.folder) }}">Models</a> page.{% endif %}
+  {% if d.sections %}{% trans count=d.todo | length %}{{ count }} lecture not drafted yet, or changed since.{% pluralize %}{{ count }} lectures not drafted yet, or changed since.{% endtrans %}{% else %}{% trans count=d.todo | length %}{{ count }} lecture not drafted yet.{% pluralize %}{{ count }} lectures not drafted yet.{% endtrans %}{% endif %}
+  {% if view.model %}{% if view.tokens_k %}{{ _("This asks %(model)s, one request per lecture, about %(k)s thousand input tokens in all: a paid model charges for them.", model=view.model, k=view.tokens_k) }}{% else %}{{ _("This asks %(model)s, one request per lecture, under a thousand input tokens in all: a paid model charges for them.", model=view.model) }}{% endif %}
+  {{ action(url_for('draft_coverage', name=course.folder), ngettext("Draft %(num)s lecture", "Draft %(num)s lectures", d.todo | length)) }}
+  {% else %}{{ _("No model is set for it: choose one for the setup, plan or generate role on the %(page)s page.", page=models_link) }}{% endif %}
 </div>
 {% endif %}
 {% if d.sections %}
-<p class="muted">{{ d.sections | length }} lecture{{ "s" if d.sections | length != 1 }} drafted, by {{ d.models | join(", ") }}.</p>
-
-{% if not view.exists %}
+<p class="muted">{% trans count=d.sections | length, models=d.models | join(", ") %}{{ count }} lecture drafted, by {{ models }}.{% pluralize %}{{ count }} lectures drafted, by {{ models }}.{% endtrans %}</p>
 <div class="actions">
-  {{ action(url_for('use_coverage', name=course.folder), "Use as coverage.md", primary=True) }}
-  <span class="muted">Check the rows below first; once it is coverage.md, edit it in VS Code.</span>
+  {{ action(url_for('use_coverage', name=course.folder), _("Use as coverage"), primary=True) }}
+  <span class="muted">{{ _("Check the rows below first; once it is the course's coverage, edit points on this page.") }}</span>
 </div>
-{% elif missing %}
-<form method="post" action="{{ url_for('add_coverage', name=course.folder) }}" class="form wide">
-  <p>coverage.md has no section for {{ missing | length }} drafted lecture{{ "s" if missing | length != 1 }}. The ticked ones are added at its end; nothing already in it changes.</p>
-  {% if not (missing | selectattr("ticked") | list) %}<p class="muted">This coverage.md names its lectures its own way, so the page cannot tell which it has: tick only the ones it lacks.</p>{% endif %}
-  {% for m in missing %}
-  <label class="check"><input type="checkbox" name="lecture" value="{{ m.lecture }}"{% if m.ticked %} checked{% endif %}> {{ m.lecture }}</label>
-  {% endfor %}
-  <div class="actions"><button type="submit" class="primary">Add the ticked lectures to coverage.md</button></div>
-</form>
-{% else %}
-<p>{{ chip("done") }} coverage.md has a section for every drafted lecture.</p>
-{% endif %}
-{% if view.draft_file %}<form method="post" action="{{ url_for('edit_coverage', name=course.folder) }}" class="action"><input type="hidden" name="file" value="draft"><button type="submit">Open the draft in VS Code</button></form>{% endif %}
-
-<h3>The draft</h3>
+<h3>{{ _("The draft") }}</h3>
 {% for s in d.sections %}
 <details class="review">
-  <summary>{{ s.lecture }} <span class="muted">{{ s.rows | length }} point{{ "s" if s.rows | length != 1 }}{% if s.gap_code %}, {{ s.gap_code }} gap-code{% endif %}</span></summary>
+  <summary>{{ s.lecture }} <span class="muted">{{ ngettext("%(num)s point", "%(num)s points", s.rows | length) }}{% if s.gap_code %}, {{ s.gap_code }} gap-code{% endif %}</span></summary>
   <table class="coverage">
-    <thead><tr><th>Slides</th><th>Point</th><th>Status</th></tr></thead>
+    <thead><tr><th>{{ _("Slides") }}</th><th>{{ _("Point") }}</th><th>{{ _("Status") }}</th></tr></thead>
     <tbody>{% for r in s.rows %}<tr><td>{{ r.slides }}</td><td>{{ r.point }}</td><td>{{ r.status }}</td></tr>{% endfor %}</tbody>
   </table>
-  {% if s.uncovered %}<p class="muted">{{ s.uncovered | length }} page{{ "s" if s.uncovered | length != 1 }} no point covers.</p>{% endif %}
-  {% if s.dropped %}<ul class="sources">{% for why in s.dropped %}<li class="muted">Dropped: {{ why }}</li>{% endfor %}</ul>{% endif %}
+  {% if s.uncovered %}<p class="muted">{% trans count=s.uncovered | length %}{{ count }} page no point covers.{% pluralize %}{{ count }} pages no point covers.{% endtrans %}</p>{% endif %}
+  {% if s.dropped %}<ul class="sources">{% for why in s.dropped %}<li class="muted">{{ _("Dropped: %(why)s", why=why) }}</li>{% endfor %}</ul>{% endif %}
 </details>
 {% endfor %}
 {% endif %}
 {% endif %}
 </section>
+{% endif %}
 
-{% if view.exists %}
-<h2>coverage.md</h2>
-<div class="coverage-file">{{ view.html }}</div>
+{% else %}
+{# --- the data --- #}
+{% if view.stale %}
+<div class="notice notice-bad">{{ _("coverage.md was edited after the last save. Edits to that file do not reach the data: make them here, then") }}
+  {{ action(url_for('render_coverage', name=course.folder), _("write coverage.md again from the data")) }}</div>
+{% endif %}
+<section class="step">
+<h2>{{ _("Draft from the lectures") }}</h2>
+<p class="muted">{{ _("%(lectures)s, %(points)s in the data.", lectures=ngettext("%(num)s lecture", "%(num)s lectures", view.lectures | length), points=ngettext("%(num)s point", "%(num)s points", view.points)) }} {{ _("A draft asks a model for a lecture's knowledge points and merges them in: a point you edited or an exercise practises stays as it is, a new point is added, a point the draft no longer finds is listed for you to confirm.") }}</p>
+{% if view.todo %}
+<div class="notice notice-ok">
+  {% trans count=view.todo | length, names=view.todo | join(", ") %}{{ count }} lecture not drafted yet, or changed since: {{ names }}.{% pluralize %}{{ count }} lectures not drafted yet, or changed since: {{ names }}.{% endtrans %}
+  {% if view.model %}{% if view.tokens_k %}{{ _("This asks %(model)s, one request per lecture, about %(k)s thousand input tokens in all: a paid model charges for them.", model=view.model, k=view.tokens_k) }}{% else %}{{ _("This asks %(model)s, one request per lecture, under a thousand input tokens in all: a paid model charges for them.", model=view.model) }}{% endif %}
+  {{ action(url_for('draft_coverage', name=course.folder), ngettext("Draft %(num)s lecture", "Draft %(num)s lectures", view.todo | length)) }}
+  {% else %}{{ _("No model is set for it: choose one for the setup, plan or generate role on the %(page)s page.", page=models_link) }}{% endif %}
+</div>
+{% else %}
+<p>{{ chip("done", _("done")) }} {{ _("Every lecture is drafted from its current text.") }}</p>
+{% endif %}
+{% if view.model and view.lectures %}
+<form method="post" action="{{ url_for('draft_coverage', name=course.folder) }}" class="action"><input type="hidden" name="all" value="1"><button type="submit">{{ _("Draft every lecture again") }}</button></form>
+<span class="muted">{{ _("asks %(model)s for all %(n)s lectures, paid; your points and the exercises' marks are kept, the model's rows replaced", model=view.model, n=view.lectures | length) }}</span>
+{% endif %}
+</section>
+
+{% for lv in view.lectures %}
+{% set l = lv.lecture %}
+<details class="review" id="l-{{ loop.index }}">
+  <summary>{{ lv.name }}{% if l.title %} · {{ l.title }}{% endif %} <span class="muted">{{ ngettext("%(num)s point", "%(num)s points", l.live | length) }}{% if lv.gap_code %}, {{ _("%(n)s gap-code open", n=lv.gap_code) }}{% endif %}{% if lv.removed %}, {{ _("%(n)s to confirm", n=lv.removed | length) }}{% endif %}{% if lv.changed %} · {{ _("lecture changed since its draft") }}{% endif %}</span></summary>
+  {% if l.drafted %}<p class="muted">{{ _("Drafted %(when)s by %(model)s.", when=l.drafted, model=l.model) }}{% if l.uncovered %} {% trans count=l.uncovered | length %}{{ count }} page no point covers.{% pluralize %}{{ count }} pages no point covers.{% endtrans %}{% endif %}</p>{% endif %}
+  <table class="coverage">
+    <thead><tr><th>{{ _("Slides") }}</th><th>{{ _("Point") }}</th><th>{{ _("Status") }}</th><th></th></tr></thead>
+    <tbody>{% for p in l.live %}<tr{% if p.owner_edited %} class="owner-edited"{% endif %}><td>{{ p.slides }}</td><td>{{ p.point }}</td><td>{{ p | status_cell }}</td><td><a href="{{ url_for('coverage_point', name=course.folder, lecture=lv.name, point_id=p.id) }}">{{ _("Edit") }}</a></td></tr>{% endfor %}</tbody>
+  </table>
+  {% if lv.removed %}
+  <p>{{ _("No longer found in the lecture by the last draft. Confirm each, or keep it as yours:") }}</p>
+  <ul class="sources">{% for p in lv.removed %}<li>{{ p.slides }} · {{ p.point }} · {{ p | status_cell }}
+    <form method="post" action="{{ url_for('drop_coverage_point', name=course.folder, lecture=lv.name, point_id=p.id) }}" class="action"><button type="submit">{{ _("Remove") }}</button></form>
+    <form method="post" action="{{ url_for('keep_coverage_point', name=course.folder, lecture=lv.name, point_id=p.id) }}" class="action"><button type="submit">{{ _("Keep") }}</button></form></li>{% endfor %}</ul>
+  {% endif %}
+  <details>
+    <summary>{{ _("Add a point") }}</summary>
+    <form method="post" action="{{ url_for('add_coverage_point', name=course.folder, lecture=lv.name) }}" class="form">
+      <label class="field">{{ _("Slides") }}<input name="slides" required placeholder="4.15-4.24"></label>
+      <label class="field">{{ _("Point") }}<input name="point" required></label>
+      <label class="field">{{ _("Status") }}<select name="status">{% for s in statuses %}<option value="{{ s }}">{{ s }}</option>{% endfor %}</select></label>
+      <label class="field">{{ _("Check") }} <span class="muted">{{ _("what an exercise could check (gap-code)") }}</span><input name="check"></label>
+      <label class="field">{{ _("Note") }}<input name="note"></label>
+      <div class="actions"><button type="submit">{{ _("Add") }}</button></div>
+    </form>
+  </details>
+  <details>
+    <summary>{{ _("Title and notes") }}</summary>
+    <form method="post" action="{{ url_for('save_lecture_notes', name=course.folder, lecture=lv.name) }}" class="form">
+      <label class="field">{{ _("Title") }}<input name="title" value="{{ l.title }}"></label>
+      <label class="field">{{ _("Notes") }} <span class="muted">{{ _("shown above the lecture's table, and read by the plan") }}</span><textarea name="notes" rows="3">{{ l.notes }}</textarea></label>
+      <div class="actions"><button type="submit">{{ _("Save") }}</button></div>
+    </form>
+  </details>
+</details>
+{% endfor %}
+{% if view.store.appendix %}
+<h2>{{ _("Other sections of the file") }}</h2>
+<pre class="failure">{{ view.store.appendix }}</pre>
+{% endif %}
 {% endif %}
 {% endblock %}

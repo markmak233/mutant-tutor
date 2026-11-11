@@ -36,13 +36,16 @@ MODELS_DEV = {
                             "ds-new": _model("ds-new", "2026-09-01", reasoning=True,
                                              canonical_model_id="deepseek/ds-new-0901"),
                             "ds-gone": _model("ds-gone", "2026-10-01", status="deprecated")}},
-    # One maker's model at two sites: Zhipu's own and z.ai.
+    # One maker's model at two sites: Zhipu's own and z.ai. The list's URL for a known
+    # provider is not used (tampered here: this tool's own is kept).
     "zhipuai": {"id": "zhipuai", "name": "Zhipu AI", "npm": "@ai-sdk/openai-compatible",
-                "api": "https://open.bigmodel.cn/api/paas/v4", "env": ["ZHIPU_API_KEY"],
+                "api": "https://open.bigmodel.cn.evil.example/api/paas/v4",
+                "env": ["ZHIPU_API_KEY"],
                 "models": {"glm-x": _model("glm-x", canonical_model_id="zhipuai/glm-x")}},
     "zai": {"id": "zai", "name": "Z.AI", "npm": "@ai-sdk/openai-compatible",
             "api": "https://api.z.ai/api/paas/v4", "env": ["ZHIPU_API_KEY"],
             "models": {"glm-x": _model("glm-x", canonical_model_id="zhipuai/glm-x")}},
+    # A server on this machine: its models come from the server, so the entry is skipped.
     "lmstudio": {"id": "lmstudio", "name": "LMStudio", "npm": "@ai-sdk/openai-compatible",
                  "api": "http://127.0.0.1:1234/v1", "env": ["LMSTUDIO_API_KEY"],
                  "models": {"local-x": _model("vendor/Local-X 7B".replace(" ", "-"))}},
@@ -62,7 +65,7 @@ MODELS_DEV = {
                     "painter": _model("acme-paint", modalities={"input": ["text"],
                                                                 "output": ["image"]}),
                     "odd-id": _model("<b>acme</b>")}},
-    # Its own SDK, with the OpenAI-compatible URL from OPENAI_URLS.
+    # Its own SDK; llm.py speaks its Messages API (provider "anthropic").
     "anthropic": {"id": "anthropic", "name": "Anthropic", "npm": "@ai-sdk/anthropic",
                   "env": ["ANTHROPIC_API_KEY"], "models": {"c": _model("claude-test-1")}},
     "openrouter": {"id": "openrouter", "name": "OpenRouter", "npm": "@openrouter/ai-sdk-provider",
@@ -104,12 +107,15 @@ def test_only_providers_this_tool_can_call_are_kept_each_value_checked(tmp_path)
     by_id = {p.id: p for p in found.providers}
 
     assert [p.id for p in found.providers] == [
-        "deepseek", "zhipuai", "zai", "anthropic", "openrouter", "lmstudio",  # common first
-        "odd-key", "acme-cn", "openai-shaped"]  # then by name
+        "deepseek", "zhipuai", "zai", "anthropic", "openrouter",  # common first
+        "odd-key", "acme-cn", "openai-shaped"]  # then by name; lmstudio: from the server
     assert found.left_out == 2  # vendor-sdk (its own SDK), plain-http (http elsewhere)
     assert by_id["anthropic"].base_url == "https://api.anthropic.com/v1"
     assert by_id["acme-cn"].base_url == "https://api.acme.example/v1"  # no trailing slash
-    assert by_id["lmstudio"].key_env == ""  # a server on this machine needs none
+    # A known provider's URL is this tool's own, whatever the list says; another provider's
+    # is the list's, marked so for the page.
+    assert by_id["zhipuai"].base_url == "https://open.bigmodel.cn/api/paas/v4"
+    assert [p.own_url for p in found.providers] == [True] * 5 + [False] * 3
     assert by_id["odd-key"].key_env == "" and by_id["odd-key"].doc == ""
     assert by_id["odd-key"].name == "<i>Odd</i>"  # kept as text; the page escapes it
 
@@ -167,18 +173,15 @@ def test_a_known_provider_keeps_its_own_way_and_url(tmp_path):
     assert values == {"name": "ds-new-2", "provider": "deepseek", "model": "ds-new",
                       "api_key_env": "DEEPSEEK_API_KEY",
                       "base_url": "https://api.deepseek.com",  # shown; left out on saving
-                      "reasoning_effort": "", "reasoning_effort_on": "", "timeout_s": ""}
+                      "reasoning_effort": "", "reasoning_effort_on": "", "timeout_s": "",
+                      "temperature": ""}  # empty: the usual 0 is sent
     assert notes == []
 
     zai = found.provider("zai")
     values, _ = catalog.fill(zai, zai.models[0], set())
     assert (values["provider"], values["base_url"]) == ("glm", "https://api.z.ai/api/paas/v4")
 
-    local = found.provider("lmstudio")
-    values, _ = catalog.fill(local, local.models[0], set())
-    assert (values["provider"], values["base_url"], values["api_key_env"]) == (
-        "lmstudio", "http://localhost:1234/v1", "")  # llm.py's spelling of the same server
-    assert values["name"] == "local-x-7b"  # the id's last part, as a profile name
+    assert found.provider("lmstudio") is None  # a server on this machine: from the server
 
 
 def test_another_provider_is_custom_with_the_lowest_thinking_it_takes(tmp_path):
@@ -189,8 +192,15 @@ def test_another_provider_is_custom_with_the_lowest_thinking_it_takes(tmp_path):
     assert efforts[0][0]["base_url"] == "https://api.acme.example/v1"
     assert [v["reasoning_effort"] for v, _ in efforts] == ["none", "low", ""]
     assert "cannot be turned down" in efforts[2][1][0]
+
+
+def test_anthropic_is_its_own_provider_not_the_compatible_layer(tmp_path):
     anthropic = _catalog(tmp_path).provider("anthropic")
-    assert "no prompt caching" in catalog.fill(anthropic, anthropic.models[0], set())[1][0]
+    values, notes = catalog.fill(anthropic, anthropic.models[0], set())
+
+    assert (values["provider"], values["base_url"]) == ("anthropic", "https://api.anthropic.com/v1")
+    assert values["api_key_env"] == "ANTHROPIC_API_KEY"
+    assert notes == []
 
 
 # --- downloading -------------------------------------------------------------------------------
@@ -223,6 +233,70 @@ def test_a_download_is_kept_and_a_failure_keeps_the_copy_before(tmp_path):
     assert catalog.load(tmp_path).provider("acme-cn") is not None  # the copy before
 
 
+def test_a_fetch_keeps_which_providers_moved_since_the_fetch_before(tmp_path):
+    """A provider's URL that differs from the copy before is listed for the page: a move,
+    or a tampered list. A known provider's URL cannot move, as the list's is not used."""
+    assert catalog.refresh(tmp_path, lambda r, timeout: _Reply(json.dumps(MODELS_DEV).encode())
+                           ) is None
+    assert catalog.load(tmp_path).url_changes == ()  # nothing before
+
+    moved = json.loads(json.dumps(MODELS_DEV))
+    moved["acme-cn"]["api"] = "https://api.acme.evil.example/v1"
+    moved["deepseek"]["api"] = "https://api.deepseek.evil.example"
+    moved["openai-shaped"]["api"] = "https://shaped.example/v1/"  # the same, written otherwise
+    assert catalog.refresh(tmp_path, lambda r, timeout: _Reply(json.dumps(moved).encode())
+                           ) is None
+    assert catalog.load(tmp_path).url_changes == (
+        ("acme-cn", "https://api.acme.example/v1", "https://api.acme.evil.example/v1"),)
+    assert catalog.load(tmp_path).provider("deepseek").base_url == "https://api.deepseek.com"
+
+
+# --- servers on this machine -------------------------------------------------------------------
+
+
+def test_a_local_server_is_asked_for_its_own_models():
+    """GET /v1/models at the server, no key; Ollama answers "data": null with no model."""
+    asked = []
+
+    def opener(request, timeout):
+        asked.append((request.full_url, request.headers.get("Authorization"), timeout))
+        return _Reply(json.dumps({"object": "list", "data": [
+            {"id": "qwen3:0.6b", "object": "model"}, {"id": "gemma-4"},
+            {"id": "qwen3:0.6b"}, {"id": "<odd>"}, "junk"]}).encode())
+
+    models, problem = catalog.installed("http://localhost:11434/v1", opener)
+    assert asked == [("http://localhost:11434/v1/models", None, catalog.LOCAL_TIMEOUT_S)]
+    assert problem == "" and [m.id for m in models] == ["gemma-4", "qwen3:0.6b"]
+    assert models[0].thinking == "not said" and models[0].price_text == ""
+
+    none = catalog.installed("http://localhost:11434/v1",
+                             lambda r, timeout: _Reply(b'{"object":"list","data":null}'))
+    assert none[0] == () and "lists no model" in none[1]
+    odd = catalog.installed("http://localhost:11434/v1", lambda r, timeout: _Reply(b"[1]"))
+    assert "not a list of models" in odd[1]
+
+    def down(request, timeout):
+        raise urllib.error.URLError("connection refused")
+
+    assert "is the server running" in catalog.installed("http://localhost:8080/v1", down)[1]
+    # Never a host elsewhere: the GUI's server does not call out from this page.
+    assert "not on this machine" in catalog.installed("https://api.example/v1", opener)[1]
+
+
+def test_a_local_provider_fills_the_form_with_no_key_and_a_note():
+    provider = catalog.local_provider("ollama")
+    assert provider.base_url == "http://localhost:11434/v1" and provider.own_url
+    model = catalog.installed("http://localhost:11434/v1", lambda r, timeout: _Reply(
+        b'{"data":[{"id":"qwen3:0.6b"}]}'))[0][0]
+    values, notes = catalog.fill(provider, model, set())
+    assert (values["provider"], values["model"], values["api_key_env"],
+            values["base_url"], values["reasoning_effort"]) == (
+        "ollama", "qwen3:0.6b", "", "http://localhost:11434/v1", "")
+    assert values["name"] == "qwen3-0.6b"
+    assert "Check on the Models page tells" in notes[0]
+    assert catalog.local_provider("deepseek") is None
+
+
 # --- the page ----------------------------------------------------------------------------------
 
 
@@ -250,6 +324,82 @@ def _page(client, path):
 def test_with_no_list_yet_the_page_offers_to_fetch_it_and_the_form_by_hand(root):
     text = _page(_browser(root), "/c/demo-course/models/new")
     assert "Fetch the list" in text and "Or by hand" in text and 'id="model-form"' in text
+    assert 'label="On this machine"' in text and "Ollama (ollama)" in text  # without the list
+
+
+def test_a_local_server_lists_its_models_on_the_page_or_says_it_is_down(root, monkeypatch):
+    client = _browser(root)
+    monkeypatch.setattr(catalog, "installed", lambda url: (
+        (catalog.Model("qwen3:0.6b", "qwen3:0.6b", "", None, (), False, 0, None, None),),
+        ""))
+    text = _page(client, "/c/demo-course/models/new?catalog=ollama")
+    assert "<strong>Ollama</strong>" in text and "no key: a server on this machine" in text
+    assert "qwen3:0.6b" in text and "not said" in text and "its docs" in text
+    assert "WSL 2 forwards it" in text
+    text = _page(client, "/c/demo-course/models/new?catalog=ollama&model=qwen3:0.6b")
+    assert "Filled from the server&#39;s list" in text and 'value="qwen3:0.6b"' in text
+    assert 'value="qwen3-0.6b"' in text and "Check on the Models page tells" in text
+
+    monkeypatch.setattr(catalog, "installed", lambda url: ((), f"Nothing answers at {url}"))
+    text = _page(client, "/c/demo-course/models/new?catalog=llamacpp")
+    assert "Nothing answers at http://localhost:8080/v1" in text and "<table" not in text
+    assert 'name="at" value="http://localhost:8080/v1"' in text  # the address, to change
+
+
+def test_a_local_servers_address_can_be_changed_and_listed_again(root, monkeypatch):
+    """Another port (owner, 2026-11-10): typed beside the choice, asked at that address,
+    carried by Use into the form."""
+    asked = []
+
+    def installed(url):
+        asked.append(url)
+        return (catalog.Model("m-1", "m-1", "", None, (), False, 0, None, None),), ""
+
+    monkeypatch.setattr(catalog, "installed", installed)
+    client = _browser(root)
+    text = _page(client, "/c/demo-course/models/new?catalog=ollama&at=http://localhost:11435/v1/")
+    assert asked == ["http://localhost:11435/v1"]
+    assert 'name="at" value="http://localhost:11435/v1"' in text
+    assert "model=m-1&amp;at=http://localhost:11435/v1" in text  # Use keeps it
+    text = _page(client, "/c/demo-course/models/new?catalog=ollama&model=m-1"
+                         "&at=http://localhost:11435/v1")
+    assert 'name="base_url" value="http://localhost:11435/v1"' in text
+    text = _page(client, "/c/demo-course/models/new?catalog=ollama&at=localhost:11435")
+    assert "The address starts with http://" in text and len(asked) == 2
+    # The choice changed after the address was shown (no htmx): that address is not sent
+    # to the other server; the box shows the new provider's own.
+    text = _page(client, "/c/demo-course/models/new?catalog=lmstudio"
+                         "&at=http://localhost:11435/v1&at_for=ollama")
+    assert asked[-1] == "http://localhost:1234/v1"
+    assert 'name="at" value="http://localhost:1234/v1"' in text
+    assert 'name="at_for" value="lmstudio"' in text
+
+
+def test_the_address_box_follows_the_choice(root):
+    """htmx swaps the box when the choice changes: a local provider's default address, or
+    nothing for a cloud one."""
+    client = _browser(root)
+    text = _page(client, "/c/demo-course/models/new/at?catalog=vllm")
+    assert 'name="at" value="http://localhost:8000/v1"' in text and 'value="vllm"' in text
+    text = _page(client, "/c/demo-course/models/new/at?catalog=deepseek")
+    assert text.strip() == '<span id="local-at"></span>'
+    assert 'hx-get="/c/demo-course/models/new/at"' in _page(client, "/c/demo-course/models/new")
+
+
+def test_a_providers_address_from_the_list_is_marked_and_a_moved_one_shown(root):
+    _catalog(root)
+    client = _browser(root)
+    assert "check the domain before saving" in _page(client,
+                                                     "/c/demo-course/models/new?catalog=acme-cn")
+    assert "check the domain" not in _page(client, "/c/demo-course/models/new?catalog=deepseek")
+
+    path = root / catalog.CACHE
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["url_changes"] = [["acme-cn", "https://api.acme.example/v1",
+                            "https://api.acme.evil.example/v1"]]
+    path.write_text(json.dumps(data), encoding="utf-8")
+    text = _page(client, "/c/demo-course/models/new")
+    assert "the list gives another address for" in text and "acme.evil.example" in text
 
 
 def test_fetching_comes_back_on_the_provider_chosen(root, monkeypatch):

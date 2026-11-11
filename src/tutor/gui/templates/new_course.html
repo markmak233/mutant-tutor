@@ -1,27 +1,27 @@
 {% extends "base.html" %}
 {# A new course: one task runs `python -m tutor.workspace init` (workspace.toml, the
-   course's .venv). Lectures are added after, on its Lectures page (owner, 2026-11-07). #}
-{% block title %}New course{% endblock %}
-{% block crumbs %}<span>New course</span>{% endblock %}
+   course's .venv). Lectures are added after, on its Lectures page (owner, 2026-11-07).
+   Text through _() (gui/i18n.py); the file names are passed in as markup. #}
+{% block title %}{{ _("New course") }}{% endblock %}
+{% block crumbs %}<span>{{ _("New course") }}</span>{% endblock %}
 {% block content %}
-<h1>New course</h1>
-<p class="muted">Makes a course folder in <code>{{ root }}</code>: its <code>workspace.toml</code>,
-  its own Python environment with this tool (a few minutes, and the network), and the files
-  that let VS Code's terminal use it. Add the lectures after, on its Lectures page: PDFs and
-  web pages, or a whole folder to tick from.</p>
+<h1>{{ _("New course") }}</h1>
+{% set code_root %}<code>{{ root }}</code>{% endset %}
+{% set code_toml %}<code>workspace.toml</code>{% endset %}
+<p class="muted">{{ _("Makes a course folder in %(root)s: its %(file)s, its own Python environment with this tool (a few minutes, and the network), and the files that let VS Code's terminal use it. Add the lectures after, on its Lectures page: PDFs and web pages, or a whole folder to tick from.", root=code_root, file=code_toml) }}</p>
 {% if problems %}
 <ul class="notice notice-bad form-problems">{% for line in problems %}<li>{{ line }}</li>{% endfor %}</ul>
-<p class="muted">Nothing was created.</p>
+<p class="muted">{{ _("Nothing was created.") }}</p>
 {% endif %}
 <form method="post" action="{{ url_for('create_course') }}" class="form">
-  <label class="field">Folder name
-    <span class="muted">lowercase letters, digits, '_' and '-', e.g. comp1234</span>
+  <label class="field">{{ _("Folder name") }}
+    <span class="muted">{{ _("lowercase letters, digits, '_' and '-', e.g. comp1234") }}</span>
     <input type="text" name="folder" value="{{ values.folder }}" required maxlength="40" pattern="[a-z0-9][a-z0-9_\-]*" autocomplete="off">
   </label>
-  <label class="field">Course id
-    <span class="muted">optional; empty: the folder name. Exercises and the test image are named by it.</span>
+  <label class="field">{{ _("Course id") }}
+    <span class="muted">{{ _("optional; empty: the folder name. Exercises and the test image are named by it.") }}</span>
     <input type="text" name="course" value="{{ values.course }}" maxlength="40" autocomplete="off">
   </label>
-  <div class="actions"><button type="submit" class="primary">Create the course</button></div>
+  <div class="actions"><button type="submit" class="primary">{{ _("Create the course") }}</button></div>
 </form>
 {% endblock %}

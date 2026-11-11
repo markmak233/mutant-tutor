@@ -21,6 +21,7 @@ from tutor.materials.slides import (
     lecture_context,
     lecture_file,
     lecture_numbers,
+    own_pages,
     page_groups,
 )
 
@@ -136,6 +137,21 @@ def test_a_lecture_that_fits_goes_whole_with_the_exercises_pages_marked(tmp_path
     cut = lecture_context(workspace, source, limit=10)  # too long: own pages only
     assert "page 3 body" in cut and "page 4 body" in cut and "page 1 body" not in cut
     assert lecture_context(workspace, "synthetic") == ""
+
+
+def test_the_judge_takes_the_pages_unmarked_and_the_exercises_own_apart(tmp_path):
+    """mark=False (the judge, 2026-11-10): the sections read the same for every exercise of
+    the lecture, and own_pages names the exercise's in a line of their own."""
+    workspace, _ = make_batch(tmp_path)
+    source = {"lecture": "L2.2", "pdf_pages": "3-4"}
+
+    plain = lecture_context(workspace, source, mark=False)
+    assert "this exercise's page" not in plain and "page 3 body" in plain
+    assert plain == lecture_context(workspace, {"lecture": "L2.2", "pdf_pages": "1"}, mark=False)
+    assert plain == lecture_context(workspace, source).replace(" · this exercise's page", "")
+    pages = own_pages(workspace, source)
+    assert len(pages) == 2 and pages[0].endswith(" p.3") and pages[1].endswith(" p.4")
+    assert own_pages(workspace, "synthetic") == []
 
 
 @pytest.mark.parametrize(("lecture", "expected"), [

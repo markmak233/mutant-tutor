@@ -89,7 +89,9 @@ class GenerationSettings(BaseModel):
         "item's slides."))
 
     # --- the batch ----------------------------------------------------------------------
-    max_count: int = Field(6, ge=1, le=20, description=(
+    # Bound 40 (owner, 2026-11-09): a plan item is about 1,000 characters (~300 tokens), so
+    # 40 fits max_tokens_no_thinking (16k) with room; 100 would be cut off.
+    max_count: int = Field(6, ge=1, le=40, description=(
         "At most this many exercises when the plan chooses how many."))
     parallel: int | None = Field(None, ge=1, le=8, description=(
         "Exercises generated at once; empty: one per four CPU cores, 1 to 4 (each "

@@ -33,6 +33,7 @@ from tutor.image_recipe import (
     image_name,
     runner_uid,
 )
+from tutor.package_bounds import merge
 
 BUILD_COMMAND = "python -m tutor.container build"
 # What a run may use of the VM's CPUs: the same Spark runs took as long as on the host.
@@ -136,6 +137,10 @@ def _image_of(path: Path, data: Mapping) -> str:
         raise ContainerError(f"{path} has no `course` entry")
     # str(), as load_workspace does: the same name whichever way the file is read.
     requires = {name: str(version) for name, version in data.get("requires", {}).items()}
+    try:
+        requires = merge(requires, data.get("package-bounds", {}))
+    except ValueError as exc:
+        raise ContainerError(str(exc)) from None
     return image_name(data["course"], requires)
 
 
@@ -200,7 +205,7 @@ class ImageStatus:
 
 def image_status(workspace: Workspace, run: Callable = subprocess.run) -> ImageStatus:
     """Whether this course's tests can run in a container now, and if not, how to fix it."""
-    image = image_name(workspace.course, workspace.requires)
+    image = image_name(workspace.course, workspace.effective_requires)
     return ImageStatus(image, image_problem(image, run))
 
 
@@ -209,20 +214,31 @@ def _say(text: str) -> None:
 
 
 def build(workspace: Workspace, run: Callable = subprocess.run,
-          say: Callable[[str], None] = _say) -> str:
+          say: Callable[[str], None] = _say, *, keep_older: bool = False,
+          installed: Callable[[str], str | None] | None = None) -> str:
     """Build this course's image, check it from inside, drop its older versions; returns its
     name. `run` is a parameter so tests need no Docker. Raises ContainerError."""
     if problem := docker_problem(run):
         raise ContainerError(problem)
-    image = image_name(workspace.course, workspace.requires)
-    recipe = dockerfile(workspace.requires, installed=image_recipe.installed_version)
+    image = image_name(workspace.course, workspace.effective_requires)
+    lookup = image_recipe.installed_version if installed is None else installed
+    recipe = dockerfile(workspace.effective_requires, installed=lookup)
     say(f"building {image}\n{recipe}")
-    # "-": the recipe comes from stdin with no build context, so no file of this machine
-    # reaches the image. Docker's output is not captured: a first build takes minutes.
-    if run(["docker", "build", "--tag", image, "-"], input=recipe, text=True).returncode != 0:
-        raise ContainerError("docker build failed, see its output above")
-    _check_inside(workspace, image, run)
-    _remove_older(image, run)
+    from tutor import image_build, image_records
+
+    # A FROM-only temporary tag captures actual base content. Both builds use stdin and
+    # no context/course files. The normal build still streams Docker's progress output.
+    say("resolving the base image and recording this build's actual identity")
+    canonical = dockerfile(workspace.effective_requires)
+    with image_build.snapshot(recipe, run, canonical=canonical) as (actual, provenance):
+        argv = ["docker", "build", "--pull=false", "--tag", image,
+                *image_build.labels(provenance), "-"]
+        if run(argv, input=actual, text=True).returncode != 0:
+            raise ContainerError("docker build failed, see its output above")
+        _check_inside(workspace, image, run)
+        image_records.record(workspace, run)
+    if not keep_older:  # doctor retains the previous image for explicit rollback
+        _remove_older(image, run)
     say(f"ready: {image}")
     return image
 
@@ -265,8 +281,9 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.command == "recipe":
             # What build would send, with this interpreter's versions; no Docker needed.
-            print(f"# {image_name(workspace.course, workspace.requires)}")
-            print(dockerfile(workspace.requires, installed=image_recipe.installed_version), end="")
+            print(f"# {image_name(workspace.course, workspace.effective_requires)}")
+            print(dockerfile(workspace.effective_requires,
+                             installed=image_recipe.installed_version), end="")
             return 0
         status = image_status(workspace)
     except (WorkspaceError, ContainerError) as e:

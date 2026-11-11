@@ -13,6 +13,17 @@ The file is downloaded data, so each value is checked before it is kept: a base 
 names; anything else is left out. Only providers this tool can call are kept: those models.dev
 marks as taking OpenAI's requests, and those it lists with their own SDK whose OpenAI URL
 is in OPENAI_URLS; the others are counted, and the page says how many.
+
+The list is downloaded data, and a changed base URL or key name in it, filled by "Use" and
+saved, would send that key and the course's text to another host on every call (owner,
+2026-11-07; guarded 2026-11-10). So a provider this tool knows (KNOWN, OPENAI_URLS) always
+gets this tool's own URL, whatever the list says (`own_url`); the page marks the others as
+"URL from models.dev"; and a fetch keeps which providers' URLs changed since the fetch
+before, for the page to show. The Models page refuses a key name used at another host.
+
+Servers on this machine (LOCAL: Ollama, LM Studio, llama.cpp, vLLM; owner, 2026-11-10) are
+not read from the list: their models are what the server has, which it tells at GET
+/v1/models with no key (`installed`), and that call goes only to localhost.
 """
 
 from __future__ import annotations
@@ -29,9 +40,10 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from tutor import llm
+from tutor.gui.i18n import N_
 
 SOURCE = "https://models.dev/api.json"
-CACHE_FORMAT = 2  # what the kept file holds; a file of another format is fetched again
+CACHE_FORMAT = 3  # what the kept file holds; a file of another format is fetched again
 CACHE = Path(".cache") / "models-dev.json"  # under the GUI's root, beside the course folders
 TIMEOUT_S = 30
 MAX_BYTES = 40 * 1024 * 1024  # the file was 6 MB on 2026-11-07
@@ -39,10 +51,11 @@ SHOWN = 40  # models listed before "Show all"
 
 # models.dev lists these with their own SDK (and mostly no base URL); each one's
 # OpenAI-compatible URL, from the provider's own docs (checked 2026-11-07). MiniMax is listed
-# there with its Anthropic-style URL, which this tool's client does not speak.
+# there with its Anthropic-style URL, which this tool's client speaks only for Anthropic
+# itself (KNOWN below: its own provider in llm.py since 2026-11-10). These URLs are this
+# tool's own: the list's are not used for them.
 OPENAI_URLS = {
     "openrouter": "https://openrouter.ai/api/v1",
-    "anthropic": "https://api.anthropic.com/v1",
     "google": "https://generativelanguage.googleapis.com/v1beta/openai",
     "xai": "https://api.x.ai/v1",
     "mistral": "https://api.mistral.ai/v1",
@@ -52,16 +65,30 @@ OPENAI_URLS = {
     "minimax-cn": "https://api.minimaxi.com/v1",
 }
 # Providers llm.py knows by name: their own way to turn thinking off, and their base URL
-# (z.ai is Zhipu's international site: GLM's rules, another URL).
+# (z.ai is Zhipu's international site: GLM's rules at its own URL, ZAI_URL). The local
+# servers (LOCAL) are their own providers in llm.py under the same ids.
 KNOWN = {"deepseek": "deepseek", "zhipuai": "glm", "zai": "glm", "openai": "openai",
-         "lmstudio": "lmstudio"}
+         "anthropic": "anthropic", "lmstudio": "lmstudio", "ollama": "ollama",
+         "llamacpp": "llamacpp", "vllm": "vllm"}
+ZAI_URL = "https://api.z.ai/api/paas/v4"  # from z.ai's docs (checked 2026-11-07)
+# Servers on this machine, as the form names them: their models come from the server
+# (`installed`), at llm.py's default URL for each; models.dev's entry for LM Studio (a
+# sample of models) is left out, so the two lists do not disagree.
+LOCAL = {"ollama": "Ollama", "lmstudio": "LM Studio", "llamacpp": "llama.cpp (llama-server)",
+         "vllm": "vLLM"}
+LOCAL_DOCS = {
+    "ollama": "https://docs.ollama.com/api/openai-compatibility",
+    "lmstudio": "https://lmstudio.ai/docs/app/api/endpoints/openai",
+    "llamacpp": "https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md",
+    "vllm": "https://docs.vllm.ai/en/latest/serving/openai_compatible_server.html",
+}
+LOCAL_TIMEOUT_S = 5  # a server on this machine answers at once, or is not running
+LOCAL_MAX_BYTES = 1024 * 1024  # a list of models is a few kB
 # Listed first, in this order; the rest follow by name.
 COMMON = ("deepseek", "zhipuai", "zai", "moonshotai-cn", "moonshotai", "alibaba-cn", "alibaba",
           "minimax-cn", "minimax", "volcengine", "siliconflow-cn", "siliconflow", "openai",
-          "anthropic", "google", "xai", "mistral", "openrouter", "groq", "togetherai",
-          "lmstudio")
-NOTES = {"anthropic": "Through Anthropic's OpenAI-compatible layer: no prompt caching, and "
-                      "the thinking is not returned."}
+          "anthropic", "google", "xai", "mistral", "openrouter", "groq", "togetherai")
+NOTES: dict[str, str] = {}  # a line the New model form shows for a provider, by id
 # How models.dev marks a provider that takes OpenAI's requests at its own base URL.
 _OPENAI_SHAPED = ("@ai-sdk/openai-compatible", "@ai-sdk/openai")
 _KEY = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
@@ -80,7 +107,7 @@ class Model:
     id: str
     name: str
     released: str  # "2026-10-17"; "" when not given
-    reasoning: bool  # it thinks
+    reasoning: bool | None  # it thinks; None: not said (a local server's list)
     efforts: tuple[str, ...]  # the reasoning_effort values it takes, e.g. ("none", "high")
     image: bool  # it reads images (the vision role needs that)
     context: int  # tokens; 0 when not given
@@ -90,11 +117,14 @@ class Model:
 
     @property
     def thinking(self) -> str:
-        """How it thinks, as the table says it."""
+        """How it thinks, as the table says it (the fixed words marked N_(): the page
+        translates them with _(); "lowest <effort>" names a value and stays as it is)."""
+        if self.reasoning is None:
+            return N_("not said")
         if not self.reasoning:
-            return "no"
-        return "can be off" if "none" in self.efforts else (
-            f"lowest {low}" if (low := self.lowest) else "always")
+            return N_("no")
+        return N_("can be off") if "none" in self.efforts else (
+            f"lowest {low}" if (low := self.lowest) else N_("always"))
 
     @property
     def context_text(self) -> str:
@@ -129,6 +159,8 @@ class Provider:
     key_env: str  # the variable its key goes in; "" for a server on this machine
     doc: str  # its docs page, https; "" when not given
     models: tuple[Model, ...]  # newest first; deprecated ones left out
+    # The base URL is this tool's own (OPENAI_URLS, KNOWN, LOCAL), not the list's.
+    own_url: bool = False
 
 
 @dataclass(frozen=True)
@@ -136,6 +168,9 @@ class Catalog:
     fetched: str  # the day it was downloaded
     providers: tuple[Provider, ...]  # COMMON first, then by name
     left_out: int  # providers reachable only through their own SDK
+    # (provider id, URL before, URL now) for providers whose URL differed from the copy
+    # kept before this fetch: a change to look at before using one of them.
+    url_changes: tuple[tuple[str, str, str], ...] = ()
 
     def provider(self, provider_id: str) -> Provider | None:
         return next((p for p in self.providers if p.id == provider_id), None)
@@ -172,6 +207,7 @@ def refresh(root: Path, opener=urllib.request.urlopen) -> str | None:
         return "models.dev sent something that is not its catalog; nothing was kept."
     kept = compact(data, date.today().isoformat())
     path = root / CACHE
+    kept["url_changes"] = _url_changes(path, kept["providers"])
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_name(f".{path.name}.{secrets.token_hex(4)}.tmp")
     tmp.write_text(json.dumps(kept, ensure_ascii=False), encoding="utf-8")
@@ -180,13 +216,25 @@ def refresh(root: Path, opener=urllib.request.urlopen) -> str | None:
     return None
 
 
+def _url_changes(path: Path, providers: list[dict]) -> list[list[str]]:
+    """[id, URL before, URL now] for each provider the copy at `path` (the fetch before)
+    also had, at another URL; [] with no copy before, or one that cannot be read."""
+    try:
+        before = json.loads(path.read_text(encoding="utf-8")).get("providers") or []
+        old = {p["id"]: p["base_url"] for p in before if isinstance(p, dict)}
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        return []
+    return [[p["id"], old[p["id"]], p["base_url"]] for p in providers
+            if p["id"] in old and not same_url(old[p["id"]], p["base_url"])]
+
+
 def compact(data: dict, fetched: str) -> dict:
     """The part of models.dev's file this tool uses, each value checked."""
     providers, left_out = [], 0
     makers = _makers(data)
     for key, raw in data.items():
-        if not isinstance(raw, dict) or not _PROVIDER.match(str(key)):
-            continue
+        if not isinstance(raw, dict) or not _PROVIDER.match(str(key)) or key in LOCAL:
+            continue  # a local server's models come from the server, not the list
         provider = _provider(str(key), raw, makers)
         if provider is None:
             left_out += 1
@@ -217,7 +265,8 @@ def load(root: Path) -> Catalog | None:
             tuple(Provider(**{**p, "models": tuple(
                 Model(**{**m, "efforts": tuple(m["efforts"])}) for m in p["models"])})
                 for p in data["providers"]),
-            int(data["left_out"]))
+            int(data["left_out"]),
+            tuple((str(a), str(b), str(c)) for a, b, c in data.get("url_changes") or []))
     except (OSError, ValueError, KeyError, TypeError):
         return None
     _loaded[path] = (mtime, catalog)
@@ -243,6 +292,9 @@ def fill(provider: Provider, model: Model, taken: set[str]) -> tuple[dict[str, s
     A provider llm.py knows keeps its own way to turn thinking off; another one is `custom`
     with its base URL, and a thinking model there gets the lowest reasoning_effort it takes."""
     notes = list(filter(None, [NOTES.get(provider.id)]))
+    if provider.id in LOCAL:
+        notes.append("The server's list does not say whether the model thinks or reads "
+                     "images: Check on the Models page tells whether its thinking stayed on.")
     known = KNOWN.get(provider.id)
     if known:
         default = llm.PROVIDERS[known][0] or ""
@@ -256,7 +308,8 @@ def fill(provider: Provider, model: Model, taken: set[str]) -> tuple[dict[str, s
                          "and the thinking is paid.")
     values = {"name": _profile_name(model.id, taken), "provider": known or "custom",
               "model": model.id, "api_key_env": provider.key_env, "base_url": base_url,
-              "reasoning_effort": effort, "reasoning_effort_on": "", "timeout_s": ""}
+              "reasoning_effort": effort, "reasoning_effort_on": "", "timeout_s": "",
+              "temperature": ""}
     return values, notes
 
 
@@ -276,12 +329,13 @@ def _makers(data: dict) -> set[str]:
 def _provider(key: str, raw: dict, makers: set[str]) -> Provider | None:
     """One provider as kept, or None when this tool cannot call it."""
     api = raw.get("api") if isinstance(raw.get("api"), str) else ""
+    own = True  # the URL is this tool's own, whatever the list says
     if key in OPENAI_URLS:
         base_url = OPENAI_URLS[key]
     elif key in KNOWN:
-        base_url = api or llm.PROVIDERS[KNOWN[key]][0] or ""
+        base_url = ZAI_URL if key == "zai" else llm.PROVIDERS[KNOWN[key]][0] or ""
     elif raw.get("npm") in _OPENAI_SHAPED:
-        base_url = api
+        base_url, own = api, False
     else:
         return None
     base_url = base_url.rstrip("/")
@@ -298,7 +352,48 @@ def _provider(key: str, raw: dict, makers: set[str]) -> Provider | None:
     models.sort(key=lambda m: (m.released, m.id), reverse=True)
     return Provider(key, _text(raw.get("name"), 80) or key, base_url, key_env,
                     doc if doc.startswith("https://") and len(doc) <= 300 else "",
-                    tuple(models))
+                    tuple(models), own)
+
+
+# --- servers on this machine --------------------------------------------------------------------
+
+
+def local_provider(provider_id: str) -> Provider | None:
+    """One of LOCAL as a Provider, at llm.py's URL for it, with no models yet (they come
+    from the server: `installed`); None for any other id."""
+    if provider_id not in LOCAL:
+        return None
+    return Provider(provider_id, LOCAL[provider_id], llm.PROVIDERS[provider_id][0] or "", "",
+                    LOCAL_DOCS[provider_id], (), own_url=True)
+
+
+def installed(base_url: str, opener=urllib.request.urlopen
+              ) -> tuple[tuple[Model, ...], str]:
+    """The models a server on this machine has, from its GET /v1/models (no key; Ollama,
+    LM Studio, llama-server and vLLM all answer it), and the problem when it gave none.
+    Only localhost is asked: the page never makes the GUI's server call out. A model's
+    thinking, what it reads and its limits are not in that list (None, "" and 0)."""
+    if urlsplit(base_url).hostname not in ("localhost", "127.0.0.1"):
+        return (), f"{base_url} is not on this machine: fill the form by hand."
+    request = urllib.request.Request(f"{base_url.rstrip('/')}/models",
+                                     headers={"Accept": "application/json"})
+    try:
+        with opener(request, timeout=LOCAL_TIMEOUT_S) as response:
+            raw = response.read(LOCAL_MAX_BYTES + 1)
+        data = json.loads(raw) if len(raw) <= LOCAL_MAX_BYTES else None
+    except (urllib.error.URLError, OSError, ValueError):
+        return (), f"Nothing answers at {base_url}: is the server running?"
+    # {"data": [{"id": ...}, ...]}; Ollama sends "data": null with no model pulled.
+    rows = data.get("data") if isinstance(data, dict) else None
+    if rows is None and isinstance(data, dict):
+        rows = []
+    if not isinstance(rows, list):
+        return (), f"{base_url} answered with something that is not a list of models."
+    ids = sorted({r["id"] for r in rows if isinstance(r, dict) and isinstance(r.get("id"), str)
+                  and _MODEL.match(r["id"])})
+    if not ids:
+        return (), f"{base_url} lists no model: load or pull one there first."
+    return tuple(Model(i, i, "", None, (), False, 0, None, None) for i in ids), ""
 
 
 def _model(key: str, raw: dict, makers: set[str]) -> Model | None:

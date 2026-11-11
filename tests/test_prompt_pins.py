@@ -12,6 +12,7 @@ import json
 
 from tutor.graph import nodes, oracle, prompts
 from tutor.graph.state import PlanItem
+from tutor.llm import Prompt
 
 CONTEXT = "## p.3 · slide 1.3\nMade-up page text.\n\n## p.4 · slide 1.4\nMore made-up text."
 FAILURE = ("rule 1 (reference passes) FAIL: reference FAILED: 1 failed\n"
@@ -114,3 +115,21 @@ def test_the_python_prompts_and_schemas_are_byte_for_byte_as_pinned():
     changed = sorted(name for name in PINNED if now.get(name) != PINNED[name])
     assert not changed, f"changed: {changed}"
     assert set(now) == set(PINNED)
+
+
+def test_the_item_prompts_are_prompts_in_two_parts_the_pages_shared():
+    """Since 2026-11-10 the generate, repair and retry prompts are llm.Prompts: the pinned
+    bytes (above) in two parts, the course pages first, the same part for every item of a
+    lecture and every round of an item, so the anthropic provider caches it once."""
+    item, other = _item("mrjob", "function"), _item("pyspark-rdd", "file")
+    first = prompts.item_prompt(item, CONTEXT, "learn")
+    repair = prompts.repair_prompt(item, CONTEXT, '{"draft": 1}', FAILURE, "learn")
+    retry = prompts.retry_prompt(item, CONTEXT, "cut off", "learn")
+
+    assert isinstance(first, Prompt) and len(first.parts) == 2
+    assert "".join(first.parts) == first and str(first) == first
+    pages = first.parts[0]
+    assert CONTEXT in pages and "count-per-group" not in pages and "Write the exercise" not in pages
+    assert prompts.item_prompt(other, CONTEXT, "review").parts[0] == pages
+    assert repair.parts[0] == pages and retry.parts[0] == pages
+    assert repair.parts[1].startswith(first.parts[1]) and retry.parts[1].startswith(first.parts[1])

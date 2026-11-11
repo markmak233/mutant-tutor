@@ -18,6 +18,8 @@ from tutor import languages
 from tutor.config import WORKSPACE_FILE, Workspace, _enclosing_git_repo
 from tutor.gui import tasks, toml_edit
 from tutor.gui.courses import Course, _child
+from tutor.gui.i18n import gettext_ as _
+from tutor.gui.i18n import ngettext_
 from tutor.gui.lectures import LectureRow
 from tutor.workspace import venv_python
 
@@ -34,16 +36,17 @@ def check_new_course(root: Path, folder: str, course_id: str) -> tuple[Path | No
     folder, course_id = folder.strip(), course_id.strip() or folder.strip()
     problems = []
     if not FOLDER.match(folder):
-        problems.append("The folder name takes lowercase letters, digits, '_' and '-', 40 at "
-                        "most, e.g. comp1234 or deep-learning.")
+        problems.append(_("The folder name takes lowercase letters, digits, '_' and '-', 40 "
+                          "at most, e.g. comp1234 or deep-learning."))
     elif (root / folder).exists():
-        problems.append(f"{folder} exists already in {root.name}: choose another name.")
+        problems.append(_("%(folder)s exists already in %(root)s: choose another name.")
+                        % {"folder": folder, "root": root.name})
     if not _COURSE_ID.match(course_id):
-        problems.append("The course id takes letters, digits, '.', '_' and '-'.")
+        problems.append(_("The course id takes letters, digits, '.', '_' and '-'."))
     if (repo := _enclosing_git_repo(root)) is not None:
-        problems.append(f"The course folder would be inside the git repository {repo.name}, "
-                        "where course material could be committed. Start the GUI with "
-                        "--root pointing elsewhere.")
+        problems.append(_("The course folder would be inside the git repository %(repo)s, "
+                          "where course material could be committed. Start the GUI with "
+                          "--root pointing elsewhere.") % {"repo": repo.name})
     return (None if problems else root / folder), course_id, problems
 
 
@@ -112,30 +115,31 @@ def setup_gaps(course: Course, rows: list[LectureRow]) -> list[tuple[str, str | 
     as a route name or None, the link's words) each; [] when nothing. The course page links
     each line to its page (owner, 2026-11-06)."""
     data = toml_edit.read(course.workspace.root)
-    gaps: list[tuple[str, str | None, str]] = []
+    gaps: list[tuple[str, str | None, str]] = []  # in the request's language (gui/i18n.py)
     if not rows:
-        gaps.append(("No lectures yet: upload the lecture PDFs or web pages, or a whole folder "
-                     "of them, and tick which to keep.", "lecture_list",
-                     "Lectures"))
+        gaps.append((_("No lectures yet: upload the lecture PDFs or web pages, or a whole "
+                       "folder of them, and tick which to keep."), "lecture_list",
+                     _("Lectures")))
     elif unread := [r for r in rows if not r.read]:
-        gaps.append((f"{len(unread)} lecture{'s' if len(unread) > 1 else ''} not read yet.",
-                     "lecture_list", "Lectures"))
+        gaps.append((ngettext_("%(n)d lecture not read yet.", "%(n)d lectures not read yet.",
+                               len(unread)) % {"n": len(unread)},
+                     "lecture_list", _("Lectures")))
     if not data.get("llm", {}).get("roles", {}).get("generate"):
-        gaps.append(("No model writes exercises yet: choose one for the generate role, or "
-                     "copy another course's models.", "models", "Models"))
+        gaps.append((_("No model writes exercises yet: choose one for the generate role, or "
+                       "copy another course's models."), "models", _("Models")))
     runner = data.get("isolation", {}).get("runner")
     if languages.is_c(data):
         # C exercises are validated only in a container (docs/design.md, "C").
         if runner != "container":
-            gaps.append(("A C course's tests run only in a container: choose it, and build "
-                         "the test image.", "environment_view", "Environment"))
+            gaps.append((_("A C course's tests run only in a container: choose it, and "
+                           "build the test image."), "environment_view", _("Environment")))
     elif runner is None:
-        gaps.append(("Where tests run is not chosen, so they run on this machine with a "
-                     "warning.", "environment_view", "Environment"))
-    gaps += [(f"{problem}.", "environment_view", "Environment")
+        gaps.append((_("Where tests run is not chosen, so they run on this machine with a "
+                       "warning."), "environment_view", _("Environment")))
+    gaps += [(f"{problem}.", "environment_view", _("Environment"))
              for problem in languages.problems(data)]
     if not (course.workspace.root / "coverage.md").is_file():
-        gaps.append(("No coverage.md (optional): plans choose knowledge points from the "
-                     "slides' titles alone, without knowing which are covered already.",
-                     "coverage_view", "Coverage"))
+        gaps.append((_("No coverage.md (optional): plans choose knowledge points from the "
+                       "slides' titles alone, without knowing which are covered already."),
+                     "coverage_view", _("Coverage")))
     return gaps

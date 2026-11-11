@@ -7,64 +7,76 @@
 <div class="title-line">
   <h1>{{ course.workspace.course }}</h1>
   <div class="actions">
-    <a class="button" href="{{ url_for('new_batch', name=course.folder) }}">New batch</a>
-    <a class="button" href="{{ url_for('lecture_list', name=course.folder) }}">Lectures</a>
-    <a class="button" href="{{ url_for('models', name=course.folder) }}">Models</a>
-    <a class="button" href="{{ url_for('environment_view', name=course.folder) }}">Environment</a>
-    <a class="button" href="{{ url_for('coverage_view', name=course.folder) }}">Coverage</a>
-    {{ action(url_for('open_course_folder', name=course.folder), "Open folder") }}
+    <a class="button" href="{{ url_for('new_batch', name=course.folder) }}">{{ _("New batch") }}</a>
+    <a class="button" href="{{ url_for('lecture_list', name=course.folder) }}">{{ _("Lectures") }}</a>
+    <a class="button" href="{{ url_for('models', name=course.folder) }}">{{ _("Models") }}</a>
+    <a class="button" href="{{ url_for('environment_view', name=course.folder) }}">{{ _("Environment") }}</a>
+    <a class="button" href="{{ url_for('coverage_view', name=course.folder) }}">{{ _("Coverage") }}</a>
+    {{ action(url_for('open_course_folder', name=course.folder), _("Open folder")) }}
   </div>
 </div>
 {{ bar(view.count("passed"), view.rows | length) }}
 {% set next = view.next %}
 {% if next %}
-<p class="next">Next:
+<p class="next">{{ _("Next:") }}
   <a href="{{ url_for('exercise', name=course.folder, batch=next[0].name, exercise=next[1].id) }}">{{ next[1].title }}</a>
-  <span class="muted">{{ next[0].name }}</span> {{ chip(next[1].status, labels[next[1].status]) }}</p>
+  <span class="muted">{{ next[0].name }}</span> {{ chip(next[1].status, _(labels[next[1].status])) }}</p>
 {% endif %}
 {% if gaps %}
-<h2>Still to set up</h2>
+<h2>{{ _("Still to set up") }}</h2>
 {# Each line links to the page that fixes it (course_setup.setup_gaps), when there is one. #}
 <ul class="setup">{% for text, page, label in gaps %}<li>{{ text }}{% if page %} <a href="{{ url_for(page, name=course.folder) }}">{{ label }} →</a>{% endif %}</li>{% endfor %}</ul>
 {% endif %}
 {% if plans %}
-<h2>Plans</h2>
+<h2>{{ _("Plans") }}</h2>
 <ul class="runs">
 {% for plan in plans %}
-  <li>{{ chip(plan.state) }} <a href="{{ url_for('plan', name=course.folder, label=plan.label) }}">{{ plan.label }}</a>
+  <li>{{ chip(plan.state, _(plan.state)) }} <a href="{{ url_for('plan', name=course.folder, label=plan.label) }}">{{ plan.label }}</a>
     {% if plan.batch %}<span class="muted">{{ plan.batch }}</span>{% endif %}</li>
 {% endfor %}
 </ul>
 {% endif %}
-<h2>Batches</h2>
+<h2>{{ _("Batches") }}</h2>
 {% if view.batches %}
 <table>
-  <thead><tr><th>Batch</th><th>Mode</th><th>Passed</th><th>Not passed yet</th></tr></thead>
+  <thead><tr><th>{{ _("Batch") }}</th><th>{{ _("Mode") }}</th><th>{{ _("Passed") }}</th><th>{{ _("Not passed yet") }}</th></tr></thead>
   <tbody>
   {% for batch in view.batches %}
     <tr>
       <td><a href="{{ url_for('batch', name=course.folder, batch=batch.name) }}">{{ batch.name }}</a></td>
       <td>{{ batch.mode }}</td>
       <td class="bar-cell">{{ bar(batch.count("passed"), batch.exercises | length) }}</td>
-      <td>{% for status in labels if status != "passed" and batch.count(status) %}{{ chip(status, batch.count(status) ~ " " ~ labels[status]) }} {% endfor %}</td>
+      <td>{% for status in labels if status != "passed" and batch.count(status) %}{{ chip(status, batch.count(status) ~ " " ~ _(labels[status])) }} {% endfor %}</td>
     </tr>
   {% endfor %}
   </tbody>
 </table>
 {% else %}
-<p>No batches yet.</p>
+<p>{{ _("No batches yet.") }}</p>
+{% endif %}
+{% if queue %}
+{# The queue (tasks.queued): next first; each can be removed until it starts. A course runs
+   one task at a time; the click that queued a task is its consent (owner, 2026-11-10). #}
+<h2>{{ _("Queued") }}</h2>
+<ol class="runs">
+{% for task in queue %}
+  <li>{{ chip(task.status, _(task.status)) }} <a href="{{ url_for('task', name=course.folder, task_id=task.id) }}">{{ task.title }}</a>
+    <span class="muted">{{ _("queued %(when)s", when=task.started) }}</span>
+    <form method="post" action="{{ url_for('remove_task', name=course.folder, task_id=task.id) }}" class="action"><button type="submit">{{ _("Remove") }}</button></form></li>
+{% endfor %}
+</ol>
 {% endif %}
 {% if tasks %}
-<h2>Tasks</h2>
+<h2>{{ _("Tasks") }}</h2>
 <ul class="runs">
 {% for task in tasks %}
-  <li>{{ chip(task.status) }} <a href="{{ url_for('task', name=course.folder, task_id=task.id) }}">{{ task.title }}</a>
+  <li>{{ chip(task.status, _(task.status)) }} <a href="{{ url_for('task', name=course.folder, task_id=task.id) }}">{{ task.title }}</a>
     <span class="muted">{{ task.started }}</span></li>
 {% endfor %}
 </ul>
 {% endif %}
 {% if view.recent %}
-<h2>Recent runs</h2>
+<h2>{{ _("Recent runs") }}</h2>
 <ul class="runs">
 {% for run in view.recent %}
   <li>{{ chip(run.result) }}
@@ -74,7 +86,7 @@
 </ul>
 {% endif %}
 {% if view.gaps %}
-<h2>Not counted</h2>
+<h2>{{ _("Not counted") }}</h2>
 <ul class="problems">{% for line in view.gaps %}<li>{{ line }}</li>{% endfor %}</ul>
 {% endif %}
 {% endblock %}

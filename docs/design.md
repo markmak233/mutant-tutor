@@ -179,6 +179,7 @@ smartCodingReview/                       # public repo (the `tutor/` above), cod
 │   │                                    #   P3 parses LLM output into the same models
 │   ├── materials/                       # P3a course files -> per-file md cache (pypdfium2), vision pages; [requires] draft
 │   ├── llm.py                           # P3a thin OpenAI-compatible client, standard library only, no LangChain
+│   ├── llm_anthropic.py                 # Claude's Messages API behind llm.chat (provider "anthropic")
 │   ├── graph/                           # P3 langgraph dependency added here; languages.py: per-language profiles;
 │   │                                    #   nodes.py an item's nodes, oracle.py, drafts.py, batch.py, build.py the wiring;
 │   │                                    #   prompts.py the templates, prompt_parts/ one module per language
@@ -1171,9 +1172,10 @@ Design approved 2026-10-28 (owner):
   sends it back with feedback, which goes to `plan`. A resume rewrites plan.json only when
   the model has planned again (`plan.model.json` keeps its last plan), so the owner's
   edits survive a pause; a batch paused before that file existed keeps its plan.json, and
-  the CLI says when plan.json differs from the model's latest plan. The approved plan, edited or not, must pass the blocking checks
-  (unique and new ids, since two items with one id would share a drafts folder; known
-  lectures; slide ranges), in the CLI and again in `approve`; a count other than the one
+  the CLI says when plan.json differs from the model's latest plan. Every row must have a
+  unique, identifiable ID; selected rows, edited or not, must pass the schema and blocking
+  checks (new ids, since two items with one id would share a drafts folder; known lectures;
+  slide ranges), in the CLI and again in `approve`; a count other than the one
   asked for is the owner's choice (both found in an outside review, 2026-10-29). A SQLite checkpointer in
   `.drafts/<batch>/` keeps the paused batch, so `python -m tutor.graph resume` continues it
   in another terminal or another day. Approved items fan out with `Send` and run the item
@@ -1638,8 +1640,8 @@ the call log shows the result. Meaning comes first: a short prompt gains nothing
 contorted, and reordering a calibrated prompt means calibrating it again.
 
 Measured so far: DeepSeek hits 53-75% on generate and repair. `gpt-6.1-terra` as the judge hits 7%,
-its largest OpenAI cost. Its prompt puts each exercise before the slides, and the slides carry marks
-for that exercise, but moving the slides first was not enough. In a small test (2026-11-03, week 8's
+its largest OpenAI cost. Its prompt then put each exercise before the slides, and the slides carried
+marks for that exercise; moving the slides first was not enough there. In a small test (2026-11-03, week 8's
 11 exercises and 2 first drafts with known errors), exercises sharing about 9000 tokens at the start
 hit 0%, sent one at a time or in parallel, while the same whole prompt sent again minutes later hit
 99.98%. A 90-second wait before the second call, a `prompt_cache_key` and the slides in a message of
@@ -1650,6 +1652,11 @@ The same test shows what a layout change would risk. The judge run again on its 
 the letters of 3 of the 13 and whether an exercise is fully fine on 1. The new layout changed 3 of
 13 against the first run, no more than that noise, and still flagged both known errors. 13 items
 show a direction only, but phase 5 has to report the judge's numbers with this noise in mind.
+
+On Anthropic the prefix is explicit (2026-11-10, "Anthropic provider", cache breakpoints): with
+the slides first and the exercise's pages named apart, the judge hit 71% of its input on the
+54-item calibration, a 60% saving at Sonnet 5.5's prices; the same layout change that hit 0%
+on OpenAI for a reason never found.
 
 ## LLM engineering candidates (review at the start of each phase)
 
@@ -1695,13 +1702,95 @@ deterministic judge, hybrid RAG with recall@k, the phase 5 metrics, the hint lea
     switches. A profile holding an `api_key` field or a key-like value is refused, unknown
     fields are errors, and a missing variable is named in the message. Without an `[llm]`
     section, `LLM_PROVIDER` / `LLM_MODEL` / `LLM_BASE_URL` / `LLM_API_KEY` act as one
-    profile. Like `[safety]`, the section is the owner's: generation never writes it. Apple Intelligence's on-device model is reachable too, through third-party
+    profile. Like `[safety]`, the section is the owner's: generation never writes it.
+    A profile's `temperature = "default"` (owner, 2026-11-09) leaves the temperature out of
+    its requests: Claude Opus 5.5, reached through Anthropic's OpenAI-compatible address as a
+    `custom` profile, answered HTTP 400 ("`temperature` is deprecated for this model") to the
+    0 every other call sends. It is the field's one value, as callers choose the temperature
+    and the profile only says the model takes none; the Models form offers it under More.
+    Such a model answers at its own temperature, so a rerun is not the same answer, and the
+    repair rounds' rising temperature (0.2 * N) does not apply to it. Chosen over retrying
+    without the field after a refusal: one refused request per run, and less plain. That
+    address was for trying Claude out; since 2026-11-10 Claude has its own provider (next
+    entry). Apple Intelligence's on-device model is reachable too, through third-party
     bridges that serve it as an OpenAI-compatible local API (apfel and similar; not an
     Apple interface), so the same client can call it with no extra code. It is not a default:
     about 4096 tokens for input and output together (one week's material and the format spec
     do not fit), no image input found, one fixed small model, and rate limits for
     background use. It may serve as one more local arm in the phase 5 model comparison or for
     short text tasks.
+  - Anthropic provider (owner, 2026-11-10: "use the native provider"), `provider =
+    "anthropic"` in `tutor/llm_anthropic.py`, standard library like the rest of the client.
+    Why not the compatible address: Anthropic's own docs call that layer a way "to test and
+    compare model capabilities", "not a long-term or production-ready solution", and it has
+    no prompt caching at all (`prompt_tokens_details` "always empty"; the 11-10 judge
+    calibration with Sonnet 5.5 paid $2.52 for 1.1M input tokens that way); the Messages
+    API opts into caching per request. Measured before deciding (one course, 11-10): plan
+    (Sonnet 9/9 coverage rows), oracle (Sonnet 54/58 agree with the reference, mutants 91%)
+    and the judge (Sonnet as good as gpt-terra on planted defects, 13/18 to 14/18, with no
+    owner-approved exercise marked unclear against gpt's 6). The mapping, in the module's
+    docstring and here in short: the system prompt is a top-level field; `max_tokens` is
+    required (32,000 when a caller gives none, the pipeline's thinking default; thinking
+    counts towards it); no `thinking` field (adaptive and on by default on the 5.5 models,
+    Opus cannot turn it off) and no temperature (refused), so a call's depth goes through
+    `output_config.effort`: `thinking=False` sends the profile's `reasoning_effort` or
+    "low", `thinking=True` its `reasoning_effort_on` or nothing (the model's default), the
+    same profile fields every provider uses; a JSON schema goes to `output_config.format`
+    (structured output), after the constraints Anthropic refuses are dropped from the copy
+    sent (`exclusiveMinimum`, `maxItems`, ...: HTTP 400 for the draft and doctor schemas in
+    the first probe; the caller's pydantic model still checks them), and a schema with a
+    free-form map (the draft's `data_files`, which the API refuses outright) goes into the
+    prompt as DeepSeek's JSON mode does, the caller validating as always; the reply's text
+    blocks are joined, thinking blocks left out, `max_tokens` becomes the "length" finish
+    reason the graph reads; the event stream is put back together like the OpenAI one.
+    Usage keeps the client's one meaning: Anthropic's `input_tokens` leaves out the tokens
+    read from or written to the cache, so the reply adds the three back (costs are computed
+    from the total), with `cached_tokens` and a new `cache_write_tokens` kept apart in the
+    call log. The request and error handling are one function (`llm.exchange`) for both
+    shapes; only the path, the headers (`x-api-key`, `anthropic-version`) and the reading of
+    the reply differ. No SDK: the owner's keys stay in `.env` as for every provider; the
+    SDK's credential chain (`ant auth login`, workload identity) is a later option, not a
+    reason for a dependency now. Checked with Haiku 5.5 against the real API before the
+    tests were final (8 calls, $0.0004); the Models page clicked in headless Chrome on a
+    scratch course (New model, Anthropic from the list, Use, Save: `provider = "anthropic"`,
+    no base_url written).
+  - Cache breakpoints (owner, 2026-11-10, the same day). A caller that gives a message as
+    an `llm.Prompt` (its parts: the shared one first, then this call's own) tells the
+    provider where the prefix ends: the anthropic module sends one text block per part
+    with `cache_control` after every part but the last, and marks the system prompt's last
+    block too (at most four marks, the API's limit). To every other reader a Prompt is the
+    plain string its parts make (a `str` subclass): the OpenAI-shaped providers, the
+    assistant's request files and their ids, the tests' fakes and the prompt pins see the
+    bytes a string would give, so DeepSeek's generate and repair requests did not change
+    by a byte (the pins prove it), and the pins were not recomputed. Explicit breakpoints,
+    not the API's automatic one: that lands on the last block, which in these prompts is
+    the part that changes every call. Who gives parts: the generate, repair and retry
+    prompts (the course pages first, the example and the item after, so the items of a
+    lecture and the rounds of an item share the pages); the judge (below). Not the oracle
+    (its spec is about 260 tokens, under the 512 a Claude 5.5 model caches), nor the plan
+    (one call) or the hints judge (no slides). The judge's prompt had to change order for
+    this: the exercise came first and the slides last, with the exercise's own pages
+    marked in their headings, so no two calls shared more than the system prompt (the 7%
+    hit rate under "Prompt layout for caching"). Now the batch mode, the lectures taught
+    and the unmarked pages come first, then a line naming the exercise's own pages, the
+    question, the starting file, Useful functions and the reference; the words did not
+    change, the order did, so `PROMPT_VERSION` went to 5 and the calibration was run
+    again with Sonnet 5.5, sequentially so that the first call of a lecture fills the
+    cache before the next reads it. Measured (54 rated items and 18 planted defects, the
+    same set as the morning's run on the compatible address): 71% of the input served from
+    the cache (781,749 of 1,101,216 tokens; 53 of 54 calls read, 7 wrote), $0.96 against
+    $2.39 for the same calls uncached, a 60% saving; 215 s. The verdicts: planted defects
+    12 of 18 (clear 1/5, fits 3/5, taught 3/3, targets 5/5) against 13 of 18 in the
+    morning, and the real ratings the same (clear 1 of 5 found, no owner-approved exercise
+    marked n), within the rerun noise this section records (3 of 13 letters); one of the
+    two fits misses was a verdict with an empty `evidence` and ok=true, which the judge's
+    retries do not catch (only a reply that fails the schema is asked again). So the judge
+    role moved to `claude-sonnet-5-5` in every course (owner's condition: not worse than
+    the morning's run), and the last OpenAI role is gone; the OpenAI profiles stay in the
+    files until the key ends. A 1-hour cache lifetime (writes at 2x) was not needed:
+    sequential judging stays within the 5 minutes; generation's repair rounds, with
+    minutes of validation between calls, are where it may matter, to be read from the
+    call log of the next batch before deciding.
 - [3] Summary of recently covered material in the generation prompt (ContentGen found it
   improved generated questions); built from `coverage.md` and the batch's sources.
 - [3] Call log: one JSONL line per LLM call (node, model, input / output / cached tokens,
@@ -2183,8 +2272,9 @@ themselves, so a cheap layer comes first and a stronger one later.
     runner (2026-11-07): one C run in each example timed out at 5 s, with no output kept to
     prove the cause; Docker Desktop's VM on the owner's Mac uses 18 bits, and 32 bits there
     (arm64) did not reproduce it in 40 runs. CI prints the value and sets 28 (see "CI"); for a
-    user on such a Linux host, `tutor doctor` ("Roadmap" 6) is to check the value and give the
-    `sysctl` command. With 28 set, the next CI run (2026-11-08) passed every C test, and
+    user on such a Linux host, `tutor doctor` ("Roadmap" 6) now checks the value in C's
+    registered machine check and prints the `sysctl` command (2026-11-09); it never runs it.
+    With 28 set, the next CI run (2026-11-08) passed every C test, and
     nothing else about C had changed; as the hang is intermittent, one run is strong evidence,
     not proof.
   - Step 2, a course's language (owner, 2026-11-07; `tutor/languages.py`, the Environment
@@ -2203,6 +2293,27 @@ themselves, so a cheap layer comes first and a stronger one later.
       standard library's, each a plain `name.h` path) and `gcc = "12"` in [requires] when
       missing (the image's Debian gcc). Checked writes as every other table, the file before
       kept as `.bak`.
+    - What the lectures' code uses beyond the core modules (owner, 2026-11-10; the plan
+      had a model drafting `[safety] allow_imports` and `[languages.*]` at a course's
+      creation, each entry with its source, accepted one by one). The [requires] draft
+      already proposes the pip packages, and ticking one allows its module; `[languages.c]
+      flags` already come from the lectures' gcc lines. What was left out: a module that
+      is no pip package (`subprocess`, `socket`, `threading`, `struct`: the standard
+      library, which the draft leaves out on purpose) was never proposed, so a course that
+      teaches it got exercises the static check refused; likewise a header a course ships.
+      Import and include lines are exact text, so `materials/imports_found.py` reads them
+      with a regular expression, no model (as the C flags): every module the cached
+      lectures' code imports beyond the core set, the frameworks' and `allow_imports`, and
+      every header beyond the standard ones and `allow_headers`, each with the lecture,
+      page and line it was seen on, most-cited first. Step 1 lists them with a tick each
+      and "Allow the ticked", which adds to `[safety] allow_imports` / `allow_headers`
+      through the checked write (`.bak` kept); a name that starts processes, reaches the
+      network, loads code or touches the interpreter is marked risky, with what allowing
+      it means. Never ticked by code. A prose line that starts with "import" shows up too
+      (one did), with its line, and the owner skips it. On the real courses it found one
+      prose line on the Spark course and the two headers the C course ships.
+      `[languages.*]` beyond C waits for a second language. Clicked in headless Chrome on
+      a scratch course: the three rows, two ticked and allowed, the risky one left.
     - The page's step 1, laid out for more languages (owner, 2026-11-07): "Find it in the
       lectures" first; then one language list, Python first and not removable (the tests are
       pytest), each row its [requires] toolchain's version (python, gcc), with "Add a
@@ -2214,6 +2325,10 @@ themselves, so a cheap layer comes first and a stronger one later.
       of [requires] too, as it is C's row (it used to stay); accepting gcc from the lectures'
       candidates adds C, with the version typed (an explicit click, so C is still declared,
       not inferred). A pure Python course shows no C settings at all.
+    - Doctor's registry (2026-11-09) follows the same language membership/order. Each new
+      language also adds a doctor_languages module and DOCTORS entry, a shipped smoke
+      example and machine/platform tests. LanguageDoctor keeps machine_checks,
+      platform_problem and validation_needs_container separate; doctor.py is unchanged.
     - "On this machine" is greyed for a C course and refused by the server: C runs only in
       the container. A `gcc` here of another make or version (macOS's clang) is shown as
       "differs", not as missing: the learner's own runs compile with it, validation with the
@@ -2335,6 +2450,130 @@ themselves, so a cheap layer comes first and a stronger one later.
 
 ## Version conflicts
 
+Doctor step 2A (2026-11-09): `tutor.doctor_advice` now supplies immutable caller-fact,
+advice and result records, a strict JSON schema/parser, and a pure permission gate.
+It is a library only: no CLI advice flag, model/network call, environment discovery,
+installation, execution or file write. Default doctor behavior is unchanged.
+Package identity follows PyPA's case/separator normalization. Permissions come only from
+declared and installed distributions and `compat.needed` for this course at the proposed
+Python; batch order cannot retain companions needed only by the old Python. System tools
+and unsupported toolchains are excluded from package changes. Python choices must be
+offered, unlocked, different and not ruled out by known conflicts in the current declared
+requirements. This conservative check does not resolve joint package/Python changes.
+Version constraints accept only numeric releases with ==, !=, >=, <=, >, <, ~= and comma
+intersections; ~= needs at least two components. This is a restricted subset, not a full
+PEP 440 parser or dependency solver (no wildcards, pre/post/local/epoch syntax, URLs,
+markers, extras or pip options). Syntax approval proves neither satisfiability nor that
+a matching release exists. Gate results are accepted/rejected/stopped/new-package-review,
+always unverified. Rejection or new-package review releases no changes; a new name stays
+in its separate review field. Empty changes stop rather than claim success. Disposable
+verification and owner-approved application remain later increments.
+
+Doctor step 2B (2026-11-09): explicit --preview-advice/--advise modes require a selected
+UTF-8 failure record. The first previews only; the second sends sanitized material and
+measured distribution/Python facts to an explicit doctor role/--profile (LLM_* outside
+course configuration). Only --env-file reads credentials, through config.load_env's new
+optional target mapping; os.environ and subprocess environments are not populated with
+those values. Probe the course venv/image, never substitute tool facts for a missing one;
+image metadata uses existing container limits, no mount/network/pull/build, and its Python
+is locked until 2C. Static probes have captured text, deadlines and owned-container cleanup.
+The new prompt marks every external section with graph.prompts.material. llm.chat_payload
+is a pure shared preview/request layout; schema_first is opt-in for doctor, leaving old
+payloads and calibrated prompts unchanged. llm.py stays whole as one provider-client job.
+Thinking is off; retry once for truncation only. Input/request bounds are 64/128 KiB,
+never a token estimate. No log or assistant request file is written; exchange profiles
+are refused. Every reply passes 2A, all suggestions remain unverified warnings, and unknown
+names are withheld pending the independent review path. No fix or original file is changed.
+Redaction is best effort; owners must review their selected log before requesting a send.
+One assignment keeps its value: a model profile's `api_key_env = "NAME_OF_A_KEY"`, whose
+value is a variable's name (upper-case words joined by underscores, named like a
+credential); any other value on that line is hidden (owner, 2026-11-09).
+
+Doctor 2C verification (2026-11-09): --verify-advice adds fixed import/dependency-check
+evidence, never executes failure text or model-written code. A passing baseline stops
+without a model call. A failing baseline is followed by at most three cumulative trials
+in fresh disposable venvs/images, with repeated-proposal/missing-module stop rules. Every
+reply and cumulative target-Python batch passes the permission gate. Public PyPI wheels
+only; inherited pip configuration/credentials are excluded. Host package execution has
+user rights; container trials derive an owned image and use tutor.execution's limits,
+without host fallback. Temporary resources are cleaned, and unavailable cleanup is
+reported. Only the same check failing then passing is verified, not a whole course.
+Container Python remains locked. --review-new-package independently asks distinct
+provider/endpoint profiles with thinking on, then checks bounded PyPI release-file JSON;
+only agreement plus release evidence is displayed, never automatically installed. A
+profile label cannot prove the underlying model identity; owners select independent
+models. Application/rollback, GUI integration and image records remain separate steps.
+
+Doctor application (2026-11-09): optional [package-bounds] holds the same restricted
+numeric comparisons; [requires] retains numeric prefixes. A package identity occurs in
+only one table, and repair preview explicitly moves an affected package. Workspace's
+effective_requires feeds checks, installs, image identities/recipes, doctor facts and GUI
+environment consumers; empty bounds preserve legacy recipes. Known bad release families
+are conservatively intersected with bounds; nonnumeric installed versions cannot pass a
+numeric bound check. Pip, not this grammar, resolves dependencies. The doctor extra adds
+tomlkit only for explicit application/preview, preserving comments/unrelated tables.
+--save-repair writes exclusive private structured artifacts with workspace/environment
+hashes, no failure text/paths. --preview-repair prints the full diff; --apply-repair with
+--confirm re-gates, rejects stale facts and repeats before/after verification. Host
+replacement retains the original venv, builds at its final path, checks and rolls back
+on failure/interrupt. Container application uses a temporary proposed workspace and
+keep_older=True so existing images survive, promoting configuration only after checks.
+A per-course lock serializes transactions. Successful backups remain for --undo-repair
+or explicit --finish-repair --confirm; edits to saved/current config refuse undo. No
+student/lecture/model/runner edit, system install or new-package auto-application occurs.
+The Environment integration follows below; image inventories are described under its step 4.
+
+Doctor GUI integration (2026-11-09; the clicks made are listed below): Doctor is the
+automatic check in Environment step 2. The initial render defers read-only probes to htmx
+fragments; these receive structured, redacted doctor rows without parsing CLI text. Known
+problems link to existing install/build, Python switch, runner or host-guide actions on
+their own rows. A running course task disables fix controls. Old `/c/<course>/doctor`
+bookmarks redirect to Environment step 2; there is no separate Doctor page or bounds editor.
+
+An uncovered Problem offers "Ask a model for a fix", opening a four-screen wizard:
+selected data/profile and full sanitized preview, advice, temporary verification result,
+then complete diff and application. The failure is pre-filled from the row and latest
+failed install/build log tail, at most 64 KiB of UTF-8, and remains editable. An imports
+row also supplies its module when recognized. Selected inputs stay in private logs/doctor.
+Preview and Send are separate POST actions. Only new-package advice exposes independent
+second-provider/PyPI review; a changed destination requires a new preview. Failed
+verification offers a return to step 1. A verified proposal still needs a full diff preview
+and confirmation before Apply; afterwards Undo restores the original setup and Keep it
+explicitly discards its backups. Finish preserves later owner edits; undo refuses edited
+configuration. Each action retains the existing CLI service's gates and checks.
+
+Destination/input/config/fact fingerprints bind send/apply to current previews. Model
+credentials stay in the worker's private mapping, never the server environment; both
+profiles' credential values are removed from shared previews. The wizard displays complete
+bounded results, not parsed log tails; oversized previews/diffs are refused rather than
+silently cut. Temporary installs, apply, undo and backup discard have explicit consent.
+Step 1 has one version cell per package, with prefix/comparison storage described below.
+Clicked in headless Chrome on scratch courses, with stand-ins for the model and the
+installer (2026-11-09): a missing `.venv` row's Install (the fix buttons disabled while
+it ran, then every row OK); the four fix screens (preview, send, test, the diff, Apply,
+Undo); an old Doctor bookmark's redirect; a version moved between prefix and comparison
+with its comments and the `.bak` kept, and `java >=17` refused; every step's links.
+A second round the same day, the container ones with the real Docker: a Docker that
+does not answer (its row a Problem, the image row skipped); Build on the image's row
+(disabled while it ran, then OK); step 4's record with a package the .venv had moved
+away from the image; a .venv on a Python the course no longer declares, switched with
+"Make .venv with Python 3.12"; with only an unsuitable Python on the machine (a
+stand-in list), "Download one with uv" opened; and a new package's independent review.
+The uv download itself was clicked on 2026-11-10, once uv was installed: the page listed
+five CPythons with the two the course cannot use marked, the form waited for its tick,
+`uv python install` put 3.13 in uv's own folder, and the switch then offered it.
+That round found two faults no test had: the page took envcheck's exit status 1 (a
+requirement fails) for a check that could not run and dropped its rows, so the switch
+did not mark the .venv's own Python nor apply the probe's removed-module rows; and the
+plan page showed its date only after a reload. Both are fixed, each with a test.
+
+Doctor's own output (the CLI's lines and the rows the page receives) hides the values of
+environment variables named like a credential (KEY, TOKEN, SECRET, PASSWORD and the
+like: the advice redactor's name rule) and any text shaped like an API key. It does not
+hide every environment value (owner, 2026-11-09): hiding HOME or TMPDIR cut the paths
+out of the commands a row advises. What is sent to a model still goes through the
+advice redactor, which is stricter.
+
 Decided 2026-11-08 (owner), when Python 3.12 to 3.14 came into CI: a package that installs and
 imports cleanly can still fail when a job runs, because a newer Python removed something it
 uses (mrjob: `distutils` in 3.12, `pipes` in 3.13) or changed what it relies on (PySpark 3.5
@@ -2369,9 +2608,9 @@ every language and framework, so one way of handling them:
   makes the `.venv` anew (the one before kept as `.venv.old` and put back if anything fails,
   `[requires]` checked against the new Python), and only then sets `[requires] python`
   (`workspace.toml.bak` kept). The server runs only a Python it offers, found again on the
-  request, never a path from the form. Installing a Python that is not on the machine is the
-  owner's, until packaging ("Roadmap" 6).
-- Then a model, for what neither covers (planned, with `tutor doctor`; "Roadmap" 6): it reads
+  request, never a path from the form. Additional interpreters now use the explicit uv
+  download page reached from Environment's Python recovery (described under "Local GUI").
+- Original model-fix design (2026-11-08; implementation recorded above): it reads
   the failure's text, the versions and `[requires]`, and proposes a change as structured data
   (a version, the course's Python, a companion), which the owner confirms before it is applied
   and the checks then verify; a fix that holds becomes a rule. Its prompt is strict: the
@@ -3001,6 +3240,21 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
       container course needs on the host only Docker, the tool and an IDE: the image already
       holds Java, Hadoop and gcc. Done when a C and a Spark exercise give the same outcomes
       both ways and their attempts lines match.
+      - The exercise page's "Run my tests in the container" (owner, 2026-11-10: the
+        terminal command as a button). It starts `python -m tutor test <exercise>` as a
+        course task, so it queues like any other, shows live output on its task page and
+        records the attempt on the host as the terminal would. Shown only for a container
+        course (a host course's notice says to run pytest in the course terminal); Docker
+        or the image missing stops it before it starts, as for validation. A run whose
+        tests fail is a failed task, which stays on its log, where the failures are, with
+        Run again; one that passes goes back to the exercise with a notice. Clicked in
+        headless Chrome on a scratch container course with no image: the button, the task,
+        `tutor test`'s own "image is missing" message, Back and Run again. The exercise
+        page then lists its own runs (owner, the same day: "the record is in Tasks, but
+        that means leaving the exercise"): every logged attempt, newest first, with its
+        counts, duration and snapshot name, never its first error (as the dashboard's
+        runs: a hand-calculation answer can sit in it; the task's log has it), and the
+        test tasks started from the page, linked to their logs.
       - Optional, after it: a page for a learner who wants to run tests on the host anyway,
         saying how to install that course's toolchain (Java, Hadoop, a C compiler) on their
         platform, automated where a language allows it safely. Toolchains differ by language,
@@ -3009,18 +3263,38 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
       image's digest, shown on the Environment page with the `[requires]` packages whose
       versions differ between the course's `.venv` and the image. Recorded, not pinned: a
       pinned base image misses security updates; pin it once drift is seen.
+      Built 2026-11-09: canonical recipe/image names remain unchanged; a FROM-only temporary
+      local tag captures the actual base ID, then the build records provenance labels.
+      Post-check inventory uses the immutable image ID in a bounded, read-only/network-off
+      container, no course mount. Private versioned snapshots are kept per image content,
+      with a current recipe pointer and drift/staleness checks. Environment step 4 shows
+      build time and actual course-venv/image differences inline, with metadata-only refresh
+      and a link to full history; legacy base provenance stays unknown. A build snapshot is
+      not a permanent base pin. Browser acceptance is pending.
    Then packaging and release (see "Deferred", "Packaging and release"), with `tutor doctor`
    (checks the tool, that Docker runs, the course's image, then validates one example in the
    course's runner as a smoke test, and says what to do next for each failure) and a fresh
    install timed on macOS, Windows and Linux; Docker on Windows is first tested there.
-   `tutor doctor` also brings the model that turns an install failure no rule covers into a
-   proposed fix, under the limits in "Version conflicts" (owner, 2026-11-08: with doctor, not
-   before: most of its fixes need another Python or a version bound `[requires]` cannot
-   write yet, and doctor runs before any course, so it needs a model of its own). And uv
-   offers the Pythons the machine lacks in the Environment page's switch (`uv python
-   install`, into the user's folder, no administrator rights); whether that counts as
-   installing system software, which `tutor doctor` never does, is the owner's to decide
-   then.
+   - `tutor doctor` step 1 (deterministic checks, no model, no installs): done 2026-11-09.
+     Tool checks always run; a nearest-ancestor workspace adds course checks. No .env load,
+     course writes or repair actions. Optional --smoke copies a shipped example into a
+     disposable course and calls load_exercise/validate/format_report directly, without
+     changing validation/ or writing a report. C validation needs a container independently
+     of host student-test support. Each check fails independently with an actionable row.
+     Per-language parts mirror graph/prompt_parts: doctor_languages.LanguageDoctor holds
+     the smoke example, machine_checks, platform_problem and validation_needs_container;
+     DOCTORS matches tutor.languages.LANGUAGES. A new language adds a module, its registry
+     entry, a shipped example and machine/platform tests; doctor.py does not change.
+     Framework dependencies stay in envcheck. The structured advice gate, preview/send,
+     disposable verification and explicit application/undo are implemented (2026-11-09;
+     "Version conflicts"). Environment integrates the check, host guide and four-screen
+     repair wizard; the clicks made are listed in "Version conflicts".
+   An optional doctor profile handles failures no rule covers; proposals use the existing
+   permission gate and temporary verification. Numeric comparisons are stored in the
+   separate `[package-bounds]` table and shown in Environment's one version table. uv can
+   download an additional Python with explicit consent when recovery finds none compatible,
+   into the user's directory without changing PATH or a course venv. Selecting it for a
+   course remains a separate action; default `tutor doctor` installs nothing.
    Later, each when its trigger comes: a JDK instead of a JRE in the image (a course that
    compiles Java in it); a separate execution backend (a third runner such as Podman; until
    then the host or container switch in `execution.py` is enough); VS Code Dev Containers on
@@ -3209,14 +3483,9 @@ format (see "Learning rules").
   Output, Example and Constraints in English (the rules read as an exam states them, with
   no mistranslated rule); whether `hints.md` and `tutor.hint` follow.
 
-The GUI in other languages (owner, 2026-11-07; not built). Why not now: the GUI's text still
-changes with every step (23 templates, the notices, and messages written by the Python
-modules: several hundred strings), so a translation now would double each change and its
-tests; and the exercises themselves are in the lectures' language, so a translated GUI
-around them helps only half. Revisit at packaging and release, when the text has settled, and
-together with translated `question.md` above.
-- Shape: gettext (Flask-Babel), English as the only source; the language from a setting or the
-  browser; untranslated strings fall back to English.
+The GUI in other languages: built 2026-11-10 (see "The GUI" below, "The pages in another
+language"); the owner's decision that day: the repository ships English only, and a model
+writes any other language on the Language page. Translated `question.md` above stays deferred.
 
 Later phases, after phase 5 (order decided 2026-10-26, numbered 2026-10-30): phase 6 the
 second course, phase 7 the local GUI, then packaging and release. Changed by the owner on
@@ -3236,7 +3505,27 @@ mode is not done (see "Decisions not to do").
   to find weak knowledge points and schedule `review`-mode batches with spaced repetition.
 - Packaging and release: an install line, one click to start, CI on macOS and Windows
   (WSL) as well, versioned releases after `v0.1.0`.
-  - One click (the owner's aim, 2026-11-05; a plan for the release, not built): one install
+  Portable-wheel preparation built 2026-11-09: controlled setuptools hooks carry public
+  source/build metadata, GUI assets and synthetic examples, excluding private roots,
+  caches and links. Installed workspace/repair installers extract the controlled source
+  temporarily and install noneditable; source checkouts retain editable installs. No
+  unrelated PyPI tutor-name fallback. Archive paths/size are validated, examples work
+  outside a checkout, and offline wheel inspection precedes actual fresh-install checks.
+  Local launch built 2026-11-09: `tutor gui` shares the module launcher. Installed wheels
+  default to per-user courses/config folders (TUTOR_HOME can override both); checkout
+  WORKSPACE_DIR behavior stays. Launch state is private and root-specific. A second
+  launch verifies a fresh HMAC challenge over loopback before reusing a server; invalid
+  state has an explicit reset, and no server is killed. `tutor shortcut` creates a new
+  .command/.lnk/.desktop without overwriting or changing startup items. Native desktop
+  trust/click and browser acceptance remain separate from platform-format unit tests.
+  Optional Python management built 2026-11-09: existing uv-managed stable CPythons join
+  interpreter discovery. The separate optional page/`tutor python` command lists uv's
+  offline catalog; only a confirmed action downloads a freshly offered interpreter,
+  checking known conflicts and measured removed imports. No system installer, PATH alias,
+  course switch, runner fallback or default-doctor install. Native install acceptance
+  uses a new scratch root and an existing Python, with implicit Python downloads disabled;
+  the packaging CI matrix covers installed wheels/fresh synthetic courses on three OSes.
+  - One click (the owner's aim, 2026-11-05; installation acceptance still pending): one install
     line gets `uv`, which fetches the Python it needs and installs the tool (`uv tool install`,
     the same job as `pipx`, without needing Python first). `tutor gui` starts the server and
     opens the browser with that launch's token. `tutor shortcut` writes a desktop shortcut on
@@ -3345,6 +3634,39 @@ late; the adaptive review screens can be built with it.
   plan's exercises that did not come out and links to the plan to try them again (owner).
   With two or more, "Try all N again" runs each one's commands one after another in one
   task.
+- Select items on the Plan page (owner approved 2026-11-08): native checkboxes start all
+  checked. Approve and generate selected starts only checked rows; an empty selection is
+  refused with its ticks preserved, before a task or model call. Full notes and reasons
+  remain visible. Unchecked rows say "Left out by you", not failed; Try all includes only
+  actual failures. No custom JavaScript or nested forms: checkboxes use HTML's form
+  association. The CLI equivalent is `resume --approve --only=alpha,charlie`; omitting
+  --only preserves all-items approval, while an explicit empty list is refused.
+  - Unlike the earlier status/retry addition, selection changes graph state and dispatch.
+    The checkpoint keeps the full approved plan, selected_ids in plan order, the exact
+    reviewed file's SHA-256, and generation_complete after collect, even with zero saved.
+    plan.json is never filtered. Dispatch and assistant-answer resumes use only selected
+    IDs; Continue cannot broaden them. Legacy checkpoints without selected_ids mean all.
+    A new plan clears selection metadata; the model-facing schemas and prompts stay intact.
+  - Identity must be unambiguous throughout the plan. Schema, unused ID, source and slide
+    checks apply only to selected rows; an invalid deferred row need not block a valid one.
+    A GUI approval submits IDs and the reviewed digest; both the server and queued CLI
+    compare the digest before work. A stale page shows the current full plan for review.
+    Selection/approval flags are rejected outside the approval interrupt, before stopped
+    work can run or run.json settings can change.
+  - The GUI reads the root SQLite checkpoint lazily, with a read-only connection and short
+    busy timeout, without loading .env or models. A read failure disables paid controls and
+    offers Refresh/repair instructions rather than guessing the authorized subset. Once
+    approved, the page and retries use the full checkpoint snapshot, even if plan.json is
+    changed externally. Edit plan.json is offered only before approval. Approval before
+    the first item log still means Continue; completion without a manifest has no Open
+    batch link.
+  - After the selected run finishes and the whole course is idle, each deferred row has
+    Generate, an explicit new paid item/validation task. It uses the approved notes and
+    saved settings/profile overrides, resolved against current course model definitions
+    shown on the page. Current schema, source and ID collisions are checked again. A
+    blocked row links to the course/existing exercises and New batch as its fix path.
+    A later saved/error/discarded result replaces left-out status and follows the ordinary
+    retry workflow. No bulk Generate all left out action in this version.
 - "Try again with a note" (owner, 2026-11-07, after a real retry failed rule 1 the same way
   twice: the reference and the tests read an ambiguous question differently, and nothing
   about the retry had changed). Under an exercise that did not come out, a folded section
@@ -3356,6 +3678,66 @@ late; the adaptive review screens can be built with it.
   note is kept beside the item file, and the next try's box starts from it. A batch made
   with `hide_answers` (hand-calculation exercises) shows no check output, which can quote
   expected values; the note still works there. "Try all" takes no notes.
+- "Try again with a 64,000 output cap" (owner, 2026-11-10). A plan's two items came out
+  discarded with a rule 1 failure shown, but their first two rounds had been cut off at
+  `max_tokens` (32,000, with thinking on, which counts towards it): only the last round's
+  failure is shown, so the cut-offs were invisible, and a plain retry would run into the
+  same cap. Now an exercise's status reads every round of its generation.jsonl record and
+  says which were cut off ("Rounds 0, 1: the reply was cut off at the batch's output cap"),
+  and only such an exercise gets a second button, and a ticked box in the note form, for a
+  retry with the one larger cap `plan_items.RETRY_CAP` (64,000): both `max_tokens` and
+  `max_tokens_no_thinking` as `--set`s after run.json's, since the graph keeps the last
+  value of a setting given twice and a repair round may run with thinking off. One step,
+  not a free number: the one a cut-off item needs, within the settings' 128,000, and the
+  route takes no other value (`cap-bad`) and none for an item whose rounds were not cut
+  off. The batch's own cap is unchanged: raising the default would pay for longer thinking
+  on every item. "Try all" keeps the batch's cap. Clicked in headless Chrome on a scratch
+  course with the stand-in graph (the record rewritten as the real one was): the line, the
+  button, the task's command with both caps last. Both week 9 items came out VALID through
+  it the same afternoon (first replies of 51,616 and 52,220 output tokens, which the old
+  cap had cut; one needed two repairs, the other one).
+- Lectures coverage.md has nothing on (owner, 2026-11-10). Week 9's plan of 11-09 had run
+  with no coverage rows for its two lectures: the drafted rows were still in
+  `coverage-draft.md`, unmerged, so the plan model picked knowledge points from the page
+  titles alone, and nothing said so. `generation.coverage_missing` names the lectures the
+  file shows no trace of, by three signs, since the file is written two ways: a heading
+  equal to the lecture's name (the draft's format), a heading carrying its number ("L8.1
+  Finding Similar Items I" in a hand-written file), or a table row whose Slides cell starts
+  with its week ("8.3-8.9"; two lectures of one week both number their slides 8.x, so a
+  week with rows for one of them warns for neither). The New batch form marks such a
+  lecture "(no rows in coverage.md)" with a line pointing to the Coverage page, and a plan
+  waiting for approval shows a notice naming them: it can still be approved (a new course
+  has no coverage yet, and the planner works without it), but the owner knows what the
+  plan was made from. Checked on the real course's New batch form: its two week 9 lectures
+  are marked, weeks 2 and 8 (the one heading style and the other) are not; the waiting
+  plan's notice on a test plan, as the real week 9 plan is past approval.
+- Task queue (owner, 2026-11-09 the wish, 2026-11-10 built). A course runs one task at a
+  time, for the reasons `gui/tasks.py` states (validation's own parallelism, two batches
+  pushing runs past their limits), and before this a second click was refused with "a
+  task is running" and every button of the course hidden until the task ended: the daily
+  friction while a long task ran. Now `tasks.start` writes the task as `queued` and
+  `kick` starts the oldest queued task when nothing runs; the runner kicks the queue at its
+  end, so the next task starts with no GUI around (a task already went on if the GUI
+  stopped), and a page reading the course kicks it too, for a queue a dead runner left.
+  Two processes can notice the queue at once, so a task starts only for the one that
+  creates its `claimed` file first (`O_EXCL`). Its `started` time is when it really
+  started. The course page lists the queue, next first, each with Remove (a queued task is
+  deleted whole: its log is empty); a queued task's page says what it starts after, polls
+  like a running one and has the same Remove; the notice after a click says it was queued.
+  A failed task does not hold the queue. Decided with the owner: still one at a time (the
+  queue removes the friction; parallel kinds can come later); a paid task queued runs when
+  its turn comes without a second click ("加入队列他已经点过一次了": the click that queued
+  it is the consent), so the queue shows it and Remove is there until it starts. What a
+  queue cannot do: a task's preconditions are checked at the click, not at the start (a
+  retry's item file is written at the click; the graph command refuses a plan that moved).
+  The plan page keeps its own rule: a task of this plan, running or queued, takes its
+  buttons away (one exercise is not generated twice), another course task no longer does;
+  the plan's state is "queued" and its table stays visible. Pages that disable buttons
+  while a task runs for their own reasons (the Environment page's install and build, the
+  doctor's steps) keep doing so. Clicked in headless Chrome on a scratch course with the
+  stand-in graph slowed down: a second plan queued behind the first plan's generation, the
+  course page's list and the task page's place, Remove, a third plan starting by itself
+  when the generation ended.
 - Fixing in the page, not through Claude (owner, 2026-11-06: "这些漏洞下次在网页有补充"):
   - A task that failed or was stopped has "Run again", when it is safe to run twice (reading
     lectures, transcribing, Validate all, Check, install, build, the two drafts). It posts to
@@ -3396,10 +3778,14 @@ late; the adaptive review screens can be built with it.
     label was a planning one that did not finish, the page offers Continue, not Approve. A
     batch planned in a terminal has no such history. Assistant mode (exit 3) shows as
     waiting for the assistant: its requests are answered from a terminal, then Continue.
+  - A label used before (by a batch or a draft) gets the first free -1, -2, ... in the
+    form, not a refusal (owner, 2026-11-09); the plan page shows the date of its draft
+    folder (DATE_p3-LABEL), as batches show theirs. Only the GUI renames: the CLI's `plan`
+    still refuses a taken label, typed by hand. Labels made before stay as they are.
   - The new-batch form is the one page that shows what a request sent: a refused form comes
     back with the values typed, escaped like everything else.
   - How many exercises (owner, 2026-11-06): "let the plan model decide", with its limit in
-    view (`--max-count`: `[generation] max_count`, else 20, since some lectures hold far
+    view (`--max-count`: `[generation] max_count`, else 40, since some lectures hold far
     more than 6 points; the CLI's default stays 6), or "exactly N" (`--count`).
     The plan model already counts the knowledge points that deserve an exercise, so no
     separate call counts them first: it would read the same pages for a second fee, and the
@@ -3407,6 +3793,11 @@ late; the adaptive review screens can be built with it.
     stopped at the limit now says so on the plan page, since points may have been merged or
     left out. The limit is kept in the batch's state when the plan is made, so a plan sent
     back cannot go past it; more means adding items to `plan.json` or a new batch.
+    The bound rose from 20 to 40 (owner, 2026-11-09): only ticked items are generated, so a
+    longer plan costs no more, and the plan model's reply bounds it instead. Measured on the
+    saved plans, an item is 650 to 1,130 characters (about 300 tokens), so 40 items fit
+    `max_tokens_no_thinking` (16k) with room; 100, or a limit of PDF pages / 5 (about 48
+    for four 60-page lectures), would be cut off.
 - Lectures and new courses (step 5, owner, 2026-11-06). A course's Lectures page lists each
   PDF with what the cache holds (not read, read, image pages waiting). Uploads: PDFs only,
   checked by their first bytes; 100 MB each and 500 MB a request; the name kept as given
@@ -3509,6 +3900,13 @@ late; the adaptive review screens can be built with it.
     is parsed as text, never loaded into the GUI's environment, kept line for line
     otherwise, replaced in one step and readable by its owner only. A key also set in the
     environment the GUI started from wins (load_env's rule), and the page says so.
+    "Used by" lists each course once, with that course's models after it. Adding a key
+    (owner, 2026-11-10): choosing a provider fills the name with the variable its key
+    goes in, from the models.dev list the Models page keeps (`catalog.py`'s `key_env`);
+    the list is only read, by a GET of the page, and a typed name still works, as it must
+    when no list is kept yet. A provider whose key is set already says so and the form
+    replaces it. The Models page's "not set" links open the form with the name filled.
+    The provider is not guessed from the key's shape: a plain `sk-` key fits several.
   - A course's Models page writes its workspace.toml's [llm] with tomlkit (owner), which
     keeps the owner's comments; a changed value loses only its own line's comment. Every
     save is checked before the file is replaced: read back with tomllib, [llm] must be
@@ -3530,18 +3928,173 @@ late; the adaptive review screens can be built with it.
     the request carries nothing of the courses. Kept in `<root>/.cache/models-dev.json`,
     reduced to what is used (about 1.2 MB, 204 providers of 235): the providers models.dev
     marks as taking OpenAI's requests, plus those it lists with their own SDK whose
-    OpenAI-compatible URL is checked in their docs (`catalog.OPENAI_URLS`: Anthropic,
-    Gemini, xAI, Mistral, Groq, Together, MiniMax, OpenRouter); the rest are counted on the
+    OpenAI-compatible URL is checked in their docs (`catalog.OPENAI_URLS`: Gemini, xAI,
+    Mistral, Groq, Together, MiniMax, OpenRouter); the rest are counted on the
     page. A downloaded value is checked before it is kept (https, or http on this machine;
     a key name in capitals; a plain model id) and shown escaped. Above the hand-written
     form, which stays: a provider (common ones first, the key's state in `.env` by name),
     its models newest first without withdrawn ones, and "Use", which fills the form and
-    saves nothing. A provider llm.py knows (DeepSeek, Zhipu and z.ai as `glm`, OpenAI, LM
-    Studio) keeps its own way to turn thinking off; another one is `custom` with its URL,
-    and a thinking model gets the lowest `reasoning_effort` it takes (none, minimal, low),
-    or a note that each call thinks. No script: choosing a provider is a GET form, so the
-    page can be reloaded. Anthropic goes through its OpenAI-compatible layer, which has no
-    prompt caching; the page says so.
+    saves nothing. A provider llm.py knows (DeepSeek, Zhipu and z.ai as `glm`, OpenAI,
+    Anthropic since 2026-11-10, LM Studio) keeps its own way to turn thinking off; another
+    one is `custom` with its URL, and a thinking model gets the lowest `reasoning_effort` it
+    takes (none, minimal, low), or a note that each call thinks. No script: choosing a
+    provider is a GET form, so the page can be reloaded. A `custom` profile at Anthropic's
+    own address is refused with the advice to choose `anthropic` (the rule every known
+    provider's address has).
+  - The pages in another language (owner, 2026-11-07 asked; 2026-11-10: "I ship no
+    translation; a Language page has a model write the language you want, and the switch
+    goes back and forth, English included"; `gui/i18n.py`, `gui/translate.py`, the Language
+    page). The pages' own text goes through gettext: `_()` and `{% trans %}` in the
+    templates (`{% pluralize %}` for a count), `N_()` on a module-level English string
+    (the notices), which the page translates when it shows it. Not translated: a task's
+    output, `tutor doctor`'s lines (the command's own), what a model wrote, file names and
+    TOML keys, the exercise files VS Code opens. At run time only the standard library's
+    `gettext` and Jinja's `i18n` extension: a language is `<root>/translations/<name>.po`
+    (the name as the owner typed it, "中文"; its header keeps it for the switch), read by
+    this tool's own small .po reader, so no binary `.mo` and no Babel. The English strings
+    are extracted from the pages and modules themselves (Jinja's own `babel_extract` on
+    the templates, an `ast` walk for the calls in the modules), so nothing is kept in
+    step by hand. "Translate into" on the Language page runs `python -m tutor.gui.translate
+    NAME` as a task of the course whose setup model it asks (paid, so on that click only;
+    the page says about how many thousand tokens): batches of 60 strings as a numbered
+    JSON list, a schema for the answer, and each translation kept only when `i18n.safe`
+    passes (the same `%` placeholders, as Jinja formats a translation with `%` and a stray
+    one would fail the page; the same `<...>` pieces, so no markup of the model's own);
+    a refused or unanswered string stays English and is asked again next time, as a run
+    asks only for what the file lacks, so a page changed in English never breaks another
+    language; a string the model gives back unchanged ("Docker") is kept so, as done,
+    else it was asked again on every run and the count never reached the total
+    (2026-11-10), but counted apart, "kept as the English by the model", in each batch's
+    line, the run's last line and the Language page's line for the file (`i18n.unchanged`:
+    an entry whose text is its msgid), since it may be the model declining rather than the
+    word being the same (2026-11-10: a made-up language, 喵语, got all 165 strings back
+    and the run said "165 of 165 translated"); `--again-unchanged` asks for those alone,
+    say on another model (2026-11-11). A note to the translator (owner, 2026-11-10: the
+    Hong Kong file came back part written Traditional Chinese, part colloquial Cantonese,
+    as each batch was asked alone; 2026-11-11): the Language page's optional box, `--note`,
+    the owner's wish about variety and register, kept in the file's `X-Note` header and
+    sent with every batch of every run (a run without one sends the file's), between
+    `<note>` tags after the language line and before the material, so the system prompt
+    stays the same for every call and the language's calls share their prefix (prompt
+    cache); the system prompt names the note as the owner's wish about wording that
+    changes none of the rules, and asks for one register throughout, the written standard
+    unless the note says otherwise (prompt version 2, in `X-Generator`; not a pinned
+    prompt). A built-in language table (owner, 2026-11-10 "is there a standard table, a
+    UN one?"; 2026-11-11, `gui/language_table.py`): the standard is BCP 47 (IETF), tags
+    made of ISO 639 language, ISO 15924 script and ISO 3166 / UN M.49 region subtags, the
+    valid ones listed in IANA's Language Subtag Registry, the names in Unicode's CLDR;
+    no library ships either in the standard library, and the GUI needs a few dozen rows,
+    so a short table by hand: the tag as the registry spells it, the name in the language
+    itself as CLDR writes it (the switch shows it), a sentence for the model where the
+    tag leaves the variety or register open (zh-Hans and zh-Hant, the written standards
+    of the mainland and of Taiwan; es neutral;
+    pt-BR and pt-PT), and the direction. The Language page's form offers the table in a
+    drop-down and keeps the text box for a language not in it (no script of our own: the
+    box is always there, the server takes the table's choice when there is one). A table
+    language is filed by its tag in lower case (`zh-hant.po`; `--code TAG`), its name
+    in X-Name, the table's sentence as the note when the owner wrote none, and the
+    table's direction; a typed name is filed by its slug as before. The browser's
+    Accept-Language is matched subtag by subtag against the files (`from_browser`): the
+    tag, then with CLDR's likely script for a Chinese region ("zh-HK" is zh-hant),
+    then shorter forms down to the language, then a file of the same language and script,
+    then of the same language ("pt" finds pt-br). The files written before by name
+    (`zh_hk.po`) keep working under their names; renamed to the tag, the browser finds
+    them too. The model to ask (owner, 2026-11-10: the drop-down offered each course's
+    setup model and all four were the same Sonnet; 2026-11-11): every course's chat
+    profiles (`environment.chat_profiles`: the embedding role's left out), the same
+    provider and model in several courses listed once under the first, the first
+    course's setup model chosen; the task runs in the course that owns the profile, with
+    its key (`--profile`). A language is deleted from the same list (owner, 2026-11-11:
+    "two clicks"): a required box then the button, as the GUI's other removals; the file
+    goes for good (a paid translation with it, hence the box), English is chosen when it
+    was the one in use; the row's form is on a line of its own, at the end side. Jinja's
+    new-style `_()` marks what gettext returns as safe HTML (so the
+    values it formats in are escaped), translated or not, so the callables escape the
+    text first: an English string may say `<profile>` and shows as written; a literal `%`
+    in a page's English is written `%%` (a test checks every string). The language: the
+    owner's choice on the footer's switch, kept for every course in
+    `<root>/.tutor-gui-settings.json`, else the browser's Accept-Language when a file of
+    that code exists, else English. Tried on Ollama's qwen3 0.6B for the click check
+    (59 of 82 strings; the rest stayed English): the path, not the quality. Plural forms:
+    two for every language (the same text twice where a language has one). Every
+    template is wrapped (2026-11-10: 880 strings), and the Python side too: the form
+    problems a module returns are looked up with `gettext_` inside the request, the
+    state words a chip shows (task statuses, plan and item states, doctor's statuses,
+    the [requires] kinds) and the explanations are `N_()` strings, so the files and the
+    comparisons keep the English and the page shows `_(state)`; every abort message is
+    `N_()` and the error handler translates it with gettext alone (a command's text may
+    carry a `%`). A sentence with a link or `<code>` inside is one string, its pieces
+    passed in as captured blocks (`{% set code_x %}<code>…</code>{% endset %}`, which
+    escape their content), so a translator sees the whole sentence. Still English:
+    the language rows' titles and roles (`tutor.languages`, a core module), a
+    throwaway `_` must not be used in a module that imports gettext as `_`. Right to
+    left (owner, 2026-11-10 "Arabic also needs the layout mirrored"; 2026-11-11): every
+    page is `<html dir="rtl">` for such a language and the stylesheet names no physical
+    side (start and end, `margin-inline-start`, `inset-inline-start`; a test refuses
+    `left` and `right`), so the browser mirrors the pages from that one attribute;
+    code, paths, commands and a task's log are `direction: ltr` and bidi-isolated, as
+    they read the same in every language. The direction comes from the file's
+    `X-Direction` header (`rtl` or `ltr`, written by `tutor.gui.translate`), else read
+    off the translations themselves (the side most of their first strong characters
+    are written from, Unicode's bidirectional classes R and AL against L; the name
+    decides a tie only, so a name typed as a code, "ar", does not outvote the text), so
+    a hand-written file needs no header and nothing new on the form. Checked in Chrome
+    with a hand-written Arabic file (nine strings, no model; `notes/gui-checks/
+    rtl_click_test.py`): the header, buttons, lists, tables and forms mirrored with no
+    horizontal overflow, `<code>` left to right; an arrow in a string ("Lectures →") is
+    the translator's to turn, as it is text. The question itself is not mirrored
+    (owner, 2026-11-11, the one exception): the article is `dir="ltr"`, as it is the
+    model's text in the language it was written in, not the pages'.
+  - Light or dark by choice (owner, 2026-11-11 "override the night mode"; `gui/theme.py`).
+    The stylesheet followed the system's `prefers-color-scheme` alone, two blocks of the
+    same variables. Now each colour is defined once as `light-dark(light, dark)` under
+    `color-scheme: light dark`, so the system still decides by default (and the browser's
+    own parts, form controls and scrollbars, follow), and the footer's Theme switch
+    (System, Light, Dark, beside the language) writes `<html data-theme="light|dark">`,
+    which the stylesheet turns into `color-scheme: light` or `dark`: one attribute, no
+    script. The choice is kept for every course in the GUI's settings file with the
+    language (`i18n.save_setting` keeps the other keys). The footer's switches return to
+    the page they were on less its one-shot `notice` (`gui_back`), so a notice is not
+    shown twice and a forged one is not echoed. Tick boxes take the accent colour and a
+    size that sits on the text's baseline (`accent-color`).
+  - Servers on this machine in New model (owner, 2026-11-07 "WSL and Mac llama, those
+    local ones, later"; 2026-11-10). models.dev lists only LM Studio of them. The form's
+    provider choice now starts with an "On this machine" group (Ollama, LM Studio,
+    llama.cpp's llama-server, vLLM; `catalog.LOCAL`), there without the models.dev list,
+    each a provider of llm.py's at the port its docs give (11434, 1234, 8080, 8000) with
+    the request field its docs give for thinking off (Ollama `reasoning_effort: "none"`;
+    llama-server and vLLM `chat_template_kwargs: {enable_thinking: false}`, llama-server
+    then `reasoning_budget: 0`). "List its models" asks the server itself, `GET /v1/models`
+    with no key (`catalog.installed`): what it has loaded or pulled, which models.dev could
+    not know; that call goes only to localhost, so the page never makes the GUI's server
+    call out. The server's list does not say whether a model thinks or reads images (the
+    table says "not said"). The address beside the choice can be changed (another port,
+    say) and the server listed again, and "Use" carries it into the form (owner,
+    2026-11-10); a server in WSL is reached from Windows at localhost too (WSL 2 forwards
+    it; written from the docs, to be clicked on the owner's PC at the packaging check).
+    What makes a local server unlike a cloud one: it ignores a request field it does not
+    know instead of refusing it with 400 (Ollama 0.30.2 and `think: false` on its OpenAI
+    path, tried 2026-11-10), so chat()'s try-the-next-switch never runs and thinking stays
+    on unnoticed: slower, and the tiny `check` reply comes back empty, the whole 32 tokens
+    spent thinking. So every reply now counts the thinking it carried
+    (`Reply.reasoning_chars`: `reasoning_content` or Ollama's `reasoning` beside the
+    content, or a `<think>` block a server left inside it; streamed pieces too; in the
+    call log), and Check says "thinking stayed on (N characters of it)" with what to set.
+    Tried on Ollama with qwen3 0.6B: the built-in switch answers "ok" in 0.7 s; a switch
+    it ignores gives the empty reply and the line. llama-server and vLLM are tested with
+    stand-ins only (neither is installed here with a model).
+  - The models.dev list is downloaded data (owner, 2026-11-07, "not now"; done
+    2026-11-10). A changed base URL or key name in it, filled by "Use" and saved, would
+    send that key and the course's text to another host on every call. Three guards: a
+    provider this tool knows (`catalog.KNOWN`, `OPENAI_URLS`, LOCAL) always gets this
+    tool's own URL, whatever the list says (`Provider.own_url`; z.ai's own URL is a
+    constant, as it differs from Zhipu's), and the page marks the others "address from
+    models.dev: check the domain before saving"; a fetch keeps which providers' URLs differ
+    from the copy before (`url_changes`, shown on the page until the next fetch: a provider
+    does move, a list can be tampered with); and saving a profile is refused when its key
+    name is used by any profile of any course at another host (`llm_settings.key_elsewhere`:
+    one key goes to one provider; the same host at another path passes, a key-less local
+    profile is not compared). The kept list is format 3 (one kept before is fetched again).
   - One provider's oracle (owner, 2026-11-07: "not everyone buys several APIs; do not
     forbid it, at least warn"). The oracle at the same provider and address as generate or
     repair was refused, by the Models page and by the graph before any call. It now runs,
@@ -3594,21 +4147,37 @@ late; the adaptive review screens can be built with it.
     has nothing to check; a profile only the embedding role uses gets an embedding call.
   - Not in this step: the `[generation]` tunables (their defaults are measured values).
 - Environment page:
+  - Optional host setup guide (2026-11-09): step 2 links to a packaged, read-only page
+    with explicit macOS/Linux/Windows/WSL navigation. It reads course requirements and
+    the existing language registry; no probes, lecture reads, model requests or installs.
+    Python links back to venv install/check/switch; C links to its existing settings.
+    Declared Java/Hadoop get manual guidance derived from docs/setup/bigdata.md, with
+    official sources and coverage limits for other versions. No new language support,
+    system installer. Doctor connects this guide to measured course checks and repair paths.
+    Container practice needs no host JVM/compiler.
+    Linux/WSL fresh-install testing is still outstanding. Templates are packaged so the
+    page does not depend on a source checkout's docs directory.
   - The page is four numbered steps in the order they are done (owner, 2026-11-06, after
     trying it on a new course: by topic it read unclearly): (1) what the course needs, the
     model's draft then the list; (2) install on this machine, the check below its button;
     (3) where tests run; (4) the test image, dimmed and "not needed" on the host. Each says
     whether it is done; steps 2 and 4 say so in their htmx parts.
-  - Built in step 7a (owner, 2026-11-06), no model involved, one page per course:
-    - The check is `python -m tutor.envcheck --json` run with the course's own `.venv`:
-      envcheck checks the interpreter that runs it, and the learner's tests use that venv.
-      It runs from the repository, as tasks do, so it reads `.env` itself (JAVA_HOME,
-      HADOOP_HOME) and the GUI still never loads it. 0.2 s warm; the check and the image's
-      state load into the page with htmx, since Docker can take seconds while its VM wakes.
+  - Environment controls (started in step 7a, 2026-11-06; integrated 2026-11-09), one page
+    per course, with deterministic checks and explicit optional model repair:
+    - Step 2 automatically loads the same deterministic Doctor rows as `tutor doctor`,
+      without smoke or model calls. Check / Result / What to do columns use OK, Needs
+      attention, Problem and Skipped, with duplicate rows removed. Doctor's host requirement
+      probe uses the course's `.venv`; a missing/broken venv produces one failure and skips
+      those requirements. Known failures have their existing fix buttons on the row:
+      install, build, Python switch, host guide or runner choice. An uncovered Problem
+      alone offers the four-screen model-fix wizard described in "Version conflicts".
+      Running tasks disable fix actions. The initial page loads probes through htmx;
+      read-only checks never start a model, install or worker task. The GUI server never
+      loads credentials into its environment.
     - "Exercises may import" (owner, 2026-11-06): each pip row of the list has a tick and the
       module it is imported as; the ticked ones go into `[safety] allow_imports` in the same
-      checked write as `[requires]`, an unticked one comes out, and modules no row names (an
-      OS course's `subprocess`) stay, listed under the table. Unticked by default: widening
+      checked write as the version declarations, an unticked one comes out, and modules no
+      row names (an OS course's `subprocess`) stay, listed under the table. Unticked by default: widening
       the static check is the owner's call, package by package. The module box starts with
       what the lectures' code imports it as when the draft saw it (scikit-learn is sklearn),
       else the name with `-` as `_`. The generate and repair prompt names them as importable
@@ -3617,16 +4186,20 @@ late; the adaptive review screens can be built with it.
       (checked by its hash), so its prompt cache holds. The oracle's prompt keeps the core
       modules only, to stay independent of the exercise; an exercise whose answer needs the
       library itself may then get no oracle, to decide when one does.
-    - `[requires]` is a table in the page (owner, 2026-11-06): "+ Add a row" appends a blank
-      row fetched by htmx, "−" removes its row with htmx's `delete` swap, so no script of
-      ours; nothing is written until Save, and a cleared name is dropped too. The rules
-      are envcheck's (`requires_problems`, now shared by the venv install and the image: a
-      plain package name, a version prefix of dotted numbers, a JVM for pyspark and hadoop),
-      plus a Hadoop release the image can build when tests run in the container. Each pip
-      name links to its PyPI page, for the owner to check a name before installing it.
+    - Step 1 has one version cell per package, accepting a prefix such as `3.5` or a
+      restricted numeric comparison such as `>=1,<2`. Prefixes stay in `[requires]`,
+      comparisons in `[package-bounds]`; changing form moves the entry in one checked
+      toml_edit write with a `.bak`, preserving unrelated tables/comments. Package identities
+      cannot appear twice across spelling variants or declaration tables. Python, java,
+      hadoop and gcc accept prefixes only; Python/C versions remain in the language list.
+      Language-version and draft-accept saves preserve unrelated bounds. Import consent is
+      saved in that same transaction. "+ Add a row" and "−" change the form using htmx;
+      Save applies it. Empty rows are ignored, incomplete/invalid rows return as typed.
+      The shared envcheck rules still require a JVM for pyspark/hadoop, and container
+      courses require a supported Hadoop recipe. Each pip name links to its PyPI page.
     - "Install into .venv" runs `tutor.workspace init` again as a task, which makes the
-      `.venv` if missing and installs this package and `[requires]` (the same command a
-      command-line user runs). The page shows first the pip command, where it installs,
+      `.venv` if missing and installs this package and its declared dependencies (the same
+      command a command-line user runs). The page shows first the pip command, where it installs,
       that it needs no admin rights and changes nothing outside the course folder, that it
       downloads from PyPI, and how to undo it.
     - Where tests run: container or host, written to `[isolation] runner` only when chosen;
@@ -3637,13 +4210,26 @@ late; the adaptive review screens can be built with it.
       image takes its package versions; before it, the page shows the recipe
       (`python -m tutor.container recipe`, in that venv), each download and its source, the
       sizes measured so far for scale, and how to remove the image.
-    - Not in 7a: the per-platform recipes for system software below (only Java and Hadoop
-      exist so far, both in `docs/setup/bigdata.md`, and each recipe needs checking on each
-      platform, while only macOS is at hand); the page points to `docs/setup/` instead. A
-      broken venv being rebuilt, and a venv on another Python, are not handled either.
-    - Checked by a click in Chrome on a scratch course: a row added, host refused without
-      the tick, container saved, the install (2 s) and the build (8 s, cached layers, 0.18
-      GB) run as tasks, the check then ok; the three real courses only opened.
+    - Step 4 loads build time and course-venv/image version differences in a separate
+      read-only fragment; a course tested on this machine has no image, so none is shown.
+      Its times are stored in UTC and shown like every other time on the pages: this
+      machine's clock, to the second (`tasks.local_time`; owner, 2026-11-10).
+      Differences are information; unmeasured versions stay unknown.
+      Old records never produce a current comparison. Missing/old/invalid/unavailable records
+      offer the existing metadata-only Refresh action; the full record/history page is
+      linked here only. An unbuildable recipe keeps a GUI path back to step 1 instead of
+      failing the history page. Legacy images keep unknown build/base facts until rebuilt.
+    - Python recovery offers installed compatible interpreters through the existing guarded
+      switch. Only when none is compatible does it show "No suitable Python here. Download
+      one with uv", linking to the existing explicit-consent download page. A compatible
+      current interpreter counts; a package-only repair does not imply a Python search.
+      The host guide stays inside step 2. No setup links sit above the four steps, whose
+      intro states their order only. System-tool installation remains manual.
+    - Original step-7a Chrome check (2026-11-06) on a scratch course: a row added, host refused
+      without the tick, container saved, the install (2 s) and the build (8 s, cached layers, 0.18
+      GB) run as tasks, the check then ok; the three real courses only opened. The clicks
+      made on the Environment/Doctor integration, and those still owed, are listed in
+      "Version conflicts".
   - Built in step 7b (owner, 2026-11-06): a model drafts `[requires]` from the lectures
     (`python -m tutor.materials.requires`, a task from the page's button, which names the
     model and the input tokens; only on that click, as it may cost money).
@@ -3766,6 +4352,74 @@ late; the adaptive review screens can be built with it.
     footers, so its ranges are PDF pages; generation sends such a lecture whole anyway.
     Using the draft is the owner's click. Checked by a click in Chrome on a scratch course:
     use, then add a second lecture after a hand-written line, which stayed.
+  - coverage as data (owner, 2026-11-09 the idea, 2026-11-10 "do it now, it is the same
+    thing" after the no-rows warning; `tutor/materials/coverage_store.py`). `coverage.json`
+    is the source of truth and `coverage.md` is rendered from it on every save, in the
+    shape the file always had. Why: the Markdown file could not be updated for a changed
+    lecture without losing the owner's edits, a batch could only propose its marks, and
+    whether a lecture had rows was a guess from headings. Per lecture, keyed by the name a
+    plan uses: the hash of the lecture text it was drafted from, the date and model, the
+    owner's title and notes, the points and the pages none covers. A point: a stable id
+    (sha256 of lecture, slides and text, never its position, so adding a row moves
+    nothing), slides, text, one of the five statuses, the check in square brackets, any
+    other note, `covered_by` (the `ex:<id> (batch)` marks, a list, the status kept under
+    them so a gap's kind survives the exercise), `owner_edited` and `removed`. Reading the
+    old file once (`migrate`, the file before kept as `coverage.md.bak`): both shapes the
+    files had, a draft's `## <lecture file>` headings and a hand-written file's `## Week N`
+    / `### L8.1 Title` headings mapped to lectures by their numbers (the title kept, a
+    week's note given to its first lecture); the status cell parsed as the files wrote it,
+    escaped `|` included; a row that is not three cells, and any other text, kept as
+    notes; a section that is no lecture (a labs table) kept after the lectures. Checked on
+    the three courses that have a file: every table row read (102, 220 and 276), and the
+    rendered file read again gives the same lectures. Merging a new draft of one lecture:
+    by id, a point found again is kept with the owner's fields untouched (its pages filled
+    in), a point the owner edited or an exercise practises is kept whatever the draft says,
+    any other point the draft no longer has is marked removed and listed under the table
+    for the owner to confirm (never deleted by code), a new point is added where the draft
+    puts it. A batch marks the one point its saved exercise's lecture and slides match
+    exactly (`mark_covered`); with no or several matches it stays a proposal. The plan
+    prompt receives the rendered table when the data exists (the same bytes for the same
+    data; the prompt's own text is unchanged and its pins hold), the file as written for a
+    course not migrated, "(none)" for one with neither, so a new course still plans. Edits
+    to the rendered file do not flow back (`rendered_is_stale` tells the page). Command
+    line: `python -m tutor.materials.coverage_store migrate | render | redraft [--all]`;
+    the drafting itself stays in `tutor.materials.coverage`. The Coverage page (same day)
+    is on this data, in three states: nothing yet (the draft, then "Use as coverage" makes
+    coverage.json); a hand-kept coverage.md (shown as it is, with what a conversion would
+    read from it, lectures, rows and the lines to look at, and one button that converts
+    it); the data (each lecture's points with an Edit page per point, Add a point, Title
+    and notes, the points a draft no longer found with Remove and Keep, "Draft N lectures"
+    for the ones not drafted yet or changed since their text's hash, "Draft every lecture
+    again" for the regeneration, and a notice when coverage.md was edited by hand, with a
+    button that writes it again). An edit, an addition or a Keep marks the point as the
+    owner's, so a draft keeps it; the Remove button is the owner's confirmation, code never
+    deletes. A finished batch marks the one point each saved exercise's lecture and slides
+    match, and `coverage-proposal.md` lists what it marked apart from what it still
+    proposes. The old "add the ticked lectures to coverage.md" is gone: a lecture the data
+    lacks is drafted into it. Clicked in headless Chrome on two scratch courses with the
+    stand-in launcher: use the draft, edit a point (the rendered coverage.md shows the new
+    marks), add a point; the conversion preview and Convert on a hand-written file (the
+    week's note on its lecture, `.bak` kept).
+  - Drafting a lecture again (owner, 2026-11-10). Ids come from a point's slides and text,
+    so a lecture drafted again by another model matches almost none of its old rows by id;
+    under the incremental rule every old row would wait for the owner's confirmation (96,
+    220 and 276 rows on the three courses). So "Draft every lecture again" (`redraft
+    --all`, `merge_draft(replace=True)`) replaces the model's own earlier rows without
+    asking: a row the owner edited stays; a practised row's marks move to the one new row
+    at the same slides when there is one (the row itself goes), and the row stays when
+    there is none; any other old row goes. The incremental draft (new or changed lectures)
+    keeps the confirmation rule. A hand-written file's rows (one whose headings are not the
+    drafts') are read as the owner's (`owner_edited`), so a whole redraft keeps them all,
+    which would put the model's rows beside them: that course is drafted lecture by
+    lecture as the owner decides, not whole. Converting also records each covered lecture
+    as drafted from its current text, so the next draft asks only for the lectures the
+    file lacked. Done 2026-11-10 with Sonnet 5.5 (numbers in the owner's notes): the three
+    files converted on the command line (the page's own code), the course with no file
+    drafted whole, the two model-drafted courses drafted again whole, the hand-written
+    course's three missing lectures taken from their stored answers. The first run found
+    that the API wants `additionalProperties: false` on every object of a schema (the
+    draft's answer model has no `extra="forbid"`, unlike the pipeline's): the anthropic
+    module adds it to the copy it sends.
 - Packaging the GUI itself as an image (owner asked, 2026-11-05: the aim is opening it in one click,
   see "Packaging and release", which does not need this, so an image is at most a later option). The
   costs: to start test containers from inside, it needs the Docker socket, which amounts to root on

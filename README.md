@@ -27,8 +27,8 @@ and is built as an AI engineering portfolio project.
   answer.
 - **Hints that never show the answer.** `python -m tutor.hint` runs your tests and names a
   known mistake, or the planted mutant your code fails like.
-- **Your models.** Any OpenAI-compatible model, local or cloud, one per role (plan, generate,
-  repair, oracle, ...); the GUI fills a model's settings from the public
+- **Your models.** Any OpenAI-compatible model, or Claude through its own API, local or
+  cloud, one per role (plan, generate, repair, oracle, ...); the GUI fills a model's settings from the public
   [models.dev](https://models.dev) list. With no API key, a coding assistant on a
   subscription can answer instead ([assistant mode](docs/assistant-mode.md)).
 - **Generated code kept apart.** Each test run can start a fresh Docker container with no
@@ -46,27 +46,20 @@ in C, are in [`examples/`](examples/).
 
 ## Quick start
 
-Requirements: Python 3.11 to 3.14 (each tested in CI; the big-data examples need 3.13 or
-older, as PySpark 3.5 does not run on 3.14) and, for the big-data examples, Java 17. Setting up from scratch: [`docs/setup/bigdata.md`](docs/setup/bigdata.md).
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then from this checkout
+with Python 3.11 already installed:
 
 ```bash
-python3.11 -m venv .venv && source .venv/bin/activate
-pip install -e ".[bigdata,dev]"
-cp .env.example .env            # set JAVA_HOME; comment out WORKSPACE_DIR / HADOOP_HOME if unused
-
-pytest                          # fast unit tests (~30 s)
-python -m tutor.validation examples/station-average-rdd/exercise examples/station-average-rdd/solution
+uv tool install --no-python-downloads --python 3.11 ".[gen,gui,doctor]"
+tutor gui
 ```
 
-The GUI (courses, lectures, models and keys, environment, planning and approving a batch;
-generating also needs the `gen` extra):
-
-```bash
-pip install -e ".[gui]"
-python -m tutor.gui             # every course folder next to WORKSPACE_DIR's, or --root DIR
-```
-
-It listens on 127.0.0.1 only, with a token for each launch.
+The GUI manages courses, lectures, models, keys and environment, then plans and approves
+a batch. It listens on 127.0.0.1 with a launch token; a second launch reuses its verified
+server. `tutor shortcut` creates a local desktop launcher. See
+[installation and fresh-machine prerequisites](docs/setup/install.md), including the
+explicit option to let uv download Python. Docker is needed for container courses;
+host big-data runs also need [Java/Hadoop](docs/setup/bigdata.md).
 
 For a course set to the container, run `tutor test` from an exercise folder (or
 `python -m tutor test`). It shows live output and records attempts on the host, with a
@@ -74,6 +67,19 @@ For a course set to the container, run `tutor test` from an exercise folder (or
 Linux containers and an IDE; Java, Hadoop and gcc can stay in the course image. Ordinary
 `pytest` remains available for host debugging and needs the host's libraries/toolchain.
 See [the command options](docs/details.md#testing-your-work-in-the-course-image).
+
+## Check your setup
+
+Run `tutor doctor` (or `python -m tutor doctor`) in a course or pass its folder. It checks
+the tool, Docker, the course venv, host requirements or its test image, and gives a next
+step for each problem. Add `--smoke` to validate one shipped example on a temporary copy.
+Default checks never install, load `.env`, call a model or change the course.
+See [checks and exit codes](docs/details.md#checking-your-setup).
+
+For optional model advice, first review `tutor doctor --preview-advice --failure failure.log`,
+then use `--advise` instead of `--preview-advice` to send that selected record and environment
+facts to your doctor profile. Suggestions remain unverified. See the same guide for model
+configuration and explicit `--env-file` credentials; no fix is installed or applied.
 
 ## Intended use
 

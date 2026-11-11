@@ -196,3 +196,12 @@ def test_winutils_names_what_is_missing(tmp_path, files, on_path, hint):
 def test_winutils_without_hadoop_home():
     result = check_winutils(None, "")
     assert not result.ok and "HADOOP_HOME" in result.hint
+
+
+def test_a_bad_version_is_told_what_its_kind_of_entry_takes():
+    """A toolchain takes a prefix only, so its message does not offer a bound."""
+    java = requires_problems({"python": "3.11", "java": ">=17"}, allow_bounds=True)
+    package = requires_problems({"python": "3.11", "requests": "two"}, allow_bounds=True)
+    assert any("java" in line and "prefix" in line for line in java)
+    assert not any("bound" in line for line in java)
+    assert any("requests" in line and "numeric package bound" in line for line in package)

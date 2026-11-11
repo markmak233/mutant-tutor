@@ -1,7 +1,9 @@
+{# An error page (app.py): the code, the message the check gave (translated in app.py where it is a
+   page's own, marked N_(); a command's text is shown as it is), and the way back when there is one. #}
 {% extends "base.html" %}
 {% block title %}{{ code }}{% endblock %}
 {% block content %}
 <h1>{{ code }}</h1>
 <p>{{ message }}</p>
-{% if back %}<p><a href="{{ back }}">Back to the form</a></p>{% endif %}
+{% if back %}<p><a href="{{ back }}">{{ _("Back to the form") }}</a></p>{% endif %}
 {% endblock %}

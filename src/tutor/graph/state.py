@@ -166,5 +166,9 @@ class BatchState(TypedDict, total=False):
     plan_problems: list[str]  # what was still wrong with the plan after the retries
     feedback: str  # the owner's answer when sending the plan back
     approved: bool
+    # Approval metadata is checkpoint-only: model-facing schemas/prompts stay unchanged.
+    selected_ids: list[str] | None  # absent/None in legacy batches: all proposed items
+    plan_digest: str | None  # exact plan.json bytes reviewed before approval
+    generation_complete: bool  # set after collect, including when no item was saved
     # One summary per item; parallel branches each add theirs.
     results: Annotated[list[dict], operator.add]
