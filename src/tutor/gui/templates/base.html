@@ -2,8 +2,10 @@
 {# Every page extends this. Values are escaped by Jinja2; nothing here marks text as safe
    but a translation, which _() marks so (gui/i18n.py checks each one for markup first).
    dir: "rtl" for a language written right to left (gui/i18n.py); the stylesheet uses
-   logical properties, so the browser mirrors the layout from this one attribute. #}
-<html lang="{{ gui_language }}" dir="{{ gui_direction }}">
+   logical properties, so the browser mirrors the layout from this one attribute.
+   data-theme: "light" or "dark" when chosen on the footer's switch (gui/theme.py), else
+   absent and the stylesheet follows the system. #}
+<html lang="{{ gui_language }}" dir="{{ gui_direction }}"{% if gui_theme %} data-theme="{{ gui_theme }}"{% endif %}>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -25,9 +27,12 @@
     {% block content %}{% endblock %}
   </main>
   <footer class="language-switch">
-    {# The language, for every course (gui/i18n.py): the others as buttons, back to this page. #}
-    <a href="{{ url_for('language_page') }}">{{ _("Language") }}</a>:
-    {% for code, name in gui_languages.items() %}{% if code == gui_language %}<strong>{{ name }}</strong>{% else %}<form method="post" action="{{ url_for('set_language') }}" class="action"><input type="hidden" name="language" value="{{ code }}"><input type="hidden" name="back" value="{{ request.full_path if request.query_string else request.path }}"><button type="submit" class="small">{{ name }}</button></form>{% endif %}{% endfor %}
+    {# The language, for every course (gui/i18n.py): the others as buttons, back to this page;
+       then the theme (gui/theme.py): System, Light, Dark, the one in use in bold. #}
+    <span class="switch"><a href="{{ url_for('language_page') }}">{{ _("Language") }}</a>:
+    {% for code, name in gui_languages.items() %}{% if code == gui_language %}<strong>{{ name }}</strong>{% else %}<form method="post" action="{{ url_for('set_language') }}" class="action"><input type="hidden" name="language" value="{{ code }}"><input type="hidden" name="back" value="{{ gui_back }}"><button type="submit" class="small">{{ name }}</button></form>{% endif %}{% endfor %}</span>
+    <span class="switch">{{ _("Theme") }}:
+    {% for value, label in gui_themes %}{% if value == gui_theme %}<strong>{{ _(label) }}</strong>{% else %}<form method="post" action="{{ url_for('set_theme') }}" class="action"><input type="hidden" name="theme" value="{{ value }}"><input type="hidden" name="back" value="{{ gui_back }}"><button type="submit" class="small">{{ _(label) }}</button></form>{% endif %}{% endfor %}</span>
   </footer>
 </body>
 </html>

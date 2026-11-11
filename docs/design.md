@@ -4007,7 +4007,8 @@ late; the adaptive review screens can be built with it.
     its key (`--profile`). A language is deleted from the same list (owner, 2026-11-11:
     "two clicks"): a required box then the button, as the GUI's other removals; the file
     goes for good (a paid translation with it, hence the box), English is chosen when it
-    was the one in use. Jinja's new-style `_()` marks what gettext returns as safe HTML (so the
+    was the one in use; the row's form is on a line of its own, at the end side. Jinja's
+    new-style `_()` marks what gettext returns as safe HTML (so the
     values it formats in are escaped), translated or not, so the callables escape the
     text first: an English string may say `<profile>` and shows as written; a literal `%`
     in a page's English is written `%%` (a test checks every string). The language: the
@@ -4044,6 +4045,18 @@ late; the adaptive review screens can be built with it.
     the translator's to turn, as it is text. The question itself is not mirrored
     (owner, 2026-11-11, the one exception): the article is `dir="ltr"`, as it is the
     model's text in the language it was written in, not the pages'.
+  - Light or dark by choice (owner, 2026-11-11 "override the night mode"; `gui/theme.py`).
+    The stylesheet followed the system's `prefers-color-scheme` alone, two blocks of the
+    same variables. Now each colour is defined once as `light-dark(light, dark)` under
+    `color-scheme: light dark`, so the system still decides by default (and the browser's
+    own parts, form controls and scrollbars, follow), and the footer's Theme switch
+    (System, Light, Dark, beside the language) writes `<html data-theme="light|dark">`,
+    which the stylesheet turns into `color-scheme: light` or `dark`: one attribute, no
+    script. The choice is kept for every course in the GUI's settings file with the
+    language (`i18n.save_setting` keeps the other keys). The footer's switches return to
+    the page they were on less its one-shot `notice` (`gui_back`), so a notice is not
+    shown twice and a forged one is not echoed. Tick boxes take the accent colour and a
+    size that sits on the text's baseline (`accent-color`).
   - Servers on this machine in New model (owner, 2026-11-07 "WSL and Mac llama, those
     local ones, later"; 2026-11-10). models.dev lists only LM Studio of them. The form's
     provider choice now starts with an "On this machine" group (Ollama, LM Studio,

@@ -59,7 +59,7 @@ from types import ModuleType
 
 from flask import Flask, abort, redirect, render_template, request, url_for
 
-from tutor.gui import i18n, launch, launcher_state, lectures, routes, tasks
+from tutor.gui import i18n, launch, launcher_state, lectures, routes, tasks, theme
 from tutor.gui.i18n import N_
 from tutor.gui.routes.common import NOTICES, UPLOAD_LIMIT_BYTES
 
@@ -121,8 +121,10 @@ def create_app(root: Path, token: str, port: int | None = None,
     from tutor.materials.coverage_store import status_cell
 
     app.add_template_filter(status_cell, "status_cell")
-    # The pages in the owner's language (gui/i18n.py): `_()` and {% trans %} in templates.
+    # The pages in the owner's language (gui/i18n.py): `_()` and {% trans %} in templates;
+    # light or dark by choice (gui/theme.py): <html data-theme>.
     i18n.install(app)
+    theme.install(app)
 
     @app.context_processor
     def notice():

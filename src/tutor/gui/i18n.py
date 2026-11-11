@@ -44,6 +44,7 @@ import json
 import re
 import unicodedata
 from pathlib import Path
+from urllib.parse import urlencode
 
 from flask import Flask, g, request
 from markupsafe import escape
@@ -51,7 +52,9 @@ from markupsafe import escape
 from tutor.gui import language_table
 
 ENGLISH = "en"
-SETTINGS = ".tutor-gui-settings.json"  # under the GUI's root, beside the launcher's state
+# Under the GUI's root, beside the launcher's state: {"language": ..., "theme": ...}, one
+# small JSON the footer's switches write (`setting`, `save_setting`; the theme is gui/theme.py).
+SETTINGS = ".tutor-gui-settings.json"
 TRANSLATIONS = "translations"  # under the GUI's root: <language>.po, one per language
 # A language's file name: what the owner typed on the Language page, in lower case, with
 # runs of anything but letters, digits, '_' and '-' as one '-' ("日本語" stays as it is).
@@ -298,18 +301,35 @@ def available(root: Path) -> dict[str, str]:
     return found
 
 
-def chosen(root: Path) -> str:
-    """The language the owner chose on the switch, "" for none (or an unreadable file)."""
+def settings(root: Path) -> dict:
+    """The settings file's content, {} when there is none or it is unreadable."""
     try:
         data = json.loads((root / SETTINGS).read_text(encoding="utf-8"))
-        language = data.get("language", "") if isinstance(data, dict) else ""
     except (OSError, ValueError):
-        return ""
-    return language if isinstance(language, str) and language in available(root) else ""
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def setting(root: Path, key: str) -> str:
+    """One string setting, "" when it is not there or not a string."""
+    value = settings(root).get(key, "")
+    return value if isinstance(value, str) else ""
+
+
+def save_setting(root: Path, key: str, value: str) -> None:
+    """One setting written, the others kept (the language and the theme share the file)."""
+    data = {**settings(root), key: value}
+    (root / SETTINGS).write_text(json.dumps(data, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def chosen(root: Path) -> str:
+    """The language the owner chose on the switch, "" for none (or an unreadable file)."""
+    language = setting(root, "language")
+    return language if language in available(root) else ""
 
 
 def choose(root: Path, language: str) -> None:
-    (root / SETTINGS).write_text(json.dumps({"language": language}) + "\n", encoding="utf-8")
+    save_setting(root, "language", language)
 
 
 def from_browser(header: str, languages: dict[str, str]) -> str:
@@ -363,6 +383,10 @@ def install(app: Flask) -> None:
     @app.context_processor
     def language_context():
         language = resolve()
+        # `gui_back`: where a footer switch returns to: this page, its query less the
+        # one-shot `notice` (else a notice would show again, and a forged one be echoed).
+        args = [(k, v) for k, v in request.args.items(multi=True) if k != "notice"]
+        back = request.path + ("?" + urlencode(args) if args else "")
         return {"gui_language": language, "gui_languages": available(g.root),
-                "gui_direction": translations_for(language).direction}
+                "gui_direction": translations_for(language).direction, "gui_back": back}
 

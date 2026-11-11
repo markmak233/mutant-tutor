@@ -10,7 +10,7 @@ import sys
 
 from flask import Flask, abort, redirect, render_template, request, url_for
 
-from tutor.gui import courses, environment, i18n, language_table, translate
+from tutor.gui import courses, environment, i18n, language_table, theme, translate
 from tutor.gui.i18n import N_
 from tutor.gui.routes.common import course_or_404, start_task
 
@@ -65,6 +65,16 @@ def register(app: Flask) -> None:
         if language not in i18n.available(root):
             abort(400, N_("No such language."))
         i18n.choose(root, language)
+        back = request.form.get("back", "")
+        if not back.startswith("/") or back.startswith("//"):
+            back = url_for("language_page")
+        return redirect(back, code=303)
+
+    @app.post("/theme")
+    def set_theme():
+        """The footer's Theme switch (gui/theme.py): light, dark or the system's; kept for
+        every course; back to the page it was on."""
+        theme.choose(app.config["ROOT"], request.form.get("theme", ""))
         back = request.form.get("back", "")
         if not back.startswith("/") or back.startswith("//"):
             back = url_for("language_page")

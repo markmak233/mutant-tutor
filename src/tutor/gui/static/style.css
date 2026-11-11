@@ -2,20 +2,23 @@
    Sides are logical (start/end, inline-start, inset-inline-start), never left/right: a
    language written right to left sets <html dir="rtl"> (gui/i18n.py) and the browser
    mirrors the pages from that; tests/test_gui_i18n.py refuses a physical side. */
+/* Colours: each defined once as light-dark(light, dark); `color-scheme` picks the side.
+   By default both, so the system's choice applies; the footer's Theme switch (gui/theme.py)
+   sets <html data-theme="light|dark">, which fixes one side. color-scheme also turns the
+   browser's own parts (form controls, scrollbars) to match. */
 :root {
-  --bg: #f7f6f3; --card: #ffffff; --fg: #1d1d1b; --muted: #6b6b66; --line: #e3e2de;
-  --accent: #2d5fa8; --track: #e9e7e1; --code-bg: #f1f0ec;
-  --passed: #2f7a3e; --passed-bg: #e3f1e5; --started: #9a5f0c; --started-bg: #fbeedb;
-  --unlogged: #7d4291; --unlogged-bg: #f2e6f6; --bad: #b3261e; --bad-bg: #fbe4e2;
+  color-scheme: light dark;
+  --bg: light-dark(#f7f6f3, #161615); --card: light-dark(#ffffff, #1f1f1d);
+  --fg: light-dark(#1d1d1b, #e8e7e3); --muted: light-dark(#6b6b66, #9d9c96);
+  --line: light-dark(#e3e2de, #34332f); --accent: light-dark(#2d5fa8, #8ab4f0);
+  --track: light-dark(#e9e7e1, #34332f); --code-bg: light-dark(#f1f0ec, #2a2a27);
+  --passed: light-dark(#2f7a3e, #8fd19c); --passed-bg: light-dark(#e3f1e5, #20352a);
+  --started: light-dark(#9a5f0c, #f0b660); --started-bg: light-dark(#fbeedb, #3a2c16);
+  --unlogged: light-dark(#7d4291, #d7a6e6); --unlogged-bg: light-dark(#f2e6f6, #33233b);
+  --bad: light-dark(#b3261e, #f5978f); --bad-bg: light-dark(#fbe4e2, #40211e);
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #161615; --card: #1f1f1d; --fg: #e8e7e3; --muted: #9d9c96; --line: #34332f;
-    --accent: #8ab4f0; --track: #34332f; --code-bg: #2a2a27;
-    --passed: #8fd19c; --passed-bg: #20352a; --started: #f0b660; --started-bg: #3a2c16;
-    --unlogged: #d7a6e6; --unlogged-bg: #33233b; --bad: #f5978f; --bad-bg: #40211e;
-  }
-}
+:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="dark"] { color-scheme: dark; }
 * { box-sizing: border-box; }
 body {
   margin: 0; background: var(--bg); color: var(--fg);
@@ -292,3 +295,10 @@ footer.language-switch {
   display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; font-size: 0.9rem;
 }
 footer.language-switch form.action { display: inline; }
+footer.language-switch .switch { display: inline-flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; margin-inline-end: 1rem; }
+
+/* Tick boxes: the accent colour, a little larger, on the text's baseline. */
+input[type="checkbox"] { accent-color: var(--accent); width: 1.05rem; height: 1.05rem; vertical-align: -0.2rem; margin: 0 0.35rem 0 0; margin-inline: 0 0.35rem; }
+
+/* A row's own action (delete a language) on a line of its own, at the end side. */
+.inline-form.row-end { display: flex; justify-content: flex-end; margin: 0.3rem 0 0.5rem; }

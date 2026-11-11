@@ -12,7 +12,7 @@ import pytest
 pytest.importorskip("flask")  # the `gui` extra
 
 from tutor import llm  # noqa: E402
-from tutor.gui import i18n, language_table, translate  # noqa: E402
+from tutor.gui import i18n, language_table, theme, translate  # noqa: E402
 from tutor.gui.app import create_app  # noqa: E402
 
 TOKEN = "test-token"
@@ -181,6 +181,39 @@ def test_a_page_shows_the_chosen_language_and_the_switch_goes_back_and_forth(roo
     assert "Your courses" in _page(client, "/")
     assert client.post("/language", base_url=BASE, headers={"Origin": BASE},
                        data={"language": "fr"}).status_code == 400
+
+
+def test_the_theme_switch_sets_the_page_and_shares_the_settings_file(root):
+    """Light, dark or the system's (gui/theme.py): <html data-theme> when chosen; the
+    choice and the language keep each other in the one settings file; the footer's
+    switches go back to the page they were on, less a one-shot notice."""
+    client = _browser(root)
+    text = _page(client, "/")
+    assert "data-theme" not in text and "<strong>System</strong>" in text
+    assert 'name="theme" value="dark"' in text and 'name="back" value="/"' in text
+    response = client.post("/theme", base_url=BASE, headers={"Origin": BASE},
+                           data={"theme": "dark", "back": "/c/demo-course/?x=1"})
+    assert response.status_code == 303
+    assert response.headers["Location"] == "/c/demo-course/?x=1"
+    text = _page(client, "/")
+    assert 'data-theme="dark"' in text and "<strong>Dark</strong>" in text
+    assert theme.chosen(root) == "dark"
+    i18n.choose(root, "zh")  # the language written: the theme stays
+    assert json.loads((root / i18n.SETTINGS).read_text(encoding="utf-8")) == {
+        "theme": "dark", "language": "zh"}
+    assert 'lang="zh" dir="ltr" data-theme="dark"' in _page(client, "/")
+    client.post("/theme", base_url=BASE, headers={"Origin": BASE}, data={"theme": "light"})
+    assert 'data-theme="light"' in _page(client, "/") and i18n.chosen(root) == "zh"
+    client.post("/theme", base_url=BASE, headers={"Origin": BASE},
+                data={"theme": "sepia", "back": "//evil.example/"})  # unknown: the system's
+    assert theme.chosen(root) == "" and "data-theme" not in _page(client, "/")
+    text = _page(client, "/?notice=%3Cb%3Eforged%3C/b%3E&x=1")
+    assert "forged" not in text and 'name="back" value="/?x=1"' in text
+    # The stylesheet: one definition per colour, the side from color-scheme.
+    css = (Path(i18n.__file__).parent / "static" / "style.css").read_text(encoding="utf-8")
+    assert "color-scheme: light dark;" in css and "--bg: light-dark(" in css
+    assert ':root[data-theme="dark"] { color-scheme: dark; }' in css
+    assert "prefers-color-scheme" not in css
 
 
 def test_a_language_can_be_deleted_in_two_clicks_and_english_takes_over(root):
