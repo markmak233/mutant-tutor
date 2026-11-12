@@ -54,6 +54,8 @@ NOTICES = {
                                "longer kept.")),
     "key-saved": ("ok", N_("Saved in .env. Commands started from now on use it.")),
     "key-deleted": ("ok", N_("Removed from .env.")),
+    "provider-saved": ("ok", N_("Saved in llm.toml (the file before is llm.toml.bak).")),
+    "provider-removed": ("ok", N_("Removed from llm.toml.")),
     "model-saved": ("ok", N_("Saved in workspace.toml (the file before is workspace.toml.bak).")),
     "model-deleted": ("ok", N_("Removed from workspace.toml (the file before is "
                             "workspace.toml.bak).")),

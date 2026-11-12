@@ -129,7 +129,7 @@ def form_values(name: str, data: dict) -> dict[str, str]:
     return values
 
 
-def _check_start(data: dict, form: dict[str, str], problems: list[str]) -> None:
+def check_start(data: dict, form: dict[str, str], problems: list[str]) -> None:
     """parallel_start and max_parallel from the form into the file's form, in `data`:
     the choice and its seconds joined ("first-event+10"); empty choice: the provider's
     default, so nothing is written; max_parallel a whole number."""
@@ -166,7 +166,7 @@ def check_profile(course: Course, name: str, form: dict[str, str]
     """A profile's fields from a form, or the problems."""
     data = {k: v for k in FIELDS if (v := form.get(k, "").strip())}
     problems = []
-    _check_start(data, form, problems)
+    check_start(data, form, problems)
     if not PROFILE.match(name):
         problems.append(_("A model's name takes lowercase letters, digits, '.', '_' and "
                           "'-', e.g. deepseek-flash."))

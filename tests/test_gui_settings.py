@@ -149,9 +149,12 @@ def test_a_key_set_from_the_page_is_never_sent_back(root, env_file, monkeypatch)
     client = _browser(root, env_file)
 
     response = post(client, "/keys/set", {"name": "DEEPSEEK_API_KEY", "value": SECRET})
-    page = client.get("/keys/", base_url=BASE).get_data(as_text=True)
+    page = client.get("/providers/", base_url=BASE).get_data(as_text=True)
 
-    assert response.headers["Location"] == "/keys/?notice=key-saved"
+    assert response.headers["Location"] == "/providers/?notice=key-saved#keys"
+    # The Keys page's address still works: it is the Providers page's keys now.
+    moved = client.get("/keys/?name=X_KEY", base_url=BASE)
+    assert (moved.status_code, moved.headers["Location"]) == (302, "/providers/?name=X_KEY#keys")
     assert SECRET not in page and "…WXYZ" in page and "sk-old" not in page
     assert f"DEEPSEEK_API_KEY={SECRET}" in env_file.read_text(encoding="utf-8")
 
@@ -166,11 +169,11 @@ def test_a_refused_key_is_not_put_back_in_the_form(root, env_file):
 def test_the_page_removes_a_key_and_lists_who_uses_one(root, env_file):
     client = _browser(root, env_file)
 
-    page = client.get("/keys/", base_url=BASE).get_data(as_text=True)
+    page = client.get("/providers/", base_url=BASE).get_data(as_text=True)
     assert "demo-course: other" in page and "WORKSPACE_DIR" not in page
 
     response = post(client, "/keys/delete", {"name": "OPENAI_API_KEY"})
-    assert response.headers["Location"] == "/keys/?notice=key-deleted"
+    assert response.headers["Location"] == "/providers/?notice=key-deleted#keys"
     assert post(client, "/keys/delete", {"name": "WORKSPACE_DIR"}).status_code == 400
 
 
@@ -580,26 +583,26 @@ def test_choosing_a_provider_fills_the_name_and_says_when_its_key_is_set(root, e
     catalog_support._catalog(root)  # the kept models.dev list, as the Models page leaves it
     client = _browser(root, env_file)
 
-    page = client.get("/keys/?provider=deepseek", base_url=BASE).get_data(as_text=True)
+    page = client.get("/providers/?provider=deepseek", base_url=BASE).get_data(as_text=True)
     assert 'name="name" value="DEEPSEEK_API_KEY"' in page and "for DeepSeek" in page
     assert '<option value="deepseek" selected>' in page and "is set already" not in page
 
     # Its key is in .env already: the form replaces it, and still shows no key.
-    page = client.get("/keys/?provider=zhipuai", base_url=BASE).get_data(as_text=True)
+    page = client.get("/providers/?provider=zhipuai", base_url=BASE).get_data(as_text=True)
     assert 'name="name" value="ZHIPU_API_KEY"' in page and "is set already" in page
     form = page.split('id="add-key"')[1]
     assert 'class="primary">Replace</button>' in form and 'value="short"' not in page
 
     # An id that is not in the list, and a name the form would refuse, fill nothing.
     for query in ("?provider=nobody", "?name=lower%22%3E", "?provider=lmstudio"):
-        page = client.get("/keys/" + query, base_url=BASE).get_data(as_text=True)
+        page = client.get("/providers/" + query, base_url=BASE).get_data(as_text=True)
         assert 'name="name" value=""' in page
-    page = client.get("/keys/?name=ACME_API_KEY", base_url=BASE).get_data(as_text=True)
+    page = client.get("/providers/?name=ACME_API_KEY", base_url=BASE).get_data(as_text=True)
     assert 'name="name" value="ACME_API_KEY"' in page
     assert env_file.read_text(encoding="utf-8") == ENV  # looking changes nothing
 
 
 def test_without_the_provider_list_the_form_takes_a_typed_name(root, env_file):
-    page = _browser(root, env_file).get("/keys/", base_url=BASE).get_data(as_text=True)
+    page = _browser(root, env_file).get("/providers/", base_url=BASE).get_data(as_text=True)
     assert 'name="provider"' not in page and "No provider list yet" in page
     assert "/c/bare/models/new" in page or "/c/demo-course/models/new" in page

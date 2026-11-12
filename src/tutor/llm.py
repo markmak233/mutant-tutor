@@ -281,11 +281,14 @@ def shared_path(workspace: Path) -> Path:
 
 
 def read_shared(workspace: Path | None) -> dict:
-    """The shared file as written ({} when there is none), for the GUI's pages and for
+    """The shared file of this course's folder as written ({} when there is none), for
     section(); a file that does not parse is an LLMError naming it."""
-    if workspace is None:
-        return {}
-    path = shared_path(workspace)
+    return read_shared_file(shared_path(workspace)) if workspace is not None else {}
+
+
+def read_shared_file(path: Path) -> dict:
+    """A shared llm.toml by its path ({} when there is none; the GUI knows the courses'
+    folder, so it reads the file there); one that does not parse is an LLMError naming it."""
     if not path.is_file():
         return {}
     try:

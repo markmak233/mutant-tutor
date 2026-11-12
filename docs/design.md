@@ -4019,7 +4019,19 @@ late; the adaptive review screens can be built with it.
     (keys no card uses under "Other keys"); "Copy from another course" goes. Built so far
     (4b): `llm.section()` merges the two, each profile with its card's fields, and every
     page that reads which model does what reads it (generation, lectures' vision model,
-    environment's setup model and chat profiles, roles); the pages that write follow.
+    environment's setup model and chat profiles, roles). (4c-1) The Providers page
+    (`/providers/`, the header's link; `gui/providers.py`): one card per provider with
+    its kind, address (its own or the kind's), key (set, replaced and removed in place,
+    by name, shown by its tail), start and cap, and its models under it with the course
+    roles naming each; a card form with Apply filling the kind's address, as the model
+    form's; a card no model names can be removed; shared models that name a kind
+    directly (written by hand) are listed as "Models with no card". The Keys page is
+    gone: `/keys/` sends to the Providers page's "Other keys" (keys no card names, with
+    the courses' own models naming them, and the Add-a-key form). llm.toml is written
+    through `toml_edit.edit_path`, the same checked write as workspace.toml's (backup
+    `llm.toml.bak`). Clicked in Chrome on a scratch root
+    (`notes/gui-checks/providers_click.py`). Still to come: the model form on this page
+    (4c-2), "Move to shared" on a course's page (4d).
   - Filling New model from models.dev (owner, 2026-11-07: the form was plain, with only
     the providers llm.py knows by name; "custom" meant finding and typing a base URL). The
     public catalog at `https://models.dev/api.json` (MIT, no key) lists providers with

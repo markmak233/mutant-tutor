@@ -224,6 +224,9 @@ table.requires input[type="text"] { width: 100%; }
 .review { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 0.5rem 1rem; margin: 0.5rem 0; }
 .review summary { cursor: pointer; font-weight: 600; }
 .review dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.4rem 1rem; margin: 0.75rem 0 0.25rem; }
+/* A provider card's facts (providers.html): key, start, cap, as the review's list. */
+.card dl.facts { display: grid; grid-template-columns: max-content 1fr; gap: 0.4rem 1rem; margin: 0.5rem 0 0.75rem; }
+.card dl.facts dd { margin: 0; }
 .review dt { font-weight: 600; color: var(--muted); }
 .review dd { margin: 0; min-width: 0; }
 .review ul { margin: 0; padding-inline-start: 1.1rem; }
