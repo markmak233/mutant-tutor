@@ -57,7 +57,7 @@ ROLES = [role for _, group in ROLE_GROUPS for role, _ in group]
 def merged_roles(course: Course, chosen: dict[str, str]) -> dict[str, str]:
     """The roles as they would be saved: the file's, with each chosen one set, or removed
     when chosen as none ("")."""
-    saved = llm_settings.section(course).get("roles", {})
+    saved = llm_settings.file_section(course).get("roles", {})
     roles = {**saved, **{r: n for r, n in chosen.items() if n}}
     for role, name in chosen.items():
         if not name:
@@ -139,8 +139,8 @@ def role_warnings(course: Course, roles: dict[str, str], found) -> list[str]:
 def save_roles(course: Course, chosen: dict[str, str], dry_run: bool = False) -> list[str]:
     """Set each offered role to a profile, or to none (""). Roles not offered stay.
     `dry_run`: only the problems, nothing written."""
-    old = llm_settings.section(course)
-    known = old.get("profiles", {})
+    old = llm_settings.file_section(course)
+    known = llm_settings.section(course).get("profiles", {})  # shared ones too
     problems = [f"{role}: no model named {name}." for role, name in chosen.items()
                 if name and name not in known]
     if problems:
@@ -174,12 +174,12 @@ def save_roles(course: Course, chosen: dict[str, str], dry_run: bool = False) ->
 
 def copy_models(course: Course, source: Course) -> list[str]:
     """The other course's profiles and roles, into a course that has none yet."""
-    if llm_settings.section(course).get("profiles"):
+    if llm_settings.file_section(course).get("profiles"):
         return [_("This course has models already; change them one by one.")]
-    data = llm_settings.section(source)
+    data = llm_settings.file_section(source)
     if not data.get("profiles"):
         return [_("%(course)s has no models to copy.") % {"course": source.folder}]
-    expected = copy.deepcopy(llm_settings.section(course))
+    expected = copy.deepcopy(llm_settings.file_section(course))
     expected["profiles"] = copy.deepcopy(data["profiles"])
     expected["roles"] = copy.deepcopy(data.get("roles", {}))
 

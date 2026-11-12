@@ -323,6 +323,30 @@ def test_measure_start_runs_the_timing_command_on_one_chat_model(root, env_file,
         "cc", {"provider": "assistant"}, []))
 
 
+def test_a_course_with_only_roles_reads_the_shared_models_everywhere(root):
+    """Owner, 2026-11-12: models are shared, roles are not. A course whose workspace.toml
+    has only [llm.roles] sees the shared llm.toml's models, with their cards, on every page
+    that reads which model does what, and its roles may name them."""
+    from tutor.gui import environment, generation, lectures
+
+    _write(root / "llm.toml", '[providers.deepseek]\napi_key_env = "DEEPSEEK_API_KEY"\n\n'
+           '[profiles.ds]\nprovider = "deepseek"\nmodel = "deepseek-v4-flash"\n\n'
+           '[profiles.local]\nprovider = "lmstudio"\nmodel = "gemma"\n')
+    shared = courses.get_course(root, "bare")
+    _write(shared.workspace.root / "workspace.toml",
+           'course = "bare"\n\n[llm.roles]\ngenerate = "ds"\nvision = "local"\n')
+
+    assert llm_settings.section(shared)["profiles"]["ds"]["api_key_env"] == "DEEPSEEK_API_KEY"
+    assert llm_settings.file_section(shared) == {"roles": {"generate": "ds", "vision": "local"}}
+    assert ("generate", "ds (deepseek: deepseek-v4-flash)") in [
+        (role, text) for role, text in generation.models(shared)]
+    assert lectures.vision_model(shared) == "local (lmstudio: gemma)"
+    assert ("ds", "deepseek", "deepseek-v4-flash") in environment.chat_profiles(shared)
+    assert llm_roles.save_roles(shared, {"oracle": "local"}) == []
+    assert tomllib.loads(_toml(shared))["llm"] == {
+        "roles": {"generate": "ds", "vision": "local", "oracle": "local"}}  # no profile written
+
+
 def test_renaming_a_model_moves_its_roles_and_keeps_other_comments(course):
     data = {"provider": "glm", "model": "glm-5.3-flash", "api_key_env": "ZHIPU_API_KEY",
             "reasoning_effort": "low"}

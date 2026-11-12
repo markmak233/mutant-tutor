@@ -83,7 +83,7 @@ def test_roles_pick_profiles_and_providers_fill_in_the_rest(tmp_path):
     ("role", "profile", "llm", "env", "expected"),
     [
         ("hint", None, WORKSPACE_LLM, {}, "no model for 'hint'"),
-        ("vision", "gpt", WORKSPACE_LLM, {}, "no [llm.profiles.gpt]"),
+        ("vision", "gpt", WORKSPACE_LLM, {}, "no model named 'gpt' in llm.toml or workspace.toml"),
         ("generate", None, WORKSPACE_LLM, {}, "needs ZHIPU_API_KEY set in .env"),
         ("vision", None, '[llm.profiles.p]\nprovider = "glm"\nmodel = "m"\napi_key = "x"\n'
          '[llm.roles]\nvision = "p"\n', {}, "holds a key"),
@@ -136,6 +136,107 @@ def test_how_parallel_calls_start_comes_from_the_provider_unless_the_profile_say
     assert (config.parallel_start, llm.start_wait(config), config.max_parallel) == (
         start, wait, 2)
     assert config_for("vision", workspace=workspace(tmp_path), environ={}).max_parallel is None
+
+
+SHARED = """
+[providers.deepseek]
+api_key_env = "DEEPSEEK_API_KEY"
+max_parallel = 4
+
+[providers.zai]
+kind = "glm"
+base_url = "https://api.z.ai/api/paas/v4"
+api_key_env = "ZAI_API_KEY"
+parallel_start = "first-done"
+
+[profiles.ds-flash]
+provider = "deepseek"
+model = "deepseek-v4-flash"
+timeout_s = 900
+
+[profiles.ds-pro]
+provider = "deepseek"
+model = "deepseek-v4-pro"
+parallel_start = "first-event+30"
+
+[profiles.glm-flash]
+provider = "zai"
+model = "glm-5.3-flash"
+
+[profiles.local]
+provider = "lmstudio"
+model = "gemma"
+"""
+
+
+def shared_course(tmp_path, roles, own=""):
+    """A course folder beside the shared llm.toml, as the GUI lists courses."""
+    (tmp_path / "llm.toml").write_text(SHARED, encoding="utf-8")
+    course = tmp_path / "course"
+    course.mkdir()
+    return workspace(course, own + "[llm.roles]\n" + roles)
+
+
+def test_shared_models_take_their_cards_endpoint_key_and_ways(tmp_path):
+    """Owner, 2026-11-12: the models live once beside the courses, each provider a card
+    with its endpoint, key name, start and cap; a course keeps only its roles."""
+    ws = shared_course(tmp_path, 'generate = "ds-flash"\noracle = "glm-flash"\n'
+                                 'repair = "ds-pro"\nvision = "local"\n')
+    env = {"DEEPSEEK_API_KEY": SECRET, "ZAI_API_KEY": "zai-test-not-a-real-value"}
+
+    flash = config_for("generate", workspace=ws, environ=env)
+    assert (flash.provider, flash.base_url, flash.api_key, flash.timeout_s) == (
+        "deepseek", "https://api.deepseek.com", SECRET, 900.0)
+    assert (flash.parallel_start, flash.max_parallel) == ("first-event+10", 4)
+    pro = config_for("repair", workspace=ws, environ=env)
+    assert (pro.parallel_start, pro.max_parallel) == ("first-event+30", 4)  # its own start
+    glm = config_for("oracle", workspace=ws, environ=env)
+    assert (glm.provider, glm.base_url, glm.parallel_start) == (
+        "glm", "https://api.z.ai/api/paas/v4", "first-done")
+    assert config_for("vision", workspace=ws, environ=env).base_url == "http://localhost:1234/v1"
+    assert llm.origins(ws) == {"ds-flash": "shared", "ds-pro": "shared",
+                               "glm-flash": "shared", "local": "shared"}
+
+
+def test_a_courses_own_profile_not_moved_yet_comes_first(tmp_path):
+    """Until its models are moved, a course reads its own [llm.profiles] as before, over
+    a shared one of the same name."""
+    own = '[llm.profiles.ds-flash]\nprovider = "glm"\nmodel = "glm-5.3-flash"\n\n'
+    ws = shared_course(tmp_path, 'generate = "ds-flash"\n', own)
+    config = config_for("generate", workspace=ws, environ={})
+    assert (config.provider, config.model) == ("glm", "glm-5.3-flash")
+    assert llm.origins(ws)["ds-flash"] == "course" and llm.origins(ws)["ds-pro"] == "shared"
+
+
+@pytest.mark.parametrize(("card", "expected"), [
+    ('kind = "acme"\n', "kind must be one of"),
+    ('base_url = "http://x/v1"\n', "needs a kind"),  # a name llm.py does not know
+    ('kind = "glm"\nmodel = "m"\n', "unknown fields: model"),
+    ('kind = "glm"\napi_key_env = "sk-abcdefghijklmnopqrstu"\n', "holds a key"),
+])
+def test_a_card_that_cannot_be_read_says_why(tmp_path, card, expected):
+    (tmp_path / "llm.toml").write_text(f'[providers.mine]\n{card}\n[profiles.p]\n'
+                                       f'provider = "mine"\nmodel = "m"\n', encoding="utf-8")
+    (tmp_path / "c").mkdir()
+    ws = workspace(tmp_path / "c", '[llm.roles]\ngenerate = "p"\n')
+    with pytest.raises(LLMError, match=re.escape(expected)):
+        config_for("generate", workspace=ws, environ={})
+
+
+def test_a_shared_file_that_does_not_parse_is_named(tmp_path):
+    (tmp_path / "llm.toml").write_text("[profiles.p\n", encoding="utf-8")
+    (tmp_path / "c").mkdir()
+    ws = workspace(tmp_path / "c", '[llm.roles]\ngenerate = "p"\n')
+    with pytest.raises(LLMError, match="llm.toml does not parse"):
+        config_for("generate", workspace=ws, environ={})
+
+
+def test_a_course_with_no_llm_section_still_uses_the_environment(tmp_path):
+    (tmp_path / "llm.toml").write_text(SHARED, encoding="utf-8")
+    (tmp_path / "c").mkdir()
+    ws = workspace(tmp_path / "c", "")
+    config = config_for("generate", workspace=ws, environ={"LLM_MODEL": "m"})
+    assert (config.name, config.model) == ("env", "m")
 
 
 def test_without_an_llm_section_the_environment_is_the_profile(tmp_path):

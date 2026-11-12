@@ -38,7 +38,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from tutor.gui import tasks, toml_edit
+from tutor.gui import llm_settings, tasks, toml_edit
 from tutor.gui.courses import Course
 from tutor.gui.i18n import N_
 from tutor.gui.i18n import gettext_ as _
@@ -246,7 +246,7 @@ def defaults(course: Course) -> dict:
 def models(course: Course, overrides: dict | None = None) -> list[tuple[str, str]]:
     """(role, what does it) for each role a batch uses, from [llm.roles] and [llm.profiles];
     names only, never a key."""
-    llm = _toml(course).get("llm", {})
+    llm = llm_settings.section(course)  # the shared models too (owner, 2026-11-12)
     if not llm and not overrides:
         return [("all roles", "the LLM_* variables in .env")]
     roles, profiles = llm.get("roles", {}), llm.get("profiles", {})

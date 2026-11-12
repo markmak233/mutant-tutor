@@ -4002,6 +4002,24 @@ late; the adaptive review screens can be built with it.
     its roles along. "Copy from another course" fills a course that has none. The checked
     write is `gui/toml_edit.py` since step 7a, which writes [requires] and [isolation] the
     same way.
+  - Shared models (owner, 2026-11-12: "the models span every course; roles stay each
+    course's"). Every model lives once, in `llm.toml` beside the courses (the folder the GUI
+    lists them in, a course's parent; the CLI finds it the same way): `[providers.NAME]`
+    are the provider cards, an endpoint (`kind`, the provider llm.py knows, left out when
+    the name is one; `base_url`), its key's name, its `parallel_start` and its
+    `max_parallel` (now truly one cap per provider), and `[profiles.NAME]` the models, each
+    naming its card in `provider` (or a kind, as before) and free to set its own
+    `parallel_start` (DeepSeek's flash and pro may differ). A course keeps only its
+    `[llm.roles]`; roles are not shared and not copied, a new course chooses its own. No
+    model of a course's own any more (the owner: "to use another model in one course,
+    choose it in that role"): a profile still in a course's workspace.toml, from before,
+    is read first so a course nobody has moved works as it did, but the pages write none
+    there, and a "Move to shared" offers the move (equal profiles become one; one name
+    with two contents stays and is shown). The Keys page goes into the Providers page
+    (keys no card uses under "Other keys"); "Copy from another course" goes. Built so far
+    (4b): `llm.section()` merges the two, each profile with its card's fields, and every
+    page that reads which model does what reads it (generation, lectures' vision model,
+    environment's setup model and chat profiles, roles); the pages that write follow.
   - Filling New model from models.dev (owner, 2026-11-07: the form was plain, with only
     the providers llm.py knows by name; "custom" meant finding and typing a base URL). The
     public catalog at `https://models.dev/api.json` (MIT, no key) lists providers with

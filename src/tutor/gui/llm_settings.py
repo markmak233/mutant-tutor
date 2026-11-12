@@ -57,8 +57,9 @@ class ProfileView:
     roles: list[str] = field(default_factory=list)  # the roles that use it
 
 
-def section(course: Course) -> dict:
-    """The course's [llm], {} without one (or when the file cannot be read)."""
+def file_section(course: Course) -> dict:
+    """The course's [llm] as its workspace.toml has it, {} without one (or when the file
+    cannot be read): what a write starts from and is checked against."""
     try:
         with (course.workspace.root / WORKSPACE_FILE).open("rb") as f:
             data = tomllib.load(f).get("llm", {})
@@ -67,8 +68,21 @@ def section(course: Course) -> dict:
     return data if isinstance(data, dict) else {}
 
 
+def section(course: Course) -> dict:
+    """The course's [llm] as a run uses it (llm.section): its roles, and the shared
+    models of llm.toml with any of its own not moved yet over them, each with its provider
+    card's fields. For every page that reads which model does what; a shared file that
+    does not parse falls back to the course's own (the page that shows the shared models
+    says what is wrong with it)."""
+    try:
+        return llm.section(course.workspace.root)
+    except (llm.LLMError, OSError, tomllib.TOMLDecodeError):
+        return file_section(course)
+
+
 def profiles(course: Course) -> list[ProfileView]:
-    data = section(course)
+    """The course's own profiles, in its workspace.toml, with the roles naming each."""
+    data = file_section(course)
     roles = data.get("roles", {})
     return [ProfileView(name, dict(values), sorted(r for r, p in roles.items() if p == name))
             for name, values in sorted(data.get("profiles", {}).items())
@@ -201,7 +215,7 @@ def check_profile(course: Course, name: str, form: dict[str, str]
 
 def save_profile(course: Course, original: str | None, name: str, data: dict) -> list[str]:
     """Add a profile, or change `original` (renamed to `name`, its roles following it)."""
-    old = section(course)
+    old = file_section(course)
     names = set(old.get("profiles", {}))
     if original is not None and original not in names:
         return [_("That model is no longer in workspace.toml; reload the page.")]
@@ -243,7 +257,7 @@ def save_profile(course: Course, original: str | None, name: str, data: dict) ->
 
 
 def delete_profile(course: Course, name: str) -> list[str]:
-    old = section(course)
+    old = file_section(course)
     if name not in old.get("profiles", {}):
         return [_("That model is no longer in workspace.toml.")]
     used = sorted(r for r, p in old.get("roles", {}).items() if p == name)

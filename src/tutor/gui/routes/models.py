@@ -21,8 +21,8 @@ def models_page(course: courses.Course, problems: list[str], code: int = 200,
     """The models and roles; `unsaved`: roles chosen but refused or held back by a
     warning, kept in the form with what stopped them just above Save."""
     others = [c for c in courses.find_courses(current_app.config["ROOT"])[0]
-              if c.folder != course.folder and llm_settings.section(c).get("profiles")]
-    saved = llm_settings.section(course).get("roles", {})
+              if c.folder != course.folder and llm_settings.file_section(c).get("profiles")]
+    saved = llm_settings.file_section(course).get("roles", {})
     roles = unsaved if unsaved is not None else saved
     found = catalog.load(current_app.config["ROOT"])
     warnings = llm_roles.role_warnings(course, roles, found)
@@ -145,7 +145,7 @@ def register(app: Flask) -> None:
     @app.get("/c/<name>/models/m/<profile>/")
     def edit_model(name: str, profile: str):
         course = course_or_404(name)
-        data = llm_settings.section(course).get("profiles", {}).get(profile)
+        data = llm_settings.file_section(course).get("profiles", {}).get(profile)
         if not isinstance(data, dict):
             abort(404, N_("No such model."))
         values = applied() or llm_settings.form_values(profile, data)
@@ -186,7 +186,7 @@ def register(app: Flask) -> None:
             # The roles as chosen stay in the form (owner, 2026-11-07: they were reset to
             # the file's, which looked like the choices were wiped).
             return models_page(course, problems, 400, unsaved=roles)
-        changed = roles != llm_settings.section(course).get("roles", {})
+        changed = roles != llm_settings.file_section(course).get("roles", {})
         if changed and not request.form.get("confirm") and llm_roles.role_warnings(
                 course, roles, catalog.load(app.config["ROOT"])):
             # Asked before saving (owner, 2026-11-07): the roles as chosen come back with
@@ -206,7 +206,7 @@ def register(app: Flask) -> None:
         chosen = {role: request.args.get(role, "") for role in llm_roles.ROLES
                   if role in request.args}
         roles = llm_roles.merged_roles(course, chosen)
-        same = roles == llm_settings.section(course).get("roles", {})
+        same = roles == llm_settings.file_section(course).get("roles", {})
         warnings = [] if same else llm_roles.role_warnings(
             course, roles, catalog.load(app.config["ROOT"]))
         return render_template("_role_check.html", check_warnings=warnings,

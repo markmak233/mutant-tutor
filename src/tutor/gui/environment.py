@@ -46,7 +46,7 @@ from tutor import (
     workspace,
 )
 from tutor.envcheck import NOT_PIP, pip_requirements, requires_problems, version_matches
-from tutor.gui import requirement_versions, tasks, toml_edit
+from tutor.gui import llm_settings, requirement_versions, tasks, toml_edit
 from tutor.gui.courses import Course
 from tutor.gui.i18n import N_
 from tutor.gui.i18n import gettext_ as _
@@ -456,7 +456,7 @@ def setup_model(course: Course) -> str | None:
 def setup_profile(course: Course) -> tuple[str, str, dict] | None:
     """(profile name, the role that names it, its [llm.profiles] table) of the model a
     draft would ask: the setup role's, else plan's, else generate's; None without one."""
-    llm = _data(course).get("llm", {})
+    llm = llm_settings.section(course)  # the shared models too (owner, 2026-11-12)
     if not llm:
         return None
     named = llm.get("roles", {})
@@ -472,7 +472,7 @@ def chat_profiles(course: Course) -> list[tuple[str, str, str]]:
     model), in the file's order; the one the embedding role names is left out (an
     embedding model answers no chat). For the Language page's model choice (owner,
     2026-11-10: every course's setup model was the same Sonnet, so the choice was none)."""
-    llm = _data(course).get("llm", {})
+    llm = llm_settings.section(course)  # the shared models too (owner, 2026-11-12)
     embedding = llm.get("roles", {}).get("embedding") if isinstance(llm, dict) else None
     found = []
     for name, data in (llm.get("profiles", {}) if isinstance(llm, dict) else {}).items():

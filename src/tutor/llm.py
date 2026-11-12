@@ -227,34 +227,136 @@ def json_body(text: str) -> str:
 def config_for(role: str, profile: str | None = None, workspace: Path | None = None,
                environ: Mapping[str, str] | None = None) -> LLMConfig:
     """The model for `role`: the named `profile` if given, else the workspace's
-    [llm.roles] entry, else the LLM_* environment variables."""
+    [llm.roles] entry, else the LLM_* environment variables. A profile is looked up in the
+    course's own workspace.toml first (the old way, until the course's models are moved to
+    the shared file), then in the shared llm.toml beside the courses (section())."""
     env = os.environ if environ is None else environ
-    section = _llm_section(workspace)
-    if not section:
+    found = section(workspace)
+    if not found:
         if profile:
             raise LLMError(f"profile {profile!r} given, but workspace.toml has no [llm] section")
         return _from_env(env)
-    profiles = section.get("profiles", {})
-    name = profile or section.get("roles", {}).get(role)
+    profiles = found.get("profiles", {})
+    name = profile or found.get("roles", {}).get(role)
     if not name:
         raise LLMError(f"no model for {role!r}: add `{role} = \"<profile>\"` to [llm.roles] "
                        f"in workspace.toml, or pass --profile")
     if name not in profiles:
-        raise LLMError(f"workspace.toml has no [llm.profiles.{name}]; "
-                       f"profiles: {', '.join(sorted(profiles)) or 'none'}")
+        raise LLMError(f"no model named {name!r} in {SHARED_FILE} or workspace.toml; "
+                       f"models: {', '.join(sorted(profiles)) or 'none'}")
     return _from_profile(name, profiles[name], env, workspace)
 
 
 def roles(workspace: Path | None = None) -> dict[str, str]:
     """The workspace's [llm.roles]: role -> profile name ({} without an [llm] section)."""
-    return dict(_llm_section(workspace).get("roles", {}))
+    return dict(section(workspace).get("roles", {}))
 
 
-def _llm_section(workspace: Path | None) -> dict:
+# --- the shared models (owner, 2026-11-12) ---------------------------------------------------
+# One llm.toml beside the courses (the folder the GUI lists them in, a course's parent) holds
+# every model, once: [providers.NAME] are the provider cards (an endpoint, its key's name, how
+# a lecture's other calls start, how many calls it takes at once) and [profiles.NAME] the
+# models, each naming its card in `provider`. A course keeps only its [llm.roles]: roles are
+# not shared. A profile still in a course's workspace.toml (before its models were moved) is
+# read first, so a course nobody has moved works as it did; no new one is written there.
+#
+#     [providers.zai]                       # any name; kind: which provider llm.py knows
+#     kind = "glm"                          # (left out: the card's own name, e.g. deepseek)
+#     base_url = "https://api.z.ai/api/paas/v4"
+#     api_key_env = "ZAI_API_KEY"
+#     max_parallel = 2
+#
+#     [profiles.glm-flash]
+#     provider = "zai"
+#     model = "glm-5.3-flash"
+
+SHARED_FILE = "llm.toml"
+PROVIDER_FIELDS = {"kind", "base_url", "api_key_env", "parallel_start", "max_parallel"}
+NAME = re.compile(r"^[a-z0-9][a-z0-9._-]{0,39}$")  # a card's or a profile's name
+
+
+def shared_path(workspace: Path) -> Path:
+    """Where the shared models are for this course: llm.toml in the folder above it."""
+    return workspace.resolve().parent / SHARED_FILE
+
+
+def read_shared(workspace: Path | None) -> dict:
+    """The shared file as written ({} when there is none), for the GUI's pages and for
+    section(); a file that does not parse is an LLMError naming it."""
+    if workspace is None:
+        return {}
+    path = shared_path(workspace)
+    if not path.is_file():
+        return {}
+    try:
+        with path.open("rb") as f:
+            data = tomllib.load(f)
+    except tomllib.TOMLDecodeError as e:
+        raise LLMError(f"{path} does not parse: {e}") from e
+    return data if isinstance(data, dict) else {}
+
+
+def card(name: str, data: dict) -> dict:
+    """A provider card as the profile fields it gives each of its models: `provider` (the
+    kind llm.py knows) and whichever of base_url, api_key_env, parallel_start and
+    max_parallel it sets. Refused, saying why: an unknown field, a key in the file, a kind
+    llm.py does not know, or no kind where the name is not one."""
+    where = f"[providers.{name}] in {SHARED_FILE}"
+    if not isinstance(data, dict):
+        raise LLMError(f"{where} is not a table")
+    if "api_key" in data or any(isinstance(v, str) and KEY_LIKE.match(v) for v in data.values()):
+        raise LLMError(f"{where} holds a key: keys belong in .env, named by api_key_env")
+    unknown = set(data) - PROVIDER_FIELDS
+    if unknown:
+        raise LLMError(f"{where} has unknown fields: {', '.join(sorted(unknown))}")
+    kind = data.get("kind", name)
+    if kind not in PROVIDERS:
+        raise LLMError(f"{where} needs a kind, one of {', '.join(PROVIDERS)}"
+                       if "kind" not in data else
+                       f"{where} kind must be one of {', '.join(PROVIDERS)}")
+    return {"provider": kind, **{k: v for k, v in data.items() if k != "kind"}}
+
+
+def _with_cards(profiles: dict, cards: dict) -> dict:
+    """Each profile whose `provider` names a card, with the card's fields under its own:
+    what _from_profile reads. A profile naming a kind (deepseek) and no card is as before."""
+    out = {}
+    for name, data in profiles.items():
+        if isinstance(data, dict) and data.get("provider") in cards:
+            given = card(data["provider"], cards[data["provider"]])
+            data = {**given, **{k: v for k, v in data.items() if k != "provider"}}
+        out[name] = data
+    return out
+
+
+def section(workspace: Path | None) -> dict:
+    """The course's [llm] as a run uses it: its own roles, and the profiles of the shared
+    file with the course's own (not moved yet) over them, each with its card's fields.
+    {} for a course with no [llm] at all (the LLM_* variables then)."""
+    own = _course_llm(workspace)
+    if not own:
+        return {}
+    shared = read_shared(workspace)
+    cards = shared.get("providers", {}) if isinstance(shared.get("providers"), dict) else {}
+    profiles = {**(shared.get("profiles") or {}), **(own.get("profiles") or {})}
+    return {**own, "profiles": _with_cards(profiles, cards)}
+
+
+def origins(workspace: Path | None) -> dict[str, str]:
+    """Where each of the course's profiles comes from: "course" (its own workspace.toml,
+    not moved yet) or "shared" (llm.toml)."""
+    own = (_course_llm(workspace).get("profiles") or {})
+    shared = (read_shared(workspace).get("profiles") or {})
+    return {**{n: "shared" for n in shared}, **{n: "course" for n in own}}
+
+
+def _course_llm(workspace: Path | None) -> dict:
+    """The course's own [llm] in its workspace.toml, as written."""
     if workspace is None or not (workspace / "workspace.toml").is_file():
         return {}
     with (workspace / "workspace.toml").open("rb") as f:
         return tomllib.load(f).get("llm", {})
+
 
 
 def _from_profile(name: str, data: dict, env: Mapping[str, str],
@@ -713,13 +815,13 @@ def main(argv: list[str] | None = None) -> int:
     except WorkspaceError as e:
         print(f"setup: {e}", file=sys.stderr)
         return 1
-    section = _llm_section(workspace)
-    names = args[1:] or sorted(section.get("profiles", {}))
+    found = section(workspace)
+    names = args[1:] or sorted(found.get("profiles", {}))
     if not names:
         print("workspace.toml has no [llm.profiles] to check", file=sys.stderr)
         return 1
     used: dict[str, set[str]] = {}
-    for role, name in section.get("roles", {}).items():
+    for role, name in found.get("roles", {}).items():
         used.setdefault(name, set()).add(role)
     failed = 0
     for name in names:
