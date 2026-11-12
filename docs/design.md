@@ -4035,7 +4035,12 @@ late; the adaptive review screens can be built with it.
     the courses' own models naming them, and the Add-a-key form). llm.toml is written
     through `toml_edit.edit_path`, the same checked write as workspace.toml's (backup
     `llm.toml.bak`). Clicked in Chrome on a scratch root
-    (`notes/gui-checks/providers_click.py`). (4c-2) A card's models are added, edited and
+    (`notes/gui-checks/providers_click.py`). New provider fills from a list as New model
+    did (owner, 2026-11-12, after the first use: "where is the models.dev choice?"): the
+    servers on this machine and the kept models.dev list, an entry giving the card its
+    name (the id), its kind (the one llm.py knows for it, else custom), its address (a
+    known kind's own, else the list's, with the check-the-domain note) and its key's
+    variable; a card that exists is marked in the list. (4c-2) A card's models are added, edited and
     removed on this page (`/providers/p/<card>/models/new`, `/providers/m/<model>/`): the
     card fixes the provider, address and key, so the form has only the model's own fields
     (the provider's name for it, the two reasoning efforts, the time limit, temperature,

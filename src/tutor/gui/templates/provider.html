@@ -5,6 +5,7 @@
    provider: a known kind shows its own address (saving leaves it out of the file); custom
    needs one. With no script, Apply sends the whole form back by GET after the kind is
    changed; htmx does the same on change. Text through _() (gui/i18n.py). #}
+{% from "_macros.html" import action %}
 {% set page_title = original or _("New provider") %}
 {% block title %}{{ page_title }} · {{ _("Providers") }}{% endblock %}
 {% block crumbs %}
@@ -15,6 +16,54 @@
 <h1>{{ page_title }}</h1>
 {% if problems %}
 <ul class="notice notice-bad form-problems">{% for line in problems %}<li>{{ line }}</li>{% endfor %}</ul>
+{% endif %}
+{% if shelf %}
+{# Filling the card from a list (owner, 2026-11-12): the servers on this machine and the
+   kept models.dev list (catalog.py), as the course page's New model had them. Choosing
+   one is a GET of this page, which fills the form; nothing is saved by it. #}
+<section class="catalog">
+  <h2>{{ _("Fill from a list") }}</h2>
+  {% set found = shelf.catalog %}
+  {% set sel = shelf.provider.id if shelf.provider else "" %}
+  {% set models_dev %}<a href="https://models.dev" rel="noopener noreferrer" target="_blank">models.dev</a>{% endset %}
+  <form method="get" action="{{ url_for('new_provider') }}" class="catalog-pick">
+    <label>{{ _("Provider") }}
+      <select name="catalog">
+        <option value="">{{ _("choose one") }}</option>
+        <optgroup label="{{ _('On this machine') }}">
+        {% for id, label in local.items() %}<option value="{{ id }}"{% if sel == id %} selected{% endif %}>{{ label }} ({{ id }}){% if id in shelf.taken %} · {{ _("has a card") }}{% endif %}</option>{% endfor %}
+        </optgroup>
+        {% if found %}
+        <optgroup label="{{ _('Common') }}">
+        {% for p in found.providers if p.id in common %}<option value="{{ p.id }}"{% if sel == p.id %} selected{% endif %}>{{ p.name }} ({{ p.id }}){% if p.id in shelf.taken %} · {{ _("has a card") }}{% endif %}</option>{% endfor %}
+        </optgroup>
+        <optgroup label="{{ _('All the others') }}">
+        {% for p in found.providers if p.id not in common %}<option value="{{ p.id }}"{% if sel == p.id %} selected{% endif %}>{{ p.name }} ({{ p.id }}){% if p.id in shelf.taken %} · {{ _("has a card") }}{% endif %}</option>{% endfor %}
+        </optgroup>
+        {% endif %}
+      </select>
+    </label>
+    <button type="submit" class="small">{{ _("Fill the form") }}</button>
+    {% if found %}<button type="submit" class="small" formmethod="post" formaction="{{ url_for('refresh_provider_catalog') }}">{{ _("Refresh the list") }}</button>{% endif %}
+  </form>
+  {% if not found %}
+  {% if shelf.stale %}<p class="notice notice-bad">{{ _("The list kept (%(when)s) came from an older version of this tool, which now keeps more of it: fetch it again.", when=shelf.stale) }}</p>{% endif %}
+  <p class="muted">{{ _("The cloud providers come from a public list (%(site)s, MIT): base URL, key name, release dates, prices. It is downloaded only when you click, and nothing of your courses is sent. Or fill the form below by hand.", site=models_dev) }}</p>
+  {{ action(url_for('refresh_provider_catalog'), _("Fetch the list")) }}
+  {% else %}
+  <p class="muted">{{ _("From %(site)s, fetched %(when)s: %(n)s providers this tool can call; %(left)s more need their own SDK and are not listed.", site=models_dev, when=found.fetched, n=found.providers | length, left=found.left_out) }}</p>
+  {% if found.url_changes %}
+  <p class="notice notice-bad">{{ _("Since the fetch before, the list gives another address for:") }}
+    {% for id, before, now in found.url_changes %}<br><code>{{ id }}</code>: <code>{{ before }}</code> → <code>{{ now }}</code>{% endfor %}
+    <br>{{ _("A provider does move; a list can also be tampered with. Check the new domain on the provider's own site before using it.") }}</p>
+  {% endif %}
+  {% endif %}
+  {% if shelf.provider %}
+  {% set p = shelf.provider %}
+  <div class="notice notice-ok">{{ _("Filled with %(name)s: check it (the address is %(url)s%(note)s), change what you like, then Save; its models come next, on its card.", name=p.name, url=p.base_url, note=("" if p.own_url else _(", from models.dev: check the domain before saving"))) }}</div>
+  {% endif %}
+</section>
+<h2>{{ _("Or by hand") if not shelf.provider else _("The provider") }}</h2>
 {% endif %}
 {% set chosen = values.kind or "" %}
 {% set builtin = defaults.get(chosen) %}

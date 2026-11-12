@@ -286,3 +286,33 @@ def test_check_and_measure_run_as_a_task_of_the_course_naming_the_model(root, mo
         ("a-course", "Measure how glm-flash's cache starts",
          ["-m", "tutor.llm_timing", "glm-flash"], {"kind": "timing", "from": "providers"})]
     assert post(client, "/providers/m/nobody/check").status_code == 404
+
+
+def test_a_new_card_is_filled_from_the_list_or_a_local_server(root):
+    """Owner, 2026-11-12: New provider offers the models.dev list, as New model did: an
+    entry fills the name, the kind llm.py knows for it (else custom), the address (a
+    known kind's own, else the list's) and the key's variable; a local server its own."""
+    import test_gui_catalog as catalog_support
+
+    client = _browser(root)
+    bare = client.get("/providers/new", base_url=BASE).get_data(as_text=True)
+    assert "Fetch the list" in bare and 'optgroup label="On this machine"' in bare
+    catalog_support._catalog(root)
+    page = client.get("/providers/new", base_url=BASE).get_data(as_text=True)
+    assert 'optgroup label="Common"' in page and "(deepseek) · has a card" in page
+
+    filled = client.get("/providers/new?catalog=openrouter", base_url=BASE).get_data(as_text=True)
+    assert 'name="name" value="openrouter"' in filled
+    assert '<option value="custom" selected>' in filled
+    assert 'name="api_key_env" value="OPENROUTER_API_KEY"' in filled
+    assert "check the domain" not in filled  # its address is this tool's own (OPENAI_URLS)
+    listed = client.get("/providers/new?catalog=acme-cn", base_url=BASE).get_data(as_text=True)
+    assert 'value="https://api.acme.example/v1"' in listed  # the list's address
+    assert "from models.dev: check the domain" in listed
+    known = client.get("/providers/new?catalog=anthropic", base_url=BASE).get_data(as_text=True)
+    assert '<option value="anthropic" selected>' in known
+    assert 'value="https://api.anthropic.com/v1"' in known and "check the domain" not in known
+    local = client.get("/providers/new?catalog=ollama", base_url=BASE).get_data(as_text=True)
+    assert '<option value="ollama" selected>' in local and 'name="api_key_env" value=""' in local
+    nobody = client.get("/providers/new?catalog=nobody", base_url=BASE).get_data(as_text=True)
+    assert 'name="name" value=""' in nobody

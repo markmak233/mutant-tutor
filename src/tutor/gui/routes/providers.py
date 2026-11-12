@@ -114,10 +114,33 @@ def _first_course(root, model: str):
     return found[0] if found else None
 
 
-def card_page(original: str | None, values: dict, problems: list[str], code: int = 200):
+def card_page(original: str | None, values: dict, problems: list[str], code: int = 200,
+              shelf: dict | None = None):
     return render_template("provider.html", original=original, values=values,
-                           problems=problems, kinds=providers.KINDS,
+                           problems=problems, kinds=providers.KINDS, shelf=shelf,
+                           common=catalog.COMMON, local=catalog.LOCAL,
                            defaults=llm_settings.provider_defaults()), code
+
+
+def _card_shelf(chosen: str) -> tuple[dict, dict | None]:
+    """The list a new card can be filled from (owner, 2026-11-12: "where is the choice of
+    a models.dev provider?"): the kept models.dev list and the servers on this machine,
+    as the course page's New model had them; `chosen`, an id, gives the form's values:
+    the id as the card's name, the kind llm.py knows for it (else custom), the address
+    (a known kind's own, else the list's), the variable its key goes in."""
+    root = current_app.config["ROOT"]
+    found = catalog.load(root)
+    provider = catalog.local_provider(chosen) or (found.provider(chosen) if found else None)
+    shelf = {"catalog": found, "stale": "" if found else catalog.stale(root),
+             "provider": provider, "taken": set(providers.read(root).get("providers", {}))}
+    if provider is None:
+        return shelf, None
+    kind = catalog.KNOWN.get(provider.id, provider.id if provider.id in catalog.LOCAL
+                             else "custom")
+    name = provider.id if llm.NAME.match(provider.id) else ""
+    own = (llm.PROVIDERS.get(kind) or (None,))[0]
+    return shelf, {"name": name, "kind": kind, "base_url": own or provider.base_url,
+                   "api_key_env": provider.key_env}
 
 
 def register(app: Flask) -> None:
@@ -139,7 +162,20 @@ def register(app: Flask) -> None:
 
     @app.get("/providers/new")
     def new_provider():
-        return card_page(None, _applied() or {"name": "", "kind": ""}, [])
+        """A blank card form, with the models.dev list and the local servers above it:
+        `catalog` names one, which fills the form (saved only by its own Save)."""
+        shelf, filled = _card_shelf(request.args.get("catalog", ""))
+        return card_page(None, _applied() or filled or {"name": "", "kind": ""}, [], shelf=shelf)
+
+    @app.post("/providers/catalog")
+    def refresh_provider_catalog():
+        """Download models.dev's list again, then back to New provider on the choice."""
+        if problem := catalog.refresh(app.config["ROOT"]):
+            shelf, _ = _card_shelf("")
+            return card_page(None, {"name": "", "kind": ""}, [problem], 502, shelf=shelf)
+        chosen = request.form.get("catalog", "")
+        args = {"catalog": chosen} if chosen else {}
+        return redirect(url_for("new_provider", notice="catalog-fetched", **args), code=303)
 
     @app.get("/providers/p/<name>/")
     def edit_provider(name: str):
