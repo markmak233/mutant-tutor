@@ -202,6 +202,12 @@ table.plan { margin: 1rem 0; }
 }
 .inline-form button.primary { background: var(--accent); border-color: var(--accent); color: var(--bg); }
 .row-actions { display: flex; gap: 0.4rem; flex-wrap: wrap; }
+/* In a table the cell stays a cell (display: flex on a td took it out of the row, so its
+   border no longer lined up with the row's; Providers page, 2026-11-12): the buttons sit
+   inline, on one line, in a column no wider than they need. */
+td.row-actions { display: table-cell; white-space: nowrap; width: 1%; }
+td.row-actions form.action { display: inline-block; vertical-align: top; }
+td.row-actions form.action + form.action { margin-inline-start: 0.4rem; }
 .form .role { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: 0.3rem 0; }
 .form details summary { cursor: pointer; font-weight: 600; margin-bottom: 0.5rem; }
 .form details .field { margin-bottom: 0.75rem; }
