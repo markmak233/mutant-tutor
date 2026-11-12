@@ -34,7 +34,7 @@ def models_page(course: courses.Course, problems: list[str], code: int = 200,
                            makers=llm_settings.profile_makers(course, found),
                            unsaved=unsaved is not None,
                            groups=llm_settings.ROLE_GROUPS, others=others,
-                           key_set=key_names()), code
+                           key_set=key_names(), measurable=llm_settings.measurable), code
 
 
 def profile_page(course: courses.Course, original: str | None, values: dict,
@@ -237,3 +237,16 @@ def register(app: Flask) -> None:
         title = f"Check {wanted}" if wanted else "Check the models"
         return start_task(course, title, [llm_settings.check_command(names)],
                           meta={"kind": "check"})
+
+    @app.post("/c/<name>/models/timing")
+    def time_model(name: str):
+        """When the profile's provider can serve its cache to the next call (`python -m
+        tutor.llm_timing`), as a task: about sixteen paid calls, so on this click only;
+        the task's log ends with the suggested parallel_start, which nothing writes."""
+        course = course_or_404(name)
+        wanted = request.form.get("profile", "")
+        found = next((p for p in llm_settings.profiles(course) if p.name == wanted), None)
+        if found is None or not llm_settings.measurable(found):
+            abort(404, N_("No such model."))
+        return start_task(course, f"Measure how {wanted}'s cache starts",
+                          [llm_settings.timing_command(wanted)], meta={"kind": "timing"})

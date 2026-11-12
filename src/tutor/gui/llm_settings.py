@@ -463,6 +463,19 @@ def check_command(names: list[str]) -> list[str]:
     return [sys.executable, "-m", "tutor.llm", "check", *names]
 
 
+def timing_command(name: str) -> list[str]:
+    """`python -m tutor.llm_timing` on one profile (the name checked against the file):
+    when its provider's cache can be read, to choose its parallel_start."""
+    return [sys.executable, "-m", "tutor.llm_timing", name]
+
+
+def measurable(profile: ProfileView) -> bool:
+    """A chat model on an API: not an assistant (no calls), not an embedding model (only
+    the embedding role uses it: no chat endpoint)."""
+    return (profile.data.get("provider") != "assistant"
+            and not (profile.roles and set(profile.roles) == {"embedding"}))
+
+
 def _source(course: Course, name: str, known: dict) -> tuple[str, str]:
     """(provider, base URL) of a profile, as generation tells two providers apart."""
     data = known[name]

@@ -1685,7 +1685,20 @@ them. The model form sets both under "More": a list of the four ways, its first 
 provider's own (which writes nothing, so the profile follows the tool's measured default),
 a seconds box for `first-event+N` (0.5 to 600; the file keeps one value, the page splits it
 again), and a cap box (1 to 32, empty for none); clicked in Chrome on a scratch course
-(`notes/gui-checks/parallel_start_click.py`). On a deep-learning course's lecture with Sonnet (first call about 70 s) the gate costs a
+(`notes/gui-checks/parallel_start_click.py`). "Measure start" beside each chat model's Check
+(owner, 2026-11-12) runs `python -m tutor.llm_timing NAME` as a task: four rounds (released
+at the first event, +3 s, +10 s, after the end), each one long call and three short ones on
+a 40,000-character prefix of this tool's own source with a new id in front (no course text,
+and present in an installed tool), thinking off; about sixteen paid calls, so on the click
+only, the button's title saying so. It suggests a `parallel_start` and writes nothing: for
+a provider that counts cached tokens the earliest round whose three followers all read at
+least 80% of their input from the cache (an earlier start that misses pays for the prefix
+again); for a server that counts none (LM Studio, Ollama) the round that finished soonest
+among those whose followers reached their first text in at most half the first call's time;
+`together` when no round read the cache. A round whose first call ended before its release
+is marked and left out, as it was really `first-done`. Clicked in Chrome with Ollama's
+qwen3 0.6B (free; `notes/gui-checks/measure_start_click.py`): 17 s a round, `first-done`
+suggested, as measured by hand. On a deep-learning course's lecture with Sonnet (first call about 70 s) the gate costs a
 few seconds instead of a call; the stream readers report the first event as `on_progress(0)`.
 `cached_tokens` in the call log shows the result. Meaning comes first: a short prompt gains nothing and is not
 contorted, and reordering a calibrated prompt means calibrating it again.

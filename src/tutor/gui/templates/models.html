@@ -56,6 +56,9 @@
       <td class="muted">{{ p.roles | join(", ") }}</td>
       <td class="row-actions">
         <form method="post" action="{{ url_for('check_models', name=course.folder) }}" class="action"><input type="hidden" name="profile" value="{{ p.name }}"><button type="submit">{{ _("Check") }}</button></form>
+        {# When its provider's cache can be read by the next call (llm_timing): paid, so
+           the button says so; the task's log suggests a parallel_start, written by no one. #}
+        {% if measurable(p) %}<form method="post" action="{{ url_for('time_model', name=course.folder) }}" class="action"><input type="hidden" name="profile" value="{{ p.name }}"><button type="submit" title="{{ _('About sixteen calls on a 10,000-token prefix (on Sonnet about $0.2, DeepSeek a cent or two; free on this machine): when the next calls can read its cache. The result is a suggestion for How a lecture&#39;s other calls start.') }}">{{ _("Measure start") }}</button></form>{% endif %}
         {% if not p.roles %}{{ action(url_for('delete_model', name=course.folder, profile=p.name), _("Remove")) }}{% endif %}
       </td>
     </tr>

@@ -202,6 +202,7 @@ def waiting_for(course: courses.Course, task: tasks.Task) -> str:
     if kind == "vision":
         return _("the vision model, %(model)s") % {"model": lectures.vision_model(course) or "?"}
     return _({"check": N_("the models being checked"),
+              "timing": N_("the model being measured, about sixteen calls"),
               "install": N_("pip, which may be downloading"),
               "create": N_("pip, which may be downloading"),
               "build": N_("docker build, which may be downloading"),

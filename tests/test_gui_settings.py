@@ -291,6 +291,38 @@ def test_how_parallel_calls_start_is_saved_shown_and_left_to_the_provider(
     assert "parallel_start" not in tomllib.loads(_toml(course))["llm"]["profiles"]["ds"]
 
 
+def test_measure_start_runs_the_timing_command_on_one_chat_model(root, env_file, course,
+                                                                 monkeypatch):
+    """The Models page's "Measure start" (owner, 2026-11-12): a task running
+    `python -m tutor.llm_timing NAME` on that model only; offered for chat models, not for
+    an embedding-only one or an assistant, and refused for a name not in the file."""
+    started = []
+
+    def fake_start(course_root, title, commands, env, meta=None):
+        started.append((title, commands, meta))
+        return tasks.Task("20260102-100000-0abcde", course_root, title, tasks.RUNNING, "",
+                          None, commands, [], 1, meta or {})
+
+    monkeypatch.setattr(tasks, "start", fake_start)
+    client = _browser(root, env_file)
+    post(client, "/c/demo-course/models/save", {"name": "ds", **_form()})
+    page = _form_page(client, "/c/demo-course/models/")
+    assert page.count('action="/c/demo-course/models/timing"') == sum(
+        llm_settings.measurable(p) for p in llm_settings.profiles(course))
+    assert "Measure start" in page
+
+    response = post(client, "/c/demo-course/models/timing", {"profile": "ds"})
+    assert response.status_code == 303
+    title, commands, meta = started[0]
+    assert commands[0][-3:] == ["-m", "tutor.llm_timing", "ds"] and meta == {"kind": "timing"}
+    assert post(client, "/c/demo-course/models/timing", {"profile": "nope"}).status_code == 404
+
+    assert not llm_settings.measurable(llm_settings.ProfileView(
+        "vec", {"provider": "lmstudio", "model": "nomic"}, ["embedding"]))
+    assert not llm_settings.measurable(llm_settings.ProfileView(
+        "cc", {"provider": "assistant"}, []))
+
+
 def test_renaming_a_model_moves_its_roles_and_keeps_other_comments(course):
     data = {"provider": "glm", "model": "glm-5.3-flash", "api_key_env": "ZHIPU_API_KEY",
             "reasoning_effort": "low"}
