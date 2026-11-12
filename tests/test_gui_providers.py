@@ -229,6 +229,13 @@ def test_the_model_form_lists_the_cards_models_from_the_kept_list_and_saves(root
     assert "Fill from the provider" in page
     assert 'href="/providers/p/deepseek/models/new?model=' in page
     assert 'name="provider"' not in page  # the card fixes it
+    # The card has deepseek-v4-flash already; a list entry of that id is not offered again.
+    assert "?model=ds-old" in page
+    ok = post(client, "/providers/models/save", {"card": "deepseek", "name": "old",
+                                                 "model": "ds-old"})
+    assert ok.status_code == 303
+    again = client.get("/providers/p/deepseek/models/new", base_url=BASE).get_data(as_text=True)
+    assert "?model=ds-old" not in again and "?model=ds-new" in again
     filled = client.get("/providers/p/deepseek/models/new?model=ds-new",
                         base_url=BASE).get_data(as_text=True)
     assert 'name="model" value="ds-new"' in filled and "Filled with" in filled

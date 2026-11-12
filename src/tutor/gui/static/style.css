@@ -225,6 +225,8 @@ table.requires input[type="text"] { width: 100%; }
 .review summary { cursor: pointer; font-weight: 600; }
 .review dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.4rem 1rem; margin: 0.75rem 0 0.25rem; }
 /* A provider card's facts (providers.html): key, start, cap, as the review's list. */
+/* The Providers page's cards stand apart (owner, 2026-11-12: "a gap between each"). */
+section.card { margin: 1.25rem 0; }
 .card dl.facts { display: grid; grid-template-columns: max-content 1fr; gap: 0.4rem 1rem; margin: 0.5rem 0 0.75rem; }
 .card dl.facts dd { margin: 0; }
 .review dt { font-weight: 600; color: var(--muted); }

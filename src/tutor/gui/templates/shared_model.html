@@ -59,6 +59,8 @@
     </tbody>
   </table>
   {% if shelf.hidden %}<p><a href="{{ url_for('new_shared_model', name=card.name, all=1) }}">{{ _("Show all %(n)s models", n=shelf.models | length + shelf.hidden) }}</a> <span class="muted">{{ _("(the newest %(n)s are listed)", n=shelf.models | length) }}</span></p>{% endif %}
+  {% elif shelf.all_added %}
+  <p class="muted">{{ _("Every model the list offers is on this card already; type another's name below.") }}</p>
   {% elif p %}
   <p class="muted">{{ _("The list names no model of this provider that is still offered.") }}</p>
   {% elif shelf.catalog and card.kind != "custom" %}

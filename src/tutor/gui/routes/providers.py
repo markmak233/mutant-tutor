@@ -90,13 +90,16 @@ def _shelf(card: providers.CardView, model_id: str, show_all: bool) -> dict:
                          if catalog.same_url(p.base_url, card.base_url)), None) or next(
             (p for p in found.providers if catalog.KNOWN.get(p.id) == card.kind), None)
     model = next((m for m in provider.models if m.id == model_id), None) if provider else None
-    listed = list(provider.models) if provider else []
+    # A model the card has already is not offered again (owner, 2026-11-12).
+    have = {m.model for m in card.models}
+    listed = [m for m in provider.models if m.id not in have] if provider else []
     shown = listed if show_all else listed[:catalog.SHOWN]
     if model and model not in shown:
         shown.append(model)
     return {"catalog": found, "stale": "" if found else catalog.stale(root),
             "provider": provider, "model": model, "models": shown,
             "hidden": len(listed) - len(shown), "problem": problem,
+            "all_added": bool(provider and provider.models and not listed),
             "key_set": bool(card.api_key_env in keys.read(current_app.config["ENV_FILE"]))}
 
 
