@@ -12,7 +12,7 @@ pytest.importorskip("flask")  # the `gui` extra
 
 import tomlkit  # noqa: E402
 
-from tutor.gui import courses, keys, llm_settings, tasks, toml_edit  # noqa: E402
+from tutor.gui import courses, keys, llm_roles, llm_settings, tasks, toml_edit  # noqa: E402
 from tutor.gui.app import create_app  # noqa: E402
 
 TOKEN = "test-token"
@@ -342,7 +342,7 @@ def test_a_model_in_use_cannot_be_removed(course):
 
 
 def test_roles_are_saved_and_one_set_to_none_is_removed(course):
-    assert llm_settings.save_roles(course, {"oracle": "other", "vision": ""}) == []
+    assert llm_roles.save_roles(course, {"oracle": "other", "vision": ""}) == []
 
     roles = tomllib.loads(_toml(course))["llm"]["roles"]
     assert roles == {"generate": "cheap", "oracle": "other"}  # generate was not offered
@@ -351,23 +351,23 @@ def test_roles_are_saved_and_one_set_to_none_is_removed(course):
 
 def test_an_oracle_as_close_as_one_model_is_warned_about_not_refused(course):
     """Owner, 2026-11-07: not everyone pays for two providers; the page warns instead."""
-    assert llm_settings.save_roles(course, {"oracle": "cheap"}, dry_run=True) == []
-    roles = llm_settings.merged_roles(course, {"oracle": "cheap"})
-    warnings = llm_settings.role_warnings(course, roles, None)
+    assert llm_roles.save_roles(course, {"oracle": "cheap"}, dry_run=True) == []
+    roles = llm_roles.merged_roles(course, {"oracle": "cheap"})
+    warnings = llm_roles.role_warnings(course, roles, None)
     assert len(warnings) == 1 and "one model (cheap)" in warnings[0]
 
 
 def test_a_role_cannot_name_a_missing_model(course):
-    assert llm_settings.save_roles(course, {"oracle": "nowhere"}) == [
+    assert llm_roles.save_roles(course, {"oracle": "nowhere"}) == [
         "oracle: no model named nowhere."]
 
 
 def test_models_are_copied_into_a_course_that_has_none(root, course):
     bare = courses.get_course(root, "bare")
 
-    assert llm_settings.copy_models(bare, course) == []
+    assert llm_roles.copy_models(bare, course) == []
     assert tomllib.loads(_toml(bare))["llm"] == tomllib.loads(_toml(course))["llm"]
-    assert "has models already" in llm_settings.copy_models(course, bare)[0]
+    assert "has models already" in llm_roles.copy_models(course, bare)[0]
 
 
 def test_a_change_that_would_touch_another_table_is_not_written(course, monkeypatch):
@@ -379,7 +379,7 @@ def test_a_change_that_would_touch_another_table_is_not_written(course, monkeypa
         return real(doc)
 
     monkeypatch.setattr(llm_settings, "_tables", wrong)
-    problems = llm_settings.save_roles(course, {"oracle": "other"})
+    problems = llm_roles.save_roles(course, {"oracle": "other"})
 
     assert "left as it was" in problems[0] and _toml(course) == before
 

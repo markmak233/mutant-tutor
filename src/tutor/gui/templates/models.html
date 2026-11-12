@@ -2,7 +2,7 @@
 {# A course's models: [llm.profiles] and [llm.roles] in its workspace.toml (llm_settings.py).
    Text through _() (gui/i18n.py); the role names, provider ids, model names and file names
    stay as they are; the role groups' titles and descriptions are N_() strings in
-   llm_settings.ROLE_GROUPS, translated here with _(). #}
+   llm_roles.ROLE_GROUPS, translated here with _(). #}
 {% from "_macros.html" import action, chip %}
 {% block title %}{{ _("Models") }} · {{ course.workspace.course }}{% endblock %}
 {% block crumbs %}
@@ -24,7 +24,7 @@
 <ul class="notice notice-bad form-problems">{% for line in problems %}<li>{{ line }}</li>{% endfor %}</ul>
 {% endif %}
 {% if warnings %}
-{# The saved roles' oracle is a less independent reading (llm_settings.role_warnings): a
+{# The saved roles' oracle is a less independent reading (llm_roles.role_warnings): a
    reminder. Roles being chosen get theirs above Save (_role_check.html). #}
 <div class="notice notice-bad">
   <p>{{ _("The roles are saved, but:") }}</p>

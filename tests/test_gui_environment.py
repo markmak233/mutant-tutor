@@ -14,7 +14,7 @@ pytest.importorskip("flask")  # the `gui` extra
 
 from tutor import workspace  # noqa: E402
 from tutor.doctor_rows import Row  # noqa: E402
-from tutor.gui import courses, doctor_page, environment, llm_settings, tasks  # noqa: E402
+from tutor.gui import courses, doctor_page, environment, llm_roles, tasks  # noqa: E402
 from tutor.gui.app import create_app  # noqa: E402
 from tutor.materials import cache  # noqa: E402
 from tutor.materials import requires as requires_draft  # noqa: E402
@@ -518,7 +518,7 @@ def test_the_models_page_offers_the_setup_role(root, course):
     _write(course.workspace.root / "workspace.toml",
            'course = "demo"\n[llm.profiles.cheap]\nprovider = "glm"\nmodel = "m"\n')
     text = _browser(root).get("/c/demo-course/models/", base_url=BASE).get_data(as_text=True)
-    assert "<strong>setup</strong>" in text and "setup" in llm_settings.ROLES
+    assert "<strong>setup</strong>" in text and "setup" in llm_roles.ROLES
 
 
 # --- "exercises may import": [safety] allow_imports from the list (owner, 2026-11-06) -------------

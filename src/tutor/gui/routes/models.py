@@ -11,7 +11,7 @@ import os
 from flask import Flask, abort, current_app, redirect, render_template, request, url_for
 
 from tutor import llm
-from tutor.gui import catalog, courses, keys, llm_settings
+from tutor.gui import catalog, courses, keys, llm_roles, llm_settings
 from tutor.gui.i18n import N_
 from tutor.gui.routes.common import course_or_404, start_task
 
@@ -25,15 +25,15 @@ def models_page(course: courses.Course, problems: list[str], code: int = 200,
     saved = llm_settings.section(course).get("roles", {})
     roles = unsaved if unsaved is not None else saved
     found = catalog.load(current_app.config["ROOT"])
-    warnings = llm_settings.role_warnings(course, roles, found)
+    warnings = llm_roles.role_warnings(course, roles, found)
     return render_template("models.html", course=course, problems=problems,
                            profiles=llm_settings.profiles(course), roles=roles,
                            warnings=[] if unsaved is not None else warnings,
                            check_warnings=warnings if unsaved is not None else [],
                            check_problems=problems, check_confirm=False,
-                           makers=llm_settings.profile_makers(course, found),
+                           makers=llm_roles.profile_makers(course, found),
                            unsaved=unsaved is not None,
-                           groups=llm_settings.ROLE_GROUPS, others=others,
+                           groups=llm_roles.ROLE_GROUPS, others=others,
                            key_set=key_names(), measurable=llm_settings.measurable), code
 
 
@@ -179,21 +179,21 @@ def register(app: Flask) -> None:
     @app.post("/c/<name>/models/roles")
     def save_roles(name: str):
         course = course_or_404(name)
-        chosen = {role: request.form.get(role, "") for role in llm_settings.ROLES
+        chosen = {role: request.form.get(role, "") for role in llm_roles.ROLES
                   if role in request.form}
-        roles = llm_settings.merged_roles(course, chosen)
-        if problems := llm_settings.save_roles(course, chosen, dry_run=True):
+        roles = llm_roles.merged_roles(course, chosen)
+        if problems := llm_roles.save_roles(course, chosen, dry_run=True):
             # The roles as chosen stay in the form (owner, 2026-11-07: they were reset to
             # the file's, which looked like the choices were wiped).
             return models_page(course, problems, 400, unsaved=roles)
         changed = roles != llm_settings.section(course).get("roles", {})
-        if changed and not request.form.get("confirm") and llm_settings.role_warnings(
+        if changed and not request.form.get("confirm") and llm_roles.role_warnings(
                 course, roles, catalog.load(app.config["ROOT"])):
             # Asked before saving (owner, 2026-11-07): the roles as chosen come back with
             # the warning and "Save even so" above Save. With htmx the warning was shown
             # while choosing, and the box ticked saves at once.
             return models_page(course, [], 409, unsaved=roles)
-        problems = llm_settings.save_roles(course, chosen)
+        problems = llm_roles.save_roles(course, chosen)
         if problems:
             return models_page(course, problems, 400, unsaved=roles)
         return redirect(url_for("models", name=name) + "?notice=roles-saved", code=303)
@@ -203,14 +203,14 @@ def register(app: Flask) -> None:
         """The part above Save for the roles chosen in the form (_role_check.html): htmx
         asks for it whenever a role changes. Reads only; nothing is saved."""
         course = course_or_404(name)
-        chosen = {role: request.args.get(role, "") for role in llm_settings.ROLES
+        chosen = {role: request.args.get(role, "") for role in llm_roles.ROLES
                   if role in request.args}
-        roles = llm_settings.merged_roles(course, chosen)
+        roles = llm_roles.merged_roles(course, chosen)
         same = roles == llm_settings.section(course).get("roles", {})
-        warnings = [] if same else llm_settings.role_warnings(
+        warnings = [] if same else llm_roles.role_warnings(
             course, roles, catalog.load(app.config["ROOT"]))
         return render_template("_role_check.html", check_warnings=warnings,
-                               check_problems=llm_settings.save_roles(course, chosen,
+                               check_problems=llm_roles.save_roles(course, chosen,
                                                                       dry_run=True),
                                check_confirm=bool(request.args.get("confirm")))
 
@@ -220,7 +220,7 @@ def register(app: Flask) -> None:
         source = courses.get_course(app.config["ROOT"], request.form.get("source", ""))
         if source is None:
             abort(404, N_("No such course."))
-        problems = llm_settings.copy_models(course, source)
+        problems = llm_roles.copy_models(course, source)
         if problems:
             return models_page(course, problems, 400)
         return redirect(url_for("models", name=name) + "?notice=models-copied", code=303)
