@@ -4046,7 +4046,22 @@ late; the adaptive review screens can be built with it.
     a model still in the course's own file is edited there until it is moved. Clicked in
     Chrome with Ollama (`notes/gui-checks/shared_model_click.py`): the server's list,
     Use, Save, Check as the course's task (ok in 2.3 s), edit, Remove refused while named
-    and done after. Still to come: "Move to shared" on a course's page (4d).
+    and done after. (4d) "Move to shared" (`gui/move_models.py`): a course whose own file
+    still has models shows them in a box on its Models page with the move's plan: each
+    profile's card is the shared card of its kind at its address (its own base_url, else
+    the kind's), else a new one named after the kind (`kind-2` when that name is a card at
+    another address or with another key), which takes the key's name from the first
+    profile that made it; a profile whose key's name differs from its card's stays (one
+    address, one key: the owner decides), as does one whose shared namesake differs
+    (equal ones merge, nothing written); an assistant profile moves with no card. Two
+    clicks (a box, then the button); the shared file is written first through the checked
+    write, the course's own only after that went in, dropping the moved profiles and
+    keeping the roles, so a failure between the two leaves the models in both files,
+    which is harmless. The roles' choices list every model the course can use, the
+    shared ones and its own not moved yet (marked); "Copy from another course" is gone.
+    Clicked in Chrome on a scratch course with four providers
+    (`notes/gui-checks/move_models_click.py`): the box, the unticked refusal, the move,
+    the two files, the Providers page's cards with "Used by", the roles saved after.
   - Filling New model from models.dev (owner, 2026-11-07: the form was plain, with only
     the providers llm.py knows by name; "custom" meant finding and typing a base URL). The
     public catalog at `https://models.dev/api.json` (MIT, no key) lists providers with

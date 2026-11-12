@@ -576,8 +576,9 @@ def test_each_models_maker_shows_where_roles_are_chosen(root):
     (root / "demo-course" / "workspace.toml").write_text(ROLES_TOML, encoding="utf-8")
     _catalog(root)
     text = _browser(root).get("/c/demo-course/models/", base_url=BASE).get_data(as_text=True)
-    assert ">zai-oracle (glm, by zhipuai)</option>" in text
-    assert ">other (deepseek, by deepseek)</option>" in text
+    # Still in the course's own file (not moved to the shared one): said so in the option.
+    assert ">zai-oracle (glm, by zhipuai; this course&#39;s own)</option>" in text
+    assert ">other (deepseek, by deepseek; this course&#39;s own)</option>" in text
     assert 'muted">by zhipuai</span>' in text  # in the table too
 
 

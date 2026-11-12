@@ -61,8 +61,8 @@ NOTICES = {
                             "workspace.toml.bak).")),
     "roles-saved": ("ok", N_("Roles saved in workspace.toml (the file before is "
                           "workspace.toml.bak).")),
-    "models-copied": ("ok", N_("Models copied into workspace.toml. Keys are shared through "
-                            ".env, so they work here too.")),
+    "models-moved": ("ok", N_("Moved into the shared llm.toml; the roles stay as they were "
+                              "(the files before are workspace.toml.bak and llm.toml.bak).")),
     "nothing-to-transcribe": ("ok", N_("No image page is waiting for the vision model.")),
     "no-vision-model": ("bad", N_("No vision model is set: add `vision = \"<profile>\"` to "
                                "[llm.roles] in workspace.toml.")),

@@ -11,7 +11,7 @@ import os
 from flask import Flask, abort, current_app, redirect, render_template, request, url_for
 
 from tutor import llm
-from tutor.gui import catalog, courses, keys, llm_roles, llm_settings
+from tutor.gui import catalog, courses, keys, llm_roles, llm_settings, move_models
 from tutor.gui.i18n import N_
 from tutor.gui.routes.common import course_or_404, start_task
 
@@ -20,9 +20,14 @@ def models_page(course: courses.Course, problems: list[str], code: int = 200,
                 unsaved: dict[str, str] | None = None):
     """The models and roles; `unsaved`: roles chosen but refused or held back by a
     warning, kept in the form with what stopped them just above Save."""
-    others = [c for c in courses.find_courses(current_app.config["ROOT"])[0]
-              if c.folder != course.folder and llm_settings.file_section(c).get("profiles")]
+    root = current_app.config["ROOT"]
     saved = llm_settings.file_section(course).get("roles", {})
+    # The models a role may name: the shared ones and the course's own not moved yet
+    # (llm_settings.section), each with where it comes from.
+    merged = llm_settings.section(course).get("profiles", {})
+    origins = llm.origins(course.workspace.root)
+    available = [(name, data.get("provider", "?"), origins.get(name, "course"))
+                 for name, data in sorted(merged.items()) if isinstance(data, dict)]
     roles = unsaved if unsaved is not None else saved
     found = catalog.load(current_app.config["ROOT"])
     warnings = llm_roles.role_warnings(course, roles, found)
@@ -33,7 +38,8 @@ def models_page(course: courses.Course, problems: list[str], code: int = 200,
                            check_problems=problems, check_confirm=False,
                            makers=llm_roles.profile_makers(course, found),
                            unsaved=unsaved is not None,
-                           groups=llm_roles.ROLE_GROUPS, others=others,
+                           groups=llm_roles.ROLE_GROUPS, available=available,
+                           move=move_models.plan(root, course), stays=move_models.STAYS,
                            key_set=key_names(), measurable=llm_settings.measurable), code
 
 
@@ -214,16 +220,17 @@ def register(app: Flask) -> None:
                                                                       dry_run=True),
                                check_confirm=bool(request.args.get("confirm")))
 
-    @app.post("/c/<name>/models/copy")
-    def copy_models(name: str):
+    @app.post("/c/<name>/models/move")
+    def move_models_to_shared(name: str):
+        """The course's own models into the shared llm.toml (move_models.apply), on a
+        ticked box: two clicks, as the deletions."""
         course = course_or_404(name)
-        source = courses.get_course(app.config["ROOT"], request.form.get("source", ""))
-        if source is None:
-            abort(404, N_("No such course."))
-        problems = llm_roles.copy_models(course, source)
+        if not request.form.get("confirm"):
+            return models_page(course, [N_("Tick the box first.")], 400)
+        problems = move_models.apply(app.config["ROOT"], course)
         if problems:
             return models_page(course, problems, 400)
-        return redirect(url_for("models", name=name) + "?notice=models-copied", code=303)
+        return redirect(url_for("models", name=name) + "?notice=models-moved", code=303)
 
     @app.post("/c/<name>/models/check")
     def check_models(name: str):

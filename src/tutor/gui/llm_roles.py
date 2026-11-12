@@ -13,8 +13,6 @@ from __future__ import annotations
 
 import copy
 
-import tomlkit
-
 from tutor import llm
 
 # Through the module, looked up at call time: a test's stand-in for one of its helpers
@@ -168,29 +166,5 @@ def save_roles(course: Course, chosen: dict[str, str], dry_run: bool = False) ->
                 _put(table, role, name)
             elif role in table:
                 del table[role]
-
-    return llm_settings._edit(course, change, expected)
-
-
-def copy_models(course: Course, source: Course) -> list[str]:
-    """The other course's profiles and roles, into a course that has none yet."""
-    if llm_settings.file_section(course).get("profiles"):
-        return [_("This course has models already; change them one by one.")]
-    data = llm_settings.file_section(source)
-    if not data.get("profiles"):
-        return [_("%(course)s has no models to copy.") % {"course": source.folder}]
-    expected = copy.deepcopy(llm_settings.file_section(course))
-    expected["profiles"] = copy.deepcopy(data["profiles"])
-    expected["roles"] = copy.deepcopy(data.get("roles", {}))
-
-    def change(doc) -> None:
-        table, roles = llm_settings._tables(doc)
-        for name, values in data["profiles"].items():
-            item = tomlkit.table()
-            for k, v in values.items():
-                item[k] = v
-            table[name] = item  # tomlkit sets tables it writes itself apart
-        for role, name in data.get("roles", {}).items():
-            _put(roles, role, name)
 
     return llm_settings._edit(course, change, expected)

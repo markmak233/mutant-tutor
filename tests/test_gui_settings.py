@@ -389,14 +389,6 @@ def test_a_role_cannot_name_a_missing_model(course):
         "oracle: no model named nowhere."]
 
 
-def test_models_are_copied_into_a_course_that_has_none(root, course):
-    bare = courses.get_course(root, "bare")
-
-    assert llm_roles.copy_models(bare, course) == []
-    assert tomllib.loads(_toml(bare))["llm"] == tomllib.loads(_toml(course))["llm"]
-    assert "has models already" in llm_roles.copy_models(course, bare)[0]
-
-
 def test_a_change_that_would_touch_another_table_is_not_written(course, monkeypatch):
     before = _toml(course)
     real = llm_settings._tables
