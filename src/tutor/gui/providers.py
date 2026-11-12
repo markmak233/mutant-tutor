@@ -34,6 +34,11 @@ from tutor.gui.toml_edit import spaced as _spaced
 # A card's fields in the order a new one is written (llm.PROVIDER_FIELDS, ordered).
 FIELDS = ("kind", "base_url", "api_key_env", "parallel_start", "max_parallel")
 FORM_FIELDS = ("name", *FIELDS, llm_settings.START_SECONDS)
+# A shared model's own fields, in the order written: its card gives it the provider, the
+# address, the key and the cap, so the form has none of those; `provider` is the card.
+MODEL_FIELDS = ("model", "reasoning_effort", "reasoning_effort_on", "timeout_s", "temperature",
+                "parallel_start")
+MODEL_FORM_FIELDS = ("name", *MODEL_FIELDS, llm_settings.START_SECONDS)
 # The kinds a card can be: every provider llm.py calls over an API. An assistant (request
 # files, no endpoint, no key) needs no card: a profile names it as its provider directly.
 KINDS = tuple(k for k in llm.PROVIDERS if k != "assistant")
@@ -255,3 +260,104 @@ def _tables(doc):
         if table not in doc:
             doc[table] = tomlkit.table(is_super_table=True)
     return doc["providers"], doc["profiles"]
+
+
+# --- a card's models ---------------------------------------------------------------------------
+
+
+def model_form_values(name: str, data: dict) -> dict[str, str]:
+    """A shared model from the file as its form shows it: strings, the start split."""
+    values = llm_settings.form_values(name, data)
+    values.pop("provider", None)
+    return values
+
+
+def check_model(root: Path, card: str, name: str, form: dict[str, str]
+                ) -> tuple[dict | None, list[str]]:
+    """A shared model's fields from the form, or the problems: its own fields checked as
+    the course form checks them, then the whole, with its card's fields under it, by
+    llm.py's rules (a stand-in value for the key, which stays in .env)."""
+    data = {k: v for k in MODEL_FIELDS if (v := form.get(k, "").strip())}
+    problems: list[str] = []
+    if not llm.NAME.match(name):
+        problems.append(_("A model's name takes lowercase letters, digits, '.', '_' and "
+                          "'-', e.g. deepseek-flash."))
+    found = read(root).get("providers", {})
+    raw = found.get(card) if isinstance(found, dict) else None
+    if not isinstance(raw, dict):
+        problems.append(_("That provider is no longer in llm.toml; reload the page."))
+    elif not data.get("model"):
+        problems.append(_("Give the provider's name for the model."))
+    llm_settings.check_start(data, form, problems)
+    llm_settings.check_tuning(data, problems)
+    if not problems:
+        try:
+            given = llm.card(card, raw)
+            whole = {**given, **data}
+            llm._from_profile(name, whole, {whole.get("api_key_env", ""): "x"})
+        except llm.LLMError as e:
+            problems.append(str(e))
+    return (None if problems else {"provider": card, **data}), problems
+
+
+def save_model(root: Path, original: str | None, name: str, data: dict,
+               used_by: dict[str, list[str]]) -> list[str]:
+    """Add a shared model, or change `original` (renamed to `name`). A rename of a model a
+    course's role names is refused: the roles are in the courses' own files, which this
+    page does not write (the owner changes the role, or the name stays)."""
+    old = read(root)
+    found = old.get("profiles", {}) if isinstance(old.get("profiles"), dict) else {}
+    if original is not None and original not in found:
+        return [_("That model is no longer in llm.toml; reload the page.")]
+    if name != original and name in found:
+        return [_("A model named %(name)s exists already.") % {"name": name}]
+    if original and name != original and used_by.get(original):
+        return [_("%(name)s is named by %(roles)s: a renamed model would leave those roles "
+                  "empty. Change the roles first, or keep the name.")
+                % {"name": original, "roles": ", ".join(used_by[original])}]
+    expected = copy.deepcopy(old)
+    expected.setdefault("providers", {})
+    expected.setdefault("profiles", {}).pop(original or name, None)
+    expected["profiles"][name] = data
+
+    def change(doc) -> None:
+        profiles = _tables(doc)[1]
+        if original is None:
+            item = tomlkit.table()
+            for k in ("provider", *MODEL_FIELDS):
+                if k in data:
+                    item[k] = data[k]
+            profiles[name] = _spaced(item)
+            return
+        if original != name:
+            profiles[name] = profiles[original]
+            del profiles[original]
+        item = profiles[name]
+        for k in list(item.keys()):
+            if k not in data:
+                del item[k]
+        for k in ("provider", *MODEL_FIELDS):
+            if k in data and item.get(k) != data[k]:
+                _put(item, k, data[k])
+
+    return toml_edit.edit_path(path(root), change,
+                               {"providers": expected["providers"],
+                                "profiles": expected["profiles"]})
+
+
+def delete_model(root: Path, name: str, used_by: dict[str, list[str]]) -> list[str]:
+    """Remove a shared model no course's role names."""
+    old = read(root)
+    found = old.get("profiles", {}) if isinstance(old.get("profiles"), dict) else {}
+    if name not in found:
+        return [_("That model is no longer in llm.toml; reload the page.")]
+    if used_by.get(name):
+        return [_("%(name)s is named by %(roles)s: change those roles first.")
+                % {"name": name, "roles": ", ".join(used_by[name])}]
+    expected = copy.deepcopy(old)
+    del expected["profiles"][name]
+
+    def change(doc) -> None:
+        del _tables(doc)[1][name]
+
+    return toml_edit.edit_path(path(root), change, {"profiles": expected["profiles"]})

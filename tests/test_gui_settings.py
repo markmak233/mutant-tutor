@@ -605,4 +605,4 @@ def test_choosing_a_provider_fills_the_name_and_says_when_its_key_is_set(root, e
 def test_without_the_provider_list_the_form_takes_a_typed_name(root, env_file):
     page = _browser(root, env_file).get("/providers/", base_url=BASE).get_data(as_text=True)
     assert 'name="provider"' not in page and "No provider list yet" in page
-    assert "/c/bare/models/new" in page or "/c/demo-course/models/new" in page
+    assert "added to a card above" in page  # the list is fetched there now, not in a course

@@ -13,7 +13,9 @@
 <div class="title-line">
   <h1>{{ _("Models") }}</h1>
   <div class="actions">
-    <a class="button" href="{{ url_for('new_model', name=course.folder) }}">{{ _("Add a model") }}</a>
+    {# Models are shared since 2026-11-12 (owner): new ones go on the Providers page; a
+       model still in this course's own file (not moved yet) can be edited here. #}
+    <a class="button" href="{{ url_for('provider_list') }}">{{ _("Add a model (on the Providers page)") }}</a>
     {% if profiles %}{{ action(url_for('check_models', name=course.folder), _("Check all")) }}{% endif %}
   </div>
 </div>

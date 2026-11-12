@@ -177,3 +177,105 @@ def test_a_broken_shared_file_is_named_on_the_page(root):
     (root / "llm.toml").write_text("[providers.x\n", encoding="utf-8")
     page = _browser(root).get("/providers/", base_url=BASE).get_data(as_text=True)
     assert "does not parse" in page
+
+
+# --- a card's models ---------------------------------------------------------------------------
+
+
+def test_a_shared_model_is_checked_with_its_cards_fields(root):
+    data, problems = providers.check_model(root, "deepseek", "ds-pro", {
+        "model": "deepseek-v4-pro", "timeout_s": "900", "parallel_start": "first-event+",
+        "parallel_start_s": "30"})
+    assert problems == [] and data == {"provider": "deepseek", "model": "deepseek-v4-pro",
+                                       "timeout_s": 900, "parallel_start": "first-event+30"}
+    for form, problem in [({}, "Give the provider's name"),
+                          ({"model": "m", "reasoning_effort": "very low"}, "one word"),
+                          ({"model": "m", "temperature": "0.3"}, 'temperature can only be')]:
+        data, problems = providers.check_model(root, "deepseek", "x", form)
+        assert data is None and problem in " ".join(problems)
+    assert "no longer in llm.toml" in providers.check_model(root, "gone", "x", {"model": "m"})[1][0]
+    assert "lowercase" in providers.check_model(root, "deepseek", "Big", {"model": "m"})[1][0]
+
+
+def test_a_shared_model_is_added_changed_renamed_and_removed(root):
+    used = {"ds-flash": ["A: generate"]}
+    data, _ = providers.check_model(root, "deepseek", "ds-pro", {"model": "deepseek-v4-pro"})
+    assert providers.save_model(root, None, "ds-pro", data, used) == []
+    loaded = tomllib.loads(_shared(root))
+    assert loaded["profiles"]["ds-pro"] == {"provider": "deepseek", "model": "deepseek-v4-pro"}
+    assert "# the key's name" in _shared(root)
+
+    data, _ = providers.check_model(root, "deepseek", "pro", {"model": "deepseek-v4-pro",
+                                                              "timeout_s": "600"})
+    assert providers.save_model(root, "ds-pro", "pro", data, used) == []
+    loaded = tomllib.loads(_shared(root))
+    assert "ds-pro" not in loaded["profiles"] and loaded["profiles"]["pro"]["timeout_s"] == 600
+
+    # A model a role names: no rename, no removal; the role is in the course's own file.
+    data, _ = providers.check_model(root, "deepseek", "flash", {"model": "deepseek-v4-flash"})
+    assert "named by A: generate" in providers.save_model(root, "ds-flash", "flash", data, used)[0]
+    assert "named by A: generate" in providers.delete_model(root, "ds-flash", used)[0]
+    assert providers.delete_model(root, "pro", used) == []
+    assert "pro" not in tomllib.loads(_shared(root))["profiles"]
+    assert "exists already" in providers.save_model(root, None, "ds-flash", data, used)[0]
+
+
+def test_the_model_form_lists_the_cards_models_from_the_kept_list_and_saves(root, monkeypatch):
+    import test_gui_catalog as catalog_support
+
+    catalog_support._catalog(root)  # the kept models.dev list
+    client = _browser(root)
+    page = client.get("/providers/p/deepseek/models/new", base_url=BASE).get_data(as_text=True)
+    assert "Fill from the provider" in page
+    assert 'href="/providers/p/deepseek/models/new?model=' in page
+    assert 'name="provider"' not in page  # the card fixes it
+    filled = client.get("/providers/p/deepseek/models/new?model=ds-new",
+                        base_url=BASE).get_data(as_text=True)
+    assert 'name="model" value="ds-new"' in filled and "Filled with" in filled
+    assert 'name="name" value="ds-new"' in filled  # a free name from the model's id
+    # The z.ai card (kind glm at z.ai's address) lists the entry at that address.
+    zai = client.get("/providers/p/zai/models/new", base_url=BASE).get_data(as_text=True)
+    assert 'href="/providers/p/zai/models/new?model=glm-x' in zai
+
+    ok = post(client, "/providers/models/save", {"card": "deepseek", "name": "ds-pro",
+                                                 "model": "deepseek-v4-pro", "timeout_s": "900"})
+    assert ok.headers["Location"] == "/providers/?notice=provider-saved"
+    assert tomllib.loads(_shared(root))["profiles"]["ds-pro"]["timeout_s"] == 900
+    edit = client.get("/providers/m/ds-pro/", base_url=BASE).get_data(as_text=True)
+    assert 'name="model" value="deepseek-v4-pro"' in edit and "Fill from" not in edit
+    bad = post(client, "/providers/models/save", {"card": "deepseek", "name": "ds-pro",
+                                                  "original": "ds-pro", "model": ""})
+    assert bad.status_code == 400 and "Give the provider" in bad.get_data(as_text=True)
+    assert client.get("/providers/m/nobody/", base_url=BASE).status_code == 404
+    assert post(client, "/providers/models/save", {"card": "gone", "name": "x", "model": "m"}
+                ).status_code == 404
+
+    listing = client.get("/providers/", base_url=BASE).get_data(as_text=True)
+    assert 'href="/providers/m/ds-pro/"' in listing and "/providers/m/ds-pro/delete" in listing
+    assert "/providers/m/ds-flash/delete" not in listing  # a role names it
+    gone = post(client, "/providers/m/ds-pro/delete")
+    assert gone.headers["Location"] == "/providers/?notice=provider-removed"
+    kept = post(client, "/providers/m/ds-flash/delete")
+    assert kept.status_code == 400 and "named by A: generate" in kept.get_data(as_text=True)
+
+
+def test_check_and_measure_run_as_a_task_of_the_course_naming_the_model(root, monkeypatch):
+    from tutor.gui import tasks
+
+    started = []
+
+    def fake_start(course_root, title, commands, env, meta=None):
+        started.append((course_root.name, title, commands[0][-3:], meta))
+        return tasks.Task("20260102-100000-0abcde", course_root, title, tasks.RUNNING, "",
+                          None, commands, [], 1, meta or {})
+
+    monkeypatch.setattr(tasks, "start", fake_start)
+    client = _browser(root)
+    assert post(client, "/providers/m/ds-flash/check").status_code == 303
+    assert post(client, "/providers/m/glm-flash/timing").status_code == 303
+    assert started == [
+        ("a-course", "Check ds-flash", ["tutor.llm", "check", "ds-flash"],
+         {"kind": "check", "from": "providers"}),
+        ("a-course", "Measure how glm-flash's cache starts",
+         ["-m", "tutor.llm_timing", "glm-flash"], {"kind": "timing", "from": "providers"})]
+    assert post(client, "/providers/m/nobody/check").status_code == 404

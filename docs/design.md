@@ -4030,8 +4030,23 @@ late; the adaptive review screens can be built with it.
     the courses' own models naming them, and the Add-a-key form). llm.toml is written
     through `toml_edit.edit_path`, the same checked write as workspace.toml's (backup
     `llm.toml.bak`). Clicked in Chrome on a scratch root
-    (`notes/gui-checks/providers_click.py`). Still to come: the model form on this page
-    (4c-2), "Move to shared" on a course's page (4d).
+    (`notes/gui-checks/providers_click.py`). (4c-2) A card's models are added, edited and
+    removed on this page (`/providers/p/<card>/models/new`, `/providers/m/<model>/`): the
+    card fixes the provider, address and key, so the form has only the model's own fields
+    (the provider's name for it, the two reasoning efforts, the time limit, temperature,
+    and its own `parallel_start` when it should differ from the card's); above a new one,
+    the provider's models (a server on this machine lists its own at the card's address;
+    a cloud card's come from the kept models.dev list, the entry at the card's address,
+    else the first of its kind; custom has none), "Use" filling the form as the course
+    page did. Check and Measure start run as a task of the first course whose roles name
+    the model (else the first course; a task and its log live in a course) and come back
+    to this page. A model a course's role names cannot be renamed or removed here (the
+    roles are in the courses' files, which this page does not write): the row says who
+    names it. A course's Models page adds no model any more; its button leads here, and
+    a model still in the course's own file is edited there until it is moved. Clicked in
+    Chrome with Ollama (`notes/gui-checks/shared_model_click.py`): the server's list,
+    Use, Save, Check as the course's task (ok in 2.3 s), edit, Remove refused while named
+    and done after. Still to come: "Move to shared" on a course's page (4d).
   - Filling New model from models.dev (owner, 2026-11-07: the form was plain, with only
     the providers llm.py knows by name; "custom" meant finding and typing a base URL). The
     public catalog at `https://models.dev/api.json` (MIT, no key) lists providers with

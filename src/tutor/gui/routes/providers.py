@@ -7,12 +7,15 @@ Routes are registered on the app by `register` (see gui/routes/__init__.py)."""
 
 from __future__ import annotations
 
+import dataclasses
+
 from flask import Flask, abort, current_app, redirect, render_template, request, url_for
 
 from tutor import llm
 from tutor.gui import catalog, courses, keys, llm_settings, providers
 from tutor.gui.i18n import N_
 from tutor.gui.llm_roles import ROLES
+from tutor.gui.routes.common import start_task
 
 
 def _used_by(root) -> dict[str, list[str]]:
@@ -51,8 +54,61 @@ def providers_page(problems: list[str], code: int = 200, name: str = "", provide
                            cards=providers.cards(root, _used_by(root)), key_rows=by_name,
                            other_rows=others, unassigned=providers.unassigned_models(root),
                            file_problem=providers.problem(root), file=llm.SHARED_FILE,
-                           providers=choices, chosen=chosen, existing=existing,
-                           first_course=found[0].folder if found else None), code
+                           providers=choices, chosen=chosen, existing=existing), code
+
+
+def model_page(card: providers.CardView, original: str | None, values: dict,
+               problems: list[str], code: int = 200, shelf: dict | None = None):
+    return render_template("shared_model.html", card=card, original=original, values=values,
+                           problems=problems, shelf=shelf,
+                           defaults=llm_settings.provider_defaults()), code
+
+
+def _card_or_404(name: str) -> providers.CardView:
+    found = next((c for c in providers.cards(current_app.config["ROOT"]) if c.name == name),
+                 None)
+    if found is None:
+        abort(404, N_("No such provider."))
+    return found
+
+
+def _shelf(card: providers.CardView, model_id: str, show_all: bool) -> dict:
+    """The models the card's provider offers, for the form above the fields (the course
+    page's New model shelf, cut to this one provider, whose address the card fixes): a
+    server on this machine is asked for its own models at the card's address; a cloud
+    provider's come from the kept models.dev list, the entry at the card's address, else
+    the first of the card's kind; custom has none."""
+    root = current_app.config["ROOT"]
+    found = catalog.load(root)
+    provider, problem = None, ""
+    if card.kind in catalog.LOCAL:
+        provider = dataclasses.replace(catalog.local_provider(card.kind), base_url=card.base_url)
+        listed, problem = catalog.installed(card.base_url)
+        provider = dataclasses.replace(provider, models=listed)
+    elif found and card.kind != "custom":
+        provider = next((p for p in found.providers
+                         if catalog.same_url(p.base_url, card.base_url)), None) or next(
+            (p for p in found.providers if catalog.KNOWN.get(p.id) == card.kind), None)
+    model = next((m for m in provider.models if m.id == model_id), None) if provider else None
+    listed = list(provider.models) if provider else []
+    shown = listed if show_all else listed[:catalog.SHOWN]
+    if model and model not in shown:
+        shown.append(model)
+    return {"catalog": found, "stale": "" if found else catalog.stale(root),
+            "provider": provider, "model": model, "models": shown,
+            "hidden": len(listed) - len(shown), "problem": problem,
+            "key_set": bool(card.api_key_env in keys.read(current_app.config["ENV_FILE"]))}
+
+
+def _first_course(root, model: str):
+    """The course a check or a measurement of a shared model runs as a task of: the first
+    whose roles name it, else the first course (tasks and their logs live in a course)."""
+    found = courses.find_courses(root)[0]
+    users = _used_by(root).get(model, [])
+    for course in found:
+        if any(u.startswith(course.workspace.course + ": ") for u in users):
+            return course
+    return found[0] if found else None
 
 
 def card_page(original: str | None, values: dict, problems: list[str], code: int = 200):
@@ -108,6 +164,92 @@ def register(app: Flask) -> None:
             return providers_page(problems, 400)
         return redirect(url_for("provider_list") + "?notice=provider-removed", code=303)
 
+    @app.get("/providers/p/<name>/models/new")
+    def new_shared_model(name: str):
+        """A blank form for a model of this card, with the provider's models above it:
+        `model` fills the form from one, `all` lists every model instead of the newest."""
+        card = _card_or_404(name)
+        shelf = _shelf(card, request.args.get("model", ""), bool(request.args.get("all")))
+        values: dict = {"name": ""}
+        if shelf["provider"] and shelf["model"]:
+            taken = set(providers.read(app.config["ROOT"]).get("profiles", {}))
+            values, shelf["notes"] = catalog.fill(shelf["provider"], shelf["model"], taken)
+            values = {k: v for k, v in values.items() if k in providers.MODEL_FORM_FIELDS}
+        values = _applied_model() or {**values, "timeout_s": values.get("timeout_s")
+                                      or str(llm_settings.NEW_TIMEOUT_S)}
+        return model_page(card, None, values, [], shelf=shelf)
+
+    @app.post("/providers/p/<name>/models/catalog")
+    def refresh_shared_catalog(name: str):
+        """Download models.dev's list again, then back to this card's New model."""
+        card = _card_or_404(name)
+        if problem := catalog.refresh(app.config["ROOT"]):
+            shelf = _shelf(card, "", False)
+            return model_page(card, None, {"name": ""}, [problem], 502, shelf=shelf)
+        return redirect(url_for("new_shared_model", name=name, notice="catalog-fetched"),
+                        code=303)
+
+    @app.get("/providers/m/<model>/")
+    def edit_shared_model(model: str):
+        data = providers.read(app.config["ROOT"]).get("profiles", {}).get(model)
+        if not isinstance(data, dict):
+            abort(404, N_("No such model."))
+        card = _card_or_404(str(data.get("provider", "")))
+        return model_page(card, model, _applied_model() or providers.model_form_values(
+            model, data), [])
+
+    @app.post("/providers/models/save")
+    def save_shared_model():
+        form = {k: request.form.get(k, "") for k in providers.MODEL_FORM_FIELDS}
+        original = request.form.get("original") or None
+        card_name = request.form.get("card", "")
+        card = _card_or_404(card_name)
+        name = form["name"].strip()
+        root = app.config["ROOT"]
+        data, problems = providers.check_model(root, card_name, name, form)
+        if data is not None:
+            problems = providers.save_model(root, original, name, data, _used_by(root))
+        if problems:
+            return model_page(card, original, form, problems, 400)
+        return redirect(url_for("provider_list") + "?notice=provider-saved", code=303)
+
+    @app.post("/providers/m/<model>/delete")
+    def delete_shared_model(model: str):
+        root = app.config["ROOT"]
+        problems = providers.delete_model(root, model, _used_by(root))
+        if problems:
+            return providers_page(problems, 400)
+        return redirect(url_for("provider_list") + "?notice=provider-removed", code=303)
+
+    @app.post("/providers/m/<model>/check")
+    def check_shared_model(model: str):
+        """One tiny request to the model (`python -m tutor.llm check`), as a task of the
+        first course that names it (a task runs in a course; the shared models are read
+        from any course)."""
+        root = app.config["ROOT"]
+        if model not in providers.read(root).get("profiles", {}):
+            abort(404, N_("No such model."))
+        course = _first_course(root, model)
+        if course is None:
+            return providers_page([N_("Add a course first: a check runs as a task of one.")], 400)
+        return start_task(course, f"Check {model}", [llm_settings.check_command([model])],
+                          meta={"kind": "check", "from": "providers"})
+
+    @app.post("/providers/m/<model>/timing")
+    def time_shared_model(model: str):
+        """When the model's provider can serve its cache (`python -m tutor.llm_timing`), as
+        a task of the first course that names it: about sixteen paid calls."""
+        root = app.config["ROOT"]
+        if model not in providers.read(root).get("profiles", {}):
+            abort(404, N_("No such model."))
+        course = _first_course(root, model)
+        if course is None:
+            return providers_page([N_("Add a course first: a measurement runs as a task of "
+                                      "one.")], 400)
+        return start_task(course, f"Measure how {model}'s cache starts",
+                          [llm_settings.timing_command(model)],
+                          meta={"kind": "timing", "from": "providers"})
+
     @app.post("/keys/set")
     def set_key():
         """Add or replace a key. The value is never put back in a page, even when refused."""
@@ -127,6 +269,14 @@ def register(app: Flask) -> None:
         if problem:
             return providers_page([problem], 400)
         return redirect(url_for("provider_list") + "?notice=key-deleted#keys", code=303)
+
+
+def _applied_model() -> dict | None:
+    """The model form as a reload sends it back (none of its fields follow a choice, so
+    only a `model` link from the shelf re-renders it); None otherwise."""
+    if not request.args.get("apply"):
+        return None
+    return {k: request.args.get(k, "") for k in providers.MODEL_FORM_FIELDS}
 
 
 def _applied() -> dict | None:

@@ -48,11 +48,18 @@
   </dl>
   {% if card.models %}
   <table>
-    <thead><tr><th>{{ _("Model") }}</th><th>{{ _("Provider's name for it") }}</th><th>{{ _("Used by") }}</th></tr></thead>
+    <thead><tr><th>{{ _("Model") }}</th><th>{{ _("Provider's name for it") }}</th><th>{{ _("Used by") }}</th><th></th></tr></thead>
     <tbody>
     {% for m in card.models %}
-      <tr><td>{{ m.name }}</td><td><code>{{ m.model }}</code>{% if m.data.parallel_start %} <span class="muted">{{ _("starts %(way)s", way=m.data.parallel_start) }}</span>{% endif %}</td>
-        <td class="muted">{{ m.used_by | join(", ") or _("no role names it") }}</td></tr>
+      <tr><td><a href="{{ url_for('edit_shared_model', model=m.name) }}">{{ m.name }}</a></td>
+        <td><code>{{ m.model }}</code>{% if m.data.parallel_start %} <span class="muted">{{ _("starts %(way)s", way=m.data.parallel_start) }}</span>{% endif %}</td>
+        <td class="muted">{{ m.used_by | join(", ") or _("no role names it") }}</td>
+        <td class="row-actions">
+          {# Check and Measure start run as a task of the first course naming the model. #}
+          {{ action(url_for('check_shared_model', model=m.name), _("Check")) }}
+          <form method="post" action="{{ url_for('time_shared_model', model=m.name) }}" class="action"><button type="submit" title="{{ _('About sixteen calls on a 10,000-token prefix (on Sonnet about $0.2, DeepSeek a cent or two; free on this machine): when the next calls can read its cache. The result is a suggestion for How a lecture&#39;s other calls start.') }}">{{ _("Measure start") }}</button></form>
+          {% if not m.used_by %}{{ action(url_for('delete_shared_model', model=m.name), _("Remove")) }}{% endif %}
+        </td></tr>
     {% endfor %}
     </tbody>
   </table>
@@ -60,7 +67,8 @@
   <p class="muted">{{ _("No model yet.") }}</p>
   {% endif %}
   <div class="row-actions">
-    <a class="button" href="{{ url_for('edit_provider', name=card.name) }}">{{ _("Edit") }}</a>
+    <a class="button" href="{{ url_for('new_shared_model', name=card.name) }}">{{ _("Add a model") }}</a>
+    <a class="button" href="{{ url_for('edit_provider', name=card.name) }}">{{ _("Edit the card") }}</a>
     {% if not card.models %}{{ action(url_for('delete_provider', name=card.name), _("Remove")) }}{% endif %}
   </div>
 </section>
@@ -109,7 +117,7 @@
   <div class="actions"><button type="submit" class="small">{{ _("Fill the name") }}</button></div>
 </form>
 {% else %}
-<p class="muted">{{ _("No provider list yet, so type the name. The list (models.dev) is downloaded on a course's Models page, under New model") }}{% if first_course %}: <a href="{{ url_for('new_model', name=first_course) }}">{{ _("open it") }}</a>{% endif %}.</p>
+<p class="muted">{{ _("No provider list yet, so type the name. The list (models.dev) is downloaded when a model is added to a card above.") }}</p>
 {% endif %}
 <form method="post" action="{{ url_for('set_key') }}" class="form">
   {% if existing %}{% set code_name %}<code>{{ existing.name }}</code>{% endset %}<p class="notice notice-ok">{{ _("%(name)s is set already (%(tail)s). Saving here replaces it.", name=code_name, tail=existing.tail or _("a short key")) }}</p>{% endif %}

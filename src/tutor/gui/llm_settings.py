@@ -192,6 +192,20 @@ def check_profile(course: Course, name: str, form: dict[str, str]
                               "how to turn its thinking off), or after changing the "
                               "provider click Apply, which puts that provider's own address "
                               "here.") % {"other": other, "provider": provider})
+    check_tuning(data, problems)
+    if not problems:
+        try:  # llm.py's own rules; a stand-in value for the key, which stays in .env
+            llm._from_profile(name, data, {data.get("api_key_env", ""): "x"},
+                              course.workspace.root)
+        except llm.LLMError as e:
+            problems.append(str(e))
+    return (None if problems else data), problems
+
+
+def check_tuning(data: dict, problems: list[str]) -> None:
+    """The fields a model has whatever file it is in (the course's or the shared one):
+    the two reasoning efforts one word each, the time limit a number of seconds, which is
+    then written as a number."""
     for effort in ("reasoning_effort", "reasoning_effort_on"):
         if effort in data and not _WORD.match(data[effort]):
             problems.append(_("%(field)s: one word such as low or high.") % {"field": effort})
@@ -204,13 +218,6 @@ def check_profile(course: Course, name: str, form: dict[str, str]
             problems.append(_("The time limit is a number of seconds, 1 to 3600."))
         else:
             data["timeout_s"] = int(seconds) if seconds.is_integer() else seconds
-    if not problems:
-        try:  # llm.py's own rules; a stand-in value for the key, which stays in .env
-            llm._from_profile(name, data, {data.get("api_key_env", ""): "x"},
-                              course.workspace.root)
-        except llm.LLMError as e:
-            problems.append(str(e))
-    return (None if problems else data), problems
 
 
 def save_profile(course: Course, original: str | None, name: str, data: dict) -> list[str]:
