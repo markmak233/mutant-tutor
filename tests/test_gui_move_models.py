@@ -170,3 +170,20 @@ def test_the_page_offers_the_move_on_a_ticked_box_and_lists_shared_models_for_th
     assert 'id="move-to-shared"' not in page and "This course&#39;s own models" not in page
     assert '<option value="deepseek" selected>deepseek (deepseek)</option>' in page
     assert "Add a model (on the Providers page)" in page
+
+
+def test_profiles_split_around_the_roles_table_are_all_removed(root):
+    """A real course's file had [llm.roles] between two runs of [llm.profiles.X] tables
+    (2026-11-12); tomlkit then proxies the split table and a second `del` on the same proxy
+    raised IndexError, so the move failed after the shared file was written."""
+    (root / "demo-course" / "workspace.toml").write_text(
+        'course = "demo"\n\n[llm.profiles.a]\nprovider = "lmstudio"\nmodel = "a"\n\n'
+        '[llm.profiles.b]\nprovider = "lmstudio"\nmodel = "b"\n\n'
+        '[llm.roles]\nvision = "a"\n\n'
+        '[llm.profiles.c]\nprovider = "lmstudio"\nmodel = "c"\n\n'
+        '[llm.profiles.d]\nprovider = "lmstudio"\nmodel = "d"\n\n[generation]\nparallel = 2\n',
+        encoding="utf-8")
+    assert move_models.apply(root, _course(root)) == []
+    own = tomllib.loads(_own(root))
+    assert own["llm"] == {"roles": {"vision": "a"}} and own["generation"] == {"parallel": 2}
+    assert set(_shared(root)["profiles"]) == {"a", "b", "c", "d"}

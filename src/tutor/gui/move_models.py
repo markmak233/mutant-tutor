@@ -167,8 +167,12 @@ def apply(root, course: Course) -> list[str]:
         expected_own.get("profiles", {}).pop(name, None)
 
     def change_own(doc) -> None:
-        table = llm_settings._tables(doc)[0]
+        # [llm.profiles] looked up again before each deletion: when [llm.roles] sits between
+        # two runs of [llm.profiles.X] tables (a real course's file, 2026-11-12), tomlkit
+        # gives a proxy over the runs whose indices go stale after a deletion, and the
+        # next `del` on the same proxy raised IndexError; a fresh lookup rebuilds them.
         for name in moving.moved:
+            table = llm_settings._tables(doc)[0]
             if name in table:
                 del table[name]
 
