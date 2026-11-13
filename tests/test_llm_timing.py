@@ -11,19 +11,22 @@ from tutor import llm, llm_timing
 from tutor.llm import LLMConfig, Reply
 
 CONFIG = LLMConfig("p", "custom", "http://x/v1", "m")
-LONG_S = 0.25  # the stand-in's long call
-# Small rounds for the tests: the same names, waits scaled down from 0 / 3 / 10 s.
-ROUNDS = (("first-event", 0.0), ("first-event+3", 0.03), ("first-event+10", 0.1),
+LONG_S = 0.4  # the stand-in's long call: well past the last release (0.2 s)
+# Small rounds for the tests: the same names, waits scaled down from 0 / 3 / 10 s. Each
+# moment a test tells apart is 50 ms or more from the next (a CI machine runs slow; a slow
+# machine only makes the long call longer, which no test's answer depends on).
+ROUNDS = (("first-event", 0.0), ("first-event+3", 0.1), ("first-event+10", 0.2),
           ("first-done", None))
 
 
 class Server:
     """A stand-in provider. `ready` says when a prefix may be read once its first call's
     stream has begun: a number of seconds after that, or "end" (only once that call has
-    ended); `counts`: whether replies carry cached-token counts (a local server's do not)."""
+    ended); `counts`: whether replies carry cached-token counts (a local server's do not);
+    `long_s`: how long the long call decodes."""
 
-    def __init__(self, ready, counts=True, decode_together_s=0.0):
-        self.ready, self.counts = ready, counts
+    def __init__(self, ready, counts=True, decode_together_s=0.0, long_s=LONG_S):
+        self.ready, self.counts, self.long_s = ready, counts, long_s
         self.decode_together_s = decode_together_s  # a busy local server: slower when shared
         self.lock = threading.Lock()
         self.begun: dict[str, float] = {}  # prefix -> its first call's first event
@@ -50,7 +53,7 @@ class Server:
         on_progress(0)  # the stream has begun
         time.sleep(0.005 if hit else 0.06)  # a cached prefix is not computed again
         on_progress(5)  # the first text
-        time.sleep(LONG_S if long else 0.01)
+        time.sleep(self.long_s if long else 0.01)
         with self.lock:
             # The long reply slows when others start beside it, and they beside it.
             company = company or (long and self.started > started_before)
@@ -73,8 +76,8 @@ def measure(server):
 @pytest.mark.parametrize(("server", "expected"), [
     # Anthropic: readable at the first streamed event (99.9% at +1 s).
     (Server(ready=0.0), "first-event"),
-    # DeepSeek: 0% at the first event, 99% from 3 s (here: from 0.02 s, between rounds).
-    (Server(ready=0.02), "first-event+3"),
+    # DeepSeek: 0% at the first event, 99% from 3 s (here: from 0.05 s, between rounds).
+    (Server(ready=0.05), "first-event+3"),
     # GLM: only once the first call had ended.
     (Server(ready="end"), "first-done"),
 ])
@@ -101,8 +104,11 @@ def test_no_cache_at_all_suggests_starting_together():
 
 
 def test_a_round_whose_first_call_ended_before_the_release_is_not_taken_for_its_name():
-    server = Server(ready="end")
-    late = llm_timing.run_round(CONFIG, "first-event+10", LONG_S + 0.2, chat=server, text="y")
+    # A long call that ends at once and a release a second later: a slow CI machine
+    # (macOS, 2026-11-13) once took 0.62 s for the 0.31 s call when the release came at
+    # 0.45 s, so the call was still running and the round had no note.
+    server = Server(ready="end", long_s=0.0)
+    late = llm_timing.run_round(CONFIG, "first-event+10", 1.0, chat=server, text="y")
     assert "had ended before the release" in late.note
     # It read the cache, but only as a first-done round would: not a reason for +10.
     assert llm_timing.suggest([late])[0] == "together"
