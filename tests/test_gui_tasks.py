@@ -212,9 +212,14 @@ def test_stop_ends_a_running_task_on_every_platform(tmp_path):
     """The one stop test that runs on Windows too: Stop had never worked there (a venv's
     python.exe is a launcher, a signal to its pid went to the whole console; 2026-11-11).
     There tasks.stop writes the stop file and the runner polls for it; here Ctrl+C."""
-    task = tasks.start(tmp_path, "stop me", [py("import time; time.sleep(60)"),
-                                             py("print('never')")], {})
-    wait_for(lambda: tasks.get(tmp_path, task.id).pid)
+    task = tasks.start(tmp_path, "stop me",
+                       [py("print('started', flush=True); import time; time.sleep(60)"),
+                        py("print('never')")], {})
+    # Until the command itself has printed: the runner writes its pid before it starts the
+    # first command, so a Stop sent on the pid alone sometimes came before any command ran
+    # and the task ended, rightly, with no exit code (seen 2026-11-12 and -13).
+    # (a line of its own: Windows ends it with \r\n; the command line shown has "started'")
+    wait_for(lambda: "started" in tasks.tail(tasks.get(tmp_path, task.id))[0].splitlines())
 
     assert tasks.stop(tasks.get(tmp_path, task.id))
     done = wait_end(tmp_path, task)
@@ -415,3 +420,56 @@ def test_a_stored_time_is_shown_local_to_the_second_like_a_task_time():
     assert tasks.local_time("2026-01-02T03:04:05") == "2026-01-02 03:04:05"  # no zone: local
     # Not a time: shown as it is, never an error on the page.
     assert tasks.local_time("unknown") == "unknown" and tasks.local_time(None) == "None"
+
+
+def _busy_for(times: int, real):
+    """A stand-in for a file call that Windows reports busy `times` times, then works."""
+    left = [times]
+
+    def call(*args, **kwargs):
+        if left[0] > 0:
+            left[0] -= 1
+            raise PermissionError(13, "The process cannot access the file")
+        return real(*args, **kwargs)
+
+    return call
+
+
+def test_a_task_being_replaced_on_windows_is_read_again_not_taken_as_missing(tmp_path,
+                                                                             monkeypatch):
+    """CI, 2026-11-13: on Windows a page's poll met task.json while the runner replaced it,
+    and get() said the task did not exist. A busy file is now read again."""
+    task = tasks.start(tmp_path, "queued", [py("pass")], {})
+    wait_end(tmp_path, task)
+    monkeypatch.setattr(tasks, "RETRY_BUSY", True)
+    monkeypatch.setattr(Path, "read_text", _busy_for(3, Path.read_text))
+    assert tasks.get(tmp_path, task.id).status == tasks.DONE
+
+
+def test_a_replace_waits_for_a_reader_on_windows_and_elsewhere_fails_at_once(tmp_path,
+                                                                             monkeypatch):
+    folder = tmp_path / "t"
+    folder.mkdir()
+    monkeypatch.setattr(tasks, "RETRY_BUSY", True)
+    monkeypatch.setattr(tasks.os, "replace", _busy_for(2, os.replace))
+    tasks._write(folder, {"status": "done"})
+    assert tasks.read_task(folder) == {"status": "done"}
+
+    # Not Windows: a PermissionError is a real one (a folder not ours), never waited on.
+    monkeypatch.setattr(tasks, "RETRY_BUSY", False)
+    monkeypatch.setattr(tasks.os, "replace", _busy_for(1, os.replace))
+    with pytest.raises(PermissionError):
+        tasks._write(folder, {"status": "failed"})
+
+
+def test_a_file_that_stays_busy_is_given_up_after_the_retry_time(tmp_path, monkeypatch):
+    folder = tmp_path / "t"
+    folder.mkdir()
+    tasks._write(folder, {"status": "done"})
+    monkeypatch.setattr(tasks, "RETRY_BUSY", True)
+    monkeypatch.setattr(tasks, "BUSY_RETRY_S", 0.1)
+    monkeypatch.setattr(Path, "read_text", _busy_for(10_000, Path.read_text))
+    started = time.monotonic()
+    with pytest.raises(PermissionError):
+        tasks.read_task(folder)
+    assert time.monotonic() - started < 2
