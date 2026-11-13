@@ -2,7 +2,7 @@
 {# A course's models: [llm.profiles] and [llm.roles] in its workspace.toml (llm_settings.py).
    Text through _() (gui/i18n.py); the role names, provider ids, model names and file names
    stay as they are; the role groups' titles and descriptions are N_() strings in
-   llm_settings.ROLE_GROUPS, translated here with _(). #}
+   llm_roles.ROLE_GROUPS, translated here with _(). #}
 {% from "_macros.html" import action, chip %}
 {% block title %}{{ _("Models") }} · {{ course.workspace.course }}{% endblock %}
 {% block crumbs %}
@@ -13,18 +13,20 @@
 <div class="title-line">
   <h1>{{ _("Models") }}</h1>
   <div class="actions">
-    <a class="button" href="{{ url_for('new_model', name=course.folder) }}">{{ _("Add a model") }}</a>
+    {# Models are shared since 2026-11-12 (owner): new ones go on the Providers page; a
+       model still in this course's own file (not moved yet) can be edited here. #}
+    <a class="button" href="{{ url_for('provider_list') }}">{{ _("Add a model (on the Providers page)") }}</a>
     {% if profiles %}{{ action(url_for('check_models', name=course.folder), _("Check all")) }}{% endif %}
   </div>
 </div>
 {% set code_toml %}<code>workspace.toml</code>{% endset %}
-{% set keys_link %}<a href="{{ url_for('key_list') }}">{{ _("Keys") }}</a>{% endset %}
-<p class="muted">{{ _("Saved in this course's %(file)s; keys are on the %(keys)s page. \"Check\" sends each model one tiny request, to find a wrong key or model name before a run that spends more.", file=code_toml, keys=keys_link) }}</p>
+{% set providers_link %}<a href="{{ url_for('provider_list') }}">{{ _("Providers") }}</a>{% endset %}
+<p class="muted">{{ _("The models are shared by every course and kept on the %(providers)s page, with their keys; this page chooses which model does each job in this course, saved in its %(file)s.", providers=providers_link, file=code_toml) }}</p>
 {% if problems %}
 <ul class="notice notice-bad form-problems">{% for line in problems %}<li>{{ line }}</li>{% endfor %}</ul>
 {% endif %}
 {% if warnings %}
-{# The saved roles' oracle is a less independent reading (llm_settings.role_warnings): a
+{# The saved roles' oracle is a less independent reading (llm_roles.role_warnings): a
    reminder. Roles being chosen get theirs above Save (_role_check.html). #}
 <div class="notice notice-bad">
   <p>{{ _("The roles are saved, but:") }}</p>
@@ -35,15 +37,19 @@
 {% if unsaved and check_warnings and not problems %}
 <p class="notice notice-bad">{{ _("Not saved yet: read the warning above \"Save the roles\", and tick \"Save even so\" to save them as they are.") }}</p>
 {% endif %}
-{% if not profiles %}
-<p>{{ _("No models yet.") }}</p>
-{% if others %}
-<form method="post" action="{{ url_for('copy_models', name=course.folder) }}" class="inline-form">
-  {{ _("Copy them from") }} <select name="source">{% for other in others %}<option value="{{ other.folder }}">{{ other.workspace.course }}</option>{% endfor %}</select>
-  <button type="submit" class="primary">{{ _("Copy") }}</button>
-</form>
-{% endif %}
-{% else %}
+{% if profiles %}
+{# Models still in this course's own file, from before the shared one (owner, 2026-11-12):
+   the move puts them in llm.toml and takes them out of here; the roles stay. A model the
+   plan says must stay is marked with why (move_models.STAYS). Two clicks: tick, then move. #}
+<section class="notice notice-bad" id="move-to-shared">
+  <p>{{ ngettext("%(n)s model is still in this course's own file. Move it to the shared file, where every course's models are; the roles below stay as they are.", "%(n)s models are still in this course's own file. Move them to the shared file, where every course's models are; the roles below stay as they are.", profiles | length, n=profiles | length) }}</p>
+  {% if move.stays %}<p>{{ _("Staying for now:") }} {% for name, why in move.stays.items() %}<code>{{ name }}</code> ({{ _(stays[why]) }}){% if not loop.last %}, {% endif %}{% endfor %}</p>{% endif %}
+  <form method="post" action="{{ url_for('move_models_to_shared', name=course.folder) }}" class="inline-form">
+    <label><input type="checkbox" name="confirm" value="1" required> {{ _("Move %(what)s to the shared file", what=move.moved | join(", ") or "—") }}</label>
+    <button type="submit" class="primary"{% if not move.moved and not move.cards %} disabled{% endif %}>{{ _("Move to shared") }}</button>
+  </form>
+</section>
+<h2>{{ _("This course's own models") }}</h2>
 <table>
   <thead><tr><th>{{ _("Model") }}</th><th>{{ _("Provider and model") }}</th><th>{{ _("Key") }}</th><th>{{ _("Roles") }}</th><th></th></tr></thead>
   <tbody>
@@ -56,14 +62,22 @@
       <td class="muted">{{ p.roles | join(", ") }}</td>
       <td class="row-actions">
         <form method="post" action="{{ url_for('check_models', name=course.folder) }}" class="action"><input type="hidden" name="profile" value="{{ p.name }}"><button type="submit">{{ _("Check") }}</button></form>
+        {# When its provider's cache can be read by the next call (llm_timing): paid, so
+           the button says so; the task's log suggests a parallel_start, written by no one. #}
+        {% if measurable(p) %}<form method="post" action="{{ url_for('time_model', name=course.folder) }}" class="action"><input type="hidden" name="profile" value="{{ p.name }}"><button type="submit" title="{{ _('About sixteen calls on a 10,000-token prefix (on Sonnet about $0.2, DeepSeek a cent or two; free on this machine): when the next calls can read its cache. The result is a suggestion for How a lecture&#39;s other calls start.') }}">{{ _("Measure start") }}</button></form>{% endif %}
         {% if not p.roles %}{{ action(url_for('delete_model', name=course.folder, profile=p.name), _("Remove")) }}{% endif %}
       </td>
     </tr>
   {% endfor %}
   </tbody>
 </table>
+{% endif %}
+{% if not available %}
+<p>{{ _("No models yet: add a provider and its models on the %(providers)s page, then choose them here.", providers=providers_link) }}</p>
+{% else %}
 {# htmx: a role changed asks role_check for the part above Save (hx-get on each select;
-   where it goes, and the whole form's choices, from here). #}
+   where it goes, and the whole form's choices, from here). The choices are every model
+   this course can use: the shared ones, and its own not moved yet (marked). #}
 <form method="post" action="{{ url_for('save_roles', name=course.folder) }}" class="form" hx-target="#role-check" hx-swap="outerHTML" hx-include="closest form">
   <h2>{{ _("Roles") }}</h2>
   <p class="muted">{{ _("Which model does each job.") }}</p>
@@ -75,7 +89,7 @@
       <span><strong>{{ role }}</strong> <span class="muted">{{ _(what) }}</span></span>
       <select name="{{ role }}" hx-get="{{ url_for('role_check', name=course.folder) }}" hx-trigger="change">
         <option value="">{{ _("none") }}</option>
-        {% for p in profiles %}<option value="{{ p.name }}"{% if roles.get(role) == p.name %} selected{% endif %}>{{ p.name }} ({{ p.data.provider }}{% if makers.get(p.name) %}, {{ _("by %(maker)s", maker=makers[p.name]) }}{% endif %})</option>{% endfor %}
+        {% for name, provider, origin in available %}<option value="{{ name }}"{% if roles.get(role) == name %} selected{% endif %}>{{ name }} ({{ provider }}{% if makers.get(name) %}, {{ _("by %(maker)s", maker=makers[name]) }}{% endif %}{% if origin == "course" %}; {{ _("this course's own") }}{% endif %})</option>{% endfor %}
       </select>
     </label>
     {% endfor %}

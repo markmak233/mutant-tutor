@@ -12,7 +12,7 @@ pytest.importorskip("flask")  # the `gui` extra
 
 import tomlkit  # noqa: E402
 
-from tutor.gui import courses, keys, llm_settings, tasks, toml_edit  # noqa: E402
+from tutor.gui import courses, keys, llm_roles, llm_settings, tasks, toml_edit  # noqa: E402
 from tutor.gui.app import create_app  # noqa: E402
 
 TOKEN = "test-token"
@@ -149,9 +149,12 @@ def test_a_key_set_from_the_page_is_never_sent_back(root, env_file, monkeypatch)
     client = _browser(root, env_file)
 
     response = post(client, "/keys/set", {"name": "DEEPSEEK_API_KEY", "value": SECRET})
-    page = client.get("/keys/", base_url=BASE).get_data(as_text=True)
+    page = client.get("/providers/", base_url=BASE).get_data(as_text=True)
 
-    assert response.headers["Location"] == "/keys/?notice=key-saved"
+    assert response.headers["Location"] == "/providers/?notice=key-saved#keys"
+    # The Keys page's address still works: it is the Providers page's keys now.
+    moved = client.get("/keys/?name=X_KEY", base_url=BASE)
+    assert (moved.status_code, moved.headers["Location"]) == (302, "/providers/?name=X_KEY#keys")
     assert SECRET not in page and "…WXYZ" in page and "sk-old" not in page
     assert f"DEEPSEEK_API_KEY={SECRET}" in env_file.read_text(encoding="utf-8")
 
@@ -166,11 +169,11 @@ def test_a_refused_key_is_not_put_back_in_the_form(root, env_file):
 def test_the_page_removes_a_key_and_lists_who_uses_one(root, env_file):
     client = _browser(root, env_file)
 
-    page = client.get("/keys/", base_url=BASE).get_data(as_text=True)
+    page = client.get("/providers/", base_url=BASE).get_data(as_text=True)
     assert "demo-course: other" in page and "WORKSPACE_DIR" not in page
 
     response = post(client, "/keys/delete", {"name": "OPENAI_API_KEY"})
-    assert response.headers["Location"] == "/keys/?notice=key-deleted"
+    assert response.headers["Location"] == "/providers/?notice=key-deleted#keys"
     assert post(client, "/keys/delete", {"name": "WORKSPACE_DIR"}).status_code == 400
 
 
@@ -200,6 +203,11 @@ def _form(**changes):
     ("ds", {"timeout_s": "0"}, "1 to 3600"),
     ("ds", {"reasoning_effort": "very low"}, "one word"),
     ("ds", {"temperature": "0.2"}, 'temperature can only be "default"'),
+    ("ds", {"parallel_start": "first-event+"}, "Seconds after the first reply begins"),
+    ("ds", {"parallel_start": "first-event+", "parallel_start_s": "900"}, "0.5 to 600"),
+    ("ds", {"parallel_start": "later"}, "from the list"),
+    ("ds", {"max_parallel": "0"}, "1 to 32"),
+    ("ds", {"max_parallel": "two"}, "whole number"),
 ])
 def test_a_model_is_checked_by_llm_pys_rules(course, name, changes, problem):
     data, problems = llm_settings.check_profile(course, name, _form(**changes))
@@ -255,6 +263,93 @@ def test_a_models_own_temperature_is_saved_and_kept_or_dropped_by_the_form(root,
     assert "temperature" not in tomllib.loads(_toml(course))["llm"]["profiles"]["claude"]
 
 
+def test_how_parallel_calls_start_is_saved_shown_and_left_to_the_provider(
+        root, env_file, course):
+    """Owner, 2026-11-12: each provider its own way to start a lecture's other calls, the
+    seconds adjustable, and a cap. The choice and its seconds are one value in the file
+    and split again on the page; the provider's own (empty) writes nothing, so it follows
+    the tool; saving without the fields takes them out."""
+    client = _browser(root, env_file)
+    ds = {"name": "ds", **_form()}
+
+    new = _form_page(client, "/c/demo-course/models/new?provider=deepseek&apply=1")
+    assert "own: first-event+10</option>" in new  # deepseek's measured default, shown
+
+    post(client, "/c/demo-course/models/save", {**ds, "parallel_start": "first-event+",
+                                               "parallel_start_s": "2.5", "max_parallel": "3"})
+    saved = tomllib.loads(_toml(course))["llm"]["profiles"]["ds"]
+    assert (saved["parallel_start"], saved["max_parallel"]) == ("first-event+2.5", 3)
+    page = _form_page(client, "/c/demo-course/models/m/ds/")
+    assert '<option value="first-event+" selected>' in page
+    assert 'name="parallel_start_s" value="2.5"' in page and 'name="max_parallel" value="3"' in page
+
+    post(client, "/c/demo-course/models/save", {**ds, "original": "ds",
+                                               "parallel_start": "first-event+",
+                                               "parallel_start_s": "30"})
+    saved = tomllib.loads(_toml(course))["llm"]["profiles"]["ds"]
+    assert saved["parallel_start"] == "first-event+30" and "max_parallel" not in saved
+
+    post(client, "/c/demo-course/models/save", {**ds, "original": "ds", "parallel_start": "",
+                                               "parallel_start_s": "30"})
+    assert "parallel_start" not in tomllib.loads(_toml(course))["llm"]["profiles"]["ds"]
+
+
+def test_measure_start_runs_the_timing_command_on_one_chat_model(root, env_file, course,
+                                                                 monkeypatch):
+    """The Models page's "Measure start" (owner, 2026-11-12): a task running
+    `python -m tutor.llm_timing NAME` on that model only; offered for chat models, not for
+    an embedding-only one or an assistant, and refused for a name not in the file."""
+    started = []
+
+    def fake_start(course_root, title, commands, env, meta=None):
+        started.append((title, commands, meta))
+        return tasks.Task("20260102-100000-0abcde", course_root, title, tasks.RUNNING, "",
+                          None, commands, [], 1, meta or {})
+
+    monkeypatch.setattr(tasks, "start", fake_start)
+    client = _browser(root, env_file)
+    post(client, "/c/demo-course/models/save", {"name": "ds", **_form()})
+    page = _form_page(client, "/c/demo-course/models/")
+    assert page.count('action="/c/demo-course/models/timing"') == sum(
+        llm_settings.measurable(p) for p in llm_settings.profiles(course))
+    assert "Measure start" in page
+
+    response = post(client, "/c/demo-course/models/timing", {"profile": "ds"})
+    assert response.status_code == 303
+    title, commands, meta = started[0]
+    assert commands[0][-3:] == ["-m", "tutor.llm_timing", "ds"] and meta == {"kind": "timing"}
+    assert post(client, "/c/demo-course/models/timing", {"profile": "nope"}).status_code == 404
+
+    assert not llm_settings.measurable(llm_settings.ProfileView(
+        "vec", {"provider": "lmstudio", "model": "nomic"}, ["embedding"]))
+    assert not llm_settings.measurable(llm_settings.ProfileView(
+        "cc", {"provider": "assistant"}, []))
+
+
+def test_a_course_with_only_roles_reads_the_shared_models_everywhere(root):
+    """Owner, 2026-11-12: models are shared, roles are not. A course whose workspace.toml
+    has only [llm.roles] sees the shared llm.toml's models, with their cards, on every page
+    that reads which model does what, and its roles may name them."""
+    from tutor.gui import environment, generation, lectures
+
+    _write(root / "llm.toml", '[providers.deepseek]\napi_key_env = "DEEPSEEK_API_KEY"\n\n'
+           '[profiles.ds]\nprovider = "deepseek"\nmodel = "deepseek-v4-flash"\n\n'
+           '[profiles.local]\nprovider = "lmstudio"\nmodel = "gemma"\n')
+    shared = courses.get_course(root, "bare")
+    _write(shared.workspace.root / "workspace.toml",
+           'course = "bare"\n\n[llm.roles]\ngenerate = "ds"\nvision = "local"\n')
+
+    assert llm_settings.section(shared)["profiles"]["ds"]["api_key_env"] == "DEEPSEEK_API_KEY"
+    assert llm_settings.file_section(shared) == {"roles": {"generate": "ds", "vision": "local"}}
+    assert ("generate", "ds (deepseek: deepseek-v4-flash)") in [
+        (role, text) for role, text in generation.models(shared)]
+    assert lectures.vision_model(shared) == "local (lmstudio: gemma)"
+    assert ("ds", "deepseek", "deepseek-v4-flash") in environment.chat_profiles(shared)
+    assert llm_roles.save_roles(shared, {"oracle": "local"}) == []
+    assert tomllib.loads(_toml(shared))["llm"] == {
+        "roles": {"generate": "ds", "vision": "local", "oracle": "local"}}  # no profile written
+
+
 def test_renaming_a_model_moves_its_roles_and_keeps_other_comments(course):
     data = {"provider": "glm", "model": "glm-5.3-flash", "api_key_env": "ZHIPU_API_KEY",
             "reasoning_effort": "low"}
@@ -274,7 +369,7 @@ def test_a_model_in_use_cannot_be_removed(course):
 
 
 def test_roles_are_saved_and_one_set_to_none_is_removed(course):
-    assert llm_settings.save_roles(course, {"oracle": "other", "vision": ""}) == []
+    assert llm_roles.save_roles(course, {"oracle": "other", "vision": ""}) == []
 
     roles = tomllib.loads(_toml(course))["llm"]["roles"]
     assert roles == {"generate": "cheap", "oracle": "other"}  # generate was not offered
@@ -283,23 +378,15 @@ def test_roles_are_saved_and_one_set_to_none_is_removed(course):
 
 def test_an_oracle_as_close_as_one_model_is_warned_about_not_refused(course):
     """Owner, 2026-11-07: not everyone pays for two providers; the page warns instead."""
-    assert llm_settings.save_roles(course, {"oracle": "cheap"}, dry_run=True) == []
-    roles = llm_settings.merged_roles(course, {"oracle": "cheap"})
-    warnings = llm_settings.role_warnings(course, roles, None)
+    assert llm_roles.save_roles(course, {"oracle": "cheap"}, dry_run=True) == []
+    roles = llm_roles.merged_roles(course, {"oracle": "cheap"})
+    warnings = llm_roles.role_warnings(course, roles, None)
     assert len(warnings) == 1 and "one model (cheap)" in warnings[0]
 
 
 def test_a_role_cannot_name_a_missing_model(course):
-    assert llm_settings.save_roles(course, {"oracle": "nowhere"}) == [
+    assert llm_roles.save_roles(course, {"oracle": "nowhere"}) == [
         "oracle: no model named nowhere."]
-
-
-def test_models_are_copied_into_a_course_that_has_none(root, course):
-    bare = courses.get_course(root, "bare")
-
-    assert llm_settings.copy_models(bare, course) == []
-    assert tomllib.loads(_toml(bare))["llm"] == tomllib.loads(_toml(course))["llm"]
-    assert "has models already" in llm_settings.copy_models(course, bare)[0]
 
 
 def test_a_change_that_would_touch_another_table_is_not_written(course, monkeypatch):
@@ -311,7 +398,7 @@ def test_a_change_that_would_touch_another_table_is_not_written(course, monkeypa
         return real(doc)
 
     monkeypatch.setattr(llm_settings, "_tables", wrong)
-    problems = llm_settings.save_roles(course, {"oracle": "other"})
+    problems = llm_roles.save_roles(course, {"oracle": "other"})
 
     assert "left as it was" in problems[0] and _toml(course) == before
 
@@ -488,26 +575,26 @@ def test_choosing_a_provider_fills_the_name_and_says_when_its_key_is_set(root, e
     catalog_support._catalog(root)  # the kept models.dev list, as the Models page leaves it
     client = _browser(root, env_file)
 
-    page = client.get("/keys/?provider=deepseek", base_url=BASE).get_data(as_text=True)
+    page = client.get("/providers/?provider=deepseek", base_url=BASE).get_data(as_text=True)
     assert 'name="name" value="DEEPSEEK_API_KEY"' in page and "for DeepSeek" in page
     assert '<option value="deepseek" selected>' in page and "is set already" not in page
 
     # Its key is in .env already: the form replaces it, and still shows no key.
-    page = client.get("/keys/?provider=zhipuai", base_url=BASE).get_data(as_text=True)
+    page = client.get("/providers/?provider=zhipuai", base_url=BASE).get_data(as_text=True)
     assert 'name="name" value="ZHIPU_API_KEY"' in page and "is set already" in page
     form = page.split('id="add-key"')[1]
     assert 'class="primary">Replace</button>' in form and 'value="short"' not in page
 
     # An id that is not in the list, and a name the form would refuse, fill nothing.
     for query in ("?provider=nobody", "?name=lower%22%3E", "?provider=lmstudio"):
-        page = client.get("/keys/" + query, base_url=BASE).get_data(as_text=True)
+        page = client.get("/providers/" + query, base_url=BASE).get_data(as_text=True)
         assert 'name="name" value=""' in page
-    page = client.get("/keys/?name=ACME_API_KEY", base_url=BASE).get_data(as_text=True)
+    page = client.get("/providers/?name=ACME_API_KEY", base_url=BASE).get_data(as_text=True)
     assert 'name="name" value="ACME_API_KEY"' in page
     assert env_file.read_text(encoding="utf-8") == ENV  # looking changes nothing
 
 
 def test_without_the_provider_list_the_form_takes_a_typed_name(root, env_file):
-    page = _browser(root, env_file).get("/keys/", base_url=BASE).get_data(as_text=True)
+    page = _browser(root, env_file).get("/providers/", base_url=BASE).get_data(as_text=True)
     assert 'name="provider"' not in page and "No provider list yet" in page
-    assert "/c/bare/models/new" in page or "/c/demo-course/models/new" in page
+    assert "added to a card above" in page  # the list is fetched there now, not in a course

@@ -29,6 +29,18 @@ those served from the provider's prompt cache, seconds, outcome); the key is nev
 
 `python -m tutor.llm check [PROFILE ...]` sends each profile one tiny request, so a wrong key
 or model name shows before a run that spends more.
+
+How parallel calls start (owner, 2026-11-12: "each family its own way"): a lecture's first
+generate call goes alone so its shared pages enter the provider's prompt cache, and the
+lecture's other calls start when that cache can be read, which differs by provider
+(`parallel_start`, defaults in PARALLEL_START). `max_parallel` caps the calls one endpoint
+gets at once. Both can be set per profile:
+
+    [llm.profiles.deepseek]
+    provider = "deepseek"
+    model = "deepseek-v4-flash"
+    parallel_start = "first-event+5"       # together | first-event | first-event+N | first-done
+    max_parallel = 4
 """
 
 from __future__ import annotations
@@ -91,7 +103,28 @@ _ACCEPTED: dict[tuple[str, str, str], int] = {}
 # stream_options (documented); others stream without the option, which may be refused.
 STREAM_USAGE = {"openai", "deepseek"}
 PROFILE_FIELDS = {"provider", "model", "base_url", "api_key_env", "reasoning_effort",
-                  "reasoning_effort_on", "timeout_s", "temperature"}
+                  "reasoning_effort_on", "timeout_s", "temperature", "parallel_start",
+                  "max_parallel"}
+# When a lecture's other generate calls start, after its first call (graph/nodes.py,
+# CacheGate): "together" (no wait: for a server with no prompt cache), "first-event" (as
+# soon as the first reply begins to stream), "first-event+N" (N seconds after that), or
+# "first-done" (when the first call has returned). Per provider, from measurements
+# (2026-11-11/12: a 23k-33k-token shared prefix, one call started, three released, their
+# cached share or, on a server that reports none, their time to the first text):
+#   anthropic: 99.9% at the first event (the docs: readable once the response streams);
+#   deepseek: 0% at the first event (0.6 s in), 99% at 3, 8, 15 and 30 s; 3 s was the
+#     edge seen once, so 10 s for now (owner, 2026-11-12), 7 s more for each first call;
+#   glm: 0% at 3 and 30 s, 99.9% after the first call ended;
+#   lmstudio (gemma 26B, 4 slots): released at the first event the others reused the
+#     prefix (first text 4 s against 78-103 s cold), but the four replies decoding together
+#     slowed the first: the whole set took 84 s against 68 s after the first ended, and 183 s
+#     all together; ollama (one request at a time by default) queues them, any choice ~16 s.
+# Every other provider (openai, custom, the other local servers) is not measured, so
+# "first-done": never slower to the cache than waiting, at worst slower to start.
+PARALLEL_START = {"anthropic": "first-event", "deepseek": "first-event+10"}
+DEFAULT_PARALLEL_START = "first-done"
+_START = re.compile(r"^(together|first-event|first-done|first-event\+(\d{1,3}(\.\d+)?))$")
+MAX_PARALLEL_LIMIT = 32  # the most a profile's max_parallel may say (a typo's guard)
 # A profile's `temperature = "default"`: the one value it takes. Requests then carry no
 # temperature, for a model that refuses one (Claude Opus 5.5 answered HTTP 400,
 # "`temperature` is deprecated for this model", 2026-11-09). Without the field every
@@ -124,6 +157,10 @@ class LLMConfig:
     queue: Path | None = None  # an assistant profile's request folder (provider "assistant")
     # False (a profile's `temperature = "default"`): no temperature in the request.
     send_temperature: bool = True
+    # How a lecture's other calls start after its first (PARALLEL_START), checked form.
+    parallel_start: str = DEFAULT_PARALLEL_START
+    # At most this many calls to this endpoint at once (None: the course's parallel only).
+    max_parallel: int | None = None
 
 
 class Prompt(str):
@@ -190,34 +227,139 @@ def json_body(text: str) -> str:
 def config_for(role: str, profile: str | None = None, workspace: Path | None = None,
                environ: Mapping[str, str] | None = None) -> LLMConfig:
     """The model for `role`: the named `profile` if given, else the workspace's
-    [llm.roles] entry, else the LLM_* environment variables."""
+    [llm.roles] entry, else the LLM_* environment variables. A profile is looked up in the
+    course's own workspace.toml first (the old way, until the course's models are moved to
+    the shared file), then in the shared llm.toml beside the courses (section())."""
     env = os.environ if environ is None else environ
-    section = _llm_section(workspace)
-    if not section:
+    found = section(workspace)
+    if not found:
         if profile:
             raise LLMError(f"profile {profile!r} given, but workspace.toml has no [llm] section")
         return _from_env(env)
-    profiles = section.get("profiles", {})
-    name = profile or section.get("roles", {}).get(role)
+    profiles = found.get("profiles", {})
+    name = profile or found.get("roles", {}).get(role)
     if not name:
         raise LLMError(f"no model for {role!r}: add `{role} = \"<profile>\"` to [llm.roles] "
                        f"in workspace.toml, or pass --profile")
     if name not in profiles:
-        raise LLMError(f"workspace.toml has no [llm.profiles.{name}]; "
-                       f"profiles: {', '.join(sorted(profiles)) or 'none'}")
+        raise LLMError(f"no model named {name!r} in {SHARED_FILE} or workspace.toml; "
+                       f"models: {', '.join(sorted(profiles)) or 'none'}")
     return _from_profile(name, profiles[name], env, workspace)
 
 
 def roles(workspace: Path | None = None) -> dict[str, str]:
     """The workspace's [llm.roles]: role -> profile name ({} without an [llm] section)."""
-    return dict(_llm_section(workspace).get("roles", {}))
+    return dict(section(workspace).get("roles", {}))
 
 
-def _llm_section(workspace: Path | None) -> dict:
+# --- the shared models (owner, 2026-11-12) ---------------------------------------------------
+# One llm.toml beside the courses (the folder the GUI lists them in, a course's parent) holds
+# every model, once: [providers.NAME] are the provider cards (an endpoint, its key's name, how
+# a lecture's other calls start, how many calls it takes at once) and [profiles.NAME] the
+# models, each naming its card in `provider`. A course keeps only its [llm.roles]: roles are
+# not shared. A profile still in a course's workspace.toml (before its models were moved) is
+# read first, so a course nobody has moved works as it did; no new one is written there.
+#
+#     [providers.zai]                       # any name; kind: which provider llm.py knows
+#     kind = "glm"                          # (left out: the card's own name, e.g. deepseek)
+#     base_url = "https://api.z.ai/api/paas/v4"
+#     api_key_env = "ZAI_API_KEY"
+#     max_parallel = 2
+#
+#     [profiles.glm-flash]
+#     provider = "zai"
+#     model = "glm-5.3-flash"
+
+SHARED_FILE = "llm.toml"
+PROVIDER_FIELDS = {"kind", "base_url", "api_key_env", "parallel_start", "max_parallel"}
+NAME = re.compile(r"^[a-z0-9][a-z0-9._-]{0,39}$")  # a card's or a profile's name
+
+
+def shared_path(workspace: Path) -> Path:
+    """Where the shared models are for this course: llm.toml in the folder above it."""
+    return workspace.resolve().parent / SHARED_FILE
+
+
+def read_shared(workspace: Path | None) -> dict:
+    """The shared file of this course's folder as written ({} when there is none), for
+    section(); a file that does not parse is an LLMError naming it."""
+    return read_shared_file(shared_path(workspace)) if workspace is not None else {}
+
+
+def read_shared_file(path: Path) -> dict:
+    """A shared llm.toml by its path ({} when there is none; the GUI knows the courses'
+    folder, so it reads the file there); one that does not parse is an LLMError naming it."""
+    if not path.is_file():
+        return {}
+    try:
+        with path.open("rb") as f:
+            data = tomllib.load(f)
+    except tomllib.TOMLDecodeError as e:
+        raise LLMError(f"{path} does not parse: {e}") from e
+    return data if isinstance(data, dict) else {}
+
+
+def card(name: str, data: dict) -> dict:
+    """A provider card as the profile fields it gives each of its models: `provider` (the
+    kind llm.py knows) and whichever of base_url, api_key_env, parallel_start and
+    max_parallel it sets. Refused, saying why: an unknown field, a key in the file, a kind
+    llm.py does not know, or no kind where the name is not one."""
+    where = f"[providers.{name}] in {SHARED_FILE}"
+    if not isinstance(data, dict):
+        raise LLMError(f"{where} is not a table")
+    if "api_key" in data or any(isinstance(v, str) and KEY_LIKE.match(v) for v in data.values()):
+        raise LLMError(f"{where} holds a key: keys belong in .env, named by api_key_env")
+    unknown = set(data) - PROVIDER_FIELDS
+    if unknown:
+        raise LLMError(f"{where} has unknown fields: {', '.join(sorted(unknown))}")
+    kind = data.get("kind", name)
+    if kind not in PROVIDERS:
+        raise LLMError(f"{where} needs a kind, one of {', '.join(PROVIDERS)}"
+                       if "kind" not in data else
+                       f"{where} kind must be one of {', '.join(PROVIDERS)}")
+    return {"provider": kind, **{k: v for k, v in data.items() if k != "kind"}}
+
+
+def _with_cards(profiles: dict, cards: dict) -> dict:
+    """Each profile whose `provider` names a card, with the card's fields under its own:
+    what _from_profile reads. A profile naming a kind (deepseek) and no card is as before."""
+    out = {}
+    for name, data in profiles.items():
+        if isinstance(data, dict) and data.get("provider") in cards:
+            given = card(data["provider"], cards[data["provider"]])
+            data = {**given, **{k: v for k, v in data.items() if k != "provider"}}
+        out[name] = data
+    return out
+
+
+def section(workspace: Path | None) -> dict:
+    """The course's [llm] as a run uses it: its own roles, and the profiles of the shared
+    file with the course's own (not moved yet) over them, each with its card's fields.
+    {} for a course with no [llm] at all (the LLM_* variables then)."""
+    own = _course_llm(workspace)
+    if not own:
+        return {}
+    shared = read_shared(workspace)
+    cards = shared.get("providers", {}) if isinstance(shared.get("providers"), dict) else {}
+    profiles = {**(shared.get("profiles") or {}), **(own.get("profiles") or {})}
+    return {**own, "profiles": _with_cards(profiles, cards)}
+
+
+def origins(workspace: Path | None) -> dict[str, str]:
+    """Where each of the course's profiles comes from: "course" (its own workspace.toml,
+    not moved yet) or "shared" (llm.toml)."""
+    own = (_course_llm(workspace).get("profiles") or {})
+    shared = (read_shared(workspace).get("profiles") or {})
+    return {**{n: "shared" for n in shared}, **{n: "course" for n in own}}
+
+
+def _course_llm(workspace: Path | None) -> dict:
+    """The course's own [llm] in its workspace.toml, as written."""
     if workspace is None or not (workspace / "workspace.toml").is_file():
         return {}
     with (workspace / "workspace.toml").open("rb") as f:
         return tomllib.load(f).get("llm", {})
+
 
 
 def _from_profile(name: str, data: dict, env: Mapping[str, str],
@@ -257,9 +399,30 @@ def _from_profile(name: str, data: dict, env: Mapping[str, str],
     if data.get("temperature", MODEL_TEMPERATURE) != MODEL_TEMPERATURE:
         raise LLMError(f'{where} temperature can only be "{MODEL_TEMPERATURE}" (none is sent, '
                        "for a model that refuses one); leave it out to send 0")
+    start = data.get("parallel_start", PARALLEL_START.get(provider, DEFAULT_PARALLEL_START))
+    if not isinstance(start, str) or not _START.match(start):
+        raise LLMError(f'{where} parallel_start must be "together", "first-event", '
+                       f'"first-event+N" (seconds, e.g. "first-event+3") or "first-done", '
+                       f"not {start!r}")
+    cap = data.get("max_parallel")
+    if cap is not None and (isinstance(cap, bool) or not isinstance(cap, int)
+                            or not 1 <= cap <= MAX_PARALLEL_LIMIT):
+        raise LLMError(f"{where} max_parallel must be a whole number from 1 to "
+                       f"{MAX_PARALLEL_LIMIT}, not {cap!r}")
     return LLMConfig(name, provider, base_url.rstrip("/"), data["model"], api_key,
                      float(data.get("timeout_s", 300)), thinking_off, thinking_on=thinking_on,
-                     send_temperature="temperature" not in data)
+                     send_temperature="temperature" not in data, parallel_start=start,
+                     max_parallel=cap)
+
+
+def start_wait(config: LLMConfig) -> float | None:
+    """The seconds after the first call's first streamed event when a lecture's other calls
+    may start: 0.0 for "first-event", N for "first-event+N"; None for "first-done" (they
+    wait for the first call's end) and for "together" (the caller skips the wait)."""
+    match = _START.match(config.parallel_start)
+    if match is None or match[1] in ("first-done", "together"):
+        return None
+    return float(match[2]) if match[2] else 0.0
 
 
 def _from_env(env: Mapping[str, str]) -> LLMConfig:
@@ -272,9 +435,7 @@ def _from_env(env: Mapping[str, str]) -> LLMConfig:
         raise LLMError("no model configured: add an [llm] section to workspace.toml "
                        "(see docs/setup) or set LLM_MODEL in .env")
     config = _from_profile("env", data, env)
-    return LLMConfig(config.name, config.provider, config.base_url, config.model,
-                     env.get("LLM_API_KEY") or None, config.timeout_s, config.thinking_off,
-                     thinking_on=config.thinking_on, send_temperature=config.send_temperature)
+    return replace(config, api_key=env.get("LLM_API_KEY") or None)
 
 
 def image_message(prompt: str, png: bytes) -> dict:
@@ -546,13 +707,21 @@ def reasoning_chars(message: dict) -> int:
 
 def _read_stream(response, on_progress: Callable[[int], None] | None) -> dict:
     """A streamed completion (server-sent events, one `data: {json}` line per piece) put
-    back together as the reply a call without streaming returns."""
+    back together as the reply a call without streaming returns. `on_progress(0)` at the
+    first piece says the stream has begun (as the anthropic reader does at message_start;
+    the cache gate in graph.nodes opens on it), then the characters received so far at
+    each piece of text."""
     parts, received, finish, usage, done = [], 0, None, None, False
     thought = 0  # characters of reasoning_content / reasoning in the pieces
+    begun = False
     for raw in response:
         line = raw.decode("utf-8", errors="replace").strip()
         if not line.startswith("data:"):
             continue
+        if not begun:
+            begun = True
+            if on_progress:
+                on_progress(0)
         payload = line.removeprefix("data:").strip()
         if payload == "[DONE]":
             done = True
@@ -649,13 +818,13 @@ def main(argv: list[str] | None = None) -> int:
     except WorkspaceError as e:
         print(f"setup: {e}", file=sys.stderr)
         return 1
-    section = _llm_section(workspace)
-    names = args[1:] or sorted(section.get("profiles", {}))
+    found = section(workspace)
+    names = args[1:] or sorted(found.get("profiles", {}))
     if not names:
         print("workspace.toml has no [llm.profiles] to check", file=sys.stderr)
         return 1
     used: dict[str, set[str]] = {}
-    for role, name in section.get("roles", {}).items():
+    for role, name in found.get("roles", {}).items():
         used.setdefault(name, set()).add(role)
     failed = 0
     for name in names:

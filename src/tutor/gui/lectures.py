@@ -45,7 +45,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import BinaryIO, Protocol
 
-from tutor.gui import toml_edit
+from tutor.gui import llm_settings, toml_edit
 from tutor.gui.courses import Course
 from tutor.gui.i18n import gettext_
 from tutor.materials import cache
@@ -95,7 +95,7 @@ def lecture_rows(course: Course) -> list[LectureRow]:
 
 def vision_model(course: Course) -> str | None:
     """The model that reads image pages, as the form shows it; None when none is set."""
-    llm = _toml(course.workspace.root).get("llm", {})
+    llm = llm_settings.section(course)  # the shared models too (owner, 2026-11-12)
     if not llm:
         return "the LLM_* variables in .env"
     name = llm.get("roles", {}).get("vision")

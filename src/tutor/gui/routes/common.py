@@ -54,13 +54,15 @@ NOTICES = {
                                "longer kept.")),
     "key-saved": ("ok", N_("Saved in .env. Commands started from now on use it.")),
     "key-deleted": ("ok", N_("Removed from .env.")),
+    "provider-saved": ("ok", N_("Saved in llm.toml (the file before is llm.toml.bak).")),
+    "provider-removed": ("ok", N_("Removed from llm.toml.")),
     "model-saved": ("ok", N_("Saved in workspace.toml (the file before is workspace.toml.bak).")),
     "model-deleted": ("ok", N_("Removed from workspace.toml (the file before is "
                             "workspace.toml.bak).")),
     "roles-saved": ("ok", N_("Roles saved in workspace.toml (the file before is "
                           "workspace.toml.bak).")),
-    "models-copied": ("ok", N_("Models copied into workspace.toml. Keys are shared through "
-                            ".env, so they work here too.")),
+    "models-moved": ("ok", N_("Moved into the shared llm.toml; the roles stay as they were "
+                              "(the files before are workspace.toml.bak and llm.toml.bak).")),
     "nothing-to-transcribe": ("ok", N_("No image page is waiting for the vision model.")),
     "no-vision-model": ("bad", N_("No vision model is set: add `vision = \"<profile>\"` to "
                                "[llm.roles] in workspace.toml.")),
@@ -202,6 +204,7 @@ def waiting_for(course: courses.Course, task: tasks.Task) -> str:
     if kind == "vision":
         return _("the vision model, %(model)s") % {"model": lectures.vision_model(course) or "?"}
     return _({"check": N_("the models being checked"),
+              "timing": N_("the model being measured, about sixteen calls"),
               "install": N_("pip, which may be downloading"),
               "create": N_("pip, which may be downloading"),
               "build": N_("docker build, which may be downloading"),

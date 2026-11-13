@@ -51,6 +51,10 @@ def return_to(course: courses.Course, task: tasks.Task) -> tuple[str, str, str |
     if kind == "learner-test" and isinstance(batch, str) and isinstance(exercise, str):
         return (url_for("exercise", name=name, batch=batch, exercise=exercise), exercise,
                 "tests-passed")
+    if kind in ("check", "timing") and task.meta.get("from") == "providers":
+        # Started from the Providers page (a shared model): back there, not to a course.
+        notice = "models-checked" if kind == "check" else None
+        return url_for("provider_list"), _("Providers"), notice
     if kind == "check":
         return url_for("models", name=name), _("Models"), "models-checked"
     if kind == "doctor":

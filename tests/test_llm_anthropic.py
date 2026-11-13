@@ -361,7 +361,7 @@ def test_a_streamed_reply_is_put_back_together_with_both_halves_of_its_usage(mon
 
     assert (reply.text, reply.finish_reason) == ('{"a": 1}', "stop")
     assert (reply.input_tokens, reply.cached_tokens, reply.output_tokens) == (900, 880, 12)
-    assert progress == [6, 8]
+    assert progress == [0, 6, 8]  # 0 at message_start: the stream has begun
     assert bodies[0]["stream"] is True and "stream_options" not in bodies[0]
 
 

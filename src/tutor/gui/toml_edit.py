@@ -1,5 +1,6 @@
 """Writing tables of a course's workspace.toml, safely: [llm] from the Models page (step 6),
-[requires], [safety] allow_imports and [isolation] from the Environment page (step 7).
+[requires], [safety] allow_imports and [isolation] from the Environment page (step 7); and,
+the same way, the shared llm.toml beside the courses (edit_path; gui/providers.py).
 
 tomlkit keeps the rest of the file as the owner wrote it, comments included (owner,
 2026-11-06); a value changed loses only its own line's comment. Every save is checked
@@ -20,7 +21,7 @@ import tomlkit
 
 from tutor.config import WORKSPACE_FILE
 
-REFUSED = ("workspace.toml could not be changed safely, so it was left as it was. Edit it by "
+REFUSED = ("%s could not be changed safely, so it was left as it was. Edit it by "
            "hand, or report this.")
 
 
@@ -44,20 +45,28 @@ def edit(root: Path, table: str, change: Callable, expected: dict) -> list[str]:
 def edit_tables(root: Path, change: Callable, expected: dict[str, dict]) -> list[str]:
     """edit() for one save that changes several tables, such as [requires] with
     [safety] allow_imports: each must read as expected, and every other one unchanged."""
-    path = root / WORKSPACE_FILE
-    text = path.read_text(encoding="utf-8")
+    return edit_path(root / WORKSPACE_FILE, change, expected)
+
+
+def edit_path(path: Path, change: Callable, expected: dict[str, dict]) -> list[str]:
+    """The checked write itself, for any TOML file: `change` gets the parsed tomlkit
+    document (an empty one when the file does not exist yet), each table in `expected`
+    must then read as given and every other table be unchanged, the file before is kept
+    as `<name>.bak`, and the new text replaces it in one step. [] when written."""
+    text = path.read_text(encoding="utf-8") if path.is_file() else ""
     doc = tomlkit.parse(text)
     change(doc)
     new = tomlkit.dumps(doc)
     try:
         before, after = tomllib.loads(text), tomllib.loads(new)
     except tomllib.TOMLDecodeError:
-        return [REFUSED]
+        return [REFUSED % path.name]
     if any(_bare(after.get(t, {})) != _bare(e) for t, e in expected.items()) or _rest(
             after, expected) != _rest(before, expected):
-        return [REFUSED]
-    path.with_name(WORKSPACE_FILE + ".bak").write_text(text, encoding="utf-8")
-    tmp = path.with_name(f".{WORKSPACE_FILE}.{secrets.token_hex(4)}.tmp")
+        return [REFUSED % path.name]
+    if text:
+        path.with_name(path.name + ".bak").write_text(text, encoding="utf-8")
+    tmp = path.with_name(f".{path.name}.{secrets.token_hex(4)}.tmp")
     tmp.write_text(new, encoding="utf-8", newline="")
     os.replace(tmp, path)
     return []

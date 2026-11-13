@@ -61,6 +61,13 @@ RUNNING, DONE, FAILED, STOPPED, LOST = (N_("running"), N_("done"), N_("failed"),
                                         N_("lost"))
 QUEUED = N_("queued")  # written, not started: it starts when the course's running task ends
 CLAIM_FILE = "claimed"  # created once, by whoever starts the task (os.O_EXCL)
+# Windows: opening task.json while another process replaces it, or replacing it while
+# another has it open, raises PermissionError for a moment (Python opens files without
+# FILE_SHARE_DELETE); macOS and Linux never do. A page's poll then read a task as missing
+# (CI, 2026-11-13: test_a_failed_task_does_not_hold_the_queue). So on Windows a read or a
+# replace is tried again for up to BUSY_RETRY_S; elsewhere the error goes straight up.
+RETRY_BUSY = sys.platform == "win32"
+BUSY_RETRY_S = 1.0
 
 
 @dataclass(frozen=True)
@@ -133,7 +140,7 @@ def kick(course_root: Path) -> Task | None:
                 # second task beside the first (found 2026-11-10). The next kick, a
                 # page's poll within a second, starts it if it still waits.
                 break
-            data = json.loads((task.folder / TASK_FILE).read_text(encoding="utf-8"))
+            data = read_task(task.folder)
             data.update(status=RUNNING, started=_now())  # started: when it really did
             _write(task.folder, data)
             # A session of its own: Ctrl+C on the GUI's terminal does not reach it, and
@@ -179,9 +186,9 @@ def get(course_root: Path, task_id: str) -> Task | None:
         return None
     folder = course_root / TASKS_DIR / task_id
     try:
-        data = json.loads((folder / TASK_FILE).read_text(encoding="utf-8"))
+        data = read_task(folder)
     except (OSError, ValueError):
-        return None
+        return None  # no such task (or one half removed)
     status = data.get("status", LOST)
     pid = data.get("pid")
     if status == RUNNING and pid is not None and not _alive(pid):
@@ -317,8 +324,28 @@ def _age_s(started: str) -> float:
         return float("inf")
 
 
+def _when_free(action):
+    """action(), tried again while Windows says the file is busy (RETRY_BUSY), up to
+    BUSY_RETRY_S; any other error, or one that lasts, goes up as it was."""
+    deadline = time.monotonic() + BUSY_RETRY_S
+    while True:
+        try:
+            return action()
+        except PermissionError:
+            if not RETRY_BUSY or time.monotonic() >= deadline:
+                raise
+            time.sleep(0.02)  # the other process holds it for a few milliseconds
+
+
+def read_task(folder: Path) -> dict:
+    """The task folder's task.json as a dict; every reader of the file goes through here,
+    the runner too, so a write in another process does not make it look missing."""
+    return json.loads(_when_free(lambda: (folder / TASK_FILE).read_text(encoding="utf-8")))
+
+
 def _write(folder: Path, data: dict) -> None:
-    """Whole-file replace, so a reader never sees half a file."""
+    """Whole-file replace, so a reader never sees half a file; the replace waits for a
+    reader in another process on Windows (_when_free)."""
     tmp = folder / f".{TASK_FILE}.tmp"
     tmp.write_text(json.dumps(data, indent=1), encoding="utf-8")
-    os.replace(tmp, folder / TASK_FILE)
+    _when_free(lambda: os.replace(tmp, folder / TASK_FILE))

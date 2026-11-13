@@ -1661,8 +1661,46 @@ parallel calls and a large shared part, one call goes first to fill the cache: t
 call of each lecture goes alone and the lecture's other items wait for it (`nodes.CacheGate`, built
 2026-11-11 after a Spark batch with Sonnet at parallel 8 sent its first eight calls at once, each
 writing the course pages and none reading them, about a dollar of the batch's three; repair rounds
-do not wait, a first call that fails frees the rest, and none waits past ten minutes). `cached_tokens` in
-the call log shows the result. Meaning comes first: a short prompt gains nothing and is not
+do not wait, a first call that fails frees the rest, and none waits past ten minutes). The wait is
+not for the first call to end but for its provider's cache to be readable, which differs per
+provider, so each family has its own way to start the rest (owner, 2026-11-12), a profile's
+`parallel_start`: `together` (no gate), `first-event` (when the first reply begins to stream),
+`first-event+N` (N seconds after that) or `first-done` (when the first call returns), with a
+measured default per provider in `llm.PARALLEL_START` that a profile may override. Measured
+2026-11-11/12 with a 23k-33k-token shared prefix, one call started and three released at once,
+their cached share: Anthropic serves it from the first streamed event (99.9% for calls sent
+1 s after it, as the docs say), so `first-event`; DeepSeek builds it in the background (0% at
+the first event, 0.6 s in; 99% at 3, 8, 15 and 30 s), so `first-event+10` (owner, 2026-11-12:
+10 for now, as 3 s was the edge seen once);
+GLM only once the first call has ended (0% at 30 s, 99.9% after the end), so `first-done`.
+Local servers report no cached tokens, so their time to the first text told it: LM Studio
+(gemma 26B, four slots) let the others reuse the prefix from the first event (first text in
+4 s against 78-103 s cold), but four replies decoding at once slowed the first, so the set
+took 84 s against 68 s after the first had ended and 183 s all together; Ollama answers one
+request at a time by default, so every choice took about 16 s. Both stay `first-done`, as do
+OpenAI and `custom` (not measured). A profile's `max_parallel` caps the calls one endpoint
+(provider and URL) gets at once, generate, repair and oracle alike (`nodes.CallSlots`), for an
+account whose quota allows few; absent, the course's `[generation] parallel` alone bounds
+them. The model form sets both under "More": a list of the four ways, its first entry the
+provider's own (which writes nothing, so the profile follows the tool's measured default),
+a seconds box for `first-event+N` (0.5 to 600; the file keeps one value, the page splits it
+again), and a cap box (1 to 32, empty for none); clicked in Chrome on a scratch course
+(`notes/gui-checks/parallel_start_click.py`). "Measure start" beside each chat model's Check
+(owner, 2026-11-12) runs `python -m tutor.llm_timing NAME` as a task: four rounds (released
+at the first event, +3 s, +10 s, after the end), each one long call and three short ones on
+a 40,000-character prefix of this tool's own source with a new id in front (no course text,
+and present in an installed tool), thinking off; about sixteen paid calls, so on the click
+only, the button's title saying so. It suggests a `parallel_start` and writes nothing: for
+a provider that counts cached tokens the earliest round whose three followers all read at
+least 80% of their input from the cache (an earlier start that misses pays for the prefix
+again); for a server that counts none (LM Studio, Ollama) the round that finished soonest
+among those whose followers reached their first text in at most half the first call's time;
+`together` when no round read the cache. A round whose first call ended before its release
+is marked and left out, as it was really `first-done`. Clicked in Chrome with Ollama's
+qwen3 0.6B (free; `notes/gui-checks/measure_start_click.py`): 17 s a round, `first-done`
+suggested, as measured by hand. On a deep-learning course's lecture with Sonnet (first call about 70 s) the gate costs a
+few seconds instead of a call; the stream readers report the first event as `on_progress(0)`.
+`cached_tokens` in the call log shows the result. Meaning comes first: a short prompt gains nothing and is not
 contorted, and reordering a calibrated prompt means calibrating it again.
 
 Measured so far: DeepSeek hits 53-75% on generate and repair. `gpt-6.1-terra` as the judge hits 7%,
@@ -3544,6 +3582,11 @@ mode is not done (see "Decisions not to do").
   state has an explicit reset, and no server is killed. `tutor shortcut` creates a new
   .command/.lnk/.desktop without overwriting or changing startup items. Native desktop
   trust/click and browser acceptance remain separate from platform-format unit tests.
+  The server runs in the console window the launcher opens; closing it stops the server.
+  On Windows the .lnk opens that window minimised, with a tooltip saying so (owner,
+  2026-11-12, after the first real double-click: "a terminal stays there the whole
+  time"; no trust prompt appeared). No window at all (`pythonw.exe`, no terminal on macOS
+  and Linux) waits for a Stop-server button in the pages.
   Optional Python management built 2026-11-09: existing uv-managed stable CPythons join
   interpreter discovery. The separate optional page/`tutor python` command lists uv's
   offline catalog; only a confirmed action downloads a freshly offered interpreter,
@@ -3942,11 +3985,13 @@ late; the adaptive review screens can be built with it.
     environment the GUI started from wins (load_env's rule), and the page says so.
     "Used by" lists each course once, with that course's models after it. Adding a key
     (owner, 2026-11-10): choosing a provider fills the name with the variable its key
-    goes in, from the models.dev list the Models page keeps (`catalog.py`'s `key_env`);
+    goes in, from the models.dev list kept for the model forms (`catalog.py`'s `key_env`);
     the list is only read, by a GET of the page, and a typed name still works, as it must
     when no list is kept yet. A provider whose key is set already says so and the form
-    replaces it. The Models page's "not set" links open the form with the name filled.
-    The provider is not guessed from the key's shape: a plain `sk-` key fits several.
+    replaces it. A "not set" link opens the form with the name filled. The provider is
+    not guessed from the key's shape: a plain `sk-` key fits several. Since 2026-11-12
+    the keys are on the Providers page ("Shared models", below): a provider card's key
+    on its card, the others under "Other keys"; `/keys/` leads there.
   - A course's Models page writes its workspace.toml's [llm] with tomlkit (owner), which
     keeps the owner's comments; a changed value loses only its own line's comment. Every
     save is checked before the file is replaced: read back with tomllib, [llm] must be
@@ -3956,9 +4001,77 @@ late; the adaptive review screens can be built with it.
     next table (tomlkit's `Container._insert_after`, pinned by a test). Profiles are
     checked by llm.py's own rules; roles by generation's (the oracle from another provider
     than generate and repair); a profile in use cannot be removed, and a renamed one takes
-    its roles along. "Copy from another course" fills a course that has none. The checked
-    write is `gui/toml_edit.py` since step 7a, which writes [requires] and [isolation] the
-    same way.
+    its roles along. The checked write is `gui/toml_edit.py` since step 7a, which writes
+    [requires] and [isolation] the same way, and since 2026-11-12 the shared `llm.toml`
+    (`edit_path`). Since that day the page writes only [llm.roles]: the models are shared
+    ("Shared models", next), a course's own ones from before are edited there until moved,
+    and "Copy from another course" is gone (a new course chooses roles from the shared
+    models).
+  - Shared models (owner, 2026-11-12: "the models span every course; roles stay each
+    course's"). Every model lives once, in `llm.toml` beside the courses (the folder the GUI
+    lists them in, a course's parent; the CLI finds it the same way): `[providers.NAME]`
+    are the provider cards, an endpoint (`kind`, the provider llm.py knows, left out when
+    the name is one; `base_url`), its key's name, its `parallel_start` and its
+    `max_parallel` (now truly one cap per provider), and `[profiles.NAME]` the models, each
+    naming its card in `provider` (or a kind, as before) and free to set its own
+    `parallel_start` (DeepSeek's flash and pro may differ). A course keeps only its
+    `[llm.roles]`; roles are not shared and not copied, a new course chooses its own. No
+    model of a course's own any more (the owner: "to use another model in one course,
+    choose it in that role"): a profile still in a course's workspace.toml, from before,
+    is read first so a course nobody has moved works as it did, but the pages write none
+    there, and a "Move to shared" offers the move (equal profiles become one; one name
+    with two contents stays and is shown). The Keys page goes into the Providers page
+    (keys no card uses under "Other keys"); "Copy from another course" goes. Built so far
+    (4b): `llm.section()` merges the two, each profile with its card's fields, and every
+    page that reads which model does what reads it (generation, lectures' vision model,
+    environment's setup model and chat profiles, roles). (4c-1) The Providers page
+    (`/providers/`, the header's link; `gui/providers.py`): one card per provider with
+    its kind, address (its own or the kind's), key (set, replaced and removed in place,
+    by name, shown by its tail), start and cap, and its models under it with the course
+    roles naming each; a card form with Apply filling the kind's address, as the model
+    form's; a card no model names can be removed; shared models that name a kind
+    directly (written by hand) are listed as "Models with no card". The Keys page is
+    gone: `/keys/` sends to the Providers page's "Other keys" (keys no card names, with
+    the courses' own models naming them, and the Add-a-key form). llm.toml is written
+    through `toml_edit.edit_path`, the same checked write as workspace.toml's (backup
+    `llm.toml.bak`). Clicked in Chrome on a scratch root
+    (`notes/gui-checks/providers_click.py`). New provider fills from a list as New model
+    did (owner, 2026-11-12, after the first use: "where is the models.dev choice?"): the
+    servers on this machine and the kept models.dev list, an entry giving the card its
+    name (the id), its kind (the one llm.py knows for it, else custom), its address (a
+    known kind's own, else the list's, with the check-the-domain note) and its key's
+    variable; a card that exists is marked in the list. (4c-2) A card's models are added, edited and
+    removed on this page (`/providers/p/<card>/models/new`, `/providers/m/<model>/`): the
+    card fixes the provider, address and key, so the form has only the model's own fields
+    (the provider's name for it, the two reasoning efforts, the time limit, temperature,
+    and its own `parallel_start` when it should differ from the card's); above a new one,
+    the provider's models (a server on this machine lists its own at the card's address;
+    a cloud card's come from the kept models.dev list, the entry at the card's address,
+    else the first of its kind; custom has none), "Use" filling the form as the course
+    page did. Check and Measure start run as a task of the first course whose roles name
+    the model (else the first course; a task and its log live in a course) and come back
+    to this page. A model a course's role names cannot be renamed or removed here (the
+    roles are in the courses' files, which this page does not write): the row says who
+    names it. A course's Models page adds no model any more; its button leads here, and
+    a model still in the course's own file is edited there until it is moved. Clicked in
+    Chrome with Ollama (`notes/gui-checks/shared_model_click.py`): the server's list,
+    Use, Save, Check as the course's task (ok in 2.3 s), edit, Remove refused while named
+    and done after. (4d) "Move to shared" (`gui/move_models.py`): a course whose own file
+    still has models shows them in a box on its Models page with the move's plan: each
+    profile's card is the shared card of its kind at its address (its own base_url, else
+    the kind's), else a new one named after the kind (`kind-2` when that name is a card at
+    another address or with another key), which takes the key's name from the first
+    profile that made it; a profile whose key's name differs from its card's stays (one
+    address, one key: the owner decides), as does one whose shared namesake differs
+    (equal ones merge, nothing written); an assistant profile moves with no card. Two
+    clicks (a box, then the button); the shared file is written first through the checked
+    write, the course's own only after that went in, dropping the moved profiles and
+    keeping the roles, so a failure between the two leaves the models in both files,
+    which is harmless. The roles' choices list every model the course can use, the
+    shared ones and its own not moved yet (marked); "Copy from another course" is gone.
+    Clicked in Chrome on a scratch course with four providers
+    (`notes/gui-checks/move_models_click.py`): the box, the unticked refusal, the move,
+    the two files, the Providers page's cards with "Used by", the roles saved after.
   - Filling New model from models.dev (owner, 2026-11-07: the form was plain, with only
     the providers llm.py knows by name; "custom" meant finding and typing a base URL). The
     public catalog at `https://models.dev/api.json` (MIT, no key) lists providers with

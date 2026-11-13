@@ -6,6 +6,7 @@ import subprocess
 import sys
 import threading
 import time
+from dataclasses import replace
 
 import pytest
 
@@ -304,8 +305,9 @@ class SlowModel:
     """A chat function that notes when each call starts and ends, and holds each call open
     until the test lets it go (`release`), so the order of calls is the test's to see."""
 
-    def __init__(self, fail_first=False):
+    def __init__(self, fail_first=False, streams=False):
         self.events, self.gates, self.fail_first = [], {}, fail_first
+        self.streams = streams  # a reply that begins to stream at once (on_progress(0))
         self.lock = threading.Lock()
 
     def __call__(self, config, messages, *, purpose, **kw):
@@ -313,6 +315,8 @@ class SlowModel:
         with self.lock:
             self.events.append(("start", item))
             gate = self.gates.setdefault(item, threading.Event())
+        if self.streams and kw.get("on_progress"):  # None: nobody listens (a follower)
+            kw["on_progress"](0)  # as the stream readers do at the first event
         gate.wait(5)
         with self.lock:
             self.events.append(("end", item))
@@ -371,6 +375,97 @@ def test_a_lectures_first_generate_call_goes_alone_and_the_rest_follow_it(worksp
         t.join(5)
     assert model.events.index(("end", "sum-list")) < model.events.index(("start", "sum-pairs"))
     assert all(r["draft"] is not None for r in results.values())
+
+
+@pytest.mark.parametrize("parallel_start, before_end", [
+    ("first-event", True),  # anthropic's default: readable at the first streamed event
+    ("first-event+0.05", True),  # deepseek's kind: a few seconds after it (here 0.05 s)
+    ("first-done", False),  # glm's and the unmeasured providers': after the first call
+])
+def test_the_gate_opens_as_the_profile_says(workspace, parallel_start, before_end):
+    """llm.PARALLEL_START, measured 2026-11-11/12, or the profile's own `parallel_start`:
+    where the cache can be read while the first reply is still streaming, the lecture's
+    other items go then; elsewhere when it has returned. A reply that never streams (the
+    test above) frees them when it returns whatever the setting."""
+    model = SlowModel(streams=True)
+    second = ITEM.model_copy(update={"id": "sum-pairs"})
+    d = deps(workspace, model)
+    d = replace(d, config=replace(d.config, parallel_start=parallel_start))
+    results = {}
+
+    def run(item):
+        results[item.id] = nodes.generate({"item": item, "context": "pages"}, d)
+    threads = [threading.Thread(target=run, args=(item,)) for item in (ITEM, second)]
+    threads[0].start()
+    _wait_for(model, ("start", "sum-list"))
+    threads[1].start()
+    if before_end:
+        _wait_for(model, ("start", "sum-pairs"))  # before sum-list's reply has returned
+        assert ("end", "sum-list") not in model.events
+    else:
+        time.sleep(0.2)
+        assert ("start", "sum-pairs") not in model.events  # held until sum-list returns
+    model.release("sum-list")
+    model.release("sum-pairs")
+    for t in threads:
+        t.join(5)
+    assert set(results) == {"sum-list", "sum-pairs"}
+    assert all(r["draft"] is not None for r in results.values())
+    if not before_end:
+        assert model.events.index(("end", "sum-list")) < model.events.index(("start", "sum-pairs"))
+
+
+def test_together_skips_the_gate(workspace):
+    """parallel_start = "together": a lecture's items all start at once (a server with no
+    prompt cache gains nothing by waiting), even when the first reply never streams."""
+    model = SlowModel()
+    second = ITEM.model_copy(update={"id": "sum-pairs"})
+    d = replace(deps(workspace, model), config=replace(
+        deps(workspace, model).config, parallel_start="together"))
+    results = {}
+
+    def run(item):
+        results[item.id] = nodes.generate({"item": item, "context": "pages"}, d)
+    threads = [threading.Thread(target=run, args=(item,)) for item in (ITEM, second)]
+    for t in threads:
+        t.start()
+    _wait_for(model, ("start", "sum-list"))
+    _wait_for(model, ("start", "sum-pairs"))  # both under way, neither has returned
+    assert not any(kind == "end" for kind, _ in model.events)
+    model.release("sum-list")
+    model.release("sum-pairs")
+    for t in threads:
+        t.join(5)
+    assert set(results) == {"sum-list", "sum-pairs"}
+
+
+def test_max_parallel_caps_the_calls_one_endpoint_gets_at_once(workspace):
+    """A profile's max_parallel (owner, 2026-11-12): with 1, a second call to the same
+    endpoint waits for the first even where the gate would let it go (repair rounds, here),
+    and a call to another endpoint does not wait."""
+    model = SlowModel()
+    d = deps(workspace, model)
+    capped = replace(d.config, max_parallel=1)
+    d = replace(d, config=capped)
+    states = [{"item": ITEM.model_copy(update={"id": name}), "context": "pages",
+               "draft_json": "{}", "failure": "rule 1 FAIL", "round": 0}
+              for name in ("sum-list", "sum-pairs")]
+    threads = [threading.Thread(target=nodes.repair, args=(state, d)) for state in states]
+    threads[0].start()
+    _wait_for(model, ("start", "sum-list"))
+    threads[1].start()
+    time.sleep(0.2)
+    assert ("start", "sum-pairs") not in model.events  # the endpoint's one slot is taken
+    other = replace(d, config=replace(capped, base_url="http://other/v1"))
+    elsewhere = threading.Thread(target=nodes.repair, args=(
+        {**states[0], "item": ITEM.model_copy(update={"id": "count-words"})}, other))
+    elsewhere.start()
+    _wait_for(model, ("start", "count-words"))  # another endpoint: its own slots
+    for name in ("sum-list", "sum-pairs", "count-words"):
+        model.release(name)
+    for t in [*threads, elsewhere]:
+        t.join(5)
+    assert model.events.index(("end", "sum-list")) < model.events.index(("start", "sum-pairs"))
 
 
 def test_a_first_call_that_fails_frees_the_lectures_other_items(workspace):
@@ -1153,6 +1248,19 @@ def test_exercise_replies_are_streamed_with_progress_by_exercise(workspace, caps
     nodes.generate({"item": ITEM, "context": ""}, deps(workspace, model, on_stream=_receiving))
     assert seen["stream"] is True
     assert capsys.readouterr().out == "  [sum-list] receiving: 45,000 characters\n"
+
+
+def test_the_streams_first_event_prints_nothing(workspace, capsys):
+    """The readers call on_progress(0) when a stream begins (for the cache gate); the
+    progress line waits for the first RECEIVING_STEP characters."""
+    from tutor.graph.__main__ import _receiving
+
+    def model(config, messages, **kw):
+        kw["on_progress"](0)
+        return Reply(json.dumps(draft()), 1000, 500, 0.1, "stop")
+
+    nodes.generate({"item": ITEM, "context": ""}, deps(workspace, model, on_stream=_receiving))
+    assert capsys.readouterr().out == ""
 
 
 def test_when_the_reference_agrees_with_the_oracle_repair_suspects_the_tests(workspace):

@@ -59,10 +59,12 @@ def write_oracle(state: ItemState, deps: Deps) -> ItemState:
     allowed = CORE_IMPORTS | workspace_allow_imports(deps.workspace)
     spent: ItemState = {}
     for _ in range(1 + ORACLE_RETRIES):
-        reply = deps.chat(deps.oracle_config, messages, purpose="oracle",
-                          log_path=deps.llm_log, max_tokens=deps.max_tokens,
-                          response_schema=ORACLE_SCHEMA, thinking=deps.oracle_thinking,
-                          **stream_args(state, deps))
+        # A slot of the oracle endpoint's max_parallel, if its profile sets one (CallSlots).
+        with deps.call_slots.hold(deps.oracle_config):
+            reply = deps.chat(deps.oracle_config, messages, purpose="oracle",
+                              log_path=deps.llm_log, max_tokens=deps.max_tokens,
+                              response_schema=ORACLE_SCHEMA, thinking=deps.oracle_thinking,
+                              **stream_args(state, deps))
         spent = tokens_spent({**state, **spent}, reply)
         try:
             code = OracleDraft.model_validate_json(reply.text).oracle_py

@@ -171,7 +171,7 @@ def test_a_page_shows_the_chosen_language_and_the_switch_goes_back_and_forth(roo
     assert response.headers["Location"] == "/c/demo-course/models/?x=1"
     assert json.loads((root / i18n.SETTINGS).read_text(encoding="utf-8")) == {"language": "zh"}
     text = _page(client, "/")  # chosen: for every browser, whatever its language
-    assert "<title>课程" in text and "Keys" in text  # the untranslated one stays English
+    assert "<title>课程" in text and "Providers" in text  # the untranslated one stays English
     assert "<b>未显示</b>" not in text
     assert "<strong>中文</strong>" in text and 'name="language" value="en"' in text  # the footer
 

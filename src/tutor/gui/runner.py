@@ -26,7 +26,6 @@ group (its pid leads it) and nowhere else; what is left after the grace time goe
 
 from __future__ import annotations
 
-import json
 import os
 import shlex
 import signal
@@ -36,7 +35,7 @@ import time
 from pathlib import Path
 
 from tutor.gui import tasks
-from tutor.gui.tasks import DONE, FAILED, LOG_FILE, REPO, STOPPED, TASK_FILE, _now, _write
+from tutor.gui.tasks import DONE, FAILED, LOG_FILE, REPO, STOPPED, _now, _write, read_task
 
 
 def descendants(pid: int) -> list[int]:
@@ -118,7 +117,7 @@ def run(folder: Path) -> int:
     # that, and Python then installs no handler, so Stop did nothing (seen 2026-11-06).
     # Setting a handler also gives the commands the default back, as exec resets a caught one.
     signal.signal(signal.SIGINT, signal.default_int_handler)
-    task = json.loads((folder / TASK_FILE).read_text(encoding="utf-8"))
+    task = read_task(folder)  # retried while the GUI reads it on Windows (tasks.py)
     task["pid"] = os.getpid()
     _write(folder, task)
     env = {**os.environ, **task.get("env", {}), "PYTHONUNBUFFERED": "1",

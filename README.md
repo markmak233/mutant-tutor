@@ -54,9 +54,9 @@ uv tool install --no-python-downloads --python 3.11 ".[gen,gui,doctor]"
 tutor gui
 ```
 
-The GUI manages courses, lectures, models, keys and environment, then plans and approves
-a batch. It listens on 127.0.0.1 with a launch token; a second launch reuses its verified
-server. `tutor shortcut` creates a local desktop launcher. See
+The GUI manages courses, lectures, the models and keys every course shares (each course
+chooses which model does what), and the environment, then plans and approves a batch.
+It listens on 127.0.0.1 with a launch token; a second launch reuses its verified server. `tutor shortcut` creates a local desktop launcher. See
 [installation and fresh-machine prerequisites](docs/setup/install.md), including the
 explicit option to let uv download Python. Docker is needed for container courses;
 host big-data runs also need [Java/Hadoop](docs/setup/bigdata.md).

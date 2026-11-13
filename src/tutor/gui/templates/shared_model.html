@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{# One shared model of a provider card (gui/providers.py; owner, 2026-11-12: models span every
+   course). The card fixes the provider, its address and key, so the form has only the model's
+   own fields: the provider's name for it, thinking, the time limit, temperature, and how a
+   lecture's other calls start when this model should differ from its card. Above the form,
+   the provider's models (catalog.py): a server on this machine lists its own at the card's
+   address; a cloud provider's come from the kept models.dev list; "Use" fills the form and
+   saves nothing. Text through _() (gui/i18n.py); ids, names and URLs stay as they are. #}
+{% from "_macros.html" import action, chip %}
+{% set page_title = original or _("New model") %}
+{% block title %}{{ page_title }} · {{ card.name }}{% endblock %}
+{% block crumbs %}
+<a href="{{ url_for('provider_list') }}">{{ _("Providers") }}</a>
+<a href="{{ url_for('provider_list') }}#provider-{{ card.name }}">{{ card.name }}</a>
+<span>{{ page_title }}</span>
+{% endblock %}
+{% block content %}
+<h1>{{ page_title }} <span class="muted">{{ _("of %(provider)s", provider=card.name) }}</span></h1>
+{% if problems %}
+<ul class="notice notice-bad form-problems">{% for line in problems %}<li>{{ line }}</li>{% endfor %}</ul>
+{% endif %}
+<p class="muted">{{ card.kind }} · <code>{{ card.base_url or _("no address") }}</code>
+  {% if card.api_key_env %}· {{ _("key") }} <code>{{ card.api_key_env }}</code>
+    {% if shelf and shelf.key_set %}{{ chip("ok", _("in .env")) }}{% elif shelf %}{{ chip("missing", _("not in .env")) }} <a href="{{ url_for('provider_list') }}#provider-{{ card.name }}">{{ _("add it on the card") }}</a>{% endif %}
+  {% else %}· {{ _("no key: a server on this machine") }}{% endif %}</p>
+{% if shelf and not original %}
+<section class="catalog">
+  <h2>{{ _("Fill from the provider's list") }}</h2>
+  {% set models_dev %}<a href="https://models.dev" rel="noopener noreferrer" target="_blank">models.dev</a>{% endset %}
+  {% set p = shelf.provider %}
+  {% if card.kind in ("lmstudio", "ollama", "llamacpp", "vllm") %}
+  <p class="muted">{{ _("The models the server at the card's address has, as it lists them itself.") }}</p>
+  {% elif card.kind == "custom" %}
+  <p class="muted">{{ _("A custom provider has no list here: type the model's name below.") }}</p>
+  {% elif not shelf.catalog %}
+  {% if shelf.stale %}<p class="notice notice-bad">{{ _("The list kept (%(when)s) came from an older version of this tool, which now keeps more of it: fetch it again.", when=shelf.stale) }}</p>{% endif %}
+  <p class="muted">{{ _("The cloud providers come from a public list (%(site)s, MIT): base URL, key name, release dates, prices. It is downloaded only when you click, and nothing of your courses is sent. Or fill the form below by hand.", site=models_dev) }}</p>
+  {{ action(url_for('refresh_shared_catalog', name=card.name), _("Fetch the list")) }}
+  {% else %}
+  <p class="muted">{{ _("From %(site)s, fetched %(when)s.", site=models_dev, when=shelf.catalog.fetched) }} {{ action(url_for('refresh_shared_catalog', name=card.name), _("Refresh the list")) }}</p>
+  {% endif %}
+  {% if shelf.problem %}
+  <p class="notice notice-bad">{{ shelf.problem }}</p>
+  {% elif p and shelf.models %}
+  <table class="catalog-models">
+    <thead><tr><th>{{ _("Model") }}</th><th>{{ _("Released") }}</th><th>{{ _("Thinking") }}</th><th>{{ _("Reads images") }}</th><th class="num">{{ _("Context") }}</th><th class="num">{{ _("USD per 1M tokens, in · out") }}</th><th></th></tr></thead>
+    <tbody>
+    {% for m in shelf.models %}
+      <tr{% if shelf.model and shelf.model.id == m.id %} class="chosen"{% endif %}>
+        <td><code>{{ m.id }}</code>{% if m.name != m.id %} <span class="muted">{{ m.name }}</span>{% endif %}</td>
+        <td>{{ m.released }}</td>
+        <td>{{ _(m.thinking) }}</td>
+        <td>{{ _("yes") if m.image else "" }}</td>
+        <td class="num">{{ m.context_text }}</td>
+        <td class="num">{{ m.price_text }}</td>
+        <td><a href="{{ url_for('new_shared_model', name=card.name, model=m.id) }}#model-form">{{ _("Use") }}</a></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% if shelf.hidden %}<p><a href="{{ url_for('new_shared_model', name=card.name, all=1) }}">{{ _("Show all %(n)s models", n=shelf.models | length + shelf.hidden) }}</a> <span class="muted">{{ _("(the newest %(n)s are listed)", n=shelf.models | length) }}</span></p>{% endif %}
+  {% elif shelf.all_added %}
+  <p class="muted">{{ _("Every model the list offers is on this card already; type another's name below.") }}</p>
+  {% elif p %}
+  <p class="muted">{{ _("The list names no model of this provider that is still offered.") }}</p>
+  {% elif shelf.catalog and card.kind != "custom" %}
+  <p class="muted">{{ _("The list has no entry for this provider's address: type the model's name below.") }}</p>
+  {% endif %}
+</section>
+{% if shelf.model %}
+{% set code_model %}<code>{{ shelf.model.id }}</code>{% endset %}
+<div class="notice notice-ok">{{ _("Filled with %(model)s: check it, change what you like, then Save.", model=code_model) }}
+  {% for note in shelf.notes or [] %}<br>{{ note }}{% endfor %}</div>
+{% endif %}
+<h2>{{ _("Or by hand") if not shelf.model else _("The model") }}</h2>
+{% endif %}
+{% set builtin = defaults.get(card.kind) %}
+<form method="post" action="{{ url_for('save_shared_model') }}" class="form" id="model-form">
+  <input type="hidden" name="card" value="{{ card.name }}">
+  {% if original %}<input type="hidden" name="original" value="{{ original }}">{% endif %}
+  <label class="field">{{ _("Name") }}
+    <span class="muted">{{ _("what the courses' roles call it, any short name, e.g. ds-flash") }}{% if original %}{{ _("; renaming is refused while a role names it") }}{% endif %}</span>
+    <input type="text" name="name" value="{{ values.name }}" required maxlength="40" pattern="[a-z0-9][a-z0-9._\-]*" autocomplete="off">
+  </label>
+  <label class="field">{{ _("Model") }}
+    <span class="muted">{{ _("the provider's exact name for it, e.g. deepseek-flash; the list above has the current names") }}</span>
+    <input type="text" name="model" value="{{ values.model }}" required maxlength="120" autocomplete="off">
+  </label>
+  <details{% if values.reasoning_effort or values.reasoning_effort_on or values.temperature or values.parallel_start %} open{% endif %}>
+    <summary>{{ _("More") }}</summary>
+    <label class="field">{{ _("Reasoning effort with thinking off") }}
+      {% if builtin and builtin.thinking_off %}
+      <span class="muted">{{ _("empty: %(provider)s's own way, in grey; fill only to send another", provider=card.kind) }}</span>
+      <input type="text" name="reasoning_effort" value="{{ values.reasoning_effort }}" placeholder="{{ _('built in: %(way)s', way=builtin.thinking_off) }}" maxlength="20" autocomplete="off">
+      {% else %}
+      <span class="muted">{{ _("the lowest reasoning_effort the model takes, e.g. none or low; empty: nothing is sent, so a thinking model thinks on every call") }}</span>
+      <input type="text" name="reasoning_effort" value="{{ values.reasoning_effort }}" placeholder="{{ _('none or low') }}" maxlength="20" autocomplete="off">
+      {% endif %}
+    </label>
+    <label class="field">{{ _("Reasoning effort with thinking on") }} <span class="muted">{{ _("empty: the model's default depth") }}</span>
+      <input type="text" name="reasoning_effort_on" value="{{ values.reasoning_effort_on }}" maxlength="20" autocomplete="off"></label>
+    <label class="field">{{ _("Time limit per call, seconds") }} <span class="muted">{{ _("empty: 300; a new model starts at 900, as plan and generate calls with thinking can run long") }}</span>
+      <input type="number" name="timeout_s" value="{{ values.timeout_s }}" min="1" max="3600"></label>
+    <label class="field">{{ _("Temperature") }} <span class="muted">{{ _("a model that refuses a temperature (its error says so, e.g. Claude Opus 5.5) needs \"the model's own\"") }}</span>
+      <select name="temperature">
+        <option value=""{% if not values.temperature %} selected{% endif %}>{{ _("0: the steadiest answers (sent with every call)") }}</option>
+        <option value="default"{% if values.temperature == "default" %} selected{% endif %}>{{ _("the model's own: no temperature is sent") }}</option>
+      </select></label>
+    {# This model's own start, when it should differ from its card's (DeepSeek's flash and
+       pro, say); empty: the card's, shown. #}
+    {% set start = values.parallel_start or "" %}
+    <div class="field">
+      <label for="parallel_start">{{ _("How a lecture's other calls start") }}</label>
+      <span class="muted">{{ _("empty: as the card says, %(way)s; set it only for this model to differ", way=card.parallel_start) }}</span>
+      <span class="inline-form">
+        <select name="parallel_start" id="parallel_start">
+          <option value=""{% if not start %} selected{% endif %}>{{ _("the card's: %(way)s", way=card.parallel_start) }}</option>
+          <option value="first-event"{% if start == "first-event" %} selected{% endif %}>{{ _("first-event: as the first reply begins") }}</option>
+          <option value="first-event+"{% if start == "first-event+" %} selected{% endif %}>{{ _("first-event+N: N seconds after it begins") }}</option>
+          <option value="first-done"{% if start == "first-done" %} selected{% endif %}>{{ _("first-done: when the first call has ended") }}</option>
+          <option value="together"{% if start == "together" %} selected{% endif %}>{{ _("together: no wait (a server with no prompt cache)") }}</option>
+        </select>
+        <label>{{ _("N, seconds") }} <input type="number" name="parallel_start_s" value="{{ values.parallel_start_s }}" min="0.5" max="600" step="0.5"></label>
+      </span>
+    </div>
+  </details>
+  <div class="actions"><button type="submit" class="primary">{{ _("Save") }}</button>
+    <a class="button" href="{{ url_for('provider_list') }}">{{ _("Cancel") }}</a></div>
+</form>
+{% endblock %}

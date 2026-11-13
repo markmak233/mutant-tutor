@@ -83,7 +83,7 @@ def test_roles_pick_profiles_and_providers_fill_in_the_rest(tmp_path):
     ("role", "profile", "llm", "env", "expected"),
     [
         ("hint", None, WORKSPACE_LLM, {}, "no model for 'hint'"),
-        ("vision", "gpt", WORKSPACE_LLM, {}, "no [llm.profiles.gpt]"),
+        ("vision", "gpt", WORKSPACE_LLM, {}, "no model named 'gpt' in llm.toml or workspace.toml"),
         ("generate", None, WORKSPACE_LLM, {}, "needs ZHIPU_API_KEY set in .env"),
         ("vision", None, '[llm.profiles.p]\nprovider = "glm"\nmodel = "m"\napi_key = "x"\n'
          '[llm.roles]\nvision = "p"\n', {}, "holds a key"),
@@ -93,11 +93,150 @@ def test_roles_pick_profiles_and_providers_fill_in_the_rest(tmp_path):
          '[llm.roles]\nvision = "p"\n', {}, "unknown fields: modle"),
         ("vision", None, '[llm.profiles.p]\nprovider = "custom"\nmodel = "m"\n'
          '[llm.roles]\nvision = "p"\n', {}, "needs a base_url"),
+        ("vision", None, '[llm.profiles.p]\nprovider = "lmstudio"\nmodel = "m"\n'
+         'parallel_start = "after-first"\n[llm.roles]\nvision = "p"\n', {},
+         'parallel_start must be "together", "first-event", "first-event+N"'),
+        ("vision", None, '[llm.profiles.p]\nprovider = "lmstudio"\nmodel = "m"\n'
+         'parallel_start = "first-event+"\n[llm.roles]\nvision = "p"\n', {},
+         "not 'first-event+'"),
+        ("vision", None, '[llm.profiles.p]\nprovider = "lmstudio"\nmodel = "m"\n'
+         'max_parallel = 0\n[llm.roles]\nvision = "p"\n', {},
+         "max_parallel must be a whole number from 1 to 32, not 0"),
+        ("vision", None, '[llm.profiles.p]\nprovider = "lmstudio"\nmodel = "m"\n'
+         'max_parallel = "4"\n[llm.roles]\nvision = "p"\n', {},
+         "max_parallel must be a whole number"),
     ],
 )
 def test_configuration_errors_say_what_to_fix(tmp_path, role, profile, llm, env, expected):
     with pytest.raises(LLMError, match=re.escape(expected)):
         config_for(role, profile, workspace(tmp_path, llm), env)
+
+
+@pytest.mark.parametrize(("provider", "setting", "start", "wait"), [
+    # The measured defaults per provider (llm.PARALLEL_START, 2026-11-11/12).
+    ("anthropic", None, "first-event", 0.0),
+    ("deepseek", None, "first-event+10", 10.0),
+    ("glm", None, "first-done", None),
+    ("lmstudio", None, "first-done", None),
+    # A profile's own choice wins over its provider's default.
+    ("deepseek", "first-event+30", "first-event+30", 30.0),
+    ("deepseek", "first-event+2.5", "first-event+2.5", 2.5),
+    ("anthropic", "first-done", "first-done", None),
+    ("lmstudio", "together", "together", None),
+])
+def test_how_parallel_calls_start_comes_from_the_provider_unless_the_profile_says(
+        tmp_path, provider, setting, start, wait):
+    """Owner, 2026-11-12: each family its own way of starting a lecture's other calls, with
+    the seconds adjustable; max_parallel is the profile's cap, absent by default."""
+    line = f'parallel_start = "{setting}"\n' if setting else ""
+    url = 'base_url = "http://x/v1"\n'
+    ws = workspace(tmp_path, f'[llm.profiles.p]\nprovider = "{provider}"\nmodel = "m"\n{url}'
+                             f'{line}max_parallel = 2\n[llm.roles]\ngenerate = "p"\n')
+    config = config_for("generate", workspace=ws, environ={})
+    assert (config.parallel_start, llm.start_wait(config), config.max_parallel) == (
+        start, wait, 2)
+    assert config_for("vision", workspace=workspace(tmp_path), environ={}).max_parallel is None
+
+
+SHARED = """
+[providers.deepseek]
+api_key_env = "DEEPSEEK_API_KEY"
+max_parallel = 4
+
+[providers.zai]
+kind = "glm"
+base_url = "https://api.z.ai/api/paas/v4"
+api_key_env = "ZAI_API_KEY"
+parallel_start = "first-done"
+
+[profiles.ds-flash]
+provider = "deepseek"
+model = "deepseek-v4-flash"
+timeout_s = 900
+
+[profiles.ds-pro]
+provider = "deepseek"
+model = "deepseek-v4-pro"
+parallel_start = "first-event+30"
+
+[profiles.glm-flash]
+provider = "zai"
+model = "glm-5.3-flash"
+
+[profiles.local]
+provider = "lmstudio"
+model = "gemma"
+"""
+
+
+def shared_course(tmp_path, roles, own=""):
+    """A course folder beside the shared llm.toml, as the GUI lists courses."""
+    (tmp_path / "llm.toml").write_text(SHARED, encoding="utf-8")
+    course = tmp_path / "course"
+    course.mkdir()
+    return workspace(course, own + "[llm.roles]\n" + roles)
+
+
+def test_shared_models_take_their_cards_endpoint_key_and_ways(tmp_path):
+    """Owner, 2026-11-12: the models live once beside the courses, each provider a card
+    with its endpoint, key name, start and cap; a course keeps only its roles."""
+    ws = shared_course(tmp_path, 'generate = "ds-flash"\noracle = "glm-flash"\n'
+                                 'repair = "ds-pro"\nvision = "local"\n')
+    env = {"DEEPSEEK_API_KEY": SECRET, "ZAI_API_KEY": "zai-test-not-a-real-value"}
+
+    flash = config_for("generate", workspace=ws, environ=env)
+    assert (flash.provider, flash.base_url, flash.api_key, flash.timeout_s) == (
+        "deepseek", "https://api.deepseek.com", SECRET, 900.0)
+    assert (flash.parallel_start, flash.max_parallel) == ("first-event+10", 4)
+    pro = config_for("repair", workspace=ws, environ=env)
+    assert (pro.parallel_start, pro.max_parallel) == ("first-event+30", 4)  # its own start
+    glm = config_for("oracle", workspace=ws, environ=env)
+    assert (glm.provider, glm.base_url, glm.parallel_start) == (
+        "glm", "https://api.z.ai/api/paas/v4", "first-done")
+    assert config_for("vision", workspace=ws, environ=env).base_url == "http://localhost:1234/v1"
+    assert llm.origins(ws) == {"ds-flash": "shared", "ds-pro": "shared",
+                               "glm-flash": "shared", "local": "shared"}
+
+
+def test_a_courses_own_profile_not_moved_yet_comes_first(tmp_path):
+    """Until its models are moved, a course reads its own [llm.profiles] as before, over
+    a shared one of the same name."""
+    own = '[llm.profiles.ds-flash]\nprovider = "glm"\nmodel = "glm-5.3-flash"\n\n'
+    ws = shared_course(tmp_path, 'generate = "ds-flash"\n', own)
+    config = config_for("generate", workspace=ws, environ={})
+    assert (config.provider, config.model) == ("glm", "glm-5.3-flash")
+    assert llm.origins(ws)["ds-flash"] == "course" and llm.origins(ws)["ds-pro"] == "shared"
+
+
+@pytest.mark.parametrize(("card", "expected"), [
+    ('kind = "acme"\n', "kind must be one of"),
+    ('base_url = "http://x/v1"\n', "needs a kind"),  # a name llm.py does not know
+    ('kind = "glm"\nmodel = "m"\n', "unknown fields: model"),
+    ('kind = "glm"\napi_key_env = "sk-abcdefghijklmnopqrstu"\n', "holds a key"),
+])
+def test_a_card_that_cannot_be_read_says_why(tmp_path, card, expected):
+    (tmp_path / "llm.toml").write_text(f'[providers.mine]\n{card}\n[profiles.p]\n'
+                                       f'provider = "mine"\nmodel = "m"\n', encoding="utf-8")
+    (tmp_path / "c").mkdir()
+    ws = workspace(tmp_path / "c", '[llm.roles]\ngenerate = "p"\n')
+    with pytest.raises(LLMError, match=re.escape(expected)):
+        config_for("generate", workspace=ws, environ={})
+
+
+def test_a_shared_file_that_does_not_parse_is_named(tmp_path):
+    (tmp_path / "llm.toml").write_text("[profiles.p\n", encoding="utf-8")
+    (tmp_path / "c").mkdir()
+    ws = workspace(tmp_path / "c", '[llm.roles]\ngenerate = "p"\n')
+    with pytest.raises(LLMError, match="llm.toml does not parse"):
+        config_for("generate", workspace=ws, environ={})
+
+
+def test_a_course_with_no_llm_section_still_uses_the_environment(tmp_path):
+    (tmp_path / "llm.toml").write_text(SHARED, encoding="utf-8")
+    (tmp_path / "c").mkdir()
+    ws = workspace(tmp_path / "c", "")
+    config = config_for("generate", workspace=ws, environ={"LLM_MODEL": "m"})
+    assert (config.name, config.model) == ("env", "m")
 
 
 def test_without_an_llm_section_the_environment_is_the_profile(tmp_path):
@@ -346,7 +485,7 @@ def test_a_streamed_reply_is_put_back_together_with_its_usage(monkeypatch):
 
     assert (reply.text, reply.finish_reason) == ('{"a": 1}', "stop")
     assert (reply.input_tokens, reply.cached_tokens, reply.output_tokens) == (900, 640, 12)
-    assert progress == [6, 8]
+    assert progress == [0, 6, 8]  # 0: the stream has begun (the cache gate opens on it)
     assert bodies[0]["stream"] is True
     assert bodies[0]["stream_options"] == {"include_usage": True}
 
