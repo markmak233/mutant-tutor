@@ -11,11 +11,16 @@ from tutor import llm, llm_timing
 from tutor.llm import LLMConfig, Reply
 
 CONFIG = LLMConfig("p", "custom", "http://x/v1", "m")
-LONG_S = 0.4  # the stand-in's long call: well past the last release (0.2 s)
+LONG_S = 0.6  # the stand-in's long call: with PREFILL_S, well past the last release (0.4 s)
+# The prefix computed afresh before the first text. A server with no counts is judged by
+# its followers' first text against half the first call's (llm_timing.FAST_RATIO): 0.06 s
+# here left 25 ms for a slow CI machine (macOS, 2026-11-14, a 15-minute run), so 0.3 s.
+PREFILL_S = 0.3
 # Small rounds for the tests: the same names, waits scaled down from 0 / 3 / 10 s. Each
-# moment a test tells apart is 50 ms or more from the next (a CI machine runs slow; a slow
-# machine only makes the long call longer, which no test's answer depends on).
-ROUNDS = (("first-event", 0.0), ("first-event+3", 0.1), ("first-event+10", 0.2),
+# moment a test tells apart is 100 ms or more from the next (a CI machine runs slow: 50 ms
+# was not trusted after a 15-minute macOS run; a slow machine only makes the long call
+# longer, which no test's answer depends on).
+ROUNDS = (("first-event", 0.0), ("first-event+3", 0.2), ("first-event+10", 0.4),
           ("first-done", None))
 
 
@@ -51,7 +56,7 @@ class Server:
             company = not long and self.long_active > 0
             started_before = self.started
         on_progress(0)  # the stream has begun
-        time.sleep(0.005 if hit else 0.06)  # a cached prefix is not computed again
+        time.sleep(0.005 if hit else PREFILL_S)  # a cached prefix is not computed again
         on_progress(5)  # the first text
         time.sleep(self.long_s if long else 0.01)
         with self.lock:
@@ -76,8 +81,8 @@ def measure(server):
 @pytest.mark.parametrize(("server", "expected"), [
     # Anthropic: readable at the first streamed event (99.9% at +1 s).
     (Server(ready=0.0), "first-event"),
-    # DeepSeek: 0% at the first event, 99% from 3 s (here: from 0.05 s, between rounds).
-    (Server(ready=0.05), "first-event+3"),
+    # DeepSeek: 0% at the first event, 99% from 3 s (here: from 0.1 s, between rounds).
+    (Server(ready=0.1), "first-event+3"),
     # GLM: only once the first call had ended.
     (Server(ready="end"), "first-done"),
 ])
