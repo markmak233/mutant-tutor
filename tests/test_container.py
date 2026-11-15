@@ -16,6 +16,7 @@ from tutor.container import (
     image_status,
     limits,
     main,
+    start_docker_desktop,
 )
 from tutor.image_recipe import HADOOP_MIRRORS, HADOOP_RELEASES, dockerfile, image_name, runner_uid
 
@@ -174,6 +175,35 @@ def test_docker_problem_tells_missing_from_stopped_from_running():
     assert "not running" in docker_problem(FakeDocker(fail={"info"}))
     assert docker_problem(FakeDocker()) is None
 
+
+
+def test_start_docker_desktop_asks_the_installed_app_and_never_installs(tmp_path, monkeypatch):
+    # macOS and Linux go through `run`, keyed by the command: `open` finds the app, and this
+    # Linux has no docker-desktop user service (systemctl exits 5), so nothing is started.
+    def run(command, **kwargs):
+        return subprocess.CompletedProcess(command, 0 if command[0] == "open" else 5, "", "")
+
+    assert start_docker_desktop(run=run, platform="darwin") == "open -a Docker"
+    assert start_docker_desktop(run=run, platform="linux") is None
+
+    def no_command(command, **kwargs):
+        raise FileNotFoundError(command[0])
+
+    assert start_docker_desktop(run=no_command, platform="linux") is None
+
+    # Windows starts the installer's exe under Program Files, detached, only if it is there.
+    monkeypatch.setenv("ProgramFiles", str(tmp_path))
+    started = []
+
+    def popen(command, **kwargs):
+        started.append(command)
+
+    assert start_docker_desktop(popen=popen, platform="win32") is None
+    exe = tmp_path / "Docker" / "Docker" / "Docker Desktop.exe"
+    exe.parent.mkdir(parents=True)
+    exe.write_bytes(b"")
+    assert start_docker_desktop(popen=popen, platform="win32") == str(exe)
+    assert started == [[str(exe)]]
 
 def test_the_status_says_how_to_get_ready(tmp_path):
     ws = workspace(tmp_path)

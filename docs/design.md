@@ -4468,9 +4468,16 @@ late; the adaptive review screens can be built with it.
     runs go into the container. The page shows, per course: Docker missing, not running,
     image missing or out of date, or ready, with the image's size and "Check again". A "Build
     image" button is allowed, since the recipe comes from our code and not from a model; it
-    shows the recipe, download source and expected size first. The user installs and starts
-    Docker. The venv click does not build the image, which may be 2 GB: that waits until
-    `[requires]` is confirmed. The user chooses host or container for a new course, nothing
+    shows the recipe, download source and expected size first. The user installs Docker.
+    Starting it (owner, 2026-11-15, which replaces "the user installs and starts Docker"):
+    when a course under the root runs its tests in the container, every `tutor gui` launch
+    starts an installed but stopped Docker Desktop (`container.start_docker_desktop`: `open
+    -a Docker` on macOS, its exe under Program Files on Windows, the `docker-desktop` user
+    service on Linux), in a thread so the page opens meanwhile, and says to install Docker
+    Desktop when there is no `docker`. It never installs, and a Linux Docker Engine without
+    Desktop, which needs sudo, is left to the user; courses all on the host leave Docker
+    alone, since its VM takes memory a local model may need. The venv click does not build
+    the image, which may be 2 GB: that waits until `[requires]` is confirmed. The user chooses host or container for a new course, nothing
     switched silently, with a warning when it matters: choosing the host (generated code runs
     with their rights), and a course set to the container while Docker is not available.
 - Coverage page (owner, 2026-11-06): a course's `coverage.md` shown, and a model's draft of

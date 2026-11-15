@@ -8,7 +8,9 @@ container runs under, and whether the image is there to run in. It only calls Do
 line, so there is no new dependency.
 
 Only this command builds, since a build needs the network and takes minutes. A test run that
-finds no image refuses to start; it never builds and never falls back to the host.
+finds no image refuses to start; it never builds and never falls back to the host. Starting an
+installed Docker Desktop (start_docker_desktop, which `tutor gui` calls at launch) is the one
+thing done to Docker itself; installing it is always left to the user.
 """
 
 from __future__ import annotations
@@ -16,6 +18,7 @@ from __future__ import annotations
 import argparse
 import functools
 import math
+import os
 import subprocess
 import sys
 import tomllib
@@ -133,6 +136,7 @@ def image_for(sources: Iterable[Path]) -> str | None:
 
 
 def _image_of(path: Path, data: Mapping) -> str:
+    """The image named by one parsed workspace.toml: its course and effective [requires]."""
     if "course" not in data:
         raise ContainerError(f"{path} has no `course` entry")
     # str(), as load_workspace does: the same name whichever way the file is read.
@@ -179,6 +183,51 @@ def docker_problem(run: Callable = subprocess.run) -> str | None:
     if done.returncode != 0 or not done.stdout.strip():
         return "Docker is not running: start Docker Desktop, then try again"
     return None
+
+
+# Where Docker Desktop's installer puts it on Windows, under this machine's Program Files.
+_WINDOWS_APP = Path("Docker", "Docker", "Docker Desktop.exe")
+
+
+def start_docker_desktop(run: Callable | None = None, popen: Callable | None = None,
+                         platform: str | None = None) -> str | None:
+    """Ask an installed Docker Desktop to start, without waiting until it runs; returns the
+    command that asked, or None when this machine has no Docker Desktop to start.
+
+    Starting is not installing (owner, 2026-11-15): nothing is ever installed, and a Docker
+    Engine without Desktop on Linux, which needs sudo to start, is left to the user. Starting
+    a Docker Desktop that already runs only brings its window up, so a caller need not tell
+    "stopped" from "not answering" first. Every parameter is looked up when called, so a
+    test's stand-in reaches it."""
+    run = run or subprocess.run
+    popen = popen or subprocess.Popen
+    platform = platform or sys.platform
+    if platform == "win32":
+        exe = Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / _WINDOWS_APP
+        if not exe.is_file():
+            return None
+        # A process group of its own, with no console: Docker Desktop must outlive the
+        # launcher, and Ctrl+C in the launcher's terminal must not reach it.
+        flags = (getattr(subprocess, "DETACHED_PROCESS", 0)
+                 | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
+        try:
+            popen([str(exe)], creationflags=flags, stdin=subprocess.DEVNULL,
+                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except OSError:
+            return None
+        return str(exe)
+    if platform == "darwin":
+        # `open -a` finds the app wherever macOS registered it and returns at once; it
+        # exits non-zero when no app has that name, i.e. Docker Desktop is not installed.
+        command = ["open", "-a", "Docker"]
+    else:
+        # Docker Desktop for Linux is a user service; --no-block returns before it is up.
+        command = ["systemctl", "--user", "--no-block", "start", "docker-desktop"]
+    try:
+        done = run(command, capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return " ".join(command) if done.returncode == 0 else None
 
 
 def image_size(image: str, run: Callable = subprocess.run) -> int | None:
@@ -269,6 +318,7 @@ def _remove_older(image: str, run: Callable) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """The command line: exit 0 when the asked step worked (status: the image is ready)."""
     parser = argparse.ArgumentParser(prog="python -m tutor.container",
                                      description=__doc__.split("\n")[0])
     parser.add_argument("command", choices=("build", "status", "recipe"))
