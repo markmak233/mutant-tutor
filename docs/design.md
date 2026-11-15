@@ -4503,7 +4503,17 @@ late; the adaptive review screens can be built with it.
     service on Linux), in a thread so the page opens meanwhile, and says to install Docker
     Desktop when there is no `docker`. It never installs, and a Linux Docker Engine without
     Desktop, which needs sudo, is left to the user; courses all on the host leave Docker
-    alone, since its VM takes memory a local model may need. The venv click does not build
+    alone, since its VM takes memory a local model may need. What stops Docker is told apart
+    (`container.docker_state`, after the 2026-11-15/16 walk-throughs), since each asks the
+    user for something else: not installed; Docker Desktop installed but not on this
+    terminal's PATH (installed after it opened: open a new one, not install again; the app
+    is found from `docker.exe` two folders up, or under Program Files, or per user under
+    AppData\Local\Programs, which the launcher also starts); permission denied (Linux: the
+    docker group and a new login; Windows: docker-users, from Docker's docs, untested);
+    not running (Docker Desktop, or on Linux also Docker Engine with `systemctl`); no answer
+    in 30 s. `tutor doctor`'s "next:" gives the fix, never the problem again, and for "not
+    running" also the way on where Docker cannot start (a VM or Windows Sandbox: run the
+    course's tests on this machine). The venv click does not build
     the image, which may be 2 GB: that waits until `[requires]` is confirmed. The user chooses host or container for a new course, nothing
     switched silently, with a warning when it matters: choosing the host (generated code runs
     with their rights), and a course set to the container while Docker is not available.

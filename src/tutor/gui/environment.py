@@ -26,7 +26,6 @@ from __future__ import annotations
 import os
 import re
 import shlex
-import shutil
 import subprocess
 import sys
 from collections.abc import Callable
@@ -148,10 +147,14 @@ def docker_view(course: Course, run: Callable = subprocess.run) -> DockerView:
             pass
     parts = {"runner": chosen, "image": image, "recipe": recipe,
              "downloads": downloads(requires)}
-    if shutil.which("docker") is None:
+    # One `docker info`: no command and no Docker Desktop is "missing" (install it); any
+    # other problem, an installed Desktop this server's PATH predates included, shows its
+    # own sentence and fix under "not running" (container.docker_state).
+    docker = container.docker_state(run)
+    if docker.kind == container.MISSING:
         return DockerView(state="docker-missing", **parts)
-    if problem := container.docker_problem(run):
-        return DockerView(state="docker-stopped", detail=problem, **parts)
+    if docker.kind is not None:
+        return DockerView(state="docker-stopped", detail=docker.message, **parts)
     size = container.image_size(image, run)
     if size is None:
         return DockerView(state="image-missing", detail="Build it below.", **parts)

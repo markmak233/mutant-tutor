@@ -115,7 +115,9 @@ def test_learner_matches_original_plugin_and_keeps_answers_unchanged(course, pas
     suffix = ".c" if kind == "c" else ".py"
     source = SOURCES[kind].replace("VALUE", "3" if passing else "4")
     source = source.replace("EXTRA", "0" if passing else "1")
-    (exercise / f"student{suffix}").write_text(source, encoding="utf-8")
+    # newline="\n": text mode writes CRLF on Windows, and the snapshot is compared with
+    # source's own bytes below (two failures on the owner's Windows PC, 2026-11-16).
+    (exercise / f"student{suffix}").write_text(source, encoding="utf-8", newline="\n")
     (exercise / "test_student.py").write_text(TESTS[kind], encoding="utf-8")
     (exercise.parents[1] / "manifest.json").write_text('{"mode":"learn"}', encoding="utf-8")
     before = {p.name: p.read_bytes() for p in exercise.iterdir()}

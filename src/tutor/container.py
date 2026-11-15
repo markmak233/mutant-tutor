@@ -19,12 +19,14 @@ import argparse
 import functools
 import math
 import os
+import shutil
 import subprocess
 import sys
 import tomllib
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import NamedTuple
 
 from tutor import image_recipe
 from tutor.config import WORKSPACE_FILE, Workspace, WorkspaceError, load_env, load_workspace
@@ -170,23 +172,96 @@ def image_problem(image: str, run: Callable = subprocess.run) -> str | None:
                                    f"run `{BUILD_COMMAND}`")
 
 
-def docker_problem(run: Callable = subprocess.run) -> str | None:
-    """Why Docker cannot be used right now, or None."""
+# What stands between this machine and Docker (DockerState.kind); None is ready. Each one
+# asks for a different thing from the user, so callers branch on these, never on wording.
+MISSING = "missing"  # no `docker` command and no Docker Desktop: install it
+NOT_FOUND = "not-found"  # Docker Desktop installed, but this process's PATH predates it
+DENIED = "denied"  # the daemon runs, but this user may not talk to it
+STOPPED = "stopped"  # the command is there, the daemon does not answer
+SLOW = "slow"  # `docker info` did not come back in time
+
+
+class DockerState(NamedTuple):
+    kind: str | None  # one of the kinds above, None when Docker answers
+    problem: str | None = None  # what is wrong, as a sentence fragment
+    fix: str | None = None  # what the user does about it
+
+    @property
+    def message(self) -> str | None:
+        """The one line commands and pages print: "problem: fix"."""
+        return f"{self.problem}: {self.fix}" if self.kind else None
+
+
+def docker_state(run: Callable | None = None, platform: str | None = None) -> DockerState:
+    """Whether Docker can be used now, and if not, which of the kinds above and what to do.
+    `run` and `platform` are looked up when called, so a test's stand-in reaches them."""
+    run = run or subprocess.run
+    platform = platform or sys.platform
     try:
         done = run(["docker", "info", "--format", "{{.ServerVersion}}"],
                    capture_output=True, text=True, timeout=30)
     except FileNotFoundError:
-        return "Docker is not installed (no `docker` command on PATH)"
+        # Seen on Windows (owner, 2026-11-15): Docker Desktop installed after this terminal
+        # opened, so its PATH lacks the command. Saying "not installed" there sent the user
+        # to install it again.
+        if desktop_app(platform=platform) is not None:
+            return DockerState(NOT_FOUND, "Docker Desktop is installed, but this terminal does "
+                               "not find the docker command", "start Docker Desktop once, then "
+                               "open a new terminal, start tutor from it and try again")
+        return DockerState(MISSING, "Docker is not installed (no `docker` command on PATH)",
+                           "install Docker Desktop, start it, then try again")
     except subprocess.TimeoutExpired:
-        return "Docker did not answer in 30 s: restart Docker Desktop"
+        return DockerState(SLOW, "Docker did not answer in 30 s", "restart Docker Desktop")
     # The server's version stays empty when only the client answers.
-    if done.returncode != 0 or not done.stdout.strip():
-        return "Docker is not running: start Docker Desktop, then try again"
-    return None
+    if done.returncode == 0 and done.stdout.strip():
+        return DockerState(None)
+    said = f"{done.stdout or ''}\n{done.stderr or ''}".lower()
+    # Seen on Ubuntu with Docker Engine (owner, 2026-11-15): "permission denied while trying
+    # to connect to the docker API at unix:///var/run/docker.sock" when the user is not in the
+    # docker group yet. It used to read as "not running", which sent them to start it.
+    # Windows' "access is denied" (a user outside docker-users) is from Docker's docs, untested.
+    if "permission denied" in said or "access is denied" in said:
+        fix = ("add your user to the docker-users group, then sign out and in again"
+               if platform == "win32" else "add yourself to the docker group (sudo usermod "
+               "-aG docker $USER), then log out and in again")
+        return DockerState(DENIED, "Docker is running, but your user may not use it "
+                           "(permission denied)", fix)
+    fix = ("start Docker Desktop, or Docker Engine (sudo systemctl start docker), then try again"
+           if platform.startswith("linux") else "start Docker Desktop, then try again")
+    return DockerState(STOPPED, "Docker is not running", fix)
 
 
-# Where Docker Desktop's installer puts it on Windows, under this machine's Program Files.
-_WINDOWS_APP = Path("Docker", "Docker", "Docker Desktop.exe")
+def docker_problem(run: Callable | None = None) -> str | None:
+    """Why Docker cannot be used right now, with what to do, or None."""
+    return docker_state(run).message
+
+
+# Docker Desktop's app on Windows, and where its installer puts it: for all users under
+# Program Files (needs admin), or for one user under AppData\Local\Programs (no admin;
+# seen in Windows Sandbox, 2026-11-15).
+_WINDOWS_EXE = "Docker Desktop.exe"
+
+
+def desktop_app(platform: str | None = None, which: Callable | None = None,
+                environ: Mapping[str, str] | None = None) -> Path | None:
+    """Where Docker Desktop is installed on this machine, or None (always on Linux, where it
+    is a user service that start_docker_desktop asks systemd for). Only looks, never runs."""
+    platform = platform or sys.platform
+    which = which or shutil.which
+    environ = os.environ if environ is None else environ
+    candidates = []
+    if platform == "win32":
+        if found := which("docker"):
+            # ...\resources\bin\docker.exe: the app is two folders up, whichever install.
+            candidates.append(Path(found).resolve().parents[2] / _WINDOWS_EXE)
+        candidates.append(Path(environ.get("ProgramFiles", r"C:\Program Files"))
+                          / "Docker" / "Docker" / _WINDOWS_EXE)
+        if local := environ.get("LOCALAPPDATA"):
+            candidates.append(Path(local) / "Programs" / "DockerDesktop" / _WINDOWS_EXE)
+    elif platform == "darwin":
+        candidates += [Path("/Applications/Docker.app"),
+                       Path.home() / "Applications" / "Docker.app"]
+    return next((path for path in candidates if path.exists()), None)
 
 
 def start_docker_desktop(run: Callable | None = None, popen: Callable | None = None,
@@ -203,8 +278,8 @@ def start_docker_desktop(run: Callable | None = None, popen: Callable | None = N
     popen = popen or subprocess.Popen
     platform = platform or sys.platform
     if platform == "win32":
-        exe = Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / _WINDOWS_APP
-        if not exe.is_file():
+        exe = desktop_app(platform=platform)
+        if exe is None:
             return None
         # A process group of its own, with no console: Docker Desktop must outlive the
         # launcher, and Ctrl+C in the launcher's terminal must not reach it.

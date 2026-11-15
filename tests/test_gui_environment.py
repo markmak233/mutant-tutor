@@ -12,7 +12,7 @@ import pytest
 
 pytest.importorskip("flask")  # the `gui` extra
 
-from tutor import workspace  # noqa: E402
+from tutor import container, workspace  # noqa: E402
 from tutor.doctor_rows import Row  # noqa: E402
 from tutor.gui import courses, doctor_page, environment, llm_roles, tasks  # noqa: E402
 from tutor.gui.app import create_app  # noqa: E402
@@ -91,14 +91,17 @@ def started(monkeypatch):
 class FakeRun:
     """Stands in for subprocess.run: Docker by its verb, the venv's commands by module."""
 
-    def __init__(self, docker_fail=(), size="1729000000", envcheck=None):
+    def __init__(self, docker_fail=(), size="1729000000", envcheck=None, no_docker=False):
         self.docker_fail = set(docker_fail)
         self.size = size
         self.envcheck = envcheck
+        self.no_docker = no_docker  # no `docker` command at all, as on a machine without it
         self.calls: list[tuple[list[str], dict]] = []
 
     def __call__(self, command, **kwargs):
         self.calls.append((command, kwargs))
+        if command[0] == "docker" and self.no_docker:
+            raise FileNotFoundError("docker")
         if command[0] == "docker":
             verb = " ".join(command[1:3]) if command[1] == "image" else command[1]
             out = {"info": "24.0.6\n", "image inspect": self.size + "\n"}.get(verb, "")
@@ -211,7 +214,8 @@ def test_choosing_writes_isolation_after_inits_commented_lines(root):
 
 
 def test_the_image_view_says_where_it_stands(course, monkeypatch):
-    monkeypatch.setattr(environment.shutil, "which", lambda name: "/usr/bin/docker")
+    # This machine's own Docker Desktop never decides whether Docker counts as installed.
+    monkeypatch.setattr(container, "desktop_app", lambda **kwargs: None)
     _venv(course)
 
     ready = environment.docker_view(course, FakeRun())
@@ -221,8 +225,11 @@ def test_the_image_view_says_where_it_stands(course, monkeypatch):
         "image-missing")
     stopped = environment.docker_view(course, FakeRun(docker_fail={"info"}))
     assert stopped.state == "docker-stopped" and "not running" in stopped.detail
-    monkeypatch.setattr(environment.shutil, "which", lambda name: None)
-    assert environment.docker_view(course, FakeRun()).state == "docker-missing"
+    assert environment.docker_view(course, FakeRun(no_docker=True)).state == "docker-missing"
+    # Installed after the GUI's terminal opened: not "missing", and the page says what to do.
+    monkeypatch.setattr(container, "desktop_app", lambda **kwargs: Path("Docker Desktop.exe"))
+    stale = environment.docker_view(course, FakeRun(no_docker=True))
+    assert stale.state == "docker-stopped" and "open a new terminal" in stale.detail
 
 
 def test_a_requires_table_with_no_recipe_says_so(root, course):

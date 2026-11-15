@@ -14,7 +14,6 @@ from __future__ import annotations
 import argparse
 import os
 import secrets
-import shutil
 import sys
 import threading
 import tomllib
@@ -85,11 +84,17 @@ def _wake_docker(root: Path) -> None:
         return
     from tutor import container
 
-    if shutil.which("docker") is None:
+    state = container.docker_state()  # waits while a sleeping VM wakes
+    if state.kind is None:
+        return
+    if state.kind == container.MISSING:
         print("Docker is not installed, and a course here runs its tests in a container: "
               "install Docker Desktop (docker.com) yourself, then launch again.", flush=True)
         return
-    if container.docker_problem() is None:  # waits while a sleeping VM wakes
+    if state.kind not in (container.STOPPED, container.SLOW):
+        # Installed but not on this terminal's PATH, or not this user's to use: starting it
+        # would not help, so only say what would (container.docker_state).
+        print(f"{state.message}.", flush=True)
         return
     if container.start_docker_desktop():
         print("Docker Desktop was not running: starting it. It takes a minute; then press "

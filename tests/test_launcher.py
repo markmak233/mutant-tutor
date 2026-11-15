@@ -81,16 +81,15 @@ def _course(root: Path, name: str, runner: str | None) -> None:
 
 
 class DockerStandIn:
-    """Docker as `_wake_docker` sees it: installed or not, running or not, and the starts asked."""
+    """Docker as `_wake_docker` sees it (container.docker_state's kind), and the starts asked."""
 
-    def __init__(self, monkeypatch, installed=True, running=False, desktop=True):
+    def __init__(self, monkeypatch, kind="stopped", desktop=True):
         from tutor import container
 
         self.started = 0
-        monkeypatch.setattr(gui_main.shutil, "which",
-                            lambda name: "/synthetic/docker" if installed else None)
-        monkeypatch.setattr(container, "docker_problem",
-                            lambda *a: None if running else "Docker is not running")
+        state = container.DockerState(kind, f"the {kind} problem", f"the {kind} fix") \
+            if kind else container.DockerState(None)
+        monkeypatch.setattr(container, "docker_state", lambda *a, **k: state)
         monkeypatch.setattr(container, "start_docker_desktop", self._start)
         self.desktop = desktop
 
@@ -122,11 +121,11 @@ def test_launch_leaves_docker_alone_when_no_course_needs_it(tmp_path, monkeypatc
 def test_launch_says_what_to_do_when_docker_cannot_be_started(tmp_path, monkeypatch, capsys):
     _course(tmp_path, "local", "host")
     _course(tmp_path, "boxed", "container")
-    running = DockerStandIn(monkeypatch, running=True)
+    running = DockerStandIn(monkeypatch, kind=None)
     gui_main._wake_docker(tmp_path)
     assert running.started == 0 and capsys.readouterr().out == ""
 
-    missing = DockerStandIn(monkeypatch, installed=False)
+    missing = DockerStandIn(monkeypatch, kind="missing")
     gui_main._wake_docker(tmp_path)
     assert missing.started == 0  # never installs: only says to
     assert "install Docker Desktop" in capsys.readouterr().out
@@ -134,6 +133,14 @@ def test_launch_says_what_to_do_when_docker_cannot_be_started(tmp_path, monkeypa
     DockerStandIn(monkeypatch, desktop=False)
     gui_main._wake_docker(tmp_path)
     assert "start Docker yourself" in capsys.readouterr().out
+
+    # Installed but not on this terminal's PATH, or not this user's: starting would not
+    # help, so the launcher only passes on what to do.
+    for kind in ("not-found", "denied"):
+        other = DockerStandIn(monkeypatch, kind=kind)
+        gui_main._wake_docker(tmp_path)
+        assert other.started == 0
+        assert f"the {kind} problem: the {kind} fix." in capsys.readouterr().out
 
 
 def test_help_shows_the_whole_description(capsys):
