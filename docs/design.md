@@ -2340,7 +2340,10 @@ themselves, so a cheap layer comes first and a stronger one later.
     so the course's image is affected on such a Linux host. Seen on GitHub's ubuntu-26.04
     runner (2026-11-07): one C run in each example timed out at 5 s, with no output kept to
     prove the cause; Docker Desktop's VM on the owner's Mac uses 18 bits, and 32 bits there
-    (arm64) did not reproduce it in 40 runs. CI prints the value and sets 28 (see "CI"); for a
+    (arm64) did not reproduce it in 40 runs. Docker Desktop's WSL 2 VM on the owner's Windows
+    PC (x64, kernel 6.6) uses 32 bits and did reproduce it (2026-11-16): `pytest -m docker`
+    had six C tests time out now and then, a looped ASan run printed "DEADLYSIGNAL" without
+    end, and a rerun failed different ones. CI prints the value and sets 28 (see "CI"); for a
     user on such a Linux host, `tutor doctor` ("Roadmap" 6) now checks the value in C's
     registered machine check and prints the `sysctl` command (2026-11-09); it never runs it.
     With 28 set, the next CI run (2026-11-08) passed every C test, and
@@ -3599,6 +3602,25 @@ mode is not done (see "Decisions not to do").
   course switch, runner fallback or default-doctor install. Native install acceptance
   uses a new scratch root and an existing Python, with implicit Python downloads disabled;
   the packaging CI matrix covers installed wheels/fresh synthetic courses on three OSes.
+  - Release package (owner, 2026-11-15): one zip handed over directly, with no hosting (no
+    PyPI, no GitHub Release for now) and still no install script: the wheel plus
+    `packaging/INSTALL-<OS>.txt` for macOS, Linux and Windows, plain ASCII, which the user
+    follows by hand (uv's official installer, `uv tool install` of the wheel, then `tutor
+    gui`, `shortcut` and `doctor`; Docker only pointed to). One file per system (owner: a
+    mixed file made each reader skip two thirds of it). `tests/test_install_instructions.py`
+    checks each names this version, existing extras and the courses folder `locations`
+    gives. Walked through by hand on fresh machines (2026-11-15/16): macOS 15 in a UTM VM,
+    Ubuntu in VMware Fusion (Docker Engine there needed the docker group and a new login),
+    Windows 11 x64 in Windows Sandbox; their fixes are in the texts (no Notepad in Sandbox,
+    OneDrive or translated desktops, `$env:` in PowerShell, a VM clock months behind
+    failing TLS, a new terminal after installing Docker). Windows on ARM is not supported:
+    sqlite-vec, which langgraph-checkpoint-sqlite 3 requires (only its vector store imports
+    it; the SqliteSaver used here does not), has no win_arm64 wheel, and PyYAML has none for
+    Python 3.11. Resolving for it with Python 3.12 and sqlite-vec excluded (`uv tool install
+    --excludes`) works, but a course's `.venv` installs the same extras, so support waits
+    for a change of its own. Docker on Windows x64 (2026-11-16, `pytest -m docker` on the
+    owner's PC): every container-limit test and a container course's `doctor --smoke` pass;
+    C runs sometimes hang (see "C", the AddressSanitizer issue), to be fixed separately.
   - One click (the owner's aim, 2026-11-05; installation acceptance still pending): one install
     line gets `uv`, which fetches the Python it needs and installs the tool (`uv tool install`,
     the same job as `pipx`, without needing Python first). `tutor gui` starts the server and

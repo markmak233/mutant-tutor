@@ -66,6 +66,22 @@ the course. Environment → Check again → Make .venv is the separate guarded s
 `uv python uninstall IDENTIFIER` removes an unused interpreter; first check no venv uses it.
 uv is optional: manually installed Pythons remain discoverable.
 
+## Release package
+
+A release is one zip handed to the user directly: the wheel and the per-system
+instructions in [`packaging/`](../../packaging/) (`INSTALL-macOS.txt`, `INSTALL-Linux.txt`,
+`INSTALL-Windows.txt`), which the user follows by hand. Nothing is hosted and there is no
+install script. To make it from a clean checkout:
+
+```console
+uv build --wheel --out-dir dist
+```
+
+Put the wheel and the three files in one folder named `tutor-VERSION`, then zip that folder.
+`tests/test_install_instructions.py` checks that the files name the current version, the
+extras the install command uses, and the courses folder an installed tool keeps. Windows on
+ARM is not supported yet; see docs/design.md, "Packaging and release".
+
 ## Clean-install acceptance
 
 Build a wheel, then run the explicit script with a new scratch directory outside any
