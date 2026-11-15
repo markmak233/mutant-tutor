@@ -755,10 +755,15 @@ quality is a separate score that never replaces or overrides validity, on four p
 The owner rates the first batch after solving each exercise (one line per exercise, a few
 seconds), optionally with a free-text remark ("too easy", "unclear input format"). Format
 fixed at the first rating (2026-10-28): y or n per point, in the order above (`pairs yyyy
-too easy`), since yes/no labels compare cleanly with a judge's and need no scale; the
-assistant writes one JSON line per exercise to the workspace's `ratings.jsonl` (batch,
-exercise, date, clear, fits, taught, targets, remark), one file for all batches so later
-plans read every rating at once. Those ratings are the labels an LLM judge is checked against before
+too easy`), since yes/no labels compare cleanly with a judge's and need no scale; one JSON
+line per exercise goes to the workspace's `ratings.jsonl` (batch, exercise, date, clear,
+fits, taught, targets, remark), one file for all batches so later plans read every rating
+at once. The assistant wrote those lines at first; since 2026-11-15 (owner) the exercise
+page asks for them once a logged run has passed (`gui/ratings.py`): a yes/no pair per point,
+all four required, and an optional remark. Opening it again shows the stored rating in the
+form, and saving replaces that exercise's line in place (keys the page does not set stay;
+the file before is `ratings.jsonl.bak`), so an exercise never counts twice. The page shows
+no judge verdict beside it, since these ratings are what the judge is checked against. Those ratings are the labels an LLM judge is checked against before
 it is trusted (roadmap 3b), and later batches' plans read them (see the [3] preference chat). ContentGen (SIGCSE TS 2026) separates
 correctness from contextual fit in the same way, and found that a summary of recently
 covered material in the prompt improved generated questions (a [3] candidate).

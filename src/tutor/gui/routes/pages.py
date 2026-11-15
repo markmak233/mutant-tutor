@@ -1,11 +1,12 @@
 """Read-only pages (the courses, a course, a batch, an exercise) and the actions on
-them: open a folder or VS Code, and validate a batch.
+them: open a folder or VS Code, run the learner's tests, rate a passed exercise, and
+validate a batch.
 
 Routes are registered on the app by `register` (see gui/routes/__init__.py)."""
 
 from __future__ import annotations
 
-from flask import Flask, abort, redirect, render_template, url_for
+from flask import Flask, abort, redirect, render_template, request, url_for
 
 from tutor.gui import (
     course_setup,
@@ -14,6 +15,7 @@ from tutor.gui import (
     generation,
     lectures,
     plan_items,
+    ratings,
     rendering,
     tasks,
 )
@@ -41,6 +43,8 @@ def register(app: Flask) -> None:
 
     @app.get("/")
     def home():
+        """Every course under the root, and each folder that holds a workspace.toml but
+        could not be read as one."""
         found, problems = courses.find_courses(app.config["ROOT"])
         return render_template("courses.html", root=app.config["ROOT"],
                                views=[courses.course_view(c) for c in found], problems=problems,
@@ -48,6 +52,7 @@ def register(app: Flask) -> None:
 
     @app.get("/c/<name>/")
     def course(name: str):
+        """One course: its batches, recent runs and tasks, open plans and setup gaps."""
         view = courses.course_view(course_or_404(name))
         tasks.kick(view.course.workspace.root)  # a queue a dead runner left: it goes on
         history = tasks.list_tasks(view.course.workspace.root)
@@ -61,6 +66,7 @@ def register(app: Flask) -> None:
 
     @app.get("/c/<name>/b/<batch>/")
     def batch(name: str, batch: str):
+        """One batch's exercises, and the plan items that did not become one."""
         course, view = batch_or_404(name, batch)
         return render_template("batch.html", course=course, batch=view, labels=STATUS_LABELS,
                                missing=plan_items.not_succeeded(course, batch),
@@ -68,7 +74,10 @@ def register(app: Flask) -> None:
 
     @app.get("/c/<name>/b/<batch>/e/<exercise>/")
     def exercise(name: str, batch: str, exercise: str):
+        """One exercise: its question, its runs, and its rating once it has passed."""
         course, view, row, folder = exercise_or_404(name, batch, exercise)
+        # The stored rating fills the form in, so changing it starts from what was given.
+        rating = ratings.find(course.workspace.root, batch, exercise)
         text = courses.question(course, batch, exercise)
         # The file the learner writes in: student.py, or student.c in a C exercise.
         student = student_path(folder).name
@@ -86,7 +95,28 @@ def register(app: Flask) -> None:
                                # course (owner, 2026-11-10); a host course runs pytest.
                                in_container=environment.runner(course) == "container",
                                question_in=("the opening comment" if student.endswith(".c")
-                                            else "the docstring"))
+                                            else "the docstring"),
+                               rating=rating, can_rate=ratings.can_rate(row.status, rating),
+                               rating_points=ratings.POINTS, remark_max=ratings.REMARK_MAX)
+
+    @app.post("/c/<name>/b/<batch>/e/<exercise>/rate")
+    def rate_exercise(name: str, batch: str, exercise: str):
+        """Save the owner's teaching-quality rating (gui/ratings.py), back to the exercise
+        with a notice. Checked here again, not only by the page: a form can be sent for an
+        exercise that has not passed, or with a point left out."""
+        course, _, row, _ = exercise_or_404(name, batch, exercise)
+        back = url_for("exercise", name=name, batch=batch, exercise=exercise)
+        root = course.workspace.root
+        if not ratings.can_rate(row.status, ratings.find(root, batch, exercise)):
+            return redirect(f"{back}?notice=rating-not-passed", code=303)
+        given = ratings.parse(request.form)
+        if given is None:
+            return redirect(f"{back}?notice=rating-incomplete", code=303)
+        try:
+            ratings.save(root, batch, exercise, *given)
+        except OSError:
+            return redirect(f"{back}?notice=rating-not-saved", code=303)
+        return redirect(f"{back}?notice=rating-saved", code=303)
 
     @app.post("/c/<name>/b/<batch>/e/<exercise>/test")
     def test_exercise(name: str, batch: str, exercise: str):
@@ -109,11 +139,13 @@ def register(app: Flask) -> None:
 
     @app.post("/c/<name>/open-folder")
     def open_course_folder(name: str):
+        """The course folder in the file manager."""
         folder = course_or_404(name).workspace.root
         return act(lambda: launcher.open_folder(folder), url_for("course", name=name))
 
     @app.post("/c/<name>/b/<batch>/open-folder")
     def open_batch_folder(name: str, batch: str):
+        """The batch's exercises folder (never its solutions) in the file manager."""
         course, _ = batch_or_404(name, batch)
         folder = courses.exercises_dir(course, batch)
         if folder is None:
@@ -123,12 +155,15 @@ def register(app: Flask) -> None:
 
     @app.post("/c/<name>/b/<batch>/e/<exercise>/open-folder")
     def open_exercise_folder(name: str, batch: str, exercise: str):
+        """The exercise's folder in the file manager."""
         *_, folder = exercise_or_404(name, batch, exercise)
         return act(lambda: launcher.open_folder(folder),
                    url_for("exercise", name=name, batch=batch, exercise=exercise))
 
     @app.post("/c/<name>/b/<batch>/e/<exercise>/open-ide")
     def open_exercise_in_ide(name: str, batch: str, exercise: str):
+        """VS Code on the course folder, so its terminal uses the course's venv, with the
+        exercise's student file open (its folder when the file is missing)."""
         course, _, _, folder = exercise_or_404(name, batch, exercise)
         student = student_path(folder)  # student.py, or student.c in a C exercise
 

@@ -40,6 +40,14 @@ NOTICES = {
     "stopping": ("ok", N_("Stopping: every process of the task got Ctrl+C, and what is still "
                        "running after 10 s is killed.")),
     "not-running": ("bad", N_("This task is not running.")),
+    # The exercise page's rating form (gui/ratings.py).
+    "rating-saved": ("ok", N_("Rating saved in ratings.jsonl (the file before is "
+                           "ratings.jsonl.bak).")),
+    "rating-incomplete": ("bad", N_("Nothing was saved: answer yes or no on all four points.")),
+    "rating-not-passed": ("bad", N_("Nothing was saved: an exercise is rated once its tests "
+                                 "have passed in a logged run.")),
+    "rating-not-saved": ("bad", N_("Nothing was saved: ratings.jsonl could not be written. If "
+                                "it is open in another program, close it and save again.")),
     "opened-plan": ("ok", N_("Opened plan.json in VS Code. Save it there; approving uses the "
                           "saved file. Reload this page to see your changes.")),
     "feedback-empty": ("bad", N_("Write what to change first: plain text, 2000 characters at "
@@ -139,6 +147,7 @@ UPLOAD_LIMIT_BYTES = 500 * 1024 * 1024  # one upload request, all its files toge
 
 
 def course_or_404(name: str) -> courses.Course:
+    """The course in folder `name` under the GUI's root; 404 for any other name."""
     course = courses.get_course(current_app.config["ROOT"], name)
     if course is None:
         abort(404, N_("No such course."))
@@ -146,6 +155,7 @@ def course_or_404(name: str) -> courses.Course:
 
 
 def batch_or_404(name: str, batch: str) -> tuple[courses.Course, courses.BatchView]:
+    """The course and one of its batches, as its page shows it; 404 if either is missing."""
     course = course_or_404(name)
     view = courses.batch_view(course, batch)
     if view is None:
