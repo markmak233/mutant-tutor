@@ -2369,7 +2369,10 @@ themselves, so a cheap layer comes first and a stronger one later.
       the course's built image (as root, the file is root-only; no network, nothing pulled)
       for the container, which also covers Docker Desktop's VM on macOS and Windows, or in
       /proc on a Linux host, saying `sudo cat` when it is root-only there. It warns above 28
-      with gcc 14 as the fix. A gcc 14 course gets no row.
+      with gcc 14 as the fix. A gcc 14 course gets no row. Checked on the Windows PC at 32
+      bits (2026-11-16, 93a0ace): `pytest -m docker` passed twice in a row (32 passed each;
+      before the fix, up to six C tests timed out in a run), and `tests/test_c_real.py`
+      with the gen extra passed twice too (5 passed each), with no C run timing out.
   - Step 2, a course's language (owner, 2026-11-07; `tutor/languages.py`, the Environment
     page). A course is a C course when workspace.toml has `[languages.c]`, which only the
     owner writes, through the page or by hand; not inferred from `[requires]`, where `java`
