@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0 (not tagged yet)
+## 0.1.0 (2026-11-17)
 
 The first release: the whole loop, from a course's lectures to exercises solved in an IDE,
 runs end to end. The dependency versions CI passed with are in `constraints.txt`.
