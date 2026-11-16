@@ -444,6 +444,9 @@ MR_JOB = (
 ])
 def test_combiner_check(tmp_path, combine, reduce, status):
     """Rule 5 with combiner_check reruns the reference with the combiner removed."""
+    # The reference is an MRJob: without the [bigdata] extra it cannot even be collected.
+    pytest.importorskip("mrjob", reason="mrjob is in the bigdata extra: "
+                        "pip install -e \".[bigdata,dev]\"")
     reference = MR_JOB.format(COMBINE=combine, REDUCE=reduce)
     report = run(make_exercise(
         tmp_path, tests=MR_TESTS, reference=reference,
