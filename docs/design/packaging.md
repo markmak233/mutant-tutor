@@ -89,7 +89,13 @@ Installing the tool, the release package and its workflow. Part of the design re
     day).
   - Making it (owner, 2026-11-16): a manual workflow, `release.yml` (`workflow_dispatch`
     only), not a release on every tag or push, since a release is handed over by hand
-    anyway. It calls `ci.yml` whole (`workflow_call`), so a package CI would fail is never
+    anyway. It replaces making the package by hand, as the 11-15 walk-throughs did
+    (`uv build`, then the wheel and the INSTALL texts zipped in a `tutor-VERSION`
+    folder): the owner asked for it that day ("commit, then the release workflow"; the
+    schedule had it as "later") and approved the plan and the artifact's name. What stays
+    by hand: starting the run, the tag and its push, and any GitHub Release page; the
+    by-hand steps stay in docs/setup/install.md, "Release package", for use without
+    GitHub Actions. It calls `ci.yml` whole (`workflow_call`), so a package CI would fail is never
     made; builds one wheel with `uv build`, the command for a release by hand, and checks
     its name against pyproject's version; runs the clean-install acceptance on that same
     wheel on three systems (CI's own `packaging` job tests a wheel it builds itself); then
