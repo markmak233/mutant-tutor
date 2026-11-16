@@ -4032,8 +4032,9 @@ late; the adaptive review screens can be built with it.
     work) and with no task of it running or queued; the box, then the button, as the
     GUI's other removals. It removes `batches/.drafts/<date>_p3-<label>/` whole (plan, the
     checkpoint, item drafts of a generation that saved nothing), never through a link;
-    the task logs stay. The course page then says the name is free again. Tested with the
-    Flask client only; the click in a browser is pending.
+    the task logs stay. The course page then says the name is free again. Checked by the
+    owner's click in a browser on a scratch course (2026-11-16): the plan and its draft
+    folder went.
 - htmx 2.0.11, the newest 2.x on npm (2026-09-22, 0BSD), vendored as
   `static/htmx-2.0.11.min.js` after its tarball matched npm's sha512; a test pins the file's
   sha256. Its config turns off eval, script tags in swapped HTML and its inline indicator
