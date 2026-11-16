@@ -150,6 +150,19 @@ def register(app: Flask) -> None:
                                                   python=courses.task_python(course)),
                          generation.FEEDBACK, course)
 
+    @app.post("/c/<name>/plans/<label>/delete")
+    def delete_plan(name: str, label: str):
+        """The plan goes with its draft folder, freeing its name (owner, 2026-11-11). Two
+        clicks, the box then the button, as the GUI's other removals; only a plan that never
+        reached batches/ and has no task running or waiting (PlanView.can_delete)."""
+        course, _view = plan_or_404(name, label)
+        if request.form.get("confirm") != "1":
+            abort(400, N_("Tick the box to delete the plan."))
+        notice = generation.delete_plan(course, label)
+        if notice == "plan-deleted":  # its page is gone: back to the course
+            return redirect(url_for("course", name=name) + f"?notice={notice}", code=303)
+        return redirect(url_for("plan", name=name, label=label) + f"?notice={notice}", code=303)
+
     @app.post("/c/<name>/plans/<label>/continue")
     def continue_plan(name: str, label: str):
         course, view = plan_or_404(name, label)

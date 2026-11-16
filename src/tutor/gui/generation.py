@@ -174,6 +174,15 @@ class PlanView:
         return self.state == GENERATED
 
     @property
+    def can_delete(self) -> bool:
+        """A plan that can go with its draft folder (owner, 2026-11-11: "just delete it"):
+        nothing of it reached batches/ (no batch folder, so no exercise and no student
+        work), and no task of it runs or waits. delete_plan checks this again."""
+        if self.draft is None or (self.task is not None and self.task.pending):
+            return False
+        return self.state != GENERATED and not (self.draft.parent.parent / self.draft.name).exists()
+
+    @property
     def at_limit(self) -> bool:
         """The model chose the number and stopped at the limit: knowledge points may have been
         merged or left out. The limit is fixed in the batch's state once planned, so a plan
@@ -477,6 +486,33 @@ def _draft(course: Course, label: str) -> Path | None:
     found = sorted(p for p in _dirs(course.workspace.root / "batches" / ".drafts")
                    if label_of(p.name) == label and (p / "checkpoint.sqlite").is_file())
     return found[-1] if found else None
+
+
+def delete_plan(course: Course, label: str) -> str:
+    """Remove a plan the owner gave up on: its draft folder in batches/.drafts/, whole
+    (plan.json, the checkpoint, any item drafts). Found on 2026-11-10: a plan never
+    approved kept its label, so the next New batch of that name became `w3-1`, and the
+    page had no way to drop it. Its GUI task logs stay, as every task's do.
+
+    Returns a notice code: "plan-deleted", "plan-moved" when the plan is no longer one
+    that can go (a task started for it, or it was generated, since the page was shown),
+    or "plan-delete-failed" when the folder could not be removed (on Windows, a file in it
+    still open)."""
+    view = plan_view(course, label)
+    if view is None or not view.can_delete:
+        return "plan-moved"
+    drafts = (course.workspace.root / "batches" / ".drafts").resolve()
+    draft = view.draft
+    # Only a real folder directly in .drafts: never a link, never a path that leads out.
+    if draft.is_symlink() or draft.resolve().parent != drafts:
+        return "plan-delete-failed"
+    import shutil  # only this action removes anything
+
+    try:
+        shutil.rmtree(draft)
+    except OSError:
+        return "plan-delete-failed"
+    return "plan-deleted"
 
 
 def _plan(draft: Path) -> tuple[list[dict], str | None, bool]:

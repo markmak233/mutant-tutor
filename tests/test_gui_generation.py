@@ -542,3 +542,74 @@ def test_a_generated_plan_no_longer_warns(root, course):
     _generated(course)  # approved and generated, no coverage.md at all
     page = get(_browser(root), "/c/demo-course/plans/w9-test/").get_data(as_text=True)
     assert "coverage.md has no rows" not in page
+
+
+# --- deleting a plan (owner, 2026-11-11: an unapproved w3 made the next New batch w3-1) ---
+
+
+def test_a_plan_given_up_on_is_deleted_with_two_clicks_and_frees_its_name(root, course):
+    draft = _draft(course)
+    client = _browser(root)
+    page = get(client, "/c/demo-course/plans/w9-test/").get_data(as_text=True)
+    assert "/c/demo-course/plans/w9-test/delete" in page and draft.name in page
+
+    # The button alone does nothing: the box must be ticked too.
+    assert post(client, "/c/demo-course/plans/w9-test/delete").status_code == 400
+    assert draft.is_dir()
+
+    response = post(client, "/c/demo-course/plans/w9-test/delete", {"confirm": "1"})
+    assert response.status_code == 303
+    assert response.headers["Location"].endswith("/c/demo-course/?notice=plan-deleted")
+    assert not draft.exists()
+    assert _check(course)[0].label == "w9-test"  # no longer w9-test-1
+    assert get(client, "/c/demo-course/plans/w9-test/").status_code == 404
+    shown = get(client, "/c/demo-course/?notice=plan-deleted").get_data(as_text=True)
+    assert "its name is free" in shown
+
+
+def test_a_plan_with_a_batch_folder_cannot_be_deleted(root, course):
+    """Something of it reached batches/ (an exercise saved, so maybe student work): the
+    draft stays, and the page offers no box."""
+    draft = _draft(course)
+    (course.workspace.root / "batches" / draft.name / "generation.jsonl").parent.mkdir(
+        parents=True)
+    client = _browser(root)
+    assert not generation.plan_view(course, "w9-test", []).can_delete
+    assert "/plans/w9-test/delete" not in get(client, "/c/demo-course/plans/w9-test/").get_data(
+        as_text=True)
+
+    response = post(client, "/c/demo-course/plans/w9-test/delete", {"confirm": "1"})
+    assert response.headers["Location"].endswith("/plans/w9-test/?notice=plan-moved")
+    assert draft.is_dir()
+
+
+@pytest.mark.parametrize("status", [tasks.RUNNING, tasks.QUEUED])
+def test_a_plan_whose_task_runs_or_waits_cannot_be_deleted(root, course, monkeypatch, status):
+    draft = _draft(course)
+    monkeypatch.setattr(tasks, "list_tasks", lambda course_root: [_task("plan", status=status)])
+    assert not generation.plan_view(course, "w9-test").can_delete
+
+    response = post(_browser(root), "/c/demo-course/plans/w9-test/delete", {"confirm": "1"})
+    assert response.headers["Location"].endswith("?notice=plan-moved")
+    assert draft.is_dir()
+
+
+def test_a_plan_that_stopped_before_generating_anything_can_be_deleted(course):
+    """Generation began (an item's draft folder) but saved nothing to batches/: the plan can
+    go, with the item drafts inside its folder."""
+    draft = _draft(course)
+    (draft / "a" / "round-0").mkdir(parents=True)
+    view = generation.plan_view(course, "w9-test", [_task("approve", status=tasks.STOPPED)])
+    assert view.can_delete
+    assert generation.delete_plan(course, "w9-test") == "plan-deleted" and not draft.exists()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="making a symlink needs a privilege there")
+def test_a_draft_that_is_a_link_is_never_followed(course, tmp_path):
+    """A link in .drafts that looks like a plan: nothing is removed, here or where it leads."""
+    elsewhere = _draft(course, label="real")
+    link = elsewhere.parent / "2026-01-03_p3-w9-test"
+    link.symlink_to(elsewhere, target_is_directory=True)
+
+    assert generation.delete_plan(course, "w9-test") == "plan-delete-failed"
+    assert link.is_symlink() and (elsewhere / "plan.json").is_file()

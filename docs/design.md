@@ -4024,8 +4024,16 @@ late; the adaptive review screens can be built with it.
     upload. One folder waits at a time: choosing another, or Cancel, drops it. The whole folder counts
     toward a request's 500 MB, videos too, and at most 5000 files; past either, the 413 page
     says to choose a subfolder.
-  - A "discard plan" button stays out for now (owner): it would remove a draft folder, so
-    it gets its own step, hiding the folder rather than deleting it.
+  - Deleting a plan (owner, 2026-11-11, replacing 11-07's "hide the folder rather than
+    delete it": "just delete it"; built 2026-11-16). Found when a `w3` planned on 11-10
+    was never approved: its draft kept the label, so the next New batch became `w3-1`,
+    and the plan page had no way to drop it. The plan page offers "Delete plan" only for a
+    plan nothing of which reached `batches/` (no batch folder: no exercise, so no student
+    work) and with no task of it running or queued; the box, then the button, as the
+    GUI's other removals. It removes `batches/.drafts/<date>_p3-<label>/` whole (plan, the
+    checkpoint, item drafts of a generation that saved nothing), never through a link;
+    the task logs stay. The course page then says the name is free again. Tested with the
+    Flask client only; the click in a browser is pending.
 - htmx 2.0.11, the newest 2.x on npm (2026-09-22, 0BSD), vendored as
   `static/htmx-2.0.11.min.js` after its tarball matched npm's sha512; a test pins the file's
   sha256. Its config turns off eval, script tags in swapped HTML and its inline indicator
