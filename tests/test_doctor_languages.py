@@ -1,5 +1,6 @@
 """Language registry completeness, Linux ASan settings and a stand-in third language."""
 
+import importlib
 import json
 import subprocess
 import sys
@@ -14,6 +15,11 @@ from tutor.doctor_languages import c
 from tutor.doctor_rows import Row
 
 rig = support.rig
+# Loaded for its imports, before any test fakes sys.platform: `--smoke` reaches
+# tutor.processes, which imports the Windows-only winjob when the platform says win32.
+# Loaded first under a faked win32, it failed on macOS, but only when this file ran alone
+# (2026-11-16).
+importlib.import_module("tutor.doctor_smoke")
 
 
 def test_registry_complete_and_examples_match_language():
