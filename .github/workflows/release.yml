@@ -1,0 +1,111 @@
+# The release package (docs/setup/install.md, "Release package"; docs/design.md, "Packaging
+# and release"): by hand only, from the Actions tab ("Release", "Run workflow", pick the
+# branch). It runs the whole CI, builds the wheel once, installs that same wheel on Linux,
+# macOS and Windows, and only then keeps the zip as this run's artifact for 90 days. Nothing
+# is published: no GitHub Release, no PyPI. GitHub offers the button only once this file is
+# on the default branch.
+name: Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # Every CI job as on main (spark too, as this is a manual run). A release that CI would
+  # fail is not made.
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  # One wheel for the whole run, so what is tested below is what is handed over.
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.wheel.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - run: python -m pip install uv
+      # The command install.md gives for making a release by hand.
+      - run: uv build --wheel --out-dir dist
+      # Exactly one wheel, named for pyproject.toml's version, which the INSTALL files name
+      # too (tests/test_install_instructions.py). The version goes to the bundle job. Only
+      # wheels count: uv also writes a .gitignore into dist.
+      - id: wheel
+        name: Check the wheel against pyproject.toml's version
+        run: |
+          python - <<'EOF'
+          import os
+          import sys
+          import tomllib
+          from pathlib import Path
+          project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+          version = project["project"]["version"]
+          found = sorted(p.name for p in Path("dist").glob("*.whl"))
+          expected = [f"tutor-{version}-py3-none-any.whl"]
+          print(f"dist: {found}")
+          if found != expected:
+              sys.exit(f"expected {expected}")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"version={version}\n")
+          EOF
+      # Only for the jobs below; a day is enough.
+      - uses: actions/upload-artifact@v6
+        with:
+          name: wheel
+          path: dist/*.whl
+          retention-days: 1
+          if-no-files-found: error
+
+  # The clean-install acceptance of CI's packaging job, run on this run's own wheel.
+  accept:
+    needs: build
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v5  # for tools/package_acceptance.py
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+      - run: python -m pip install uv
+      - uses: actions/download-artifact@v7
+        with:
+          name: wheel
+          path: dist
+      - run: python tools/package_acceptance.py --uv uv --python python --wheel dist --work "${{ runner.temp }}/tutor-packaging"
+
+  # The zip a user is handed: a tutor-VERSION folder with the wheel and one INSTALL file
+  # per system. The artifact's name adds the commit, so two builds of one version differ.
+  bundle:
+    needs: [ci, build, accept]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5  # for packaging/INSTALL-*.txt, at the same commit
+      - uses: actions/download-artifact@v7
+        with:
+          name: wheel
+          path: dist
+      - id: folder
+        name: Put the wheel and the instructions in one folder
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          folder="release/tutor-$VERSION"
+          mkdir -p "$folder"
+          cp "dist/tutor-$VERSION-py3-none-any.whl" packaging/INSTALL-*.txt "$folder/"
+          ls -l "$folder"
+          echo "short=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+      # path is release/, so the zip holds the tutor-VERSION folder itself.
+      - uses: actions/upload-artifact@v6
+        with:
+          name: tutor-${{ needs.build.outputs.version }}-${{ steps.folder.outputs.short }}
+          path: release/
+          retention-days: 90
+          if-no-files-found: error

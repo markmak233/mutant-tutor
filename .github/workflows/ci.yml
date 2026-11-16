@@ -1,5 +1,6 @@
 # See docs/design.md, "CI". Runs when work reaches main (a push after a merge, or a pull
 # request into main), and by hand from the Actions tab, which also runs the `spark` job.
+# release.yml calls it whole (workflow_call) before it makes a release package.
 name: CI
 
 on:
@@ -8,6 +9,7 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+  workflow_call:
 
 permissions:
   contents: read
@@ -98,8 +100,9 @@ jobs:
           sys.exit(1 if skipped or not tests else 0)
           EOF
 
-  # End-to-end validation of the examples (about 3 min plus setup). Manual runs only; the
-  # Hadoop tests skip here (no HADOOP_HOME), so run those locally.
+  # End-to-end validation of the examples (about 3 min plus setup). Manual runs only, a
+  # release's included (a called workflow sees its caller's event); the Hadoop tests skip
+  # here (no HADOOP_HOME), so run those locally.
   spark:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest

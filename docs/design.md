@@ -2777,8 +2777,9 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
   runner >= 2.327.1; workflows use GitHub-hosted latest images. Job names and matrices stay
   unchanged, particularly the required `test (3.11)`. Local tests cannot establish whether
   a GitHub job runs; that is checked on the owner's next push/PR run.
-- Runs when work reaches `main` (a push after merging `dev`, or a pull request into `main`)
-  and by hand (`workflow_dispatch`), not on every `dev` push: each step is already checked
+- Runs when work reaches `main` (a push after merging `dev`, or a pull request into `main`),
+  by hand (`workflow_dispatch`), and inside a release run (`release.yml` calls it, see
+  "Packaging and release"), not on every `dev` push: each step is already checked
   locally with `pytest` and `ruff check .`, and the badge then shows the state of `main`,
   the branch visitors see.
 - `test`: Python 3.11, 3.12, 3.13 and 3.14, `ruff check .` and the fast `pytest`. The first
@@ -3645,7 +3646,21 @@ mode is not done (see "Decisions not to do").
     --excludes`) works, but a course's `.venv` installs the same extras, so support waits
     for a change of its own. Docker on Windows x64 (2026-11-16, `pytest -m docker` on the
     owner's PC): every container-limit test and a container course's `doctor --smoke` pass;
-    C runs sometimes hang (see "C", the AddressSanitizer issue), to be fixed separately.
+    C runs sometimes hang (see "C", the AddressSanitizer issue; fixed with gcc 14 the same
+    day).
+  - Making it (owner, 2026-11-16): a manual workflow, `release.yml` (`workflow_dispatch`
+    only), not a release on every tag or push, since a release is handed over by hand
+    anyway. It calls `ci.yml` whole (`workflow_call`), so a package CI would fail is never
+    made; builds one wheel with `uv build`, the command for a release by hand, and checks
+    its name against pyproject's version; runs the clean-install acceptance on that same
+    wheel on three systems (CI's own `packaging` job tests a wheel it builds itself); then
+    uploads the `tutor-VERSION` folder as the run's artifact, named with the commit's first
+    7 characters so two builds of one version stay apart, kept 90 days (GitHub's maximum
+    by default) and downloadable by logged-in users. An artifact is not hosting in the
+    sense decided above: it lives on the run's page, is not listed as a release and
+    expires. Not runnable locally: checked with actionlint 1.7.7 and its build and bundle
+    commands rehearsed (that caught uv writing a `.gitignore` into `dist`); its first real
+    run, after it reaches the default branch, is the check that it works.
   - One click (the owner's aim, 2026-11-05; installation acceptance still pending): one install
     line gets `uv`, which fetches the Python it needs and installs the tool (`uv tool install`,
     the same job as `pipx`, without needing Python first). `tutor gui` starts the server and

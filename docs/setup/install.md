@@ -70,8 +70,20 @@ uv is optional: manually installed Pythons remain discoverable.
 
 A release is one zip handed to the user directly: the wheel and the per-system
 instructions in [`packaging/`](../../packaging/) (`INSTALL-macOS.txt`, `INSTALL-Linux.txt`,
-`INSTALL-Windows.txt`), which the user follows by hand. Nothing is hosted and there is no
-install script. To make it from a clean checkout:
+`INSTALL-Windows.txt`), which the user follows by hand. Nothing is published (no GitHub
+Release, no PyPI) and there is no install script.
+
+The usual way is the manual Release workflow
+([`.github/workflows/release.yml`](../../.github/workflows/release.yml)): on GitHub, open
+Actions, choose "Release", press "Run workflow" and pick the branch. It runs the whole CI
+(the `spark` job included), builds the wheel once, installs that wheel on
+Linux, macOS and Windows with the clean-install acceptance below, and only then keeps the
+zip as the run's artifact, `tutor-VERSION-COMMIT` (the commit's first 7 characters), on the
+run's page for 90 days. Downloading it needs a GitHub login; inside is the `tutor-VERSION`
+folder to hand over. GitHub shows the button only once the workflow file is on the default
+branch.
+
+By hand, from a clean checkout:
 
 ```console
 uv build --wheel --out-dir dist
