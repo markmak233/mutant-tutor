@@ -57,8 +57,9 @@ python = "{version}"
 """
 
 # ZDOTDIR makes this folder's terminals read .vscode/zsh instead of ~/.zshrc. The two paths win
-# over the repo's .env, which can name only one workspace: without them the attempts plugin
-# skips this folder's tests without a word.
+# over the repo's .env, which can name only one workspace. macOS only: elsewhere the attempts
+# plugin finds the course from the workspace.toml above the tests (attempts.workspace_of), and
+# `tutor gui` from the one above the terminal's folder.
 SETTINGS = """\
 {
   "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",

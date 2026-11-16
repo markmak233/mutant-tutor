@@ -1,9 +1,10 @@
 """Record every test run of a workspace exercise in attempts/attempts.jsonl (docs/design.md).
 
 A pytest plugin, registered through the `pytest11` entry point, so it loads in every pytest
-run of this venv. It writes only for tests under
-$WORKSPACE_DIR/batches/<batch>/exercises/<exercise>/: validator runs (temp dirs) and the
-repo's own tests are never recorded. One line per exercise per run, e.g.
+run of this venv. It writes only for tests under <course>/batches/<batch>/exercises/<exercise>/,
+the course being WORKSPACE_DIR or else the nearest folder above the test with a
+workspace.toml (workspace_of): validator runs (temp dirs) and the repo's own tests are never
+recorded. One line per exercise per run, e.g.
 
     {"time": "2026-10-25T14:03:11", "batch": "2026-10-25_p2-w2-mapreduce",
      "exercise": "word-count", "mode": "learn", "result": "failed", "passed": 2,
@@ -36,7 +37,7 @@ from pathlib import Path
 from tutor import attempt_records
 from tutor.attempt_records import Tally, rebuild_report, short_error, write_attempt
 from tutor.attempt_transport import EXPORT_ENV, append_event
-from tutor.config import WorkspaceError, load_env, load_workspace
+from tutor.config import WORKSPACE_FILE, WorkspaceError, load_env, load_workspace
 
 # Public filename retained for existing hint, held-out and evaluation readers.
 ATTEMPTS_FILE = attempt_records.ATTEMPTS_FILE
@@ -128,38 +129,59 @@ def _emit(event: str, **fields: object) -> None:
         warnings.warn(f"could not export the attempt: {e}", stacklevel=1)
 
 
+def workspace_of(test_file: Path, named: Path | None) -> Path | None:
+    """The course a test file belongs to: WORKSPACE_DIR's when the file is one of its
+    exercises, else the nearest folder above the file with a workspace.toml, when the file
+    is one of that course's exercises. The second covers every terminal that has no
+    WORKSPACE_DIR, or another course's: a course's VS Code terminal sets it on macOS only
+    (workspace.SETTINGS), and the repo's `.env` names one course. Without it, such runs
+    went unrecorded without a word (found 2026-11-16). A validator's or tutor's own temp
+    copy has no workspace.toml above it, so it still leaves no trace."""
+    if named is not None and exercise_of(test_file, named) is not None:
+        return named
+    for folder in test_file.resolve().parents:
+        if (folder / WORKSPACE_FILE).is_file():
+            return folder if exercise_of(test_file, folder) is not None else None
+    return None
+
+
 def _write(duration_s: float, interrupted: bool = False) -> None:
-    """Append one line per exercise this run touched, then rebuild the report. A run of no
-    workspace exercise (the validator's, the repo's own tests) leaves no trace."""
+    """Append one line per exercise this run touched, then rebuild the report of each course
+    written to. A run of no workspace exercise (the validator's, the repo's own tests) leaves
+    no trace."""
     if not _tallies:
         return
-    # Tests run from a workspace folder, so the repo's .env is loaded by path.
+    # Tests run from a workspace folder, so the repo's .env is loaded by path. An installed
+    # tool has no such file; workspace_of finds its courses from the test files instead.
     load_env(Path(__file__).resolve().parents[2] / ".env")
-    root = os.environ.get("WORKSPACE_DIR")
-    if not root:
-        return
-    # Add test files up per exercise: pytest started higher up may run several files of one.
-    by_exercise: dict[tuple[str, str], Tally] = {}
+    raw = os.environ.get("WORKSPACE_DIR")
+    named = Path(raw).expanduser().resolve() if raw else None
+    # Add test files up per course and exercise: pytest started higher up may run several
+    # files of one exercise, and (rarely) exercises of more than one course.
+    by_course: dict[Path, dict[tuple[str, str], Tally]] = {}
     for test_file, tally in _tallies.items():
-        key = exercise_of(test_file, Path(root))
-        if key is None:
-            continue
-        total = by_exercise.setdefault(key, Tally())
+        root = workspace_of(test_file, named)
+        if root is None:
+            continue  # not a workspace exercise: validator or repo tests
+        key = exercise_of(test_file, root)
+        total = by_course.setdefault(root, {}).setdefault(key, Tally())
         total.passed += tally.passed
         total.failed += tally.failed
         total.errors += tally.errors
         total.skipped += tally.skipped
         total.first_error = total.first_error or tally.first_error
-    if not by_exercise:
-        return  # not a workspace exercise: validator or repo tests
 
-    try:
-        workspace = load_workspace()
-    except WorkspaceError as e:
-        warnings.warn(f"attempt not recorded: {e}", stacklevel=1)
-        return
-    for (batch, exercise), tally in by_exercise.items():
-        write_attempt(workspace, batch, exercise, tally, duration_s,
-                      interrupted=interrupted,
-                      partitions=int(os.environ.get("TUTOR_PARTITIONS", "2")), rebuild=False)
-    rebuild_report(workspace)  # all exercise lines are durable before rebuilding once
+    partitions = int(os.environ.get("TUTOR_PARTITIONS", "2"))
+    for root, by_exercise in by_course.items():
+        # WORKSPACE_DIR's course loads with the rest of the environment (its LECTURE_DIR);
+        # a course found from its files loads alone, as `tutor test` loads one.
+        environ = None if root == named else {"WORKSPACE_DIR": str(root)}
+        try:
+            workspace = load_workspace(environ)
+        except WorkspaceError as e:
+            warnings.warn(f"attempt not recorded: {e}", stacklevel=1)
+            continue
+        for (batch, exercise), tally in by_exercise.items():
+            write_attempt(workspace, batch, exercise, tally, duration_s,
+                          interrupted=interrupted, partitions=partitions, rebuild=False)
+        rebuild_report(workspace)  # all exercise lines are durable before rebuilding once

@@ -120,8 +120,15 @@ container for isolation is fine; deploying the tool as a service is not.
     is global config. This covers VS Code terminals on macOS only.
   - Not added, tested in a scratch folder only: `required_plugins = tutor` in a workspace `pytest.ini`
     stops a run outside the venv with exit 4. It is the fallback if the gap returns.
-  - `.env` names one workspace, and the plugin skips tests outside it without a word, so these
+  - `.env` names one workspace, and the plugin skipped tests outside it without a word, so these
     terminals also set `WORKSPACE_DIR` and `LECTURE_DIR` to their folder.
+  - Since 2026-11-16 the plugin no longer depends on that: a test that is not one of
+    `WORKSPACE_DIR`'s exercises belongs to the nearest folder above it with a
+    `workspace.toml`, when it is one of that course's exercises (`attempts.workspace_of`).
+    Found reading the code for the release package: on Linux and Windows a course's VS Code
+    terminal sets no `WORKSPACE_DIR` and an installed tool has no `.env`, so every host run
+    there went unrecorded. Temp copies (the validator's, a tutoring check's) have no
+    `workspace.toml` above them and still leave no trace.
   - `python -m tutor.workspace init` writes all of this and keeps any file that exists (owner, 2026-11-05).
     Checked end to end in a scratch folder, with a real venv and install, about 11 s; `docs/setup/bigdata.md`
     has the step.
