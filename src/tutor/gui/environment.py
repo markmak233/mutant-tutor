@@ -59,7 +59,6 @@ RUNNERS = ("container", "host")
 # What each name in [requires] is, as the page says it (N_(): translated when shown).
 KINDS = {"python": N_("Python version"), "java": N_("JDK (Java)"), "hadoop": N_("Hadoop"),
          "gcc": N_("C compiler")}
-# The gcc the test image has (Debian bookworm's), which adding C writes in [requires].
 MODULE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")  # a top-level module, as allow_imports holds
 HADOOP_DOWNLOAD = "about 730 MB"  # measured 2026-11-05, see image_recipe.HADOOP_MIRRORS
 # What an image weighs, for scale: the two built here on 2026-11-06.
@@ -164,7 +163,7 @@ def docker_view(course: Course, run: Callable = subprocess.run) -> DockerView:
 def downloads(requires: dict[str, str]) -> list[tuple[str, str]]:
     """What a build fetches and from where, read off the same rules as the recipe."""
     python = requires.get("python") or f"{sys.version_info.major}.{sys.version_info.minor}"
-    found = [(f"python:{python}-slim-bookworm", "Docker Hub, the official Python image")]
+    found = [(image_recipe.base_image(requires), "Docker Hub, the official Python image")]
     if java := requires.get("java"):
         found.append((f"openjdk-{java.split('.')[0]}-jre-headless and procps",
                       "Debian's package mirrors (apt)"))

@@ -47,7 +47,7 @@ def course(request, tmp_path_factory):
         pytest.skip(problem)
     kind = request.param
     root = tmp_path_factory.mktemp(f"learner-{kind}")
-    requires = {"python": "3.11", **({"gcc": "12"} if kind == "c" else
+    requires = {"python": "3.11", **({"gcc": "14"} if kind == "c" else
                                     {"java": "17", "pyspark": "3.5"})}
     config = (f'course = "practice-{kind}"\n[requires]\n'
               + "".join(f'{name} = "{value}"\n' for name, value in requires.items())

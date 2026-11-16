@@ -84,6 +84,16 @@ _SANITIZER = re.compile(
     r"ERROR: (AddressSanitizer|LeakSanitizer)|SUMMARY: UndefinedBehaviorSanitizer"
     r"|:\d+:\d+: runtime error: ")
 _PROCESS_ID = re.compile(r"^==\d+==")
+# What gcc 12's AddressSanitizer prints, over and over, when it hangs at a program's start
+# on a kernel with 32 bits of mmap randomisation (docs/design.md, "C"). A real crash prints
+# it once and then an "ERROR: AddressSanitizer" report, which _SANITIZER finds instead.
+_ASAN_HANG = "AddressSanitizer:DEADLYSIGNAL"
+ASAN_HUNG = ("AddressSanitizer hung before the program could finish (it printed "
+             f"\"{_ASAN_HANG}\" over and over, with no report): most likely not this code. "
+             "gcc 12's sanitizer hangs now and then on machines with 32 bits of address "
+             "randomisation, Docker Desktop's on Windows among them. Run the test again; for "
+             "good, set gcc = \"14\" in the course's workspace.toml [requires] and build its "
+             "image again")
 
 
 class CompileError(Exception):
@@ -167,7 +177,13 @@ class Program:
             proc = subprocess.run([str(self.path), *map(str, args)],
                                   input=stdin.encode("utf-8"), capture_output=True,
                                   timeout=timeout_s, cwd=cwd, env=env)
-        except subprocess.TimeoutExpired:
+        except subprocess.TimeoutExpired as e:
+            # What it printed before the limit (bytes, or None when nothing came): a hung
+            # sanitizer is no endless loop of the learner's, and the usual sentence would
+            # send them looking for one in correct code.
+            partial = (e.stderr or b"").decode("utf-8", "replace")
+            if _ASAN_HANG in partial and not _SANITIZER.search(partial):
+                raise AssertionError(ASAN_HUNG) from None
             raise AssertionError(
                 f"the program did not finish within {timeout_s:g} s: an endless loop, or "
                 "waiting for input it was never given?") from None

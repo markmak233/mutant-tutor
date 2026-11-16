@@ -108,7 +108,7 @@ def test_adding_c_from_the_list_uses_the_lectures_flags_and_shows_its_settings(r
     assert data["requires"]["gcc"] == languages_page.IMAGE_GCC
     text = _page(client)
     assert "<strong>C</strong> <span class=\"muted\">gcc</span>" in text
-    assert 'name="version:gcc" value="12"' in text and ">Remove</button>" in text
+    assert 'name="version:gcc" value="14"' in text and ">Remove</button>" in text
     assert "C: compiler settings" in text and 'value="-Wall -std=c99"' in text
     assert '<option value="c">' not in text  # added already: no form, the others named
     assert 'name="language"' not in text.split("C: compiler settings")[0].split(

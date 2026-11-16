@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import re
 import subprocess
 from pathlib import Path
 
@@ -98,6 +99,30 @@ def test_a_c_course_gets_gcc_in_a_step_of_its_own():
     without = dockerfile(PLAIN_COURSE, uid=501)
     assert without == recipe.replace(recipe[recipe.index("RUN apt-get"):
                                             recipe.index("RUN pip")], "")
+
+
+@pytest.mark.parametrize(("gcc", "base"), [("12", "bookworm"), ("12.2", "bookworm"),
+                                           ("14", "trixie")])
+def test_gcc_picks_the_debian_release_that_packages_it(gcc, base):
+    """gcc 14 needs trixie (gcc 12's ASan hangs at 32 bits of mmap randomisation); gcc 12 and
+    no gcc keep bookworm, so those recipes and image names stay as they were."""
+    recipe = dockerfile({**PLAIN_COURSE, "gcc": gcc}, uid=501)
+    assert recipe.startswith(f"FROM python:3.11-slim-{base}\n")
+
+
+@pytest.mark.parametrize(("extra", "words"), [
+    ({"gcc": "13"}, "gcc 12 (Debian bookworm), 14 (Debian trixie)"),
+    ({"gcc": "14", "java": "17"}, "has only Java 21"),
+])
+def test_a_gcc_or_java_no_release_has_is_refused_before_a_build(extra, words):
+    with pytest.raises(ContainerError, match=re.escape(words)):
+        dockerfile({**PLAIN_COURSE, **extra}, uid=501)
+
+
+def test_trixie_takes_its_own_jdk():
+    recipe = dockerfile({**PLAIN_COURSE, "gcc": "14", "java": "21"}, uid=501)
+    assert recipe.startswith("FROM python:3.11-slim-trixie\n")
+    assert "openjdk-21-jre-headless" in recipe
 
 
 def test_hadoop_is_downloaded_from_every_mirror_and_checked_against_a_fixed_checksum():

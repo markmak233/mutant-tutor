@@ -79,7 +79,8 @@ def rig(tmp_path, monkeypatch):
                         lambda *a, **k: pytest.fail("doctor checked the tool interpreter"))
     # Linux hosts differ in mmap settings; dedicated language tests cover that probe.
     monkeypatch.setitem(doctor_languages.DOCTORS, "c",
-                        replace(doctor_languages.DOCTORS["c"], machine_checks=lambda run: []))
+                        replace(doctor_languages.DOCTORS["c"],
+                                machine_checks=lambda run, course: []))
     # A missing `docker` is "not installed" unless Docker Desktop is there; never let this
     # machine's own install decide which.
     monkeypatch.setattr(container, "desktop_app", lambda **kwargs: None)

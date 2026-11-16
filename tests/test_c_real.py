@@ -21,7 +21,7 @@ from tutor.validation.__main__ import format_report
 pytestmark = pytest.mark.docker
 
 EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
-REQUIRES = {"python": "3.11", "gcc": "12"}
+REQUIRES = {"python": "3.11", "gcc": "14"}
 
 
 @pytest.fixture(scope="session")
@@ -30,7 +30,7 @@ def course(tmp_path_factory) -> Path:
         pytest.skip(problem)
     root = tmp_path_factory.mktemp("c-course")
     (root / "workspace.toml").write_text(
-        'course = "dockertest-c"\n[requires]\npython = "3.11"\ngcc = "12"\n'
+        'course = "dockertest-c"\n[requires]\npython = "3.11"\ngcc = "14"\n'
         '[isolation]\nrunner = "container"\n[languages.c]\nflags = ["-Wall", "-std=c99"]\n',
         encoding="utf-8")
     build(Workspace(root=root, course="dockertest-c", requires=REQUIRES, lecture_dir=root / "l"),

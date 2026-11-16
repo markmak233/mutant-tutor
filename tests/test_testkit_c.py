@@ -165,6 +165,19 @@ def test_a_program_that_never_ends_fails_its_test_at_the_time_limit(tmp_path):
         program.run(timeout_s=0.5)
 
 
+def test_a_hung_sanitizer_is_not_blamed_on_the_learners_loop(tmp_path):
+    """gcc 12's ASan, hung at 32 bits of mmap randomisation, prints DEADLYSIGNAL without end
+    (seen on Docker Desktop's WSL 2 VM, 2026-11-16); a stand-in program prints the same."""
+    program = compiled(tmp_path, "#include <stdio.h>\nint main(void) {\n    for (;;) {\n"
+                                 "        fputs(\"AddressSanitizer:DEADLYSIGNAL\\n\", stderr);\n"
+                                 "        fflush(stderr);\n    }\n}\n")
+
+    with pytest.raises(AssertionError) as caught:
+        program.run(timeout_s=0.5)
+    assert str(caught.value) == testkit_c.ASAN_HUNG
+    assert "did not finish within" not in str(caught.value)  # the c-timeout hint's words
+
+
 def test_a_program_killed_by_a_signal_names_it(tmp_path):
     program = compiled(tmp_path, "#include <stdlib.h>\nint main(void) { abort(); }\n")
 

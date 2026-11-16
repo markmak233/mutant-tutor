@@ -2349,6 +2349,27 @@ themselves, so a cheap layer comes first and a stronger one later.
     With 28 set, the next CI run (2026-11-08) passed every C test, and
     nothing else about C had changed; as the hang is intermittent, one run is strong evidence,
     not proof.
+    - Measured and fixed (owner, 2026-11-16). On the Windows PC, a do-nothing program built
+      with the tests' flags and run 300 times under the 5 s limit: gcc 12 (bookworm) at 32
+      bits hung 67 times (68 in a second sample), each hang printing only
+      "AddressSanitizer:DEADLYSIGNAL"; gcc 12 at 28 bits, 0; gcc 14.2 (Debian trixie) at
+      32 bits, 0. Running the program with randomisation off (`setarch -R`) is no way round
+      it: Docker 29.6.1's default seccomp profile refuses that `personality()` call (Docker
+      24.0.6 on the Mac allowed it), and widening seccomp for every run is not worth it. A
+      sysctl in Docker Desktop's VM is lost when Docker restarts, so it is no fix for a
+      learner either. So gcc's major picks the image's Debian release
+      (`image_recipe.DEBIAN_BY_GCC`): `gcc = "14"` builds on trixie, `"12"` stays on
+      bookworm, and a course without C keeps its recipe and image name. Trixie packages only
+      JDK 21, so gcc 14 with java 17 (a Spark course) is refused before a build. Adding C
+      now writes gcc 14. gcc 14 also makes some old warnings errors (incompatible pointer
+      types, implicit int, int-conversion): such code no longer compiles, which the owner
+      accepted (2026-11-16). For a course still on gcc 12, a timed-out run whose output has
+      DEADLYSIGNAL and no sanitizer report says the sanitizer hung, not the learner's loop
+      (`testkit_c.ASAN_HUNG`), and `tutor doctor` reads the value where the tests run: in
+      the course's built image (as root, the file is root-only; no network, nothing pulled)
+      for the container, which also covers Docker Desktop's VM on macOS and Windows, or in
+      /proc on a Linux host, saying `sudo cat` when it is root-only there. It warns above 28
+      with gcc 14 as the fix. A gcc 14 course gets no row.
   - Step 2, a course's language (owner, 2026-11-07; `tutor/languages.py`, the Environment
     page). A course is a C course when workspace.toml has `[languages.c]`, which only the
     owner writes, through the page or by hand; not inferred from `[requires]`, where `java`
@@ -2362,8 +2383,9 @@ themselves, so a cheap layer comes first and a stronger one later.
       lines share, shown with its first line (the first C course: `-Wall -std=c99` on all 19
       lines). The box starts at the course's flags, else these, else `-std=c11 -Wall`.
     - Ticking C writes `[languages.c] flags`, `[safety] allow_headers` (headers beyond the
-      standard library's, each a plain `name.h` path) and `gcc = "12"` in [requires] when
-      missing (the image's Debian gcc). Checked writes as every other table, the file before
+      standard library's, each a plain `name.h` path) and `gcc = "14"` in [requires] when
+      missing (the image's Debian gcc: trixie's, see the AddressSanitizer issue above; 12,
+      bookworm's, until 2026-11-16). Checked writes as every other table, the file before
       kept as `.bak`.
     - What the lectures' code uses beyond the core modules (owner, 2026-11-10; the plan
       had a model drafting `[safety] allow_imports` and `[languages.*]` at a course's
