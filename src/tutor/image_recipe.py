@@ -2,7 +2,8 @@
 image's name, a hash of that recipe. Nothing here calls Docker; tutor.container builds the image
 from this recipe and runs tests in it.
 
-Isolation layer B (docs/design.md, "Code execution safety"): what goes into the image is fixed
+Isolation layer B (docs/design/execution.md, "Code execution safety"): what goes into the image is
+fixed
 here, from the course's [requires] and nothing of this machine but the versions it has.
 """
 
@@ -44,7 +45,8 @@ _TEST_PACKAGES = ("pytest", "hypothesis")
 # The Debian release under the official Python image, chosen by [requires] gcc's major: each
 # release packages one gcc. bookworm stays the default, so a course without C (or with gcc
 # 12) keeps its recipe and image name. gcc 14 is there because gcc 12's AddressSanitizer
-# hangs on kernels with 32 bits of mmap randomisation (docs/design.md, "C"); trixie packages
+# hangs on kernels with 32 bits of mmap randomisation (docs/design/execution.md, "C"); trixie
+# packages
 # only JDK 21, so it cannot carry a Spark course's java 17 (both measured 2026-11-16).
 DEFAULT_DEBIAN = "bookworm"
 DEBIAN_BY_GCC = {"12": "bookworm", "14": "trixie"}

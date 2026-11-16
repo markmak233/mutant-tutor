@@ -1,4 +1,4 @@
-"""Another Python for a course's .venv, from the Environment page's check (docs/design.md,
+"""Another Python for a course's .venv, from the Environment page's check (docs/design/execution.md,
 "Version conflicts").
 
 When the check finds that a package does not run on the course's Python (a known conflict,

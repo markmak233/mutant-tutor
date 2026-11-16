@@ -1,4 +1,4 @@
-"""Vector search over the pages, and the embeddings it needs (docs/design.md, "RAG").
+"""Vector search over the pages, and the embeddings it needs (docs/design/rag.md, "RAG").
 
 An embedding model turns a text into a list of numbers such that texts with similar meaning
 get lists pointing in similar directions. Searching is then: embed the query, and rank pages

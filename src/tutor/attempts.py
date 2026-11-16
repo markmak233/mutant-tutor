@@ -1,4 +1,4 @@
-"""Record every test run of a workspace exercise in attempts/attempts.jsonl (docs/design.md).
+"""Record every test run of a workspace exercise in attempts/attempts.jsonl (docs/design/README.md).
 
 A pytest plugin, registered through the `pytest11` entry point, so it loads in every pytest
 run of this venv. It writes only for tests under <course>/batches/<batch>/exercises/<exercise>/,

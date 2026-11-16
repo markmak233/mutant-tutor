@@ -10,7 +10,7 @@ draft leaves out on purpose) was never proposed, so a course that teaches it got
 the static check refused. The same for a header a course ships. Import and include lines
 are exact text, so this reads them with a regular expression: no cost, and every candidate
 comes with the lecture, the page and the line that show it; the owner ticks each one on the
-page, as widening the check is a safety decision (design.md, "Decisions not to do").
+page, as widening the check is a safety decision (docs/design/README.md, "Decisions not to do").
 
 A name that starts processes or shells, reaches the network, loads code or maps memory is
 marked: allowing it lets generated exercises do that, so it is for a course that teaches it.

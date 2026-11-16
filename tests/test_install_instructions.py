@@ -65,5 +65,5 @@ def test_the_courses_folder_is_where_an_installed_tool_keeps_them(system, monkey
 
 def test_windows_on_arm_is_said_to_be_unsupported():
     # sqlite-vec (through langgraph-checkpoint-sqlite) has no Windows ARM64 wheel, and
-    # PyYAML none for Python 3.11 there (docs/design.md, "Packaging and release").
+    # PyYAML none for Python 3.11 there (docs/design/packaging.md, "Packaging and release").
     assert "Windows on ARM\nis not supported yet" in _text("Windows")

@@ -108,7 +108,8 @@ What exists today, and what does not yet, so that nothing planned reads as built
 
 - [`docs/details.md`](docs/details.md): how validation and generation work, the results, the
   RAG comparison, where exercise code runs, the layout and the roadmap
-- [`docs/design.md`](docs/design.md): every design decision, with the measurements behind it
+- [`docs/design/`](docs/design/README.md): every design decision, with the measurements behind it, one
+  file per part (validation, generation, the GUI, ...) and an index
 - [`docs/assistant-mode.md`](docs/assistant-mode.md): a coding assistant instead of an API
 
 Developed with Claude Code as the coding assistant, in small reviewed steps; the working

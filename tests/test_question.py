@@ -89,7 +89,7 @@ def test_a_draft_question_has_no_how_to_run(tmp_path):
 
 
 
-# --- the Markdown layout (docs/design.md, "question.md format") --------------------------
+# --- the Markdown layout (docs/design/validation.md, "question.md format") ------------------------
 
 MARKDOWN = 'r"""' + r"""# Count the bits
 

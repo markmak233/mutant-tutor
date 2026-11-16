@@ -1,4 +1,4 @@
-"""Measure a retrieval route against the labelled queries (docs/design.md, "RAG").
+"""Measure a retrieval route against the labelled queries (docs/design/rag.md, "RAG").
 
 Two kinds of number, because the routes return two kinds of result:
 

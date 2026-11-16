@@ -1,5 +1,5 @@
 """A course's environment (GUI step 7a): what its tests need, whether this machine has it,
-and the two installs the GUI may start (docs/design.md, "Local GUI", Environment page).
+and the two installs the GUI may start (docs/design/gui.md, "Local GUI", Environment page).
 
 - The shared course_requirements probe uses the course's .venv, rather than the GUI/tool
   interpreter. This GUI keeps its existing child-only .env lookup for JAVA_HOME/HADOOP_HOME;
@@ -372,7 +372,7 @@ def save_runner(course: Course, chosen: str, understood: bool) -> list[str]:
         return [_("Choose where tests run: container or host.")]
     if chosen == "host" and languages.is_c(_data(course)):
         return [_("A C course's tests run only in a container: a static check cannot bound "
-                  "what C code does (docs/design.md, \"C\").")]
+                  "what C code does (docs/design/execution.md, \"C\").")]
     if chosen == "host" and not understood:
         return [_("To run tests on this machine, tick that you understand generated code "
                   "then runs with your rights.")]

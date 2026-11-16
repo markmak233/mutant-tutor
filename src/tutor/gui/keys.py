@@ -7,7 +7,7 @@ The user adds and removes keys by name, not only the ones a profile names.
 What the GUI does with a key: writes it, then never shows it again in full; a page shows the
 last 4 characters of a long one, to tell two apart. The file is parsed as text here and never
 loaded into the GUI's own environment, which VS Code and its terminals inherit
-(docs/design.md, "Local GUI"). Only key-like names (…_KEY, …_TOKEN, …_SECRET) and the names
+(docs/design/gui.md, "Local GUI"). Only key-like names (…_KEY, …_TOKEN, …_SECRET) and the names
 a course's profile gives in `api_key_env` are listed or removed; WORKSPACE_DIR and the other
 settings in the file are left as they are. Every other line, comments included, is kept as
 written. The file is replaced in one step and readable by its owner only (0600).

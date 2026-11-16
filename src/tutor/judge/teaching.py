@@ -1,4 +1,4 @@
-"""The teaching-quality judge (roadmap 3b step 3; docs/design.md, "Validity vs teaching
+"""The teaching-quality judge (roadmap 3b step 3; docs/design/validation.md, "Validity vs teaching
 quality").
 
 VALID says the tests, reference, mutants and oracle agree; it does not say an exercise is
@@ -17,7 +17,8 @@ reference (to see whether solving needs the knowledge point; the student never s
 the exercise's lecture with its own pages named, the lectures taught so far and the batch
 mode; never the tests, mutants or the hint levels. Without the Useful functions part,
 about ten of 25 flags (2026-10-31) were "the question does not teach the API syntax", which
-design.md puts in hints.md on purpose. Each point has `evidence` (a quote that decides
+docs/design/validation.md puts in hints.md on purpose. Each point has `evidence` (a quote that
+decides
 it) before its y/n: written first, it is a scratchpad, as `plan` is for the held-out
 writer.
 
@@ -25,9 +26,10 @@ The prompt is an `llm.Prompt` in two parts (2026-11-10, for the anthropic provid
 first what every exercise of a lecture in a batch shares (the mode, the lectures taught,
 the lecture's pages with no per-exercise mark), then the exercise (its own pages named,
 the question, the starting file, Useful functions, the reference). Before, the exercise
-came first and the pages carried its mark, so no two calls shared a prefix (design.md,
+came first and the pages carried its mark, so no two calls shared a prefix
+(docs/design/generation.md,
 "Prompt layout for caching": gpt-terra hit 7%). The judge's words did not change; its
-order did, so its calibration was run again (design.md, "Anthropic provider").
+order did, so its calibration was run again (docs/design/models.md, "Anthropic provider").
 
 It never touches validity, and nothing in generation reads it. A point's verdicts are
 trusted only once calibrate.py shows they agree with the owner's ratings.
@@ -135,7 +137,7 @@ def gather(batch_dir: Path, exercise_id: str, workspace: Path,
     exercise = batch_dir / "exercises" / exercise_id
     metadata = json.loads((solution / "metadata.json").read_text(encoding="utf-8"))
     if language_of(metadata) != "python":
-        # Its prompt and calibration are Python's (docs/design.md, "C", step 4b).
+        # Its prompt and calibration are Python's (docs/design/execution.md, "C", step 4b).
         raise JudgeError(f"a {language_of(metadata)} exercise: the judge supports Python "
                          "exercises only so far")
     # The original skeleton: exercises/<id>/student.py may hold the owner's answer.

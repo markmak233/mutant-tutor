@@ -1,7 +1,23 @@
 # Agent Rules
 
-Rules for any AI coding agent working in this repository. Design decisions live in `docs/design.md`.
-When reviewing, read its "Decisions not to do (and why)" section first: those omissions are
+Rules for any AI coding agent working in this repository. Design decisions live in
+`docs/design/`, one file per part, each small enough to read whole. Read only the parts a
+task touches; this list says which holds what, so none needs loading up front:
+
+- `README.md`: goals, public repo vs private data, "Decisions not to do", the index.
+- `layout.md`: environment, repository and workspace layouts, reading course files.
+- `validation.md`: the validator's rules, question format, independent checks, learning rules.
+- `generation.md`: the LangGraph pipeline, generation settings, prompt layout, assistant mode.
+- `rag.md`: the retrieval comparison and evaluation metrics.
+- `models.md`: providers, the Anthropic provider, per-role model comparisons.
+- `execution.md`: where code runs, the container, `tutor test`, C, other languages, version
+  conflicts.
+- `ci.md`: CI jobs. `roadmap.md`: phases, backlog, deferred work.
+- `packaging.md`: install, release package, shortcut, Windows on ARM.
+- `gui.md`: the local GUI's pages, access, tasks, plans, lectures, coverage.
+  `gui-settings.md`: models, providers, keys, page languages, the Environment page.
+
+When reviewing, read README.md's "Decisions not to do (and why)" first: those omissions are
 deliberate, not gaps to report.
 
 ## Private data and secrets
@@ -33,7 +49,7 @@ deliberate, not gaps to report.
 - Do not switch a course to `runner = "host"`, or add a fallback to the host, to get past a
   stopped Docker or a missing image: report it to the owner.
 - C is validated only in a container. C does not run natively on Windows; WSL instead
-  (design.md, "C").
+  (docs/design/execution.md, "C").
 
 ## Code
 
@@ -57,7 +73,7 @@ deliberate, not gaps to report.
   changes, compute the new pins with the code from before the change.
 - A new prompt puts text it did not write (lectures, an earlier answer, a validator's report)
   between tags (`graph/prompts.material()`), and its system prompt names them as material, not
-  instructions (design.md, "Decisions not to do", the untrusted-data entry).
+  instructions (docs/design/README.md, "Decisions not to do", the untrusted-data entry).
 - Lay a prompt out for the provider's prompt cache: what every call shares first and byte for byte
   the same, what varies per call last. Check `cached_tokens` in the call log before claiming a saving.
 - No LLM judges whether an exercise is valid; only the deterministic validator does.
@@ -113,7 +129,7 @@ Reviewing before the owner approves:
 
 - Show a plan's notes in full, never cut, and read them against the source material: a cut note
   once hid a definition that contradicted the slides, and a wrong exercise was paid for twice.
-- Check a recommendation against design.md's goals, not only the roadmap's order.
+- Check a recommendation against docs/design/README.md's goals, not only the roadmap's order.
 - Re-read written text for claims about other text ("see below", a status line that goes stale).
 
 Commits and searches:

@@ -2,7 +2,8 @@
 comparing output.
 
 Each exercise's test_student.py and test_oracle.py import this, so they stay short and the
-output rules live in one place (docs/design.md, "Interface extensions"). The comparison mode
+output rules live in one place (docs/design/validation.md, "Interface extensions"). The comparison
+mode
 and any parameters are written in the test itself, not in metadata.json: tests run where the
 solution folder is not available.
 
@@ -30,7 +31,7 @@ COMBINER_ENV = "TUTOR_COMBINER"  # "off": run MRJob jobs without their combiner 
 # "reversed": each key's values reach reducers and combiners in reverse order (rule 5)
 VALUE_ORDER_ENV = "TUTOR_VALUE_ORDER"
 ORDERS = ("any", "per_file", "total")
-# mrjob's Hadoop runner does not work on native Windows (design.md, "Environment").
+# mrjob's Hadoop runner does not work on native Windows (docs/design/layout.md, "Environment").
 HADOOP_UNSUPPORTED = ("the Hadoop runner needs macOS, Linux or WSL; "
                       "on Windows run this exercise in WSL")
 

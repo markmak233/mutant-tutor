@@ -92,7 +92,7 @@ uv build --wheel --out-dir dist
 Put the wheel and the three files in one folder named `tutor-VERSION`, then zip that folder.
 `tests/test_install_instructions.py` checks that the files name the current version, the
 extras the install command uses, and the courses folder an installed tool keeps. Windows on
-ARM is not supported yet; see docs/design.md, "Packaging and release".
+ARM is not supported yet; see docs/design/packaging.md, "Packaging and release".
 
 ## Clean-install acceptance
 

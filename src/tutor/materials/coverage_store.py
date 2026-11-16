@@ -1,5 +1,5 @@
 """coverage.json: a course's knowledge-point coverage as data, with coverage.md rendered
-from it (owner, 2026-11-09, built 2026-11-10; docs/design.md, "coverage as JSON").
+from it (owner, 2026-11-09, built 2026-11-10; docs/design/gui.md, "coverage as data").
 
 Before, coverage.md was the source of truth: a Markdown table the owner edited by hand, the
 plan read for its gaps (graph/batch.py) and a batch only *proposed* changes to. A lecture

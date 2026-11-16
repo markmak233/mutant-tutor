@@ -1,5 +1,5 @@
 """Where C cannot be built on the learner's machine, testkit_c says why in words, instead of
-a linker's error (docs/design.md, "C": no native Windows, WSL instead). Needs no compiler:
+a linker's error (docs/design/execution.md, "C": no native Windows, WSL instead). Needs no compiler:
 native Windows is simulated, and a compiler without the sanitizers is a stand-in script.
 """
 

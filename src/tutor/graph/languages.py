@@ -1,4 +1,5 @@
-"""What the generation graph does differently by a course's language (docs/design.md, "C").
+"""What the generation graph does differently by a course's language (docs/design/execution.md,
+"C").
 
 One profile per language: the plan and draft models the plan and generate models answer in,
 their JSON Schemas, and where a draft's question is. The prompts are one template filled per

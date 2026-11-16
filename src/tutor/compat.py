@@ -1,4 +1,5 @@
-"""Known version conflicts that no tool reports before a run fails (docs/design.md, "Version
+"""Known version conflicts that no tool reports before a run fails (docs/design/execution.md,
+"Version
 conflicts").
 
 What a tool can be asked is asked (a compiler about its flags, a JDK about its release, pip
@@ -17,7 +18,7 @@ imports of standard-library modules the running Python removed (REMOVED_MODULES)
 check names every one at once instead of the first that fails.
 
 A rule is added by hand, with its measurement, never by a model: a name a model suggests may
-be a package nobody checked (docs/design.md, "Version conflicts").
+be a package nobody checked (docs/design/execution.md, "Version conflicts").
 """
 
 from __future__ import annotations

@@ -1,7 +1,7 @@
 """The image a course's test runs execute in: `python -m tutor.container build`, `status`, or
 `recipe` (the Dockerfile a build would send, which the GUI shows before its Build button).
 
-Isolation layer B (docs/design.md, "Code execution safety"): the host orchestrates and a
+Isolation layer B (docs/design/execution.md, "Code execution safety"): the host orchestrates and a
 container only executes. This module holds what is specific to Docker: building the image
 from its recipe (tutor.image_recipe, made from the course's [requires]), the limits every
 container runs under, and whether the image is there to run in. It only calls Docker's command
@@ -53,7 +53,7 @@ _warned_host = False  # once per process: a batch makes hundreds of runs
 
 
 def limits(uid: int | None = None) -> list[str]:
-    """What every container runs under (docs/design.md says why each one is there)."""
+    """What every container runs under (docs/design/execution.md says why each one is there)."""
     return [
         "--init",  # reaps processes nobody waits for
         "--hostname", "localhost",  # with no network Hadoop cannot resolve the default name

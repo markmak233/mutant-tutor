@@ -1,4 +1,4 @@
-"""Static checks of C source: read it, never run it (docs/design.md, "Other languages").
+"""Static checks of C source: read it, never run it (docs/design/execution.md, "Other languages").
 
 Two uses, as for Python (safety.py and api.py):
 - find_hazards, the C part of rule `safe`. A static check cannot bound what C does (pointers,

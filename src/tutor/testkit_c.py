@@ -1,6 +1,6 @@
 """Helpers for the tests of a C exercise: compile the code under test once, run it the way the
 course runs a program (standard input, arguments, files), and read what it printed
-(docs/design.md, "Other languages").
+(docs/design/execution.md, "Other languages").
 
 A test file starts like this:
 
@@ -85,7 +85,8 @@ _SANITIZER = re.compile(
     r"|:\d+:\d+: runtime error: ")
 _PROCESS_ID = re.compile(r"^==\d+==")
 # What gcc 12's AddressSanitizer prints, over and over, when it hangs at a program's start
-# on a kernel with 32 bits of mmap randomisation (docs/design.md, "C"). A real crash prints
+# on a kernel with 32 bits of mmap randomisation (docs/design/execution.md, "C"). A real crash
+# prints
 # it once and then an "ERROR: AddressSanitizer" report, which _SANITIZER finds instead.
 _ASAN_HANG = "AddressSanitizer:DEADLYSIGNAL"
 ASAN_HUNG = ("AddressSanitizer hung before the program could finish (it printed "
@@ -100,7 +101,8 @@ class CompileError(Exception):
     """The code did not compile (or link); the message is the compiler's."""
 
 
-# C does not run natively on Windows (owner, 2026-11-07; docs/design.md, "C"): its compilers
+# C does not run natively on Windows (owner, 2026-11-07; docs/design/execution.md, "C"): its
+# compilers
 # there (MinGW's gcc) have no AddressSanitizer or UBSan, and the alternatives would each need
 # an install and hint rules of their own. WSL has Linux's gcc, as the course's container does.
 WINDOWS = ("C exercises do not run natively on Windows: their tests need AddressSanitizer and "

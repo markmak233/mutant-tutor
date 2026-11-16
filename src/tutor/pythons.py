@@ -1,4 +1,4 @@
-"""The Pythons on this machine that a course's .venv can be made with (docs/design.md,
+"""The Pythons on this machine that a course's .venv can be made with (docs/design/execution.md,
 "Version conflicts"): what the Environment page offers when a course needs another Python.
 
 Found, never installed: on PATH as python3.11, python3.12, ... (and python3), and on Windows

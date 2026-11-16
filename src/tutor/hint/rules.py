@@ -1,7 +1,7 @@
 """Layer 1 of the hint command: known low-level mistakes, recognised without a model.
 
 Each rule looks at the student's source or the first failures of their test run and names
-the line and the cause. The rules come from mistakes seen while tutoring (docs/design.md,
+the line and the cause. The rules come from mistakes seen while tutoring (docs/design/roadmap.md,
 roadmap 3c). In review mode a hint names only the kind of error, as the tutoring rules do.
 
 A C exercise has rules of its own (C_RULES): the compiler's first error, a missing #include
@@ -123,7 +123,7 @@ def _hint(rule: Rule, detail: str, mode: str) -> Hint:
 
 
 
-# --- C exercises (docs/design.md, "C", step 4b) ------------------------------------------
+# --- C exercises (docs/design/execution.md, "C", step 4b) -----------------------------------------
 # What the compiler and the sanitizers print, as testkit_c passes it into the test output.
 # A place is "student.c:14" or "student.c:14:5", maybe with folders before the file name
 # (gcc in the container may print them), which are left out of the hint.

@@ -1,4 +1,4 @@
-# See docs/design.md, "CI". Runs when work reaches main (a push after a merge, or a pull
+# See docs/design/ci.md, "CI". Runs when work reaches main (a push after a merge, or a pull
 # request into main), and by hand from the Actions tab, which also runs the `spark` job.
 # release.yml calls it whole (workflow_call) before it makes a release package.
 name: CI
@@ -27,7 +27,7 @@ jobs:
       matrix:
         # Every version pyproject.toml allows that has been released long enough for the
         # dependencies' wheels (owner, 2026-11-08; 3.15 waits). The `bigdata` extra brings
-        # what mrjob 0.7.4 needs on 3.12 and later (see docs/design.md, "CI"). The ruleset
+        # what mrjob 0.7.4 needs on 3.12 and later (see docs/design/ci.md, "CI"). The ruleset
         # requires `test (3.11)` by name; the other versions report next to it.
         python-version: ["3.11", "3.12", "3.13", "3.14"]
     steps:
@@ -61,7 +61,7 @@ jobs:
 
   # The same fast suite on macOS and Windows. A job of its own, so the `test (3.11)` check
   # that main's ruleset requires keeps its name. No Docker here: the macOS runner has none,
-  # and the Windows runner runs only Windows containers (see docs/design.md, "CI").
+  # and the Windows runner runs only Windows containers (see docs/design/ci.md, "CI").
   other-os:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45  # as `test`
@@ -99,7 +99,7 @@ jobs:
       # Kernels from 6.5 randomise addresses with up to 32 bits, and gcc 12's AddressSanitizer
       # then sometimes never finishes (it loops on "DEADLYSIGNAL"); a container shares the
       # host's kernel. The C runs timed out here at 5 s while they pass in Docker Desktop's VM
-      # (18 bits). The value is printed first, to compare (see docs/design.md, "CI").
+      # (18 bits). The value is printed first, to compare (see docs/design/ci.md, "CI").
       - name: Limit address randomisation to 28 bits for AddressSanitizer
         run: |
           echo "vm.mmap_rnd_bits was $(cat /proc/sys/vm/mmap_rnd_bits)"

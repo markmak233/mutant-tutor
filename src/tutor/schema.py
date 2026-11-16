@@ -1,7 +1,7 @@
 """The batch format: metadata.json and manifest.json as Pydantic models.
 
 One definition for everyone who writes a batch, Claude Code by hand now and the phase 3
-pipeline later (docs/design.md, "Batch format contract"). Validation rule 0 checks an
+pipeline later (docs/design/README.md, "Batch format contract"). Validation rule 0 checks an
 exercise's metadata.json with it.
 
     python -m tutor.schema <batch_dir> ...      check manifest, every metadata.json, folders
@@ -57,6 +57,9 @@ class Constraints(_Strict):
         'Names whose uses are counted for the report, never limited, e.g. "MRStep".'))
 
 
+# The docstring below is the schema's description, which the generate prompt carries, so it
+# stays byte for byte as pinned (tests/test_prompt_pins.py): its "docs/design.md" is now
+# docs/design/validation.md (2026-11-16 split), left unchanged on purpose.
 class Source(_Strict):
     """Where a workspace exercise comes from: slide footers and PDF pages, both, since
     they differ (docs/design.md, batch-1 review)."""
@@ -122,7 +125,7 @@ class Metadata(_Strict):
         return self
 
 
-# --- C exercises (docs/design.md, "Other languages") ---------------------------------------
+# --- C exercises (docs/design/execution.md, "Other languages") ------------------------------------
 # A model of their own rather than new fields in Metadata: Metadata's JSON Schema goes to the
 # generate and repair models inside ExerciseDraft, and the Python prompts were calibrated
 # with exactly that text. A C metadata.json says "language": "c", which picks this model.

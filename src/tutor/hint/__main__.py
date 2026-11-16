@@ -1,4 +1,4 @@
-"""A hint for an exercise you are solving (docs/design.md, roadmap 3c).
+"""A hint for an exercise you are solving (docs/design/roadmap.md, roadmap 3c).
 
     python -m tutor.hint [--no-llm] <exercise folder>     the folder with your student.py/.c
 

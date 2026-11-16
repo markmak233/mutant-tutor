@@ -1,4 +1,4 @@
-"""Read a workspace's records and write its report (docs/design.md, "Evaluation metrics").
+"""Read a workspace's records and write its report (docs/design/rag.md, "Evaluation metrics").
 
 No model is called and only the report is written. Every number comes from files that the
 pipeline and the owner's test runs already left behind:

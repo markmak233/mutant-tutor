@@ -3,7 +3,8 @@ course asks for it, else in a child process on this machine.
 
 The child process is isolation from the workspace, not a sandbox: it can still read and write
 outside its directory and use the network. The container is the sandbox, and a course that asks
-for it never falls back to the host (docs/design.md, "Code execution safety"). Both give the
+for it never falls back to the host (docs/design/execution.md, "Code execution safety"). Both give
+the
 same RunResult, so the callers do not know which one ran.
 
 This module decides what runs and what its result means; tutor.processes starts the run's

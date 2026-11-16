@@ -1,6 +1,7 @@
 """Windows Job Objects: kill a child process and every process it started, as one.
 
-The Windows counterpart of a POSIX process group (docs/design.md, "Code execution safety").
+The Windows counterpart of a POSIX process group (docs/design/execution.md, "Code execution
+safety").
 Windows records only each process's parent pid, so walking the tree (`taskkill /T`) misses
 a grandchild whose parent has already exited, such as the JVM PySpark starts under pytest.
 A Job Object is a kernel container instead: a process assigned to it stays in it, every

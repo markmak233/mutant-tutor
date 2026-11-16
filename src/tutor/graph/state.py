@@ -1,4 +1,4 @@
-"""What flows through the generation graph (docs/design.md, "Generation pipeline").
+"""What flows through the generation graph (docs/design/generation.md, "Generation pipeline").
 
 `ExerciseDraft` is the generate / repair nodes' structured output: its JSON Schema is sent
 to the model, and the reply is parsed back into it. Files the pipeline can derive are not
@@ -82,7 +82,7 @@ class OracleDraft(_Strict):
         "The whole oracle.py: the given interface with every function body written."))
 
 
-# --- C exercises (docs/design.md, "C", step 3) ---------------------------------------------
+# --- C exercises (docs/design/execution.md, "C", step 3) ------------------------------------------
 # Models of their own, so the Python ones above, whose JSON Schemas the plan and generate
 # models receive, keep their exact text (tests/test_prompt_pins.py). graph/languages.py picks
 # the set by the course's language.

@@ -1,4 +1,4 @@
-"""Hybrid retrieval: several routes' rankings merged into one (docs/design.md, "RAG").
+"""Hybrid retrieval: several routes' rankings merged into one (docs/design/rag.md, "RAG").
 
 BM25 finds exact terms and vectors find similar meaning, so together they should miss less.
 Their scores cannot be added: a BM25 score is unbounded and a cosine is below 1. Reciprocal
