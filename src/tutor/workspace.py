@@ -296,6 +296,11 @@ def install_command(venv_dir: Path, extras: str, packages: list[str], *,
             *(["-e"] if editable else []), f"{source or REPO}[{extras}]", *packages]
 
 
+def _this_python() -> str:
+    """This tool's Python as "3.X": what the test image uses when [requires] names none."""
+    return f"{sys.version_info.major}.{sys.version_info.minor}"
+
+
 def _requires(root: Path, python_version: str | None = None) -> dict[str, str]:
     """[requires] of the folder's workspace.toml, checked; {} before there is one. Read
     before anything is created, so a broken table changes nothing. `python_version`: checked
@@ -353,10 +358,18 @@ def main(argv: list[str] | None = None) -> int:
         print(f"workspace: {e}", file=sys.stderr)
         return 1
     root = args.folder.expanduser().resolve()
-    if python_version and _requires(root, python_version).get("python") != python_version:
-        # The GUI's switch writes it (gui/python_switch.py); from here, the owner does.
+    named = _requires(root, python_version).get("python") if python_version else None
+    # The GUI's switch writes it (gui/python_switch.py); from here, the owner does.
+    if python_version and named is not None and named != python_version:
         print(f'note: [requires] in workspace.toml still names another Python: set python = '
               f'"{python_version}" there, so the check and the test image use this one too.')
+    elif python_version and named is None and python_version != _this_python():
+        # With no python entry the test image takes this tool's Python (image_recipe), so it
+        # differs from the .venv only when this one does. Saying "still names another" here
+        # was wrong: nothing named one (seen on Windows, 2026-11-16).
+        print(f'note: [requires] in workspace.toml names no Python, so the test image uses '
+              f'this tool\'s ({_this_python()}): set python = "{python_version}" there, so the '
+              'check and the test image use the .venv\'s one too.')
     print(f"{args.folder.expanduser().resolve()} is ready. Put the lectures (PDFs or saved "
           "web pages) in lectures/, open the folder in VS Code, open a new terminal and check "
           "`which pytest` points to its .venv.")

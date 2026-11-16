@@ -22,6 +22,39 @@
    through %(student)s, while the file name in them is escaped. #}
 {% set code_student %}<code>{{ student }}</code>{% endset %}
 <p class="muted">{{ _("Solve it in VS Code: it opens the course folder, so its terminal uses the course's venv, with %(student)s.", student=code_student) }}{% if in_container %} {{ _('"Run my tests" runs %(command)s on your %(student)s in the course image, as the terminal would, and records the attempt; the run shows on its task page.', command="<code>tutor test</code>" | safe, student=code_student) }}{% endif %}</p>
+{# The teaching-quality rating (gui/ratings.py), once the exercise has passed (owner,
+   2026-11-15). Open until a rating is stored; after that, its summary line shows the
+   stored answers, and opening it shows the form filled in with them, so saving again
+   replaces that rating. Above the question, where a learner who just passed looks first.
+   No judge verdict here: the ratings are what a judge is checked against. #}
+{% if can_rate %}
+<details class="review rating"{% if not rating %} open{% endif %}>
+  <summary>{% if rating %}{{ _("Your rating") }}:
+    {% for point, name, _text in rating_points %}<span class="rating-answer">{{ _(name) }} {{ "✓" if rating.get(point) is sameas true else "✗" }}</span>{% endfor %}
+    {% if rating.get("remark") %}<span class="muted">· {{ rating.get("remark") }}</span>{% endif %}
+    {% if rating.get("date") %}<span class="muted">({{ rating.get("date") }})</span>{% endif %}
+    {% else %}{{ _("Rate this exercise") }}{% endif %}</summary>
+  <form method="post" class="form" action="{{ url_for('rate_exercise', name=course.folder, batch=batch.name, exercise=row.id) }}">
+    <p class="muted">{{ _("How good it was to learn from, apart from whether it is valid: yes or no on each point. Saved in the course's ratings.jsonl, one line per exercise; saving again replaces it.") }}</p>
+    {% for point, name, text in rating_points %}
+    {# A radio pair per point, required: a point left out would read as "no". #}
+    {% set given = rating.get(point) if rating else none %}
+    <fieldset>
+      <legend>{{ _(name) }}</legend>
+      <span class="muted">{{ _(text) }}</span>
+      <div class="rating-choice">
+        <label class="check"><input type="radio" name="{{ point }}" value="y" required{% if given is sameas true %} checked{% endif %}> {{ _("yes") }}</label>
+        <label class="check"><input type="radio" name="{{ point }}" value="n"{% if given is sameas false %} checked{% endif %}> {{ _("no") }}</label>
+      </div>
+    </fieldset>
+    {% endfor %}
+    <label class="field">{{ _("Remark") }} <span class="muted">{{ _("optional, e.g. too easy, unclear input format") }}</span>
+      <input type="text" name="remark" maxlength="{{ remark_max }}" value="{{ rating.get('remark', '') if rating else '' }}" autocomplete="off">
+    </label>
+    <div class="actions"><button type="submit" class="primary">{{ _("Save rating") }}</button></div>
+  </form>
+</details>
+{% endif %}
 {% if question %}
 {# Markdown rendered with raw HTML off (rendering.py); the only value marked safe.
    dir="ltr": the question is the model's text, in the language it was written in, not

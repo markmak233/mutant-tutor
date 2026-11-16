@@ -755,10 +755,15 @@ quality is a separate score that never replaces or overrides validity, on four p
 The owner rates the first batch after solving each exercise (one line per exercise, a few
 seconds), optionally with a free-text remark ("too easy", "unclear input format"). Format
 fixed at the first rating (2026-10-28): y or n per point, in the order above (`pairs yyyy
-too easy`), since yes/no labels compare cleanly with a judge's and need no scale; the
-assistant writes one JSON line per exercise to the workspace's `ratings.jsonl` (batch,
-exercise, date, clear, fits, taught, targets, remark), one file for all batches so later
-plans read every rating at once. Those ratings are the labels an LLM judge is checked against before
+too easy`), since yes/no labels compare cleanly with a judge's and need no scale; one JSON
+line per exercise goes to the workspace's `ratings.jsonl` (batch, exercise, date, clear,
+fits, taught, targets, remark), one file for all batches so later plans read every rating
+at once. The assistant wrote those lines at first; since 2026-11-15 (owner) the exercise
+page asks for them once a logged run has passed (`gui/ratings.py`): a yes/no pair per point,
+all four required, and an optional remark. Opening it again shows the stored rating in the
+form, and saving replaces that exercise's line in place (keys the page does not set stay;
+the file before is `ratings.jsonl.bak`), so an exercise never counts twice. The page shows
+no judge verdict beside it, since these ratings are what the judge is checked against. Those ratings are the labels an LLM judge is checked against before
 it is trusted (roadmap 3b), and later batches' plans read them (see the [3] preference chat). ContentGen (SIGCSE TS 2026) separates
 correctness from contextual fit in the same way, and found that a summary of recently
 covered material in the prompt improved generated questions (a [3] candidate).
@@ -2335,12 +2340,39 @@ themselves, so a cheap layer comes first and a stronger one later.
     so the course's image is affected on such a Linux host. Seen on GitHub's ubuntu-26.04
     runner (2026-11-07): one C run in each example timed out at 5 s, with no output kept to
     prove the cause; Docker Desktop's VM on the owner's Mac uses 18 bits, and 32 bits there
-    (arm64) did not reproduce it in 40 runs. CI prints the value and sets 28 (see "CI"); for a
+    (arm64) did not reproduce it in 40 runs. Docker Desktop's WSL 2 VM on the owner's Windows
+    PC (x64, kernel 6.6) uses 32 bits and did reproduce it (2026-11-16): `pytest -m docker`
+    had six C tests time out now and then, a looped ASan run printed "DEADLYSIGNAL" without
+    end, and a rerun failed different ones. CI prints the value and sets 28 (see "CI"); for a
     user on such a Linux host, `tutor doctor` ("Roadmap" 6) now checks the value in C's
     registered machine check and prints the `sysctl` command (2026-11-09); it never runs it.
     With 28 set, the next CI run (2026-11-08) passed every C test, and
     nothing else about C had changed; as the hang is intermittent, one run is strong evidence,
     not proof.
+    - Measured and fixed (owner, 2026-11-16). On the Windows PC, a do-nothing program built
+      with the tests' flags and run 300 times under the 5 s limit: gcc 12 (bookworm) at 32
+      bits hung 67 times (68 in a second sample), each hang printing only
+      "AddressSanitizer:DEADLYSIGNAL"; gcc 12 at 28 bits, 0; gcc 14.2 (Debian trixie) at
+      32 bits, 0. Running the program with randomisation off (`setarch -R`) is no way round
+      it: Docker 29.6.1's default seccomp profile refuses that `personality()` call (Docker
+      24.0.6 on the Mac allowed it), and widening seccomp for every run is not worth it. A
+      sysctl in Docker Desktop's VM is lost when Docker restarts, so it is no fix for a
+      learner either. So gcc's major picks the image's Debian release
+      (`image_recipe.DEBIAN_BY_GCC`): `gcc = "14"` builds on trixie, `"12"` stays on
+      bookworm, and a course without C keeps its recipe and image name. Trixie packages only
+      JDK 21, so gcc 14 with java 17 (a Spark course) is refused before a build. Adding C
+      now writes gcc 14. gcc 14 also makes some old warnings errors (incompatible pointer
+      types, implicit int, int-conversion): such code no longer compiles, which the owner
+      accepted (2026-11-16). For a course still on gcc 12, a timed-out run whose output has
+      DEADLYSIGNAL and no sanitizer report says the sanitizer hung, not the learner's loop
+      (`testkit_c.ASAN_HUNG`), and `tutor doctor` reads the value where the tests run: in
+      the course's built image (as root, the file is root-only; no network, nothing pulled)
+      for the container, which also covers Docker Desktop's VM on macOS and Windows, or in
+      /proc on a Linux host, saying `sudo cat` when it is root-only there. It warns above 28
+      with gcc 14 as the fix. A gcc 14 course gets no row. Checked on the Windows PC at 32
+      bits (2026-11-16, 93a0ace): `pytest -m docker` passed twice in a row (32 passed each;
+      before the fix, up to six C tests timed out in a run), and `tests/test_c_real.py`
+      with the gen extra passed twice too (5 passed each), with no C run timing out.
   - Step 2, a course's language (owner, 2026-11-07; `tutor/languages.py`, the Environment
     page). A course is a C course when workspace.toml has `[languages.c]`, which only the
     owner writes, through the page or by hand; not inferred from `[requires]`, where `java`
@@ -2354,8 +2386,9 @@ themselves, so a cheap layer comes first and a stronger one later.
       lines share, shown with its first line (the first C course: `-Wall -std=c99` on all 19
       lines). The box starts at the course's flags, else these, else `-std=c11 -Wall`.
     - Ticking C writes `[languages.c] flags`, `[safety] allow_headers` (headers beyond the
-      standard library's, each a plain `name.h` path) and `gcc = "12"` in [requires] when
-      missing (the image's Debian gcc). Checked writes as every other table, the file before
+      standard library's, each a plain `name.h` path) and `gcc = "14"` in [requires] when
+      missing (the image's Debian gcc: trixie's, see the AddressSanitizer issue above; 12,
+      bookworm's, until 2026-11-16). Checked writes as every other table, the file before
       kept as `.bak`.
     - What the lectures' code uses beyond the core modules (owner, 2026-11-10; the plan
       had a model drafting `[safety] allow_imports` and `[languages.*]` at a course's
@@ -2744,8 +2777,9 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
   runner >= 2.327.1; workflows use GitHub-hosted latest images. Job names and matrices stay
   unchanged, particularly the required `test (3.11)`. Local tests cannot establish whether
   a GitHub job runs; that is checked on the owner's next push/PR run.
-- Runs when work reaches `main` (a push after merging `dev`, or a pull request into `main`)
-  and by hand (`workflow_dispatch`), not on every `dev` push: each step is already checked
+- Runs when work reaches `main` (a push after merging `dev`, or a pull request into `main`),
+  by hand (`workflow_dispatch`), and inside a release run (`release.yml` calls it, see
+  "Packaging and release"), not on every `dev` push: each step is already checked
   locally with `pytest` and `ruff check .`, and the badge then shows the state of `main`,
   the branch visitors see.
 - `test`: Python 3.11, 3.12, 3.13 and 3.14, `ruff check .` and the fast `pytest`. The first
@@ -3594,6 +3628,39 @@ mode is not done (see "Decisions not to do").
   course switch, runner fallback or default-doctor install. Native install acceptance
   uses a new scratch root and an existing Python, with implicit Python downloads disabled;
   the packaging CI matrix covers installed wheels/fresh synthetic courses on three OSes.
+  - Release package (owner, 2026-11-15): one zip handed over directly, with no hosting (no
+    PyPI, no GitHub Release for now) and still no install script: the wheel plus
+    `packaging/INSTALL-<OS>.txt` for macOS, Linux and Windows, plain ASCII, which the user
+    follows by hand (uv's official installer, `uv tool install` of the wheel, then `tutor
+    gui`, `shortcut` and `doctor`; Docker only pointed to). One file per system (owner: a
+    mixed file made each reader skip two thirds of it). `tests/test_install_instructions.py`
+    checks each names this version, existing extras and the courses folder `locations`
+    gives. Walked through by hand on fresh machines (2026-11-15/16): macOS 15 in a UTM VM,
+    Ubuntu in VMware Fusion (Docker Engine there needed the docker group and a new login),
+    Windows 11 x64 in Windows Sandbox; their fixes are in the texts (no Notepad in Sandbox,
+    OneDrive or translated desktops, `$env:` in PowerShell, a VM clock months behind
+    failing TLS, a new terminal after installing Docker). Windows on ARM is not supported:
+    sqlite-vec, which langgraph-checkpoint-sqlite 3 requires (only its vector store imports
+    it; the SqliteSaver used here does not), has no win_arm64 wheel, and PyYAML has none for
+    Python 3.11. Resolving for it with Python 3.12 and sqlite-vec excluded (`uv tool install
+    --excludes`) works, but a course's `.venv` installs the same extras, so support waits
+    for a change of its own. Docker on Windows x64 (2026-11-16, `pytest -m docker` on the
+    owner's PC): every container-limit test and a container course's `doctor --smoke` pass;
+    C runs sometimes hang (see "C", the AddressSanitizer issue; fixed with gcc 14 the same
+    day).
+  - Making it (owner, 2026-11-16): a manual workflow, `release.yml` (`workflow_dispatch`
+    only), not a release on every tag or push, since a release is handed over by hand
+    anyway. It calls `ci.yml` whole (`workflow_call`), so a package CI would fail is never
+    made; builds one wheel with `uv build`, the command for a release by hand, and checks
+    its name against pyproject's version; runs the clean-install acceptance on that same
+    wheel on three systems (CI's own `packaging` job tests a wheel it builds itself); then
+    uploads the `tutor-VERSION` folder as the run's artifact, named with the commit's first
+    7 characters so two builds of one version stay apart, kept 90 days (GitHub's maximum
+    by default) and downloadable by logged-in users. An artifact is not hosting in the
+    sense decided above: it lives on the run's page, is not listed as a release and
+    expires. Not runnable locally: checked with actionlint 1.7.7 and its build and bundle
+    commands rehearsed (that caught uv writing a `.gitignore` into `dist`); its first real
+    run, after it reaches the default branch, is the check that it works.
   - One click (the owner's aim, 2026-11-05; installation acceptance still pending): one install
     line gets `uv`, which fetches the Python it needs and installs the tool (`uv tool install`,
     the same job as `pipx`, without needing Python first). `tutor gui` starts the server and
@@ -4468,9 +4535,26 @@ late; the adaptive review screens can be built with it.
     runs go into the container. The page shows, per course: Docker missing, not running,
     image missing or out of date, or ready, with the image's size and "Check again". A "Build
     image" button is allowed, since the recipe comes from our code and not from a model; it
-    shows the recipe, download source and expected size first. The user installs and starts
-    Docker. The venv click does not build the image, which may be 2 GB: that waits until
-    `[requires]` is confirmed. The user chooses host or container for a new course, nothing
+    shows the recipe, download source and expected size first. The user installs Docker.
+    Starting it (owner, 2026-11-15, which replaces "the user installs and starts Docker"):
+    when a course under the root runs its tests in the container, every `tutor gui` launch
+    starts an installed but stopped Docker Desktop (`container.start_docker_desktop`: `open
+    -a Docker` on macOS, its exe under Program Files on Windows, the `docker-desktop` user
+    service on Linux), in a thread so the page opens meanwhile, and says to install Docker
+    Desktop when there is no `docker`. It never installs, and a Linux Docker Engine without
+    Desktop, which needs sudo, is left to the user; courses all on the host leave Docker
+    alone, since its VM takes memory a local model may need. What stops Docker is told apart
+    (`container.docker_state`, after the 2026-11-15/16 walk-throughs), since each asks the
+    user for something else: not installed; Docker Desktop installed but not on this
+    terminal's PATH (installed after it opened: open a new one, not install again; the app
+    is found from `docker.exe` two folders up, or under Program Files, or per user under
+    AppData\Local\Programs, which the launcher also starts); permission denied (Linux: the
+    docker group and a new login; Windows: docker-users, from Docker's docs, untested);
+    not running (Docker Desktop, or on Linux also Docker Engine with `systemctl`); no answer
+    in 30 s. `tutor doctor`'s "next:" gives the fix, never the problem again, and for "not
+    running" also the way on where Docker cannot start (a VM or Windows Sandbox: run the
+    course's tests on this machine). The venv click does not build
+    the image, which may be 2 GB: that waits until `[requires]` is confirmed. The user chooses host or container for a new course, nothing
     switched silently, with a warning when it matters: choosing the host (generated code runs
     with their rights), and a course set to the container while Docker is not available.
 - Coverage page (owner, 2026-11-06): a course's `coverage.md` shown, and a model's draft of

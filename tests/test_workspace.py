@@ -235,3 +235,31 @@ def test_vs_codes_c_settings_are_written_and_removed_only_when_ours(tmp_path):
     assert not write_c_editor_config(tmp_path, ["-std=c99"])
     assert not write_c_editor_config(tmp_path, None)
     assert (tmp_path / C_EDITOR_FILE).read_text(encoding="utf-8") == own
+
+
+@pytest.mark.parametrize(("requires", "tool", "note"), [
+    ("", "3.11", None),  # nothing named, and the image takes the same Python: no note
+    ("", "3.13", "names no Python"),  # nothing named, but the image would take 3.13
+    ('[requires]\npython = "3.12"\n', "3.11", "still names another Python"),
+    ('[requires]\npython = "3.11"\n', "3.13", None),  # it names this one already
+])
+def test_init_with_a_python_notes_only_a_real_difference(tmp_path, monkeypatch, capsys,
+                                                         requires, tool, note):
+    # On Windows (2026-11-16) a workspace.toml with no [requires] got "still names another
+    # Python": nothing named one. The image's Python is then this tool's own.
+    import tutor.workspace as workspace
+    from tutor import pythons
+
+    root = tmp_path / "course"
+    root.mkdir()
+    (root / "workspace.toml").write_text(f'course = "demo"\n{requires}', encoding="utf-8")
+    monkeypatch.setattr(pythons, "ask", lambda given: type("Found", (), {"minor": "3.11"})())
+    monkeypatch.setattr(workspace, "init", lambda *args, **kwargs: [])
+    monkeypatch.setattr(workspace, "_this_python", lambda: tool)
+
+    assert main(["init", str(root), "--python", "python3.11"]) == 0
+    out = capsys.readouterr().out
+    if note is None:
+        assert "note:" not in out
+    else:
+        assert note in out and 'set python = "3.11"' in out

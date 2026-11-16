@@ -238,6 +238,11 @@ section.card { margin: 1.25rem 0; }
 .review dt { font-weight: 600; color: var(--muted); }
 .review dd { margin: 0; min-width: 0; }
 .review ul { margin: 0; padding-inline-start: 1.1rem; }
+/* The exercise page's rating (exercise.html): the stored answers in one line, and each
+   point's yes / no side by side, so four points fit without scrolling. */
+.rating .rating-answer { margin-inline-end: 0.75rem; font-weight: 400; }
+.rating .rating-choice { display: flex; gap: 1.5rem; }
+.rating .form { margin-top: 0.5rem; }
 code.wrap { overflow-wrap: anywhere; }
 pre.recipe { margin: 0; padding: 0.6rem 0.8rem; background: var(--code-bg); border-radius: 6px; font-size: 0.85em; white-space: pre-wrap; overflow-wrap: anywhere; }
 .chip-ok, .chip-ready { background: var(--passed-bg); color: var(--passed); }

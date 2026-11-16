@@ -26,7 +26,6 @@ from __future__ import annotations
 import os
 import re
 import shlex
-import shutil
 import subprocess
 import sys
 from collections.abc import Callable
@@ -60,7 +59,6 @@ RUNNERS = ("container", "host")
 # What each name in [requires] is, as the page says it (N_(): translated when shown).
 KINDS = {"python": N_("Python version"), "java": N_("JDK (Java)"), "hadoop": N_("Hadoop"),
          "gcc": N_("C compiler")}
-# The gcc the test image has (Debian bookworm's), which adding C writes in [requires].
 MODULE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")  # a top-level module, as allow_imports holds
 HADOOP_DOWNLOAD = "about 730 MB"  # measured 2026-11-05, see image_recipe.HADOOP_MIRRORS
 # What an image weighs, for scale: the two built here on 2026-11-06.
@@ -148,10 +146,14 @@ def docker_view(course: Course, run: Callable = subprocess.run) -> DockerView:
             pass
     parts = {"runner": chosen, "image": image, "recipe": recipe,
              "downloads": downloads(requires)}
-    if shutil.which("docker") is None:
+    # One `docker info`: no command and no Docker Desktop is "missing" (install it); any
+    # other problem, an installed Desktop this server's PATH predates included, shows its
+    # own sentence and fix under "not running" (container.docker_state).
+    docker = container.docker_state(run)
+    if docker.kind == container.MISSING:
         return DockerView(state="docker-missing", **parts)
-    if problem := container.docker_problem(run):
-        return DockerView(state="docker-stopped", detail=problem, **parts)
+    if docker.kind is not None:
+        return DockerView(state="docker-stopped", detail=docker.message, **parts)
     size = container.image_size(image, run)
     if size is None:
         return DockerView(state="image-missing", detail="Build it below.", **parts)
@@ -161,7 +163,7 @@ def docker_view(course: Course, run: Callable = subprocess.run) -> DockerView:
 def downloads(requires: dict[str, str]) -> list[tuple[str, str]]:
     """What a build fetches and from where, read off the same rules as the recipe."""
     python = requires.get("python") or f"{sys.version_info.major}.{sys.version_info.minor}"
-    found = [(f"python:{python}-slim-bookworm", "Docker Hub, the official Python image")]
+    found = [(image_recipe.base_image(requires), "Docker Hub, the official Python image")]
     if java := requires.get("java"):
         found.append((f"openjdk-{java.split('.')[0]}-jre-headless and procps",
                       "Debian's package mirrors (apt)"))

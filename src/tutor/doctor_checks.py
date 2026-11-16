@@ -82,12 +82,18 @@ def docker(run: Callable, required: bool) -> list[Row]:
         version = done.stdout.strip() if done.returncode == 0 else ""
         return done
 
-    problem = container.docker_problem(observed)
-    if problem:
-        action = ("install Docker Desktop, start it, then run tutor doctor again"
-                  if "not installed" in problem else problem)
-        return [Row("FAIL" if required else "WARN", problem, action, "host-guide")]
-    return [Row("OK", f"Docker {version} is running")]
+    state = container.docker_state(observed)
+    if state.kind is None:
+        return [Row("OK", f"Docker {version} is running")]
+    # The row says what is wrong and "next:" what to do, never the same words twice (a WARN
+    # used to repeat its text as next:, owner's walk-through 2026-11-12).
+    action = state.fix
+    if state.kind == container.STOPPED:
+        # In a VM or Windows Sandbox Docker cannot start at all (no hardware virtualisation;
+        # seen 2026-11-15), so starting it is not the only way on.
+        action += ("; where it cannot start (a virtual machine or Windows Sandbox without "
+                   "hardware virtualisation), set the course's tests to run on this machine")
+    return [Row("FAIL" if required else "WARN", state.problem, action, "host-guide")]
 
 
 def course_load(course: Course) -> list[Row]:

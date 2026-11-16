@@ -16,6 +16,14 @@ page's text. The model never sees a page it did not ask for, and every id it nam
 A whole run is kept on disk per query, so asking again costs nothing, with its trace: what the
 model saw, read and chose, which tells "never found" from "found but not chosen". `run` separates
 repeated measurements, since a model's path may differ between runs, which is worth knowing.
+
+Why this is an agent and graph/build.py is not: here the model picks the next step (search
+again, read, or stop) and the loop runs until it says so or the turns run out; in the
+generation graph code picks every next step. The bounds are what keep it safe and cheap:
+MAX_STEPS turns, SEARCH_RESULTS and MAX_READ per action, STEP_MAX_TOKENS per reply, and the
+scope check on every page id. Measured (design.md, "RAG"): about 4.8 turns, 4.6k tokens and
+14 s a query with GLM-5.3-Flash; not better than the hybrid ranking on the same queries, so
+generation does not use it.
 """
 
 from __future__ import annotations
@@ -32,6 +40,8 @@ from tutor.retrieval.bm25 import BM25Retriever
 from tutor.retrieval.corpus import Page
 from tutor.retrieval.jsonl import JsonLines
 
+# --- limits and the prompt ----------------------------------------------------------------
+
 # Part of what a stored run depends on: a new version runs again. Version 2 (2026-11-02): the
 # first one chose accurately but too few pages; on the dev queries, 46 of the 51 pages it missed
 # within a lecture were within two pages of one it returned.
@@ -43,6 +53,8 @@ MAX_READ = 5  # pages one read returns, so one action cannot pull in a whole lec
 STEP_MAX_TOKENS = 4_000
 _TITLE_CHARS = 80
 
+# The model's whole instructions: the three actions, their arguments and what each returns.
+# The numbers come from the limits above, so the prompt never promises more than the code does.
 SYSTEM_PROMPT = f"""\
 You find the pages of a course's lecture slides that teach what a reader asks for. You cannot
 see the slides; you act, one action per reply, and see what each action returns.
@@ -60,7 +72,13 @@ If a search finds nothing useful, try other words. Read a page before choosing i
 first line does not settle it. You have {MAX_STEPS} actions."""
 
 
+# --- what the model answers and what the loop keeps -----------------------------------------
+
 class Action(BaseModel):
+    """One reply of the model. Its JSON schema is sent as the structured-output format, so
+    the reply is this object or it fails to parse (decide() then costs a turn); which
+    fields count depends on `action`: `words` and `lecture` for search, `pages` otherwise."""
+
     action: Literal["search", "read", "finish"]
     words: str = ""
     lecture: str | None = None
@@ -68,6 +86,9 @@ class Action(BaseModel):
 
 
 class AgentState(TypedDict):
+    """The loop's state. No key has a reducer: each node returns whole new lists
+    (`[*old, new]`), and LangGraph replaces those keys with them."""
+
     query: str
     scope: list[str]  # the lectures this query may search
     log: list[str]  # what has happened so far, as the model will read it
@@ -79,7 +100,10 @@ class AgentState(TypedDict):
     failed: int  # turns lost to a reply that could not be read as an action
 
 
+# --- small helpers ---------------------------------------------------------------------------
+
 def _page_id(page: Page) -> str:
+    """The id the model sees and names, "lecture:PDF page" (e.g. "2.1:12")."""
     return f"{page.lecture}:{page.number}"
 
 
@@ -100,6 +124,13 @@ def tool_settings(search_name: str) -> dict:
 
 
 class AgentRetriever:
+    """The agent as a retrieval route: `search(query)` returns pages like the ranking routes
+    do, so the measurement (retrieval/__main__.py) compares them on the same queries.
+
+    `ask` is the model call (asker.py: structured output, usage counted); `search_route` is
+    the tool behind the search action, BM25 unless the hybrid route is given; `folder`
+    holds runs.jsonl, the stored runs; `run` tells repeated measurements apart."""
+
     def __init__(self, pages: list[Page], ask: Ask, folder: Path, run: int = 0,
                  search_route=None, name: str = "agent") -> None:
         self.name = name
@@ -119,6 +150,8 @@ class AgentRetriever:
     def decide(self, state: AgentState) -> dict:
         """One model turn: choose the next action, given everything so far."""
         step = state["steps"] + 1
+        # The last turn says so, so the model finishes instead of starting a search it would
+        # never see the result of.
         last = " This is the last one: finish now." if step == MAX_STEPS else ""
         # What changes comes last, so the prompt's start stays the same from turn to turn,
         # which is what a provider's prompt cache can reuse.
@@ -129,6 +162,7 @@ class AgentRetriever:
         try:
             reply = self._ask("agent-step", SYSTEM_PROMPT, user, Action.model_json_schema(),
                               STEP_MAX_TOKENS)
+            # Parsed and checked against Action; a dict in the state, as the trace stores it.
             action = Action.model_validate_json(reply).model_dump()
         except ValueError:  # not an action, or cut off: costs the turn, not the whole query
             return {"steps": step, "action": None, "failed": state["failed"] + 1,
@@ -145,6 +179,7 @@ class AgentRetriever:
         return self._read(action, state)
 
     def next_node(self, state: AgentState) -> str:
+        """The router after decide: act on the action, or end the run (see is_done)."""
         return "end" if self.is_done(state) else "act"
 
     @staticmethod
@@ -163,15 +198,21 @@ class AgentRetriever:
         if lecture is not None and lecture not in scope:
             text = f"search {words!r} in lecture {lecture}: you may only search {', '.join(scope)}."
             return {"log": [*state["log"], text]}
+        # The tool itself: another route ranks the pages, limited to the lectures allowed.
         wanted = {lecture} if lecture else set(scope)
         found = self._search_route.search(words, wanted)[:SEARCH_RESULTS]
+        # One line per page, as the prompt describes: id | slide footer | first line.
         lines = [f"{_page_id(p)} | {p.slide or '-'} | {_title(p)}" for p in found]
         text = f"search {words!r}:\n" + ("\n".join(lines) if lines else "(no page has these words)")
+        # Every page any search showed, each once: with `read` and `trace`, the stored run
+        # tells "never shown" from "shown but not read" from "read but not chosen".
         seen = list(dict.fromkeys([*state["seen"], *map(_page_id, found)]))
         return {"log": [*state["log"], text], "seen": seen}
 
     def _read(self, action: dict, state: AgentState) -> dict:
         wanted = action["pages"][:MAX_READ]
+        # Only real pages of the allowed lectures are read; a made-up id is said back to the
+        # model, so it learns it, and never reaches a page outside the scope.
         known = [i for i in wanted if self._allowed(i, state["scope"])]
         parts = [f"## {i}\n{self._pages[i].text}" for i in known]
         if unknown := [i for i in wanted if i not in known]:
@@ -180,6 +221,7 @@ class AgentRetriever:
                 "read": [*state["read"], *known]}
 
     def _allowed(self, page_id: str, scope: list[str]) -> bool:
+        """A page id that exists and lies in one of the query's lectures."""
         page = self._pages.get(page_id)
         return page is not None and page.lecture in scope
 
@@ -198,8 +240,12 @@ class AgentRetriever:
     def search(self, query: str, lectures: Collection[str] | None = None) -> list[Page]:
         scope = [lecture for lecture in self._lectures
                  if lectures is None or lecture in lectures]
+        # A stored run is reused when the query, its scope, the corpus and the run number are
+        # the same (the folder already fixes the model and tool_settings): asking again is free.
         key = digest(self._run, query, scope, self._corpus)
         if key not in self._runs:
+            # A new run: the loop from an empty state, then one row with its pages, its trace
+            # and what it cost, appended to runs.jsonl.
             in_before, out_before = usage_of(self._ask)
             start = time.monotonic()
             state = self._invoke({"query": query, "scope": scope, "log": [], "steps": 0,
@@ -224,6 +270,8 @@ class AgentRetriever:
         return self._graph.invoke(state, {"recursion_limit": 2 * MAX_STEPS + 2})
 
     def _build_graph(self):
+        """decide -> (act -> decide)* -> end: two nodes and one router, compiled with no
+        checkpointer, as a run is short and stored whole by search()."""
         try:
             from langgraph.graph import END, START, StateGraph
         except ImportError:

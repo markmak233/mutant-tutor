@@ -41,6 +41,15 @@ HADOOP_MIRRORS = ("https://downloads.apache.org/hadoop/common",
 # Every image has these: the validator's rules run pytest, and oracle tests use hypothesis.
 _TEST_PACKAGES = ("pytest", "hypothesis")
 
+# The Debian release under the official Python image, chosen by [requires] gcc's major: each
+# release packages one gcc. bookworm stays the default, so a course without C (or with gcc
+# 12) keeps its recipe and image name. gcc 14 is there because gcc 12's AddressSanitizer
+# hangs on kernels with 32 bits of mmap randomisation (docs/design.md, "C"); trixie packages
+# only JDK 21, so it cannot carry a Spark course's java 17 (both measured 2026-11-16).
+DEFAULT_DEBIAN = "bookworm"
+DEBIAN_BY_GCC = {"12": "bookworm", "14": "trixie"}
+TRIXIE_JAVA = "21"
+
 
 class ContainerError(Exception):
     """Docker or the image cannot be used. The message says how to fix it. Defined here, as
@@ -74,7 +83,7 @@ def dockerfile(requires: Mapping[str, str], uid: int | None = None,
     # requires_problems checks this only when [requires] names python; the image's own does.
     if found := compat.conflicts(requires, python):
         raise ContainerError(found[0])
-    steps = [f"FROM python:{python}-slim-bookworm"]
+    steps = [f"FROM {base_image(requires)}"]
     env = {
         # The root file system is read-only and /tmp is the only writable place besides a
         # run's own folder, so Python, Spark and MRJob all keep their files there.
@@ -101,8 +110,8 @@ def dockerfile(requires: Mapping[str, str], uid: int | None = None,
         env["JAVA_HOME"] = "/opt/java"
     if "gcc" in requires:
         # A step of its own, so the recipes (and image names) of courses without C stay as
-        # they were. Debian's gcc package is the release's one (12 on bookworm); the check
-        # after the build compares it with [requires], so another major is refused there.
+        # they were. Debian's gcc package is the release's one (debian_release picked the
+        # release by gcc's major), and the check after the build compares it with [requires].
         # libc6-dev: the C library's headers. The sanitizers' libraries come with gcc.
         steps.append("RUN apt-get update \\\n"
                      " && apt-get install -y --no-install-recommends gcc libc6-dev \\\n"
@@ -138,6 +147,33 @@ def _check_requires(requires: Mapping[str, str]) -> None:
         raise ContainerError(problems[0])
     if "hadoop" in requires:
         hadoop_release(requires["hadoop"])
+    debian_release(requires)
+
+
+def debian_release(requires: Mapping[str, str]) -> str:
+    """The Debian release the image is based on: gcc's major picks it (DEBIAN_BY_GCC), else
+    the default. ContainerError for a gcc no release packages, or for a java the release has
+    no JDK of; refused here, before a build downloads anything."""
+    gcc = requires.get("gcc")
+    if gcc is None:
+        return DEFAULT_DEBIAN
+    major = gcc.split(".")[0]
+    if major not in DEBIAN_BY_GCC:
+        known = ", ".join(f"{g} (Debian {r})" for g, r in DEBIAN_BY_GCC.items())
+        raise ContainerError(f"[requires] gcc = {gcc!r}: the test image can have gcc {known}")
+    release = DEBIAN_BY_GCC[major]
+    java = requires.get("java")
+    if release == "trixie" and java is not None and java.split(".")[0] != TRIXIE_JAVA:
+        raise ContainerError(f"[requires] gcc = {gcc!r} with java = {java!r}: gcc {major}'s "
+                             f"Debian ({release}) has only Java {TRIXIE_JAVA}; use java = "
+                             f"\"{TRIXIE_JAVA}\", or gcc = \"12\"")
+    return release
+
+
+def base_image(requires: Mapping[str, str]) -> str:
+    """The official Python image the recipe starts FROM, e.g. python:3.11-slim-bookworm."""
+    python = requires.get("python") or f"{sys.version_info.major}.{sys.version_info.minor}"
+    return f"python:{python}-slim-{debian_release(requires)}"
 
 
 def hadoop_release(required: str) -> str:

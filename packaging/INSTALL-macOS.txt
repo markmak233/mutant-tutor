@@ -1,0 +1,130 @@
+Tutor 0.1.0 on macOS: how to install it
+=======================================
+
+This folder holds:
+
+    tutor-0.1.0-py3-none-any.whl   the tool
+    INSTALL-macOS.txt              this file
+
+You run every command below yourself, in Terminal; nothing installs anything on
+its own. You need an internet connection: while Tutor installs, the libraries it
+uses are downloaded from PyPI (pypi.org).
+
+To open Terminal: Finder > Applications > Utilities > Terminal.
+
+
+1. Install uv (once per computer)
+---------------------------------
+
+uv is the program that installs Tutor; it goes into your home folder and needs
+no administrator rights. Run:
+
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+
+uv's own instructions are at https://docs.astral.sh/uv/getting-started/installation/
+If uv is already installed, skip this step.
+
+Close Terminal, open it again, and check that it answers:
+
+    uv --version
+
+
+2. Install Tutor
+----------------
+
+Go to this folder, the one holding the .whl file. For example, if you unpacked
+it in Downloads:
+
+    cd ~/Downloads/tutor-0.1.0
+
+Then run this, with the quotes:
+
+    uv tool install --python 3.11 "tutor-0.1.0-py3-none-any.whl[gen,gui,doctor]"
+
+If this computer has no Python 3.11, uv first downloads its own copy into your
+home folder; that needs no administrator rights. To use only a Python you
+installed yourself, add --no-python-downloads to the command.
+
+Then, once, so that the `tutor` command is found:
+
+    uv tool update-shell
+
+and close Terminal and open it again.
+
+
+3. Start it
+-----------
+
+    tutor gui
+
+starts Tutor and opens it in your browser. Keep that Terminal window open while
+you use it; Ctrl+C there stops it.
+
+To start it with a double-click from now on, run once:
+
+    tutor shortcut
+
+It puts a "Tutor" launcher on your desktop. The first time you open it, macOS
+may ask whether you trust it.
+
+Your courses are kept in this folder:
+
+    ~/Library/Application Support/Tutor/courses
+
+To keep them somewhere else, give the folder each time:
+tutor gui --root FOLDER (and tutor shortcut --root FOLDER for the launcher).
+
+To check what this computer has and lacks:
+
+    tutor doctor
+
+
+4. Docker (only for courses that run their tests in a container)
+----------------------------------------------------------------
+
+A course can run its tests on this computer or in a container. The container
+needs Docker Desktop, which you install yourself from
+https://docs.docker.com/desktop/setup/install/mac-install/
+(choose Apple silicon or Intel to match your Mac; read its licence terms
+there). After installing it, close Terminal and open it again. Once it is
+installed, Tutor starts it when needed.
+
+Docker Desktop needs hardware virtualisation, which a macOS virtual machine
+usually does not have: there, choose "on this machine" for a course's tests
+instead.
+
+
+5. Update to a new version
+--------------------------
+
+Go to the new version's folder and run the same command with --force, with the
+new file's name:
+
+    uv tool install --force --python 3.11 "tutor-NEW-VERSION-py3-none-any.whl[gen,gui,doctor]"
+
+Your courses are not touched.
+
+
+6. Uninstall
+------------
+
+    uv tool uninstall tutor
+
+Your courses folder (step 3) and the desktop launcher stay; delete them
+yourself if you no longer want them. To remove uv too, see the uninstall part of
+uv's instructions (step 1's link).
+
+
+7. If something goes wrong
+--------------------------
+
+- "command not found: tutor": run uv tool update-shell, then open Terminal
+  again.
+- "certificate not valid yet" or "certificate expired": this computer's clock
+  is wrong (common in a virtual machine that was off for a long time). In
+  System Settings > General > Date & Time, turn on setting the time
+  automatically, then try again.
+- The browser did not open: copy the "Open http://127.0.0.1:..." line that
+  tutor gui printed into your browser.
+- "Docker is not running": start Docker Desktop, wait until it says it is
+  running, then press "Check again" on the course's Environment page.

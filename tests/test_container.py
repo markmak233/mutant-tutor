@@ -2,20 +2,25 @@
 
 import hashlib
 import json
+import re
 import subprocess
 from pathlib import Path
 
 import pytest
 
+from tutor import container
 from tutor.config import Workspace
 from tutor.container import (
     ContainerError,
     build,
+    desktop_app,
     docker_problem,
+    docker_state,
     image_size,
     image_status,
     limits,
     main,
+    start_docker_desktop,
 )
 from tutor.image_recipe import HADOOP_MIRRORS, HADOOP_RELEASES, dockerfile, image_name, runner_uid
 
@@ -96,6 +101,30 @@ def test_a_c_course_gets_gcc_in_a_step_of_its_own():
                                             recipe.index("RUN pip")], "")
 
 
+@pytest.mark.parametrize(("gcc", "base"), [("12", "bookworm"), ("12.2", "bookworm"),
+                                           ("14", "trixie")])
+def test_gcc_picks_the_debian_release_that_packages_it(gcc, base):
+    """gcc 14 needs trixie (gcc 12's ASan hangs at 32 bits of mmap randomisation); gcc 12 and
+    no gcc keep bookworm, so those recipes and image names stay as they were."""
+    recipe = dockerfile({**PLAIN_COURSE, "gcc": gcc}, uid=501)
+    assert recipe.startswith(f"FROM python:3.11-slim-{base}\n")
+
+
+@pytest.mark.parametrize(("extra", "words"), [
+    ({"gcc": "13"}, "gcc 12 (Debian bookworm), 14 (Debian trixie)"),
+    ({"gcc": "14", "java": "17"}, "has only Java 21"),
+])
+def test_a_gcc_or_java_no_release_has_is_refused_before_a_build(extra, words):
+    with pytest.raises(ContainerError, match=re.escape(words)):
+        dockerfile({**PLAIN_COURSE, **extra}, uid=501)
+
+
+def test_trixie_takes_its_own_jdk():
+    recipe = dockerfile({**PLAIN_COURSE, "gcc": "14", "java": "21"}, uid=501)
+    assert recipe.startswith("FROM python:3.11-slim-trixie\n")
+    assert "openjdk-21-jre-headless" in recipe
+
+
 def test_hadoop_is_downloaded_from_every_mirror_and_checked_against_a_fixed_checksum():
     recipe = dockerfile(SPARK_COURSE, uid=501)
     for mirror in HADOOP_MIRRORS:
@@ -162,17 +191,105 @@ def test_the_runner_is_never_root(monkeypatch):
     assert runner_uid() == 1000
 
 
-def test_docker_problem_tells_missing_from_stopped_from_running():
+def _answer(stderr: str):
+    """`docker info` exiting 1 with this on stderr, as the CLI does when it cannot connect."""
+    def run(command, **kwargs):
+        return subprocess.CompletedProcess(command, 1, "", stderr)
+    return run
+
+
+def test_docker_state_tells_each_case_apart(monkeypatch):
     def missing(*args, **kwargs):
         raise FileNotFoundError("docker")
 
     def slow(*args, **kwargs):
         raise subprocess.TimeoutExpired("docker", 30)
 
+    # Never this machine's own Docker Desktop: each case says which app it finds.
+    monkeypatch.setattr(container, "desktop_app", lambda **kwargs: None)
+    assert docker_state(missing).kind == container.MISSING
     assert "not installed" in docker_problem(missing)
-    assert "did not answer" in docker_problem(slow)
-    assert "not running" in docker_problem(FakeDocker(fail={"info"}))
-    assert docker_problem(FakeDocker()) is None
+    # Installed after this terminal opened (Windows, 2026-11-15): not "install it again".
+    monkeypatch.setattr(container, "desktop_app", lambda **kwargs: Path("Docker Desktop.exe"))
+    found = docker_state(missing)
+    assert found.kind == container.NOT_FOUND and "not installed" not in found.message
+    assert "open a new terminal" in found.fix
+    assert docker_state(slow).kind == container.SLOW and "did not answer" in docker_problem(slow)
+    assert docker_problem(FakeDocker()) is None and docker_state(FakeDocker()).kind is None
+    # Not running: Docker Desktop on macOS and Windows, Desktop or Engine on Linux.
+    assert docker_problem(FakeDocker(fail={"info"})) is not None
+    for platform, words in (("darwin", "start Docker Desktop, then"),
+                            ("win32", "start Docker Desktop, then"),
+                            ("linux", "sudo systemctl start docker")):
+        state = docker_state(_answer("Cannot connect to the Docker daemon"), platform=platform)
+        assert state.kind == container.STOPPED and "not running" in state.problem
+        assert words in state.fix
+    # Running but not this user's (Ubuntu with Docker Engine, 2026-11-15): never "not running".
+    denied = docker_state(_answer("permission denied while trying to connect to the docker "
+                                  "API at unix:///var/run/docker.sock"), platform="linux")
+    assert denied.kind == container.DENIED and "not running" not in denied.message
+    assert "usermod -aG docker" in denied.fix and "log out" in denied.fix
+    windows = docker_state(_answer("open //./pipe/docker_engine: Access is denied."),
+                           platform="win32")
+    assert windows.kind == container.DENIED and "docker-users" in windows.fix
+
+
+def test_desktop_app_finds_either_windows_install(tmp_path, monkeypatch):
+    program_files, local = tmp_path / "Program Files", tmp_path / "Local"
+    env = {"ProgramFiles": str(program_files), "LOCALAPPDATA": str(local)}
+
+    def app(root):
+        exe = root / "Docker Desktop.exe"
+        (root / "resources" / "bin").mkdir(parents=True)
+        (root / "resources" / "bin" / "docker.exe").write_bytes(b"")
+        exe.write_bytes(b"")
+        return exe
+
+    def nowhere(name):
+        return None
+
+    assert desktop_app(platform="win32", which=nowhere, environ=env) is None
+    assert desktop_app(platform="linux", which=nowhere, environ=env) is None
+    # For one user, with no admin (seen in Windows Sandbox): under AppData\Local\Programs.
+    per_user = app(local / "Programs" / "DockerDesktop")
+    assert desktop_app(platform="win32", which=nowhere, environ=env) == per_user
+    # Wherever it is, the docker command it put on PATH leads to it (two folders up).
+    elsewhere = app(tmp_path / "D" / "Docker")
+    assert desktop_app(platform="win32", environ=env,
+                       which=lambda name: str(elsewhere.parent / "resources" / "bin" /
+                                              "docker.exe")) == elsewhere.resolve()
+
+
+def test_start_docker_desktop_asks_the_installed_app_and_never_installs(tmp_path, monkeypatch):
+    # macOS and Linux go through `run`, keyed by the command: `open` finds the app, and this
+    # Linux has no docker-desktop user service (systemctl exits 5), so nothing is started.
+    def run(command, **kwargs):
+        return subprocess.CompletedProcess(command, 0 if command[0] == "open" else 5, "", "")
+
+    assert start_docker_desktop(run=run, platform="darwin") == "open -a Docker"
+    assert start_docker_desktop(run=run, platform="linux") is None
+
+    def no_command(command, **kwargs):
+        raise FileNotFoundError(command[0])
+
+    assert start_docker_desktop(run=no_command, platform="linux") is None
+
+    # Windows starts the exe desktop_app finds (Program Files or the user's own install),
+    # detached, only if it is there; this machine's own docker command is kept out.
+    monkeypatch.setattr(container.shutil, "which", lambda name: None)
+    monkeypatch.setenv("ProgramFiles", str(tmp_path))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "Local"))
+    started = []
+
+    def popen(command, **kwargs):
+        started.append(command)
+
+    assert start_docker_desktop(popen=popen, platform="win32") is None
+    exe = tmp_path / "Local" / "Programs" / "DockerDesktop" / "Docker Desktop.exe"
+    exe.parent.mkdir(parents=True)
+    exe.write_bytes(b"")
+    assert start_docker_desktop(popen=popen, platform="win32") == str(exe)
+    assert started == [[str(exe)]]
 
 
 def test_the_status_says_how_to_get_ready(tmp_path):

@@ -132,10 +132,12 @@ def main(argv: list[str] | None = None, *, run: Callable | None = None, validato
 
         def machine_checks():
             nonlocal selected
-            selected = checks.parts(course if course and not course.error else None)
+            loaded = course if course and not course.error else None
+            selected = checks.parts(loaded)
             # Isolate each language hook, so a broken third-language probe hides nothing.
             for part in selected:
-                check(f"{part.key} machine", lambda part=part: part.machine_checks(run))
+                check(f"{part.key} machine",
+                      lambda part=part: part.machine_checks(run, loaded))
             return []
 
         check("language registry", machine_checks)

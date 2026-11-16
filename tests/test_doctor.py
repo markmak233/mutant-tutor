@@ -16,6 +16,7 @@ import pytest
 from tutor import __main__ as dispatcher
 from tutor import (
     config,
+    container,
     course_requirements,
     doctor,
     doctor_checks,
@@ -78,7 +79,11 @@ def rig(tmp_path, monkeypatch):
                         lambda *a, **k: pytest.fail("doctor checked the tool interpreter"))
     # Linux hosts differ in mmap settings; dedicated language tests cover that probe.
     monkeypatch.setitem(doctor_languages.DOCTORS, "c",
-                        replace(doctor_languages.DOCTORS["c"], machine_checks=lambda run: []))
+                        replace(doctor_languages.DOCTORS["c"],
+                                machine_checks=lambda run, course: []))
+    # A missing `docker` is "not installed" unless Docker Desktop is there; never let this
+    # machine's own install decide which.
+    monkeypatch.setattr(container, "desktop_app", lambda **kwargs: None)
 
     def forbidden(*args, **kwargs):
         pytest.fail("doctor called a model or loaded .env")
@@ -142,6 +147,17 @@ def test_docker_failures_warn_without_a_container_course(rig, capsys, mode, phra
     text = capsys.readouterr().out
     assert "WARN  Docker" in text and phrase in text and "0 failed, 1 warnings" in text
 
+
+
+def test_docker_next_line_says_what_to_do_not_the_warning_again(rig, capsys):
+    rig.docker = "down"
+    doctor.main([], run=rig)
+    lines = capsys.readouterr().out.splitlines()
+    warn = next(line for line in lines if line.startswith("WARN  Docker"))
+    then = lines[lines.index(warn) + 1].strip()
+    assert then.startswith("next:") and warn[6:].strip() not in then
+    # Where Docker cannot start at all (a VM, Windows Sandbox), the other way on.
+    assert "on this machine" in then
 
 def test_host_docker_problem_warns_and_image_skips(tmp_path, rig, capsys):
     root = course(tmp_path)

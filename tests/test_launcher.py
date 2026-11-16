@@ -72,6 +72,84 @@ def test_second_gui_launch_reuses_verified_server(tmp_path, monkeypatch, capsys)
     assert "Reused the verified server" in capsys.readouterr().out
 
 
+
+def _course(root: Path, name: str, runner: str | None) -> None:
+    """A course folder under `root`; `runner` is its [isolation] runner, None for none."""
+    (root / name).mkdir()
+    text = f'course = "{name}"\n' + (f'\n[isolation]\nrunner = "{runner}"\n' if runner else "")
+    (root / name / "workspace.toml").write_text(text, encoding="utf-8")
+
+
+class DockerStandIn:
+    """Docker as `_wake_docker` sees it (container.docker_state's kind), and the starts asked."""
+
+    def __init__(self, monkeypatch, kind="stopped", desktop=True):
+        from tutor import container
+
+        self.started = 0
+        state = container.DockerState(kind, f"the {kind} problem", f"the {kind} fix") \
+            if kind else container.DockerState(None)
+        monkeypatch.setattr(container, "docker_state", lambda *a, **k: state)
+        monkeypatch.setattr(container, "start_docker_desktop", self._start)
+        self.desktop = desktop
+
+    def _start(self, *args):
+        self.started += 1
+        return "open -a Docker" if self.desktop else None
+
+
+def test_launch_starts_a_stopped_docker_desktop_for_a_container_course(tmp_path, monkeypatch,
+                                                                       capsys):
+    _course(tmp_path, "boxed", "container")
+    docker = DockerStandIn(monkeypatch)
+    # A reused server's launch too: it waits for the start before its process ends.
+    state.save(tmp_path, 8000, TOKEN)
+    monkeypatch.setattr(state, "reachable", lambda *a: True)
+    assert gui_main.main(["--root", str(tmp_path), "--no-browser"]) == 0
+    assert docker.started == 1
+    assert "starting it" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("runner", [None, "host"])
+def test_launch_leaves_docker_alone_when_no_course_needs_it(tmp_path, monkeypatch, runner):
+    _course(tmp_path, "local", runner)
+    docker = DockerStandIn(monkeypatch)
+    gui_main._wake_docker(tmp_path)
+    assert docker.started == 0
+
+
+def test_launch_says_what_to_do_when_docker_cannot_be_started(tmp_path, monkeypatch, capsys):
+    _course(tmp_path, "local", "host")
+    _course(tmp_path, "boxed", "container")
+    running = DockerStandIn(monkeypatch, kind=None)
+    gui_main._wake_docker(tmp_path)
+    assert running.started == 0 and capsys.readouterr().out == ""
+
+    missing = DockerStandIn(monkeypatch, kind="missing")
+    gui_main._wake_docker(tmp_path)
+    assert missing.started == 0  # never installs: only says to
+    assert "install Docker Desktop" in capsys.readouterr().out
+
+    DockerStandIn(monkeypatch, desktop=False)
+    gui_main._wake_docker(tmp_path)
+    assert "start Docker yourself" in capsys.readouterr().out
+
+    # Installed but not on this terminal's PATH, or not this user's: starting would not
+    # help, so the launcher only passes on what to do.
+    for kind in ("not-found", "denied"):
+        other = DockerStandIn(monkeypatch, kind=kind)
+        gui_main._wake_docker(tmp_path)
+        assert other.started == 0
+        assert f"the {kind} problem: the {kind} fix." in capsys.readouterr().out
+
+
+def test_help_shows_the_whole_description(capsys):
+    with pytest.raises(SystemExit) as exit_:
+        gui_main.main(["--help"])
+    assert exit_.value.code == 0
+    # argparse wraps to the terminal's width, so compare the words, not the lines.
+    assert "Ctrl+C stops the server." in " ".join(capsys.readouterr().out.split())
+
 def test_waitress_text_port_is_saved_as_integer(tmp_path, monkeypatch):
     import waitress
 

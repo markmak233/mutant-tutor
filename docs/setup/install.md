@@ -66,6 +66,34 @@ the course. Environment → Check again → Make .venv is the separate guarded s
 `uv python uninstall IDENTIFIER` removes an unused interpreter; first check no venv uses it.
 uv is optional: manually installed Pythons remain discoverable.
 
+## Release package
+
+A release is one zip handed to the user directly: the wheel and the per-system
+instructions in [`packaging/`](../../packaging/) (`INSTALL-macOS.txt`, `INSTALL-Linux.txt`,
+`INSTALL-Windows.txt`), which the user follows by hand. Nothing is published (no GitHub
+Release, no PyPI) and there is no install script.
+
+The usual way is the manual Release workflow
+([`.github/workflows/release.yml`](../../.github/workflows/release.yml)): on GitHub, open
+Actions, choose "Release", press "Run workflow" and pick the branch. It runs the whole CI
+(the `spark` job included), builds the wheel once, installs that wheel on
+Linux, macOS and Windows with the clean-install acceptance below, and only then keeps the
+zip as the run's artifact, `tutor-VERSION-COMMIT` (the commit's first 7 characters), on the
+run's page for 90 days. Downloading it needs a GitHub login; inside is the `tutor-VERSION`
+folder to hand over. GitHub shows the button only once the workflow file is on the default
+branch.
+
+By hand, from a clean checkout:
+
+```console
+uv build --wheel --out-dir dist
+```
+
+Put the wheel and the three files in one folder named `tutor-VERSION`, then zip that folder.
+`tests/test_install_instructions.py` checks that the files name the current version, the
+extras the install command uses, and the courses folder an installed tool keeps. Windows on
+ARM is not supported yet; see docs/design.md, "Packaging and release".
+
 ## Clean-install acceptance
 
 Build a wheel, then run the explicit script with a new scratch directory outside any

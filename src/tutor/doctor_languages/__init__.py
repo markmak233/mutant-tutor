@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from tutor.doctor_rows import Row
 
 
-def _no_checks(run: Callable) -> list[Row]:
+def _no_checks(run: Callable, course=None) -> list[Row]:
     """Most languages have no additional machine-wide constraints."""
     return []
 
@@ -27,7 +27,9 @@ class LanguageDoctor:
 
     key: str
     smoke_example: str
-    machine_checks: Callable[[Callable], list[Row]] = _no_checks
+    # (run, course): doctor_checks.Course, or None without a course; a condition of the
+    # machine may matter only with what the course asks for (C's gcc 12, for one).
+    machine_checks: Callable[..., list[Row]] = _no_checks
     platform_problem: Callable[[str, str | None], str | None] = _no_problem
     validation_needs_container: bool = False
 
