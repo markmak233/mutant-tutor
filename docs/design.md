@@ -3697,6 +3697,13 @@ late; the adaptive review screens can be built with it.
   `tutor.workspace init` lays them out; the root is `--root`, else the folder above
   `WORKSPACE_DIR`. Each is checked like any workspace (refused inside a git repository). A
   command the GUI starts gets that course's `WORKSPACE_DIR` and `LECTURE_DIR`.
+  Without `--root`, the course is looked for in this order (2026-11-16, after a course
+  `.venv`'s `tutor gui` would not start without `--root`): `WORKSPACE_DIR` in the
+  environment; the course the command runs in (a `workspace.toml` at or above the current
+  folder: a course's VS Code terminal sets `WORKSPACE_DIR` on macOS only); `WORKSPACE_DIR`
+  in the current folder's `.env`; then in the checkout's own `.env`, from any folder, as
+  the attempts plugin already read it. Each `.env` is read for that one name. An installed
+  tool, which has no checkout, falls back to its per-user courses folder.
 - Access (step 1): the server listens on 127.0.0.1 only. A random token per launch is in the
   link the command prints and opens; the first request swaps it for an HttpOnly,
   SameSite=Strict cookie and redirects to the page without it, and every request without it

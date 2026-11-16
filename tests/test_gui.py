@@ -184,12 +184,91 @@ def test_the_root_defaults_to_the_folder_above_the_workspace(tmp_path, monkeypat
     assert gui_main._root(None) == (tmp_path / "courses").resolve()
 
 
+def _fake_checkout(monkeypatch, folder: Path) -> Path:
+    """Stand in for this repository, so the lookup never reads its real `.env` (which names
+    a real course)."""
+    folder.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(gui_main.project_source, "checkout", lambda: folder)
+    return folder
+
+
 def test_no_root_and_no_workspace_is_an_error(tmp_path, monkeypatch, capsys):
+    _fake_checkout(monkeypatch, tmp_path / "repo")  # a checkout whose .env is missing
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("WORKSPACE_DIR", raising=False)
 
     assert gui_main.main(["--no-browser"]) == 2
-    assert "--root" in capsys.readouterr().err
+    error = capsys.readouterr().err
+    assert "--root" in error and "inside a course folder" in error
+
+
+def test_the_root_is_the_folder_above_the_course_a_terminal_is_in(tmp_path, monkeypatch):
+    """A course `.venv`'s terminal on Linux or Windows has no WORKSPACE_DIR (VS Code sets it
+    on macOS only), and that tutor is the checkout's: it starts from the course it is in."""
+    _fake_checkout(monkeypatch, tmp_path / "repo")
+    course = tmp_path / "courses" / "one"
+    (course / "batches" / "w1").mkdir(parents=True)
+    (course / "workspace.toml").write_text('course = "one"\n', encoding="utf-8")
+    monkeypatch.chdir(course / "batches" / "w1")
+    monkeypatch.delenv("WORKSPACE_DIR", raising=False)
+
+    assert gui_main._root(None) == (tmp_path / "courses").resolve()
+
+
+def test_workspace_dir_set_on_purpose_wins_over_the_course_a_terminal_is_in(tmp_path,
+                                                                            monkeypatch):
+    for name in ("one", "two"):
+        (tmp_path / name / "c").mkdir(parents=True)
+        (tmp_path / name / "c" / "workspace.toml").write_text('course = "c"\n', encoding="utf-8")
+    monkeypatch.chdir(tmp_path / "one" / "c")
+    monkeypatch.setenv("WORKSPACE_DIR", str(tmp_path / "two" / "c"))
+
+    assert gui_main._root(None) == (tmp_path / "two").resolve()
+
+
+def test_the_checkouts_env_names_the_course_from_any_folder(tmp_path, monkeypatch):
+    """A course `.venv`'s tutor run outside every course: the checkout's `.env`, read for
+    WORKSPACE_DIR alone, as the attempts plugin reads it."""
+    repo = _fake_checkout(monkeypatch, tmp_path / "repo")
+    (tmp_path / "courses" / "one").mkdir(parents=True)
+    (repo / ".env").write_text(f"OPENAI_API_KEY=sk-test-not-a-real-key\n"
+                               f"WORKSPACE_DIR={tmp_path / 'courses' / 'one'}\n",
+                               encoding="utf-8")
+    (tmp_path / "elsewhere").mkdir()
+    monkeypatch.chdir(tmp_path / "elsewhere")
+    monkeypatch.delenv("WORKSPACE_DIR", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    assert gui_main._root(None) == (tmp_path / "courses").resolve()
+    assert "OPENAI_API_KEY" not in gui_main.os.environ
+
+
+def test_an_env_file_here_wins_over_the_checkouts(tmp_path, monkeypatch):
+    repo = _fake_checkout(monkeypatch, tmp_path / "repo")
+    for name in ("here", "checkout"):
+        (tmp_path / name / "c").mkdir(parents=True)
+    (repo / ".env").write_text(f"WORKSPACE_DIR={tmp_path / 'checkout' / 'c'}\n",
+                               encoding="utf-8")
+    (tmp_path / "here" / ".env").write_text(f"WORKSPACE_DIR={tmp_path / 'here' / 'c'}\n",
+                                            encoding="utf-8")
+    monkeypatch.chdir(tmp_path / "here")
+    monkeypatch.delenv("WORKSPACE_DIR", raising=False)
+
+    assert gui_main._root(None) == (tmp_path / "here").resolve()
+
+
+def test_a_course_inside_a_repository_is_refused_by_its_own_name(tmp_path, monkeypatch, capsys):
+    """The root found from the course a terminal is in gets the same refusal as any other."""
+    _fake_checkout(monkeypatch, tmp_path / "repo")
+    (tmp_path / "leaky" / ".git").mkdir(parents=True)
+    course = tmp_path / "leaky" / "courses" / "one"
+    course.mkdir(parents=True)
+    (course / "workspace.toml").write_text('course = "one"\n', encoding="utf-8")
+    monkeypatch.chdir(course)
+    monkeypatch.delenv("WORKSPACE_DIR", raising=False)
+
+    assert gui_main.main(["--no-browser"]) == 2
+    assert "the folder above this course is inside the git repository" in capsys.readouterr().err
 
 
 def _row(id, priority="must", status="not started"):
