@@ -3678,8 +3678,9 @@ mode is not done (see "Decisions not to do").
     Checked the same evening in fresh clones: Windows 11 x64 (the Desktop known folder
     gave `OneDrive\桌面`; a `.lnk` made in a non-ASCII folder points at the right python
     and arguments), WSL 2 (no desktop folder: exit 2 naming `--directory`) and an Ubuntu
-    26.04 aarch64 VM with KDE (`~/Desktop`; a double-click opened the pages; what KDE
-    asked first was not noted). The aarch64 install of `.[dev,gui,gen]` built nothing
+    26.04 aarch64 VM with KDE (`~/Desktop`; a double-click asks how to open the file,
+    "Launch" among editors such as Kate, and Launch opened Konsole and the pages; the
+    Linux INSTALL text now says so beside GNOME's "Allow Launching"). The aarch64 install of `.[dev,gui,gen]` built nothing
     from source. A launcher outlives the install it points at: the VM's launcher from the
     11-15 walk-through said "could not find the program" once that tool was uninstalled,
     as the INSTALL texts' removal section warns (delete it there; a reinstall with uv
