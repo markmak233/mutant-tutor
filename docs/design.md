@@ -3935,6 +3935,12 @@ late; the adaptive review screens can be built with it.
   PC: `test_gui_tasks.py` whole (21 passed, the 3 ps-based tests skipped), `/stop` 303 and
   the task `stopped` within 0.5 s, the server alive, the queue moving on. Not exercised
   there: the taskkill path (no command ignored Ctrl+Break).
+  A Stop inside `Popen` (POSIX, 2026-11-16, read in CPython's subprocess, not seen): Popen
+  has forked and waits a few ms for the exec when Ctrl+C raises out of it, so the command
+  runs and the runner holds no Popen for it; the runner stopped nothing and the command
+  outlived it. Now, when the runner has no running Popen but processes below it, it stops
+  them the same way and reaps its own child with `waitpid`. The `ps` it runs is left out
+  of the list: it had listed itself (measured), sending signals to a freed pid.
 - Generation (step 4, owner, 2026-11-06): no change to `graph/`. Started without a terminal,
   `python -m tutor.graph plan` already pauses at the plan and exits 0, so the GUI runs the
   CLI's commands as tasks: the new-batch form starts `plan` (lectures read into the cache,
