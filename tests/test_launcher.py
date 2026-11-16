@@ -453,8 +453,10 @@ def test_wsl_without_windows_interop_tries_the_usual_way(monkeypatch):
 def test_plain_linux_never_runs_rundll32(monkeypatch):
     monkeypatch.setattr(sys, "platform", "linux")
     monkeypatch.delenv("WSL_DISTRO_NAME", raising=False)
+    # raising=False: Windows' os has no uname at all (Windows CI, 2026-11-16), and the code
+    # asks for it only on Linux, which this test pretends to be.
     monkeypatch.setattr(gui_main.os, "uname",
-                        lambda: type("U", (), {"release": "7.0.0-34-generic"})())
+                        lambda: type("U", (), {"release": "7.0.0-34-generic"})(), raising=False)
     opened = Opened(monkeypatch)
     gui_main._open_browser(URL)
     assert opened.started == [] and opened.browsed == [URL]
