@@ -3680,13 +3680,14 @@ mode is not done (see "Decisions not to do").
     and arguments), WSL 2 (no desktop folder: exit 2 naming `--directory`) and an Ubuntu
     26.04 aarch64 VM with KDE (`~/Desktop`; a double-click asks how to open the file,
     "Launch" among editors such as Kate, and Launch opened Konsole and the pages; the
-    Linux INSTALL text now says so beside GNOME's "Allow Launching"). The aarch64 install of `.[dev,gui,gen]` built nothing
-    from source. A launcher outlives the install it points at: the VM's launcher from the
-    11-15 walk-through said "could not find the program" once that tool was uninstalled,
-    as the INSTALL texts' removal section warns (delete it there; a reinstall with uv
-    should put the python back at the same path, not tested). Windows on ARM is not supported:
-    sqlite-vec, which langgraph-checkpoint-sqlite 3 requires (only its vector store imports
-    it; the SqliteSaver used here does not), has no win_arm64 wheel, and PyYAML has none for
+    Linux INSTALL text now says so beside GNOME's "Allow Launching"). The aarch64
+    install of `.[dev,gui,gen]` built nothing from source. A launcher outlives the
+    install it points at: the VM's launcher from the 11-15 walk-through said "could not
+    find the program" once that tool was uninstalled, as the INSTALL texts' removal
+    section warns (delete it there; a reinstall with uv should put the python back at
+    the same path, not tested). Windows on ARM is not supported: sqlite-vec, which
+    langgraph-checkpoint-sqlite 3 requires (only its vector store imports it; the
+    SqliteSaver used here does not), has no win_arm64 wheel, and PyYAML has none for
     Python 3.11. Resolving for it with Python 3.12 and sqlite-vec excluded (`uv tool install
     --excludes`) works, but a course's `.venv` installs the same extras, so support waits
     for a change of its own. Docker on Windows x64 (2026-11-16, `pytest -m docker` on the
