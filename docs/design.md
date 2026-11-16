@@ -3640,7 +3640,9 @@ mode is not done (see "Decisions not to do").
   `webbrowser` fell through to `gio`, which printed "Operation not supported" and nothing
   opened. So under WSL `tutor gui` hands the link to Windows' http handler,
   `rundll32.exe url.dll,FileProtocolHandler URL`, which opened it in the owner's default
-  browser (`explorer.exe URL`, the first try, opened the Documents folder instead);
+  browser (`explorer.exe URL`, the first try, opened the Documents folder instead;
+  dde96b1 checked through `tutor gui` itself in WSL: the first launch and a reuse each
+  opened the courses page in Windows' browser);
   without Windows interop it tries the usual way, and a
   `webbrowser` that finds no browser at all prints a line to open the link by hand.
   Mirrored networking (`.wslconfig`) is untested. `tutor shortcut` creates a new
