@@ -100,6 +100,11 @@ Installing the tool, the release package and its workflow. Part of the design re
     expires. Not runnable locally: checked with actionlint 1.7.7 and its build and bundle
     commands rehearsed (that caught uv writing a `.gitignore` into `dist`); its first real
     run, after it reaches the default branch, is the check that it works.
+    v0.1.0 (2026-11-17): tag `v0.1.0` on main's 1891f31, pushed by the owner after a
+    manual CI run there (spark included, all green), as a push to main skips spark and a
+    merge had passed its PR and failed on main before. Release run 43876271241: 17 jobs
+    green, the zip `tutor-0.1.0-1891f31` holding `tutor-0.1.0/` with the wheel (0.1.0,
+    315 files) and the three INSTALL texts. `constraints.txt` is CI's 3.11 freeze.
   - One click (the owner's aim, 2026-11-05; installation acceptance still pending): one install
     line gets `uv`, which fetches the Python it needs and installs the tool (`uv tool install`,
     the same job as `pipx`, without needing Python first). `tutor gui` starts the server and
