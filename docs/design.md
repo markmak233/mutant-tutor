@@ -2828,7 +2828,11 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
   (added 2026-10-26 after a Codex review asked for integration tests apart from the fast
   ones). About 3 min without Hadoop, measured in a fresh venv: 3 passed, the 5 Hadoop tests
   skipped. Use it after changing the validator or testkit, or to show the examples validate
-  on a clean machine.
+  on a clean machine. Its first run on GitHub (inside the first release run, 2026-11-16)
+  stopped at collection: it installed only `bigdata` and `dev`, and five test files import
+  the GUI, so it now installs `gen` and `gui` as every other job does (rehearsed in a venv
+  with those extras: 8 passed with JDK 17, the Hadoop ones too, as the repo's `.env` here
+  names a HADOOP_HOME; on GitHub those 5 skip).
 - Not in CI: the Hadoop tests (Hadoop is a 700 MB download and each job starts a JVM for
   about 7 s). Run `pytest -m spark` locally with `HADOOP_HOME` set before merging changes
   to `run_mrjob`.
