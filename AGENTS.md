@@ -37,8 +37,9 @@ deliberate, not gaps to report.
 
 ## Code
 
-- A source file past 300 lines is watched; from 500, propose a split along its sections, or say
-  why it stays whole (one cohesive job). "Consider" is not "must".
+- A source file past 300 lines of code is watched; from 500, propose a split along its sections,
+  or say why it stays whole (one cohesive job). "Consider" is not "must". Count code only:
+  comments, docstrings and blank lines do not count, so commenting never pushes a file over.
 - When a change touches a file, comment that whole file: what each block does and why (regexes,
   checks, loops, prompt sections). New code is written well commented. No repository-wide
   comment-only change.
