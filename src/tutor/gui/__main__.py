@@ -16,6 +16,8 @@ from __future__ import annotations
 import argparse
 import os
 import secrets
+import shutil
+import subprocess
 import sys
 import threading
 import tomllib
@@ -144,6 +146,41 @@ def _wake_docker(root: Path) -> None:
               "yourself.", flush=True)
 
 
+def _in_wsl() -> bool:
+    """Whether this is Linux under WSL (Windows Subsystem for Linux): WSL sets
+    WSL_DISTRO_NAME in every shell, and its kernel's release names Microsoft."""
+    if not sys.platform.startswith("linux"):
+        return False
+    return bool(os.environ.get("WSL_DISTRO_NAME")) or "microsoft" in os.uname().release.lower()
+
+
+NOT_OPENED = "The browser did not open by itself: open the link above in one."
+
+
+def _open_browser(url: str) -> None:
+    """Open the pages in the browser, or say to open the link by hand.
+
+    WSL (2026-11-16, a joint test of the owner's PC and its WSL): Python's webbrowser found
+    no browser there and fell through to `gio`, which printed "Operation not supported"
+    and nothing else. Windows' own browser does reach a server in WSL that listens on
+    127.0.0.1 (WSL forwards localhost by default; checked with curl and the owner's
+    browser), so under WSL the link goes to Windows: `explorer.exe URL` opens it in the
+    default browser. explorer.exe exits 1 even when it worked, so only a failure to
+    start it counts. Without Windows interop (turned off in /etc/wsl.conf) there is no
+    explorer.exe, and the usual way is tried."""
+    if _in_wsl() and (explorer := shutil.which("explorer.exe")):
+        try:
+            subprocess.Popen([explorer, url], stdin=subprocess.DEVNULL,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return
+        except OSError:
+            pass
+    # webbrowser.open says False when it found no browser at all. A browser that fails
+    # after starting (gio's case) still reads as True: the link printed above remains.
+    if not webbrowser.open(url):
+        print(NOT_OPENED, flush=True)
+
+
 def main(argv: list[str] | None = None) -> int:
     """Start (or reuse) the GUI's server for one root; 2 when it cannot start."""
     # The module docstring's second paragraph; argparse wraps it again. The name is the one
@@ -197,7 +234,7 @@ def main(argv: list[str] | None = None) -> int:
     action = "Ctrl+C stops the server." if server is not None else "Reused the verified server."
     print(f"Courses in {root}\nOpen {url}\n{action}", flush=True)
     if not args.no_browser:
-        webbrowser.open(url)
+        _open_browser(url)
     if server is None:
         waker.join()  # a reused server: this process ends here, and the start must go out first
         return 0

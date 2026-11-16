@@ -400,3 +400,64 @@ def test_reachable_refuses_wrong_challenge_response(tmp_path, monkeypatch):
 
     monkeypatch.setattr(state, "build_opener", lambda *a: Opener())
     assert not state.reachable(tmp_path, {"port": 8000, "token": TOKEN})
+
+
+# --- opening the browser (WSL: through Windows, 2026-11-16) --------------------------------
+
+
+class Opened:
+    """Stand-ins for explorer.exe's start and webbrowser.open, recording what each got."""
+
+    def __init__(self, monkeypatch, *, explorer="/mnt/c/Windows/explorer.exe", found=True):
+        self.started, self.browsed = [], []
+        monkeypatch.setattr(gui_main.shutil, "which",
+                            lambda name: explorer if name == "explorer.exe" else None)
+        monkeypatch.setattr(gui_main.subprocess, "Popen", self._popen)
+        monkeypatch.setattr(gui_main.webbrowser, "open", self._browse)
+        self.found = found
+
+    def _popen(self, command, **kwargs):
+        self.started.append(command)
+
+    def _browse(self, url):
+        self.browsed.append(url)
+        return self.found
+
+
+URL = "http://127.0.0.1:8123/?token=synthetic"
+
+
+def test_under_wsl_the_link_opens_in_windows_browser(monkeypatch, capsys):
+    """WSL's own webbrowser fell through to gio ("Operation not supported"); Windows'
+    browser reaches the server there, so explorer.exe gets the link."""
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setenv("WSL_DISTRO_NAME", "Ubuntu")
+    opened = Opened(monkeypatch)
+    gui_main._open_browser(URL)
+    assert opened.started == [["/mnt/c/Windows/explorer.exe", URL]] and opened.browsed == []
+    assert capsys.readouterr().out == ""
+
+
+def test_wsl_without_windows_interop_tries_the_usual_way(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setenv("WSL_DISTRO_NAME", "Ubuntu")
+    opened = Opened(monkeypatch, explorer=None)
+    gui_main._open_browser(URL)
+    assert opened.started == [] and opened.browsed == [URL]
+
+
+def test_plain_linux_never_runs_explorer(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.delenv("WSL_DISTRO_NAME", raising=False)
+    monkeypatch.setattr(gui_main.os, "uname",
+                        lambda: type("U", (), {"release": "7.0.0-34-generic"})())
+    opened = Opened(monkeypatch)
+    gui_main._open_browser(URL)
+    assert opened.started == [] and opened.browsed == [URL]
+
+
+def test_no_browser_found_says_to_open_the_link(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "platform", "darwin")
+    Opened(monkeypatch, found=False)
+    gui_main._open_browser(URL)
+    assert gui_main.NOT_OPENED in capsys.readouterr().out

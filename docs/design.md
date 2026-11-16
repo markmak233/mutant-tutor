@@ -3632,7 +3632,16 @@ mode is not done (see "Decisions not to do").
   never run its cleanup (SIGTERM measured 2026-11-16). It is removed when the old pid is
   dead or, since 2026-11-16, when its port refuses connections (a server binds its port
   before saving state and keeps it until it stops), so a pid Windows has handed to another
-  program no longer stops a launcher click at `--reset-state`. `tutor shortcut` creates a new
+  program no longer stops a launcher click at `--reset-state`.
+  Under WSL (2026-11-16, a joint test of the owner's PC and its WSL 2, default NAT
+  networking): Windows reaches a server in WSL that listens on 127.0.0.1, by
+  `127.0.0.1` or `localhost` (curl: 403 without the token, 302 and the cookie with it;
+  the owner's browser showed the courses page). WSL itself has no browser: Python's
+  `webbrowser` fell through to `gio`, which printed "Operation not supported" and nothing
+  opened. So under WSL `tutor gui` hands the link to `explorer.exe`, which opens it in
+  Windows' default browser; without Windows interop it tries the usual way, and a
+  `webbrowser` that finds no browser at all prints a line to open the link by hand.
+  Mirrored networking (`.wslconfig`) is untested. `tutor shortcut` creates a new
   .command/.lnk/.desktop without overwriting or changing startup items. Native desktop
   trust/click and browser acceptance remain separate from platform-format unit tests.
   The server runs in the console window the launcher opens; closing it stops the server.
