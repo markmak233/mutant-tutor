@@ -2789,6 +2789,9 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
   `requires-python` lost its `<3.13`. Measured locally first, fast suite and `-m spark`
   (mrjob, PySpark 3.5.9 and Hadoop) on each. 3.15 waits until the dependencies have wheels
   for it. Only `test` runs every version; `other-os`, `docker` and `spark` stay on 3.11.
+  `test` and `other-os` stop after 45 minutes (2026-11-16), as the other jobs already had
+  limits: pytest takes 4 to 8 minutes there, 27 on a runner five times slower than usual,
+  and a stuck test would otherwise hold a runner for GitHub's default 6 hours.
   `test` and `other-os` install the `gen` extra too, and run `pytest -rs`: without langgraph
   the graph's tests skipped there, 28 skips a job on the first 3.11-3.14 run (2026-11-08),
   among them all of `tests/test_graph_cli.py`.

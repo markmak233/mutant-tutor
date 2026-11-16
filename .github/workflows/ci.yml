@@ -19,6 +19,9 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # A stuck test would otherwise hold the runner for GitHub's default 6 hours. 45 min:
+    # pytest takes 4-8 min, and 27 on a runner five times slower than usual (2026-11-16).
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -47,6 +50,7 @@ jobs:
   # and the Windows runner runs only Windows containers (see docs/design.md, "CI").
   other-os:
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45  # as `test`
     strategy:
       fail-fast: false
       matrix:
