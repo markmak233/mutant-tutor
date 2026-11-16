@@ -402,16 +402,17 @@ def test_reachable_refuses_wrong_challenge_response(tmp_path, monkeypatch):
     assert not state.reachable(tmp_path, {"port": 8000, "token": TOKEN})
 
 
-# --- opening the browser (WSL: through Windows, 2026-11-16) --------------------------------
+# --- opening the browser (WSL: through Windows' http handler, 2026-11-16) ------------------
 
 
 class Opened:
-    """Stand-ins for explorer.exe's start and webbrowser.open, recording what each got."""
+    """Stand-ins for rundll32.exe's start and webbrowser.open, recording what each got."""
 
-    def __init__(self, monkeypatch, *, explorer="/mnt/c/Windows/explorer.exe", found=True):
+    def __init__(self, monkeypatch, *, rundll32="/mnt/c/Windows/System32/rundll32.exe",
+                 found=True):
         self.started, self.browsed = [], []
         monkeypatch.setattr(gui_main.shutil, "which",
-                            lambda name: explorer if name == "explorer.exe" else None)
+                            lambda name: rundll32 if name == "rundll32.exe" else None)
         monkeypatch.setattr(gui_main.subprocess, "Popen", self._popen)
         monkeypatch.setattr(gui_main.webbrowser, "open", self._browse)
         self.found = found
@@ -429,24 +430,27 @@ URL = "http://127.0.0.1:8123/?token=synthetic"
 
 def test_under_wsl_the_link_opens_in_windows_browser(monkeypatch, capsys):
     """WSL's own webbrowser fell through to gio ("Operation not supported"); Windows'
-    browser reaches the server there, so explorer.exe gets the link."""
+    browser reaches the server there, so Windows' http handler gets the link. Not
+    explorer.exe: given this link it opened the Documents folder (WSL, 2026-11-16)."""
     monkeypatch.setattr(sys, "platform", "linux")
     monkeypatch.setenv("WSL_DISTRO_NAME", "Ubuntu")
     opened = Opened(monkeypatch)
     gui_main._open_browser(URL)
-    assert opened.started == [["/mnt/c/Windows/explorer.exe", URL]] and opened.browsed == []
+    assert opened.started == [["/mnt/c/Windows/System32/rundll32.exe",
+                               "url.dll,FileProtocolHandler", URL]]
+    assert opened.browsed == []
     assert capsys.readouterr().out == ""
 
 
 def test_wsl_without_windows_interop_tries_the_usual_way(monkeypatch):
     monkeypatch.setattr(sys, "platform", "linux")
     monkeypatch.setenv("WSL_DISTRO_NAME", "Ubuntu")
-    opened = Opened(monkeypatch, explorer=None)
+    opened = Opened(monkeypatch, rundll32=None)
     gui_main._open_browser(URL)
     assert opened.started == [] and opened.browsed == [URL]
 
 
-def test_plain_linux_never_runs_explorer(monkeypatch):
+def test_plain_linux_never_runs_rundll32(monkeypatch):
     monkeypatch.setattr(sys, "platform", "linux")
     monkeypatch.delenv("WSL_DISTRO_NAME", raising=False)
     monkeypatch.setattr(gui_main.os, "uname",

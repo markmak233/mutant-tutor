@@ -3638,8 +3638,10 @@ mode is not done (see "Decisions not to do").
   `127.0.0.1` or `localhost` (curl: 403 without the token, 302 and the cookie with it;
   the owner's browser showed the courses page). WSL itself has no browser: Python's
   `webbrowser` fell through to `gio`, which printed "Operation not supported" and nothing
-  opened. So under WSL `tutor gui` hands the link to `explorer.exe`, which opens it in
-  Windows' default browser; without Windows interop it tries the usual way, and a
+  opened. So under WSL `tutor gui` hands the link to Windows' http handler,
+  `rundll32.exe url.dll,FileProtocolHandler URL`, which opened it in the owner's default
+  browser (`explorer.exe URL`, the first try, opened the Documents folder instead);
+  without Windows interop it tries the usual way, and a
   `webbrowser` that finds no browser at all prints a line to open the link by hand.
   Mirrored networking (`.wslconfig`) is untested. `tutor shortcut` creates a new
   .command/.lnk/.desktop without overwriting or changing startup items. Native desktop

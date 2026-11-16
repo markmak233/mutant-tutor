@@ -160,18 +160,21 @@ NOT_OPENED = "The browser did not open by itself: open the link above in one."
 def _open_browser(url: str) -> None:
     """Open the pages in the browser, or say to open the link by hand.
 
-    WSL (2026-11-16, a joint test of the owner's PC and its WSL): Python's webbrowser found
-    no browser there and fell through to `gio`, which printed "Operation not supported"
-    and nothing else. Windows' own browser does reach a server in WSL that listens on
-    127.0.0.1 (WSL forwards localhost by default; checked with curl and the owner's
-    browser), so under WSL the link goes to Windows: `explorer.exe URL` opens it in the
-    default browser. explorer.exe exits 1 even when it worked, so only a failure to
-    start it counts. Without Windows interop (turned off in /etc/wsl.conf) there is no
-    explorer.exe, and the usual way is tried."""
-    if _in_wsl() and (explorer := shutil.which("explorer.exe")):
+    WSL (2026-11-16, joint tests of the owner's PC and its WSL 2): Python's webbrowser
+    found no browser there and fell through to `gio`, which printed "Operation not
+    supported" and nothing else. Windows' own browser does reach a server in WSL that
+    listens on 127.0.0.1 (WSL forwards localhost by default; checked with curl and the
+    owner's browser), so under WSL the link goes to Windows' handler for http links:
+    `rundll32.exe url.dll,FileProtocolHandler URL` opened it in the default browser.
+    `explorer.exe URL`, tried first on an untested assumption, opened the Documents
+    folder instead (bb79f08, measured the same day). rundll32 exits 0 whatever happens, so
+    only a failure to start it counts. Without Windows interop (turned off in
+    /etc/wsl.conf) there is no rundll32.exe, and the usual way is tried."""
+    if _in_wsl() and (rundll32 := shutil.which("rundll32.exe")):
         try:
-            subprocess.Popen([explorer, url], stdin=subprocess.DEVNULL,
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.Popen([rundll32, "url.dll,FileProtocolHandler", url],
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL)
             return
         except OSError:
             pass
