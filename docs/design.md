@@ -2799,6 +2799,9 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
   `test` and `other-os` stop after 45 minutes (2026-11-16), as the other jobs already had
   limits: pytest takes 4 to 8 minutes there, 27 on a runner five times slower than usual,
   and a stuck test would otherwise hold a runner for GitHub's default 6 hours.
+  `test (3.11)` uploads `pip freeze --exclude-editable` as the artifact `constraints-py3.11`
+  once its suite has passed (2026-11-16, for v0.1.0): the repository's `constraints.txt`
+  is that file, the versions CI passed with, not a local venv's (owner).
   `test` and `other-os` install the `gen` extra too, and run `pytest -rs`: without langgraph
   the graph's tests skipped there, 28 skips a job on the first 3.11-3.14 run (2026-11-08),
   among them all of `tests/test_graph_cli.py`.

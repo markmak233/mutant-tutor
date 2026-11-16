@@ -44,6 +44,20 @@ jobs:
       - run: ruff check .
       # No JDK on purpose: the fast suite starts no JVM (the `spark` marker is deselected).
       - run: pytest -rs
+      # The versions the suite just passed with, the source of the repository's
+      # constraints.txt (owner, 2026-11-16: CI's, not a local venv's). Only the 3.11 job,
+      # the one main's ruleset requires; reached only when the tests passed. --exclude-editable
+      # leaves out this repository itself.
+      - name: Record the versions the tests passed with
+        if: matrix.python-version == '3.11'
+        run: pip freeze --exclude-editable > constraints.txt
+      - uses: actions/upload-artifact@v6
+        if: matrix.python-version == '3.11'
+        with:
+          name: constraints-py3.11
+          path: constraints.txt
+          retention-days: 90
+          if-no-files-found: error
 
   # The same fast suite on macOS and Windows. A job of its own, so the `test (3.11)` check
   # that main's ruleset requires keeps its name. No Docker here: the macOS runner has none,
