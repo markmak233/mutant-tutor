@@ -3,7 +3,9 @@
 import json
 from pathlib import Path
 
-from tutor.question import main, question_markdown, run_block, write_question
+import pytest
+
+from tutor.question import align_tables, main, question_markdown, run_block, write_question
 
 QUESTION = '''"""Average temperature per station with Spark SQL
 
@@ -204,3 +206,57 @@ def test_a_c_questions_run_line_uses_the_courses_flags_and_the_driver(tmp_path):
         "cc -Wall -std=c99 student.c driver.c -o program && ./program")
     # Outside a course (the repo's examples): testkit_c's defaults.
     assert c_run_command(tmp_path.parent, None).startswith("cc -std=c11 -Wall student.c ")
+
+
+# --- tables padded for reading in an editor (owner, 2026-11-16) ---------------------------
+
+
+def test_a_tables_columns_line_up():
+    """A model writes no padding, so the |s zigzag in VS Code (a week 9 question). After:
+    every row's |s at the same columns, every cell's text unchanged, the rest untouched."""
+    rows = [["Extract", "Distances it lowers", "Tentative $d$ afterwards"],
+            ["$s$ (0)", "$1$: 10, $2$: 5", "$1=10,\\ 2=5$"],
+            ["3 (9)", "none", "—"]]
+    table = "\n".join(["Intro", "| " + " | ".join(rows[0]) + " |", "|---|---|---|",
+                       *("| " + " | ".join(r) + " |" for r in rows[1:]), "After"])
+    lines = align_tables(table).split("\n")
+    assert lines[0] == "Intro" and lines[-1] == "After"
+    table_lines = lines[1:-1]
+    pipes = [[i for i, ch in enumerate(line) if ch == "|"] for line in table_lines]
+    assert all(p == pipes[0] for p in pipes) and len(pipes[0]) == 4
+    cells = [[c.strip() for c in line.strip("|").split("|")] for line in table_lines]
+    assert [cells[0], *cells[2:]] == rows
+    assert all(set(c) == {"-"} for c in cells[1])
+
+
+def test_alignment_colons_stay_and_padding_is_idempotent():
+    table = "| a | long header |\n|:---|---:|\n| x | 1 |"
+    once = align_tables(table)
+    assert once.split("\n")[1] == "| :-- | ----------: |"
+    assert align_tables(once) == once
+
+
+def test_an_escaped_pipe_stays_inside_its_cell():
+    table = "| x | y |\n|---|---|\n| $\\|x\\|$ | 2 |"
+    assert align_tables(table).split("\n")[2] == "| $\\|x\\|$ | 2   |"
+
+
+def test_wide_characters_count_two_columns():
+    table = "| 名称 | n |\n|---|---|\n| ab | 1 |"
+    assert align_tables(table).split("\n") == [
+        "| 名称 | n   |", "| ---- | --- |", "| ab   | 1   |"]
+
+
+def test_an_indented_table_keeps_its_indentation():
+    table = "    | a | b |\n    |---|---|\n    | long | 1 |"
+    assert align_tables(table).split("\n")[2] == "    | long | 1   |"
+
+
+@pytest.mark.parametrize("text", [
+    "| a | b |\n|---|---|\n| only one |",       # an uneven row: left as written
+    "| a | b |\nno separator\n| x | y |",         # not a table
+    "x = a | b  # a line with pipes in code",
+    "| a | b |",                                    # a lone row
+])
+def test_anything_but_a_whole_even_table_is_left_alone(text):
+    assert align_tables(text) == text

@@ -17,6 +17,7 @@ from tutor.graph.nodes import Deps
 from tutor.graph.state import CExerciseDraft, CPlanItem, MutantDraft
 from tutor.llm import LLMConfig, Reply
 from tutor.materials import cache
+from tutor.question import align_tables
 from tutor.testkit_c import host_problem
 from tutor.validation import checks
 
@@ -151,7 +152,11 @@ def test_a_c_draft_is_written_as_c_files_with_the_given_driver(tmp_path):
     assert dropped == {}
     assert {p.name for p in exercise.iterdir()} == {"student.c", "student.h", "driver.c",
                                                     "test_student.py", "hints.md", "question.md"}
-    assert (solution / "skeleton.c").read_text(encoding="utf-8") == draft.student_c
+    # The model's text with its question's tables padded (question.align_tables).
+    assert (solution / "skeleton.c").read_text(encoding="utf-8") == align_tables(
+        draft.student_c)
+    assert (exercise / "student.c").read_text(encoding="utf-8") == align_tables(
+        draft.student_c)
     assert (solution / "reference.c").is_file() and not (solution / "reference.py").exists()
     mutant = (solution / "mutants" / "m03_one_past_the_end.c").read_text(encoding="utf-8")
     # The bug says so in a C comment on the reference's first line (a "*/" in it broken up).

@@ -596,6 +596,14 @@ Their slides flags remain, as they should: the departure is now stated.
     assumptions stated in Slides, 60 formulas rendering. One flaw: `$m = |S|$` in a table
     row, where every `|` ends a cell; the renderer now writes `\vert` there. Kept in the
     private workspace's experiments, not among the batches.
+    Tables padded (owner, 2026-11-16, on week 9's questions): a model writes a table's
+    cells with no padding, so its `|`s zigzag when student.py is read in an editor, though
+    the table renders well. `question.align_tables` pads every column to its widest cell
+    when a draft is written (`graph/drafts.write_draft`), so student.py, the skeleton and
+    question.md agree and line up; only spaces inside table rows change. Not the prompt:
+    it is pinned, and a model rarely counts spaces right. A wide (CJK) character counts
+    two columns; `\|` stays inside its cell; a table whose rows differ in cell count is
+    left as written. New batches only: existing student.py files hold the owner's work.
   - `review`: one or several weeks mixed, fuller tasks leaning file-level (closer to labs and
     projects), a bare skeleton. The tutor helps only when asked, first naming just the kind of
     error, and leaves the fix to the owner. Exercises may combine knowledge points, as a

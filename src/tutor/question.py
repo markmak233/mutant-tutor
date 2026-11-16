@@ -72,6 +72,77 @@ def question_source(student_source: str, language: str = "python") -> str:
     return c_comment(student_source) if language == "c" else _docstring(student_source)
 
 
+# A Markdown table row: a line that starts and ends with "|" (after any indentation).
+_ROW = re.compile(r"^(?P<indent>[ \t]*)\|(?P<cells>.*)\|[ \t]*$")
+# A cell of the separator row under the header: dashes, a colon at either end for alignment.
+_RULE_CELL = re.compile(r"^\s*(?P<left>:?)-+(?P<right>:?)\s*$")
+# A cell boundary: a "|" not escaped as "\|" (a formula's | in a table is written \|).
+_CELL_SPLIT = re.compile(r"(?<!\\)\|")
+
+
+def _width(text: str) -> int:
+    """How many columns `text` takes in a monospaced editor: two for a wide character
+    (Chinese, Japanese, Korean), none for a combining mark, one for the rest."""
+    import unicodedata
+
+    return sum(0 if unicodedata.combining(ch) else
+               2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1 for ch in text)
+
+
+def _aligned(rows: list[list[str]], rules: list[tuple[str, str]], indent: str) -> list[str]:
+    """The table's lines with every column padded to its widest cell; the separator row
+    keeps each column's alignment colons and gets as many dashes as the column is wide."""
+    widths = [max(3, *(_width(row[i]) for row in rows)) for i in range(len(rules))]
+    lines = []
+    for n, row in enumerate(rows):
+        cells = [cell + " " * (widths[i] - _width(cell)) for i, cell in enumerate(row)]
+        lines.append(indent + "| " + " | ".join(cells) + " |")
+        if n == 0:  # the separator goes under the header
+            dashes = [left + "-" * (widths[i] - len(left) - len(right)) + right
+                      for i, (left, right) in enumerate(rules)]
+            lines.append(indent + "| " + " | ".join(dashes) + " |")
+    return lines
+
+
+def align_tables(text: str) -> str:
+    """`text` with each Markdown table's columns padded so they line up when read as plain
+    text, as a question is in an editor (student.py's docstring, student.c's comment).
+
+    Why (owner, 2026-11-16): a model writes a table's cells with no padding, so its "|"
+    zigzag in VS Code, though the table renders well in the pages. Code pads them when a
+    draft is written (graph/drafts.write_draft); the prompt is not asked to, as it is
+    pinned and a model rarely counts spaces right. Only spaces inside table rows change,
+    so the rendered Markdown and the tests are the same. A table is a header row, a
+    separator row of dashes, then rows, all with the same indentation and number of
+    cells; anything else (a row with a different count, a lone line with pipes) is left
+    as it is."""
+    lines = text.split("\n")
+    out: list[str] = []
+    i = 0
+    while i < len(lines):
+        header = _ROW.match(lines[i])
+        rule = _ROW.match(lines[i + 1]) if header and i + 1 < len(lines) else None
+        rule_cells = _CELL_SPLIT.split(rule["cells"]) if rule else []
+        if (not rule or rule["indent"] != header["indent"]
+                or not all(_RULE_CELL.match(c) for c in rule_cells)):
+            out.append(lines[i])
+            i += 1
+            continue
+        indent = header["indent"]
+        rules = [(m["left"], m["right"]) for m in map(_RULE_CELL.match, rule_cells)]
+        rows = [[c.strip() for c in _CELL_SPLIT.split(header["cells"])]]
+        end = i + 2
+        while end < len(lines) and (row := _ROW.match(lines[end])) and row["indent"] == indent:
+            rows.append([c.strip() for c in _CELL_SPLIT.split(row["cells"])])
+            end += 1
+        if any(len(row) != len(rules) for row in rows):
+            out.extend(lines[i:end])  # an uneven table: Markdown's own reading is unclear
+        else:
+            out.extend(_aligned(rows, rules, indent))
+        i = end
+    return "\n".join(out)
+
+
 def is_markdown(doc: str) -> bool:
     """The Markdown layout starts with a "# " title; the plain one with bare title text."""
     return doc.startswith("# ")

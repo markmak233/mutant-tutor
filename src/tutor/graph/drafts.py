@@ -18,7 +18,7 @@ from pathlib import Path, PurePosixPath
 from tutor.graph.languages import PROFILES
 from tutor.graph.nodes import Deps
 from tutor.graph.state import MIN_MUTANTS, CExerciseDraft, ExerciseDraft, ItemState, MutantDraft
-from tutor.question import QUESTION_FILE, question_markdown
+from tutor.question import QUESTION_FILE, align_tables, question_markdown
 from tutor.validation.checks import Status, ValidationReport
 
 
@@ -140,6 +140,10 @@ def write_draft(draft: ExerciseDraft | CExerciseDraft, exercise_id: str, root: P
         metadata = metadata.model_copy(update={"source": source})
     student, reference, suffix = ((draft.student_c, draft.reference_c, ".c") if c
                                   else (draft.student_py, draft.reference_py, ".py"))
+    # The question's tables padded so their columns line up in an editor (owner,
+    # 2026-11-16; question.align_tables). Only the files written change: student, its
+    # skeleton and question.md agree, and a repair round still sees the model's own text.
+    student = align_tables(student)
     files = {
         exercise / f"student{suffix}": student,
         exercise / "test_student.py": draft.test_student_py,

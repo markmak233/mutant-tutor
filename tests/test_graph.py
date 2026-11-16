@@ -127,6 +127,19 @@ def test_write_draft_lays_out_a_batch_and_derives_the_skeleton(tmp_path):
     assert (exercise / "question.md").read_text(encoding="utf-8") == "# Sum a list.\n"
 
 
+def test_write_draft_pads_the_questions_tables(tmp_path):
+    """The model's unpadded table is padded in student.py, its skeleton and question.md
+    alike (owner, 2026-11-16: a table's |s zigzagged in VS Code)."""
+    student = ('r"""\n# Sum a list\n\n| Input | Total |\n|---|---|\n| [] | 0 |\n'
+               '| [1, 2, 3] | 6 |\n"""\n\n\ndef total(xs):\n    raise NotImplementedError\n')
+    d = ExerciseDraft.model_validate(draft(student_py=student))
+    exercise, solution, _ = write_draft(d, "sum-list", tmp_path / "round-0")
+    padded = "| []        | 0     |"
+    for path in (exercise / "student.py", solution / "skeleton.py", exercise / "question.md"):
+        assert padded in path.read_text(encoding="utf-8"), path.name
+    assert d.student_py == student  # the draft itself, which repair sees, is unchanged
+
+
 def broken_mutant(name: str) -> dict:
     return {"name": name, "bug": "b, wrong", "replacements": [
         {"old": "product(xs)", "new": "sum(xs)"}]}  # not in the reference
