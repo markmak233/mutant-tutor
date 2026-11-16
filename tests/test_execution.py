@@ -142,8 +142,10 @@ SLEEPER = "[sys.executable, '-c', 'import time; time.sleep(60)']"
 
 def test_timeout_kills_the_whole_process_group(tmp_path, monkeypatch):
     """An endless test is stopped at the limit, and so is any process it started
-    (the way PySpark starts a JVM): the child's pid must be gone afterwards."""
-    monkeypatch.setenv(TIMEOUT_FACTOR_ENV, "1")  # the 2 s limit as given, on every platform
+    (the way PySpark starts a JVM): the child's pid must be gone afterwards. 6 s: the run's
+    pytest must start and write the pid first, which took over 2 s on a GitHub runner five
+    times slower than usual (2026-11-16)."""
+    monkeypatch.setenv(TIMEOUT_FACTOR_ENV, "1")  # the 6 s limit as given, on every platform
     pid_file = tmp_path / "child.pid"
     test = write(
         tmp_path / "test_hang.py",
@@ -154,11 +156,11 @@ def test_timeout_kills_the_whole_process_group(tmp_path, monkeypatch):
         "    time.sleep(60)\n",
     )
 
-    result = run_pytest({"test_hang.py": test}, timeout_s=2)
+    result = run_pytest({"test_hang.py": test}, timeout_s=6)
 
     assert result.outcome is Outcome.TIMEOUT
     assert result.returncode is None
-    assert result.duration_s < 10
+    assert result.duration_s < 20  # stopped near the limit, far short of the 60 s sleep
     assert _ends_soon(int(pid_file.read_text(encoding="utf-8")))
 
 
@@ -203,12 +205,14 @@ def test_the_time_limit_factor_can_be_overridden(monkeypatch):
 
 
 def test_a_scaled_limit_lets_a_slow_run_finish(tmp_path, monkeypatch):
-    """The factor reaches the run itself: 2 s given, 4x applied, a 3 s test passes."""
+    """The factor reaches the run itself: 3 s given, 4x applied, a 4 s test passes. The 8 s
+    left over are for pytest's start; 2 s given and a 3 s test left 5, too few on a GitHub
+    runner five times slower than usual (2026-11-16)."""
     monkeypatch.setenv(TIMEOUT_FACTOR_ENV, "4")
     test = write(tmp_path / "test_slow.py",
-                 "import time\n\ndef test_slow():\n    time.sleep(3)\n")
+                 "import time\n\ndef test_slow():\n    time.sleep(4)\n")
 
-    result = run_pytest({"test_slow.py": test}, timeout_s=2)
+    result = run_pytest({"test_slow.py": test}, timeout_s=3)
 
     assert result.outcome is Outcome.PASSED
 
@@ -252,7 +256,9 @@ def _alive(pid: int) -> bool:
     if sys.platform.startswith("linux"):
         try:
             stat = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
-        except FileNotFoundError:
+        # ProcessLookupError: the file opened, then the process was reaped before the read
+        # (ESRCH; Python 3.13 on GitHub's Linux runner, 2026-11-16). Gone either way.
+        except (FileNotFoundError, ProcessLookupError):
             return False
         return stat.rsplit(") ", 1)[1].split()[0] != "Z"  # the name in () may hold spaces
     if sys.platform == "win32":
