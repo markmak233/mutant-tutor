@@ -1802,7 +1802,11 @@ deterministic judge, hybrid RAG with recall@k, the phase 5 metrics, the hint lea
     no prompt caching at all (`prompt_tokens_details` "always empty"; the 11-10 judge
     calibration with Sonnet 5.5 paid $2.52 for 1.1M input tokens that way); the Messages
     API opts into caching per request. Measured before deciding (one course, 11-10): plan
-    (Sonnet 9/9 coverage rows), oracle (Sonnet 54/58 agree with the reference, mutants 91%)
+    (Sonnet 9/9 coverage rows), oracle (Sonnet 54/58 agree with the reference, mutants 91%;
+    GLM-5.3-FlashX, measured 2026-11-16 once it had become two courses' oracle unmeasured:
+    49/58 on the big-data course, mutants 91%, and 67/70 on the deep-learning course,
+    mutants 97% like the oracles already there, on the free quota; kept on both, as a
+    disagreement costs a repair round, not a wrong exercise)
     and the judge (Sonnet as good as gpt-terra on planted defects, 13/18 to 14/18, with no
     owner-approved exercise marked unclear against gpt's 6). The mapping, in the module's
     docstring and here in short: the system prompt is a top-level field; `max_tokens` is
