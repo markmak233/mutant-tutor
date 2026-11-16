@@ -2789,6 +2789,9 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
   `requires-python` lost its `<3.13`. Measured locally first, fast suite and `-m spark`
   (mrjob, PySpark 3.5.9 and Hadoop) on each. 3.15 waits until the dependencies have wheels
   for it. Only `test` runs every version; `other-os`, `docker` and `spark` stay on 3.11.
+  `test` and `other-os` stop after 45 minutes (2026-11-16), as the other jobs already had
+  limits: pytest takes 4 to 8 minutes there, 27 on a runner five times slower than usual,
+  and a stuck test would otherwise hold a runner for GitHub's default 6 hours.
   `test` and `other-os` install the `gen` extra too, and run `pytest -rs`: without langgraph
   the graph's tests skipped there, 28 skips a job on the first 3.11-3.14 run (2026-11-08),
   among them all of `tests/test_graph_cli.py`.
@@ -2828,7 +2831,11 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
   (added 2026-10-26 after a Codex review asked for integration tests apart from the fast
   ones). About 3 min without Hadoop, measured in a fresh venv: 3 passed, the 5 Hadoop tests
   skipped. Use it after changing the validator or testkit, or to show the examples validate
-  on a clean machine.
+  on a clean machine. Its first run on GitHub (inside the first release run, 2026-11-16)
+  stopped at collection: it installed only `bigdata` and `dev`, and five test files import
+  the GUI, so it now installs `gen` and `gui` as every other job does (rehearsed in a venv
+  with those extras: 8 passed with JDK 17, the Hadoop ones too, as the repo's `.env` here
+  names a HADOOP_HOME; on GitHub those 5 skip).
 - Not in CI: the Hadoop tests (Hadoop is a 700 MB download and each job starts a JVM for
   about 7 s). Run `pytest -m spark` locally with `HADOOP_HOME` set before merging changes
   to `run_mrjob`.

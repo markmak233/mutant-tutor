@@ -32,7 +32,7 @@ import sys
 import threading
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from tutor import locations
@@ -111,12 +111,21 @@ def start(course_root: Path, title: str, commands: list[list[str]],
         _prune(base)
         # Names sort by the time they were queued: the second, then its microseconds in
         # six hex digits (it was random, and two tasks in one second could sort the wrong
-        # way round, so a plan's page took the older task for its newest). Unique, as
-        # starts take the lock. The queue runs in this order.
+        # way round, so a plan's page took the older task for its newest). The queue runs
+        # in this order. The lock alone does not make a name unique: on Windows, Python
+        # before 3.13 reads a clock that moves in steps of about 15.6 ms, so two starts in
+        # one step read the same time (a CI failure, 2026-11-16). A taken name moves on by
+        # a microsecond, which keeps names unique and in the order of the starts; mkdir
+        # refusing an existing folder also covers another process starting at that moment.
         now = datetime.now()
-        task_id = f"{now:%Y%m%d-%H%M%S}-{now.microsecond:06x}"
-        folder = base / task_id
-        folder.mkdir(parents=True)
+        while True:
+            task_id = f"{now:%Y%m%d-%H%M%S}-{now.microsecond:06x}"
+            folder = base / task_id
+            try:
+                folder.mkdir(parents=True)
+                break
+            except FileExistsError:
+                now += timedelta(microseconds=1)
         _write(folder, {"title": title, "status": QUEUED, "started": _now(), "finished": None,
                         "commands": commands, "env": env, "exit_codes": [], "pid": None,
                         "grace_s": grace_s, "meta": meta or {}})

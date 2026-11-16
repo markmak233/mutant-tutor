@@ -9,6 +9,7 @@ import shlex
 import signal
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -106,6 +107,25 @@ def test_a_second_task_queues_and_starts_when_the_first_ends(tmp_path):
     assert log.count("\nran\n") == 1  # ran once (the command line echoes "ran" too)
     assert done.started >= tasks.get(tmp_path, second.id).started  # started when it did
     assert (second.folder / tasks.CLAIM_FILE).is_file()  # claimed once, by the hand-over
+
+
+def test_starts_that_read_the_same_time_get_names_in_their_order(tmp_path, monkeypatch):
+    """Windows' clock in Python before 3.13 moves in steps of about 15.6 ms, so quick starts
+    read one time (FileExistsError on GitHub's Windows runner, 2026-11-16). A stand-in
+    clock that never moves gives each start the same reading."""
+
+    class Frozen(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 11, 16, 2, 6, 2, 999998)  # the second ends two steps on
+
+    monkeypatch.setattr(tasks, "datetime", Frozen)
+    monkeypatch.setattr(tasks, "kick", lambda root: None)  # queue only, start nothing
+    ids = [tasks.start(tmp_path, title, [py("pass")], {}).id
+           for title in ("first", "second", "third")]
+    assert ids == ["20261116-020602-0f423e", "20261116-020602-0f423f",
+                   "20261116-020603-000000"]  # unique, sorted as started, over a second
+    assert [task.title for task in tasks.list_tasks(tmp_path)][::-1] == ["first", "second", "third"]
 
 
 def test_a_kick_that_loses_the_claim_starts_nothing_else(tmp_path, monkeypatch):
@@ -411,8 +431,6 @@ def test_the_log_shows_course_paths_relative_to_the_course(tmp_path):
 
 
 def test_a_stored_time_is_shown_local_to_the_second_like_a_task_time():
-    from datetime import datetime
-
     stored = "2026-01-02T03:04:05.678901+00:00"  # as an image record keeps it
     shown = tasks.local_time(stored)
     assert shown == datetime.fromisoformat(stored).astimezone().strftime(tasks.TIME_FORMAT)

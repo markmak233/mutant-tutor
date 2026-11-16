@@ -19,6 +19,9 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # A stuck test would otherwise hold the runner for GitHub's default 6 hours. 45 min:
+    # pytest takes 4-8 min, and 27 on a runner five times slower than usual (2026-11-16).
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -47,6 +50,7 @@ jobs:
   # and the Windows runner runs only Windows containers (see docs/design.md, "CI").
   other-os:
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 45  # as `test`
     strategy:
       fail-fast: false
       matrix:
@@ -118,7 +122,10 @@ jobs:
           python-version: "3.11"
           cache: pip
           cache-dependency-path: pyproject.toml
-      - run: pip install -e ".[bigdata,dev]"
+      # gen and gui as in every other job: pytest imports every test file before `-m spark`
+      # selects, and five of them import the GUI (Flask). With only bigdata and dev, the first
+      # run of this job (the first release run, 2026-11-16) stopped at collection, exit 2.
+      - run: pip install -e ".[bigdata,dev,gen,gui]"
       - run: pytest -m spark -rs
 
   # Real installed-wheel/fresh-course acceptance; no model or owner course is used.
