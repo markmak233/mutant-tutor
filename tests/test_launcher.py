@@ -56,10 +56,64 @@ def test_existing_unverified_live_process_is_never_replaced(tmp_path, monkeypatc
     state.save(tmp_path, 8000, TOKEN)
     monkeypatch.setattr(state, "reachable", lambda *a: False)
     monkeypatch.setattr(state, "_alive", lambda pid: True)
+    monkeypatch.setattr(state, "listening", lambda port: True)
     with pytest.raises(ValueError, match="alive"):
         state.existing(tmp_path)
     monkeypatch.setattr(state, "_alive", lambda pid: False)
     assert state.existing(tmp_path) is None and state.read(tmp_path) is None
+
+
+def test_a_reused_pid_with_a_closed_port_is_stale_state(tmp_path, monkeypatch):
+    """The window was closed (no clear() ran) and Windows gave the pid to another program:
+    nothing answers on the old port, so the old server is gone and the launch goes on."""
+    state.save(tmp_path, 8000, TOKEN)
+    monkeypatch.setattr(state, "reachable", lambda *a: False)
+    monkeypatch.setattr(state, "_alive", lambda pid: True)
+    monkeypatch.setattr(state, "listening", lambda port: False)
+    assert state.existing(tmp_path) is None and state.read(tmp_path) is None
+
+
+def test_a_stale_state_of_a_closed_window_lets_the_next_launch_start(tmp_path, monkeypatch,
+                                                                     capsys):
+    """The whole path a second click takes: a dead server's state is removed and a new
+    server starts, with state of its own that its stop removes."""
+    import socket
+
+    import waitress
+
+    with socket.socket() as probe:  # a port nothing listens on any more
+        probe.bind(("127.0.0.1", 0))
+        dead_port = probe.getsockname()[1]
+    (tmp_path / state.STATE).write_text(json.dumps({
+        "root": state.identity(tmp_path), "port": dead_port, "token": "a" * 43,
+        "pid": 2 ** 22 + 7}), encoding="utf-8")  # above every default pid limit: no process
+    saved = []
+
+    class Server:
+        effective_port = "8123"
+
+        def run(self):
+            saved.append(state.read(tmp_path))
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(waitress, "create_server", lambda *a, **k: Server())
+    monkeypatch.setattr(locations, "prepare", lambda: tmp_path)
+    assert gui_main.main(["--root", str(tmp_path), "--no-browser"]) == 0
+    assert saved[0]["port"] == 8123 and saved[0]["token"] != "a" * 43
+    assert state.read(tmp_path) is None
+
+
+def test_listening_tells_a_closed_port_from_an_open_one():
+    import socket
+
+    with socket.socket() as server:
+        server.bind(("127.0.0.1", 0))
+        server.listen()
+        port = server.getsockname()[1]
+        assert state.listening(port)
+    assert not state.listening(port)
 
 
 def test_second_gui_launch_reuses_verified_server(tmp_path, monkeypatch, capsys):

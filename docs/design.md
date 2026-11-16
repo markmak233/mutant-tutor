@@ -3627,7 +3627,12 @@ mode is not done (see "Decisions not to do").
   default to per-user courses/config folders (TUTOR_HOME can override both); checkout
   WORKSPACE_DIR behavior stays. Launch state is private and root-specific. A second
   launch verifies a fresh HMAC challenge over loopback before reusing a server; invalid
-  state has an explicit reset, and no server is killed. `tutor shortcut` creates a new
+  state has an explicit reset, and no server is killed. Stale state is the usual case, not
+  a rare one: closing the server's window (Windows' way to stop it), SIGTERM or SIGHUP
+  never run its cleanup (SIGTERM measured 2026-11-16). It is removed when the old pid is
+  dead or, since 2026-11-16, when its port refuses connections (a server binds its port
+  before saving state and keeps it until it stops), so a pid Windows has handed to another
+  program no longer stops a launcher click at `--reset-state`. `tutor shortcut` creates a new
   .command/.lnk/.desktop without overwriting or changing startup items. Native desktop
   trust/click and browser acceptance remain separate from platform-format unit tests.
   The server runs in the console window the launcher opens; closing it stops the server.
