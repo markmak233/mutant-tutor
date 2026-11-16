@@ -491,3 +491,56 @@ def test_a_file_that_stays_busy_is_given_up_after_the_retry_time(tmp_path, monke
     with pytest.raises(PermissionError):
         tasks.read_task(folder)
     assert time.monotonic() - started < 2
+
+
+@POSIX_ONLY
+def test_a_stop_that_lands_while_popen_starts_the_command_still_ends_it(tmp_path, monkeypatch):
+    """Popen forks, records the pid, then waits a few ms for the exec: Ctrl+C there raises
+    out of Popen with the command already running and no Popen returned to the runner,
+    whose `child` was still None (read in CPython's subprocess, 2026-11-16). The stand-in
+    starts the real process, then raises as that Ctrl+C would. The command must not
+    outlive the runner, and the task ends as stopped."""
+    from tutor.gui import runner
+
+    real = runner.subprocess.Popen
+    started: list = []
+
+    def interrupted(command, *args, **kwargs):
+        if command[:1] == ["ps"]:  # descendants() has its own Popen: leave it alone
+            return real(command, *args, **kwargs)
+        started.append(real(command, *args, **kwargs))
+        raise KeyboardInterrupt
+
+    folder = tmp_path / "course" / tasks.TASKS_DIR / "20260101-000000-abcdef"
+    folder.mkdir(parents=True)
+    tasks._write(folder, {"title": "x", "status": tasks.RUNNING, "started": "2026-01-01 00:00:00",
+                          "pid": None, "commands": [py("import time; time.sleep(60)"),
+                                                    py("print('never')")],
+                          "exit_codes": [], "meta": {}, "env": {}, "grace_s": 2})
+    monkeypatch.setattr(runner.subprocess, "Popen", interrupted)
+    monkeypatch.setattr(tasks, "kick", lambda course_root: None)
+
+    assert runner.run(folder) == 0
+    [command] = started
+    try:
+        assert gone(command.pid), "the command outlived its runner"
+    finally:
+        command.kill()  # only matters when it did outlive it: a minute's sleep otherwise
+        command.wait()  # reaped by the runner already: returns at once
+    done = tasks.read_task(folder)
+    assert done["status"] == tasks.STOPPED and done["exit_codes"] == [None]
+
+
+@POSIX_ONLY
+def test_descendants_lists_the_children_but_not_its_own_ps():
+    """The `ps` that descendants() runs is a child too; listing it made a runner with no
+    command left seem to have one, and sent signals to a freed pid."""
+    import subprocess
+
+    from tutor.gui import runner
+
+    with subprocess.Popen(py("import time; time.sleep(30)")) as child:
+        try:
+            assert runner.descendants(os.getpid()) == [child.pid]
+        finally:
+            child.kill()

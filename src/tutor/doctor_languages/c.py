@@ -13,7 +13,7 @@ from tutor.doctor_rows import Row
 
 MMAP_BITS = "/proc/sys/vm/mmap_rnd_bits"
 # gcc 12's AddressSanitizer hangs now and then above this (67 of 300 runs at 32 on Docker
-# Desktop's WSL 2 VM, 0 of 300 at 28; gcc 14 none at 32: docs/design.md, "C", 2026-11-16).
+# Desktop's WSL 2 VM, 0 of 300 at 28; gcc 14 none at 32: docs/design/execution.md, "C", 2026-11-16).
 SAFE_BITS = 28
 HANGING_GCC = "12"
 DOCKER_TIMEOUT_S = 60  # one `cat` in an existing image; a sleeping Docker VM wakes first
@@ -43,7 +43,7 @@ def machine_checks(run: Callable, course=None) -> list[Row]:
                 f" and install it; or sudo sysctl -w vm.mmap_rnd_bits={SAFE_BITS} (reduces "
                 "address randomisation until the next restart)")
         return [Row("WARN", f"C AddressSanitizer may hang: gcc 12 with mmap_rnd_bits = {bits}",
-                    fix + ' (docs/design.md, "C")')]
+                    fix + ' (docs/design/execution.md, "C")')]
     return [Row("OK", f"C AddressSanitizer: mmap_rnd_bits = {bits}")]
 
 
@@ -83,7 +83,7 @@ def _bits_in_image(course, run: Callable) -> tuple[int | None, str]:
 def platform_problem(platform: str, runner: str | None) -> str | None:
     """Only host student tests are restricted here; validation has its own policy."""
     if platform == "win32" and runner != "container":
-        return 'C runs in WSL or in the container (docs/design.md, "C")'
+        return 'C runs in WSL or in the container (docs/design/execution.md, "C")'
     return None
 
 

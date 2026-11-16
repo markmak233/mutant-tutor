@@ -1,6 +1,6 @@
 """The shared models' providers (owner, 2026-11-12): the cards of `<root>/llm.toml`.
 
-Every model of every course lives once in llm.toml beside the courses (docs/design.md,
+Every model of every course lives once in llm.toml beside the courses (docs/design/gui-settings.md,
 "Shared models"; llm.py's section() reads it for a run). A provider card is one endpoint:
 the provider llm.py knows (`kind`), its address, the name of the variable its key is in,
 how a lecture's other calls start after the first (`parallel_start`, measured defaults in

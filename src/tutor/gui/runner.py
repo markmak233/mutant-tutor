@@ -39,16 +39,26 @@ from tutor.gui.tasks import DONE, FAILED, LOG_FILE, REPO, STOPPED, _now, _write,
 
 
 def descendants(pid: int) -> list[int]:
-    """Every process below `pid`, parents before children. POSIX `ps`; empty elsewhere."""
+    """Every process below `pid`, parents before children. POSIX `ps`; empty elsewhere.
+    The `ps` run here lists itself, as a child of this process: it is left out (measured
+    2026-11-16), else a signal meant for the command would go to its pid, ended and free
+    for reuse, and a runner with no command left would seem to have one."""
     try:
-        out = subprocess.run(["ps", "-A", "-o", "pid=,ppid="], capture_output=True, text=True,
-                             timeout=10).stdout
-    except (OSError, subprocess.TimeoutExpired):
+        ps = subprocess.Popen(["ps", "-A", "-o", "pid=,ppid="], stdout=subprocess.PIPE,
+                              stderr=subprocess.DEVNULL, text=True)
+    except OSError:
         return []
+    with ps:  # closes the pipe and reaps ps on every way out
+        try:
+            out, _ = ps.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            ps.kill()
+            return []
     children: dict[int, list[int]] = {}
     for line in out.splitlines():
         parts = line.split()
-        if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+        if (len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit()
+                and int(parts[0]) != ps.pid):
             children.setdefault(int(parts[1]), []).append(int(parts[0]))
     found, queue = [], list(children.get(pid, []))
     while queue:
@@ -81,8 +91,33 @@ def wait_or_stop(child, folder: Path, poll_s: float = POLL_S) -> int:
         time.sleep(poll_s)
 
 
-def stop_tree(child: subprocess.Popen, grace_s: float) -> None:
-    """Ctrl+C to the command and everything below it, then a kill after `grace_s`."""
+def _reap(pids: list[int], deadline: float) -> None:
+    """Wait, until `deadline`, for those of `pids` that are this process's own children and
+    have no Popen to wait on them (see stop_tree). A grandchild is not ours to wait for:
+    waitpid says so (ChildProcessError) and it is dropped, as is a pid already reaped."""
+    waiting = set(pids)
+    while waiting:
+        for pid in list(waiting):
+            try:
+                done, _ = os.waitpid(pid, os.WNOHANG)
+            except ChildProcessError:
+                done = pid
+            if done:
+                waiting.discard(pid)
+        if not waiting or time.monotonic() >= deadline:
+            return
+        time.sleep(0.1)
+
+
+def stop_tree(child: subprocess.Popen | None, grace_s: float) -> None:
+    """Ctrl+C to the command and everything below it, then a kill after `grace_s`.
+
+    `child` is None on POSIX when the Stop arrived while Popen was starting the command
+    (2026-11-16, read in CPython's subprocess): Popen has forked and records the pid, then
+    waits a few milliseconds for the exec; a KeyboardInterrupt there leaves Popen's call
+    without a return value, and its cleanup closes pipes but leaves the started process
+    running. The runner holds no Popen for it, yet it is this runner's child, so the
+    process list finds it like any other and waitpid reaps it."""
     if sys.platform == "win32":
         # The command leads its own process group (CREATE_NEW_PROCESS_GROUP at its start),
         # so Ctrl+Break reaches it and its children and nothing else on this console.
@@ -103,12 +138,17 @@ def stop_tree(child: subprocess.Popen, grace_s: float) -> None:
     tree = descendants(os.getpid())  # taken first: an orphan leaves the tree once its parent dies
     _signal_all(tree, signal.SIGINT)
     deadline = time.monotonic() + grace_s
-    while time.monotonic() < deadline and child.poll() is None:
+    if child is None:
+        _reap(tree, deadline)  # the command that has no Popen ends (or the grace runs out)
+    while child is not None and time.monotonic() < deadline and child.poll() is None:
         time.sleep(0.1)
     # Kill, deepest first, what is left: the list from before, and anything started since.
     left = tree + [pid for pid in descendants(os.getpid()) if pid not in tree]
     _signal_all(list(reversed(left)), signal.SIGKILL)
-    child.wait()
+    if child is None:
+        _reap(left, time.monotonic() + 5)  # a SIGKILL ends it at once; 5 s is only a bound
+    else:
+        child.wait()
 
 
 def run(folder: Path) -> int:
@@ -147,8 +187,15 @@ def run(folder: Path) -> int:
             signal.signal(signal.SIGINT, signal.SIG_IGN)
             stopped = True
             log.write(b"\n[stopping: Ctrl+C sent to every process of this task]\n")
+            grace_s = float(task.get("grace_s", 10.0))
             if child is not None and child.poll() is None:
-                stop_tree(child, float(task.get("grace_s", 10.0)))
+                stop_tree(child, grace_s)
+                codes.append(None)
+            elif not win and descendants(os.getpid()):
+                # The Stop landed inside Popen (stop_tree's docstring): `child` is still None
+                # or the last command's, which has ended, while the new command runs on.
+                # Windows needs no such case: its Stop is raised only outside Popen.
+                stop_tree(None, grace_s)
                 codes.append(None)
             log.write(b"[stopped]\n")
     task.update(exit_codes=codes, finished=_now(),

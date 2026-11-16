@@ -1,4 +1,4 @@
-"""The held-out check (roadmap 3b; docs/design.md, "Independent checks").
+"""The held-out check (roadmap 3b; docs/design/validation.md, "Independent checks").
 
 VALID says the tests, reference, mutants and oracle agree. They come from one generation,
 so they can share one misreading of the question, and killing every planted mutant only
@@ -203,7 +203,7 @@ def check_heldout(ex: ExerciseFiles, candidates: list[Candidate],
 
 
 def _model_hazards(ex: ExerciseFiles, path: Path, allowed: frozenset[str]) -> list[str]:
-    """Why a model's file must not run. The model writer is Python-only (docs/design.md,
+    """Why a model's file must not run. The model writer is Python-only (docs/design/execution.md,
     "C", step 4b), so a model's file in a C exercise is never run rather than run unchecked."""
     if ex.language != "python":
         return [f"a model's {ex.language} file: no static check for it here yet"]

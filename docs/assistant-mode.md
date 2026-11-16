@@ -2,7 +2,7 @@
 
 For running the pipeline with no API key: a coding assistant on a subscription (Claude Code,
 Codex, or any assistant that can run commands and read files) answers the model calls.
-This file is written for that assistant. The design is in `docs/design.md`, "Assistant
+This file is written for that assistant. The design is in `docs/design/generation.md`, "Assistant
 mode".
 
 ## Setup (once, by the owner)

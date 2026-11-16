@@ -1,7 +1,7 @@
 """Locate the private course workspace.
 
 The repo holds code only. Course material lives in a workspace outside any git repo,
-found through WORKSPACE_DIR (docs/design.md, "Public repo vs private data").
+found through WORKSPACE_DIR (docs/design/README.md, "Public repo vs private data").
 """
 
 from __future__ import annotations

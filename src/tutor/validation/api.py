@@ -1,4 +1,4 @@
-"""Static API constraints: read the source with `ast`, never run it (docs/design.md).
+"""Static API constraints: read the source with `ast`, never run it (docs/design/validation.md).
 
 metadata.json "constraints" may contain:
     forbidden_calls       names that must not be used as a method or function,

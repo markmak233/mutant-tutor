@@ -1,4 +1,4 @@
-"""Hints for C exercises (docs/design.md, "C", step 4b).
+"""Hints for C exercises (docs/design/execution.md, "C", step 4b).
 
 Layer 1 has C rules of its own, read from what the compiler and the sanitizers print (real
 runs on this machine's `cc` where a test needs one, and gcc-shaped text for what only the

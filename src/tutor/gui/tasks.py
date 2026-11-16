@@ -6,7 +6,7 @@ calls `kick`, which launches `python -m tutor.gui.runner <folder>` for the oldes
 in a session of its own when nothing runs, then returns; the runner runs the commands, writes
 their output to the log and their exit codes to task.json, and at its end kicks the queue
 again, so the next task starts with no GUI needed. The page only reads files, and a task goes
-on if the GUI stops (docs/design.md, "Local GUI").
+on if the GUI stops (docs/design/gui.md, "Local GUI").
 
 The commands come from the GUI's own code with checked paths, never from a request. A course
 runs one task at a time: validation already runs its checks in parallel, and two batches at

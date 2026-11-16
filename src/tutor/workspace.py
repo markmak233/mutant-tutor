@@ -1,6 +1,6 @@
 """Create a course workspace: `python -m tutor.workspace init DIR [--course NAME]`.
 
-One command instead of the manual steps in docs/setup (docs/design.md, "Public repo vs
+One command instead of the manual steps in docs/setup (docs/design/README.md, "Public repo vs
 private data"): the folder and lectures/, a minimal workspace.toml, the course's own .venv
 with this package, and the VS Code files that activate it in the folder's terminals.
 
@@ -13,7 +13,8 @@ Environment page runs it for that.
 
 `--python PATH --replace-venv` makes the .venv anew with another Python already on this
 machine (tutor.pythons finds them), for a course whose packages do not run on the one it has
-(docs/design.md, "Version conflicts"). The .venv before is kept as .venv.old until the new one
+(docs/design/execution.md, "Version conflicts"). The .venv before is kept as .venv.old until the
+new one
 is installed, and put back if the install fails.
 """
 
@@ -57,8 +58,9 @@ python = "{version}"
 """
 
 # ZDOTDIR makes this folder's terminals read .vscode/zsh instead of ~/.zshrc. The two paths win
-# over the repo's .env, which can name only one workspace: without them the attempts plugin
-# skips this folder's tests without a word.
+# over the repo's .env, which can name only one workspace. macOS only: elsewhere the attempts
+# plugin finds the course from the workspace.toml above the tests (attempts.workspace_of), and
+# `tutor gui` from the one above the terminal's folder.
 SETTINGS = """\
 {
   "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
@@ -86,7 +88,7 @@ ZPROFILE = """\
 
 # VS Code's C/C++ extension takes the C standard for its completion and red underlines from
 # .vscode/c_cpp_properties.json; without one it assumes the compiler's default, not the
-# course's -std (docs/design.md, "C", step 4b). Written when the owner ticks C on the
+# course's -std (docs/design/execution.md, "C", step 4b). Written when the owner ticks C on the
 # Environment page. Only a file named as this one's (C_EDITOR_NAME) is rewritten or removed,
 # so a file the owner wrote stays theirs.
 C_EDITOR_FILE = ".vscode/c_cpp_properties.json"

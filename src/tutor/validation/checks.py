@@ -1,4 +1,4 @@
-"""Validation rules (docs/design.md, "Exercise validation").
+"""Validation rules (docs/design/validation.md, "Exercise validation").
 
 0. metadata.json fits the batch format (schema.py); the other rules read their settings
    from it, so they are skipped if it does not.
@@ -62,7 +62,8 @@ from tutor.validation.safety import (
     workspace_allow_imports,
 )
 
-# Spark tests read PARTITIONS_ENV as their number of partitions / input files (design.md).
+# Spark tests read PARTITIONS_ENV as their number of partitions / input files
+# (docs/design/validation.md).
 PARTITION_COUNTS = (1, 2, 4)
 
 
@@ -132,7 +133,7 @@ def validate(ex: ExerciseFiles, timeout_s: float | None = None,
         ])
     if ex.metadata.get("runner") == "hadoop" and not hadoop_runner_supported():
         # Every test run would skip, so no rule that runs tests can say anything; the
-        # static API check still runs. Skipped counts against validity (design.md).
+        # static API check still runs. Skipped counts against validity (docs/design/validation.md).
         reason = f"skipped: {HADOOP_UNSUPPORTED}"
         return ValidationReport(ex.exercise_id, [
             fmt,
@@ -256,7 +257,7 @@ def check_safety(ex: ExerciseFiles) -> RuleResult:
                 path.read_text(encoding="utf-8"), headers, local)]
         if image_for(ex.run_files(ex.skeleton).values()) is None:
             # A static check cannot bound what C does, so its runs need the container
-            # (docs/design.md). Not a fault of the exercise, but nothing may run.
+            # (docs/design/execution.md). Not a fault of the exercise, but nothing may run.
             found.append("C code runs only in a container: set [isolation] runner = "
                          '"container" in the course\'s workspace.toml and build the image '
                          "(python -m tutor.container build)")

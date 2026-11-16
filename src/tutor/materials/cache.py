@@ -1,4 +1,4 @@
-"""The per-file markdown cache (docs/design.md, "Reading files").
+"""The per-file markdown cache (docs/design/layout.md, "Reading files").
 
 `$WORKSPACE_DIR/cache/<source path>.md` holds one section per page:
 

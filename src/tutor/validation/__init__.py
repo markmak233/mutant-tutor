@@ -1,4 +1,4 @@
-"""Deterministic exercise validation: never judged by an LLM (docs/design.md).
+"""Deterministic exercise validation: never judged by an LLM (docs/design/validation.md).
 
 Rules 0-5 plus static API constraints (see checks.py).
 Run with `python -m tutor.validation <exercise_dir> <solution_dir>`.

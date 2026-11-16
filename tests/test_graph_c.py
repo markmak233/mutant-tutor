@@ -1,4 +1,4 @@
-"""Generating C exercises (docs/design.md, "C", step 3): the C prompts filled from the one
+"""Generating C exercises (docs/design/execution.md, "C", step 3): the C prompts filled from the one
 template, what they mark as material, a C draft written out as files, a C plan, the CLI's stop
 for a C course without the container, and one C item from a model's reply to a saved exercise
 through the real validator. The model is a stand-in; the draft is built from the repository's

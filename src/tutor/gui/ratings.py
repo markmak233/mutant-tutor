@@ -1,5 +1,5 @@
 """The owner's teaching-quality rating of an exercise, given on its page once it has passed
-(owner, 2026-11-15; docs/design.md, "Validity vs teaching quality").
+(owner, 2026-11-15; docs/design/validation.md, "Validity vs teaching quality").
 
 The rating is the one fixed on 2026-10-28: yes or no on four points (report.RATING_POINTS:
 clear, fits, taught, targets) and an optional free-text remark, one JSON line per exercise
@@ -26,7 +26,8 @@ from tutor.eval.report import PASSED, RATING_POINTS
 from tutor.gui.i18n import N_
 
 FILE = "ratings.jsonl"
-# Each point as the form asks it, in RATING_POINTS' order, shortened from design.md's
+# Each point as the form asks it, in RATING_POINTS' order, shortened from
+# docs/design/validation.md's
 # definitions so every rating is given against the same words (shown through _()).
 POINTS = (
     ("clear", N_("Clear"), N_("Someone new to the content can learn it from the question and "

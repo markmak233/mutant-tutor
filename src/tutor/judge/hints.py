@@ -1,4 +1,4 @@
-"""The hint-quality judge (docs/design.md, "[3c] Calibrated LLM judge for hint quality").
+"""The hint-quality judge (docs/design/models.md, "[3c] Calibrated LLM judge for hint quality").
 
 tutor.hint's third layer asks a model for a hint. A deterministic guard keeps code out of
 it, but whether a hint gives the fix away in words, or points the wrong way, takes reading.

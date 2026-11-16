@@ -1,4 +1,4 @@
-"""Anthropic's Messages API behind `tutor.llm.chat()` (docs/design.md, "Anthropic provider").
+"""Anthropic's Messages API behind `tutor.llm.chat()` (docs/design/models.md, "Anthropic provider").
 
 A profile with `provider = "anthropic"` sends Claude's own request shape instead of an
 OpenAI-style chat completion. Anthropic also serves an OpenAI-compatible layer, but its

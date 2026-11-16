@@ -1,4 +1,4 @@
-"""BM25 keyword ranking, written out by hand (docs/design.md, "RAG").
+"""BM25 keyword ranking, written out by hand (docs/design/rag.md, "RAG").
 
 BM25 scores a document for a query by adding one number per query term:
 

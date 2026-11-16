@@ -1,4 +1,4 @@
-"""Transcribe an image page with a vision model (docs/design.md, "Reading files").
+"""Transcribe an image page with a vision model (docs/design/layout.md, "Reading files").
 
 The page goes in as a PNG together with its text layer (which has the slide's own words
 but nothing drawn as an image), and comes back as Markdown. Python code blocks in the

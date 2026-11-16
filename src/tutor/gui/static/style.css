@@ -1,4 +1,4 @@
-/* The GUI's one stylesheet, hand-written: no build step, no framework (docs/design.md).
+/* The GUI's one stylesheet, hand-written: no build step, no framework (docs/design/gui.md).
    Sides are logical (start/end, inline-start, inset-inline-start), never left/right: a
    language written right to left sets <html dir="rtl"> (gui/i18n.py) and the browser
    mirrors the pages from that; tests/test_gui_i18n.py refuses a physical side. */

@@ -23,7 +23,7 @@ class LanguagePrompts:
     spec: dict[str, str]
     # The two ways oracle_py is written (SPEC's {oracle}): whole, by the generating model,
     # or as an interface whose bodies another model writes from the question alone, so
-    # rule 4 compares two independent readings of the question (docs/design.md,
+    # rule 4 compares two independent readings of the question (docs/design/validation.md,
     # "Independent checks").
     oracle_whole: str
     oracle_interface: str

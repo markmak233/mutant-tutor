@@ -1,7 +1,7 @@
 """Check this machine against the current workspace's [requires] table.
 
 Check, don't install: every failure carries a hint saying what to fix
-(docs/design.md, "Environment"). Run with `python -m tutor.envcheck`, or with `--json` for
+(docs/design/layout.md, "Environment"). Run with `python -m tutor.envcheck`, or with `--json` for
 the GUI's Environment page, which runs it with the course's own .venv: the check is about
 the interpreter that runs it, so that is the one the learner's tests use.
 
@@ -169,7 +169,8 @@ def _removed_imports(ws: Workspace, python: str) -> list[CheckResult]:
                 f"{name} imports", module, None,
                 f"{name} imports `{module}`, which Python {version} removed, and nothing here "
                 f"provides it: use a Python before {version} for this course, or a release of "
-                f"{name} that does not import it (docs/design.md, \"Version conflicts\")"))
+                f"{name} that does not import it"
+                f" (docs/design/execution.md, \"Version conflicts\")"))
     return found
 
 

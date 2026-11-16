@@ -1,7 +1,9 @@
 """Root-specific local server reuse; persisted ports are verified by a fresh challenge.
 
 Only loopback URLs assembled here are opened. State holds the launch secret privately;
-neither a PID alone nor an unauthenticated HTTP response proves server identity.
+neither a PID alone nor an unauthenticated HTTP response proves server identity. What does
+prove a server gone is its port refusing connections: a GUI server binds its port before
+its state is saved and keeps it until it stops (existing).
 """
 
 from __future__ import annotations
@@ -12,6 +14,7 @@ import json
 import os
 import re
 import secrets
+import socket
 from contextlib import contextmanager
 from pathlib import Path
 from urllib.error import URLError
@@ -78,6 +81,23 @@ def reachable(root: Path, state: dict) -> bool:
         return False
 
 
+# Windows answers a connection to a closed loopback port only after retrying for about two
+# seconds; a shorter wait would read "nothing there" as "something there, silent".
+LISTEN_TIMEOUT_S = 5
+
+
+def listening(port: int) -> bool:
+    """Whether anything accepts connections on 127.0.0.1:`port`. Only a refusal says no:
+    a timeout or another error might be the old server, busy, so it counts as yes."""
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=LISTEN_TIMEOUT_S):
+            return True
+    except ConnectionRefusedError:
+        return False
+    except OSError:
+        return True
+
+
 def save(root: Path, port: int, token: str) -> dict:
     data = {"root": identity(root), "port": port, "token": token, "pid": os.getpid()}
     # Called under the launch lock, after stale state has been removed.
@@ -117,11 +137,19 @@ def locked(root: Path, *, reset: bool = False):
 
 
 def existing(root: Path) -> dict | None:
+    """The running server this root's state names, verified; else None, the stale state
+    removed. A server stopped by closing its window (Windows' way to stop it), by SIGTERM
+    or SIGHUP never runs its own clear(), so stale state is the usual case, not a rare one.
+    It is refused only when the old process may still be the server: its pid is alive and
+    something answers on its port. A pid alone is not enough: Windows reuses pids soon, and
+    a launcher click whose old pid now belongs to another program would stop at "use
+    --reset-state" in a window that closes at once (reasoned out from the code, 2026-11-16;
+    SIGTERM leaving the state behind was measured)."""
     state = read(root)
     if state and reachable(root, state):
         return state
     if state:
-        if _alive(state["pid"]):
+        if _alive(state["pid"]) and listening(state["port"]):
             raise ValueError("previous GUI process is alive but did not verify; check its terminal "
                              "before using --reset-state")
         clear(root, state["token"])

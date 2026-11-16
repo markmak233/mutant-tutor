@@ -1,4 +1,4 @@
-"""The concept index route, a small form of the "LLM wiki" pattern (docs/design.md, "RAG").
+"""The concept index route, a small form of the "LLM wiki" pattern (docs/design/rag.md, "RAG").
 
 Instead of searching the pages at query time, a model reads each lecture once and compiles
 its index: the knowledge points it teaches and the pages of each. To answer a query, a model

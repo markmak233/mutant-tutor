@@ -199,7 +199,8 @@ def _check_c_shape(draft: CExerciseDraft) -> None:
 def escaped_docstring(code: str) -> bool:
     """The module docstring holds a backslash but is not a raw string. In a plain string
     Python turns "\\frac" into a form feed and "\\neq" into a line break, quietly; the
-    Markdown question's LaTeX needs r\"\"\"...\"\"\" (docs/design.md, "question.md format")."""
+    Markdown question's LaTeX needs r\"\"\"...\"\"\" (docs/design/validation.md, "question.md
+    format")."""
     try:
         tokens = list(tokenize.generate_tokens(io.StringIO(code).readline))
     except (tokenize.TokenError, SyntaxError):

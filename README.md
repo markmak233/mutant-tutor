@@ -92,17 +92,24 @@ text and images, the generated code, and your code when you ask a model for a hi
 it. This is a personal project, not affiliated with any university or course, and it is
 provided as is (see [LICENSE](LICENSE)).
 
-## Status and more
+## Status
 
-Done: validation, generation, held-out checks, hints, the retrieval comparison, the
-evaluation, a container per test run, and the local GUI. In progress: a second language. C
-works end to end (its exercises are generated and validated, with sanitizers, in a container,
-and solved with the same pages, attempts and hints as Python's), and its first real batch came
-out 5 of 5 VALID; C++ and Java wait for a course that needs them. Then packaging and release.
+What exists today, and what does not yet, so that nothing planned reads as built
+([changes](CHANGELOG.md)):
+
+| Part | Built | Planned |
+|---|---|---|
+| Validation | the five rules and the static API check above | |
+| Generation | plan, approve, generate, validate, repair; Python (plain, PySpark, MRJob) and C | C++ and Java, when a course needs them |
+| Checks after generation | held-out solutions, a judge of teaching quality (command line) | as buttons on a batch's page |
+| Practice | exercises in VS Code, attempts recorded, hints (command line), `tutor test` in the container | hints in the GUI |
+| Retrieval | measured against the whole lecture, which stayed | |
+| Install | uv and a wheel, `tutor gui`, `shortcut`, `doctor`; macOS, Linux (x64, arm64), Windows x64 | Windows on ARM, through x64 emulation |
 
 - [`docs/details.md`](docs/details.md): how validation and generation work, the results, the
   RAG comparison, where exercise code runs, the layout and the roadmap
-- [`docs/design.md`](docs/design.md): every design decision, with the measurements behind it
+- [`docs/design/`](docs/design/README.md): every design decision, with the measurements behind it, one
+  file per part (validation, generation, the GUI, ...) and an index
 - [`docs/assistant-mode.md`](docs/assistant-mode.md): a coding assistant instead of an API
 
 Developed with Claude Code as the coding assistant, in small reviewed steps; the working

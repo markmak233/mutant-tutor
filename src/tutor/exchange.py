@@ -1,4 +1,4 @@
-"""A coding assistant as the model: requests and answers as files (docs/design.md,
+"""A coding assistant as the model: requests and answers as files (docs/design/generation.md,
 "Assistant mode").
 
 A profile with `provider = "assistant"` sends no request over the network. Each call

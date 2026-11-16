@@ -2,8 +2,10 @@
 
 ## Claude Code workflow
 
-- Before planning any new feature, read `docs/design.md`. If a change contradicts a decision there,
-  point it out and ask; if the owner approves a new decision, update `docs/design.md` in the same change.
+- Before planning any new feature, read the parts of `docs/design/` it touches (AGENTS.md lists
+  which file holds what; `README.md` has the goals and "Decisions not to do"). If a change
+  contradicts a decision there, point it out and ask; if the owner approves a new decision,
+  update the file that holds it in the same change.
 - For any task touching more than one file, propose a plan first and wait for approval before editing.
 - Work in small steps: one feature or fix per change, then run `pytest` and `ruff check .`.
 - After each step, summarise what changed and why in 3-5 lines, so the owner can review the diff.

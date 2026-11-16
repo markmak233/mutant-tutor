@@ -1,4 +1,5 @@
-"""The language part of a course's Environment page (owner, 2026-11-07; docs/design.md, "C").
+"""The language part of a course's Environment page (owner, 2026-11-07; docs/design/execution.md,
+"C").
 
 One list, Python first (always: the tests are pytest), each row its [requires] toolchain's
 version; below it each language's own settings (Python's packages and tools; C's flags and

@@ -1,4 +1,4 @@
-"""Read a PDF page by page with pypdfium2 (docs/design.md, "Reading files").
+"""Read a PDF page by page with pypdfium2 (docs/design/layout.md, "Reading files").
 
 For each page: its text layer, its label (the slide or page number printed in the footer),
 whether it needs the vision model, and a hash of its content.

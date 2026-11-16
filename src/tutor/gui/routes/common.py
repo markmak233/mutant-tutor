@@ -54,6 +54,10 @@ NOTICES = {
                               "most.")),
     "plan-moved": ("bad", N_("The batch is no longer at that step; this page shows where it is "
                           "now.")),
+    "plan-deleted": ("ok", N_("The plan and its draft folder are deleted; its name is free "
+                              "for a new batch.")),
+    "plan-delete-failed": ("bad", N_("The plan's draft folder could not be deleted, or not "
+                                     "all of it (a file in it may be open): try again.")),
     "note-bad": ("bad", N_("The note was not used: write plain text, 2000 characters at most, "
                         "or leave it empty to try again without one.")),
     "cap-bad": ("bad", N_("Nothing started: the output cap can only be the one offered.")),

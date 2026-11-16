@@ -1,10 +1,11 @@
 """The Python prompts and schemas the generation pipeline sends, pinned by hash.
 
-They are calibrated (docs/design.md, "Prompt layout for caching") and are the cached prefix of
+They are calibrated (docs/design/generation.md, "Prompt layout for caching") and are the cached
+prefix of
 every Python course's calls, so a change to them must be deliberate. Pinned on 2026-11-07,
 before the prompts became one template filled per language (Python and C): Python's fill
 must stay these exact bytes. A failure names what changed; if the change is meant, update
-the hash and say so in design.md.
+the hash and say so in docs/design/generation.md.
 """
 
 import hashlib

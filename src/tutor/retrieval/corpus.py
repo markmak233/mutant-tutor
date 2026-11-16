@@ -1,6 +1,6 @@
 """What every retrieval route searches: the lecture cache, one page at a time.
 
-The page is the unit of retrieval (docs/design.md, "RAG"). The cache already splits each
+The page is the unit of retrieval (docs/design/rag.md, "RAG"). The cache already splits each
 lecture into pages, a slide is short, and a page number can be checked against the slides,
 so there is no separate chunker. Routes get these pages and nothing else: coverage.md holds
 the answers they are measured against (see labels.py), so a route must never read it.

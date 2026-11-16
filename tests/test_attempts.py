@@ -33,8 +33,10 @@ def make_workspace(tmp_path: Path, mode: str | None = "review") -> Path:
     return exercise
 
 
-def run_pytest_in(folder: Path, workspace: Path) -> subprocess.CompletedProcess:
-    """Run pytest the way the owner does, from the exercise folder, with the plugin."""
+def run_pytest_in(folder: Path, workspace: Path | str) -> subprocess.CompletedProcess:
+    """Run pytest the way the owner does, from the exercise folder, with the plugin.
+    `workspace` is WORKSPACE_DIR; "" is a terminal that sets none (set but empty, so the
+    plugin's load of the repo's .env cannot fill in the real course it names)."""
     env = {**os.environ, "WORKSPACE_DIR": str(workspace), "PYTHONDONTWRITEBYTECODE": "1"}
     return subprocess.run(
         [sys.executable, "-m", "pytest", "-q", "-p", "tutor.attempts", "-p", "no:cacheprovider"],
@@ -218,7 +220,39 @@ def test_an_interrupted_run_is_not_recorded_as_passed(tmp_path):
     exercise = make_workspace(tmp_path)
     (exercise / "test_student.py").write_text(
         "def test_ok():\n    assert True\n\n"
-        "def test_stopped():\n    raise KeyboardInterrupt\n")
+        "def test_stopped():\n    raise KeyboardInterrupt\n", encoding="utf-8")
     run_pytest_in(exercise, tmp_path / "ws")
     [line] = attempts(tmp_path / "ws")
     assert (line["result"], line["passed"]) == ("interrupted", 1)
+
+
+def test_a_terminal_without_workspace_dir_records_in_the_course_above_the_tests(tmp_path):
+    """A course's VS Code terminal on Linux or Windows sets no WORKSPACE_DIR (only macOS's
+    does), and an installed tool has no .env: the course is the workspace.toml above."""
+    exercise = make_workspace(tmp_path)
+    run_pytest_in(exercise, "")
+
+    [line] = attempts(tmp_path / "ws")
+    assert (line["exercise"], line["result"]) == ("word-count", "failed")
+
+
+def test_a_run_in_another_course_than_workspace_dir_is_recorded_in_its_own(tmp_path):
+    """WORKSPACE_DIR (the repo's .env) names one course; tests of another are that one's."""
+    exercise = make_workspace(tmp_path / "mine")
+    other = make_workspace(tmp_path / "other").parents[3]
+    run_pytest_in(exercise, other)
+
+    assert [line["exercise"] for line in attempts(tmp_path / "mine" / "ws")] == ["word-count"]
+    assert attempts(other) == []
+
+
+def test_a_course_file_that_is_not_an_exercise_is_not_recorded(tmp_path):
+    """Only batches/<batch>/exercises/<exercise>/ counts, whichever way the course is found:
+    a test elsewhere in the course (a solution folder) leaves no trace."""
+    make_workspace(tmp_path)
+    solution = tmp_path / "ws" / "batches" / "2026-10-25_p2-w2" / "solutions" / "word-count"
+    solution.mkdir(parents=True)
+    (solution / "test_student.py").write_text(TESTS, encoding="utf-8")
+    run_pytest_in(solution, "")
+
+    assert not (tmp_path / "ws" / "attempts").exists()

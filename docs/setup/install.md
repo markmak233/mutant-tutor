@@ -19,12 +19,25 @@ the install command. That is a separate choice; its distributions come from Astr
 [python-build-standalone](https://docs.astral.sh/uv/concepts/python-versions/#managed-python-distributions).
 The existing-Python command above refuses a download. It needs no admin rights.
 
+### Known-good versions
+
+`constraints.txt` at the repository's root lists the exact versions CI's Python 3.11 job
+on Linux passed with for this release. To install those versions rather than the newest
+each dependency allows, add `-c constraints.txt`:
+
+```console
+uv tool install -c constraints.txt --no-python-downloads --python 3.11 ".[gen,gui,doctor]"
+```
+
+A later dependency release that breaks something is then not picked up. Other Pythons and
+systems may need other versions of a few packages; without `-c`, uv chooses for them.
+
 An installed wheel defaults to a per-user Tutor courses folder and a separate config
 folder. `tutor gui --root DIR` selects an existing folder holding your courses. `TUTOR_HOME`
 overrides the app's default courses/config base. A checkout retains WORKSPACE_DIR behavior.
 Neither the tool install nor first launch creates a model profile or copies course content.
-Add keys through Keys and choose profiles through Models; the GUI process never loads keys
-from `.env`. Commands load only the credentials they explicitly need.
+Add providers and their keys on the Providers page and choose each course's models on its
+Models page; the GUI process never loads keys from `.env`. Commands load only the credentials they explicitly need.
 
 The server binds 127.0.0.1, swaps a launch token for an HttpOnly cookie, and checks request
 origin. A second `tutor gui` verifies the existing server and opens it again. Ctrl+C in
@@ -38,8 +51,9 @@ tutor shortcut --root DIR
 This creates a new Tutor desktop launcher: .command on macOS, .lnk on Windows, .desktop
 on Linux. Existing files are refused, and no login/startup item changes. `--directory DIR`
 chooses another existing destination. Native desktop trust prompts vary; on Linux your
-desktop may require “Allow Launching”. The Python/tool environment must stay installed.
-For a different desktop folder, including redirected Windows desktops, specify its path.
+desktop may require “Allow Launching” (GNOME) or a choice of “Launch” (KDE). The
+Python/tool environment must stay installed. The launcher goes on the desktop the system
+shows, a OneDrive-redirected or translated one included; `--directory` puts it elsewhere.
 
 ## What else is needed
 
@@ -92,7 +106,7 @@ uv build --wheel --out-dir dist
 Put the wheel and the three files in one folder named `tutor-VERSION`, then zip that folder.
 `tests/test_install_instructions.py` checks that the files name the current version, the
 extras the install command uses, and the courses folder an installed tool keeps. Windows on
-ARM is not supported yet; see docs/design.md, "Packaging and release".
+ARM is not supported yet; see docs/design/packaging.md, "Packaging and release".
 
 ## Clean-install acceptance
 

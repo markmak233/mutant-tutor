@@ -1,7 +1,7 @@
 """Opening things on this machine for the GUI: a folder in the file manager, a course in VS Code.
 
 Both sit here so that one place decides how, and can say "not available" where it cannot, such
-as a GUI run in a container someday (docs/design.md, "Local GUI"). The paths come from the GUI's
+as a GUI run in a container someday (docs/design/gui.md, "Local GUI"). The paths come from the GUI's
 own checked folder names, never from a request, and each program is started from an argument
 list, without a shell. Nothing waits for it: a file manager or an editor window stays open.
 

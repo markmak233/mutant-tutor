@@ -1,4 +1,4 @@
-"""Generate exercises (docs/design.md, "Generation pipeline"). Needs the `gen` extra:
+"""Generate exercises (docs/design/generation.md, "Generation pipeline"). Needs the `gen` extra:
 pip install -e ".[gen]".
 
     python -m tutor.graph plan --lectures L4.1 L4.2 --batch w4 [--prefs "..."] [--count N]
@@ -139,7 +139,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _check_language(workspace: Path) -> None:
-    """A C course's exercises are validated only in a container (docs/design.md, "C"): one
+    """A C course's exercises are validated only in a container (docs/design/execution.md, "C"): one
     whose tests would run on this machine fails rule `safe` on every draft, so it stops here,
     before any model is paid for. ValueError with what to do."""
     if course_language(workspace) != "c":

@@ -1,4 +1,4 @@
-"""Which languages a course's exercises are written in (docs/design.md, "C").
+"""Which languages a course's exercises are written in (docs/design/execution.md, "C").
 
 Python needs nothing declared. Another language is declared in workspace.toml by a table of its
 own, which only the owner writes (the GUI's Environment page offers it), e.g.
@@ -73,7 +73,7 @@ PYTHON = Language("python", "Python", "python", "",
                   "runs the tests (pytest) and the oracle; every course has it")
 # gcc 14: the test image's (Debian trixie's, image_recipe.DEBIAN_BY_GCC), where C is
 # validated. Not 12 (bookworm's): its AddressSanitizer hangs on kernels with 32 bits of mmap
-# randomisation, as Docker Desktop's WSL 2 VM has (docs/design.md, "C").
+# randomisation, as Docker Desktop's WSL 2 VM has (docs/design/execution.md, "C").
 C = Language("c", "C", "gcc", "14", "the exercises are written in C, compiled by gcc")
 LANGUAGES = {language.key: language for language in (PYTHON, C)}
 

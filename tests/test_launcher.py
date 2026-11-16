@@ -56,10 +56,64 @@ def test_existing_unverified_live_process_is_never_replaced(tmp_path, monkeypatc
     state.save(tmp_path, 8000, TOKEN)
     monkeypatch.setattr(state, "reachable", lambda *a: False)
     monkeypatch.setattr(state, "_alive", lambda pid: True)
+    monkeypatch.setattr(state, "listening", lambda port: True)
     with pytest.raises(ValueError, match="alive"):
         state.existing(tmp_path)
     monkeypatch.setattr(state, "_alive", lambda pid: False)
     assert state.existing(tmp_path) is None and state.read(tmp_path) is None
+
+
+def test_a_reused_pid_with_a_closed_port_is_stale_state(tmp_path, monkeypatch):
+    """The window was closed (no clear() ran) and Windows gave the pid to another program:
+    nothing answers on the old port, so the old server is gone and the launch goes on."""
+    state.save(tmp_path, 8000, TOKEN)
+    monkeypatch.setattr(state, "reachable", lambda *a: False)
+    monkeypatch.setattr(state, "_alive", lambda pid: True)
+    monkeypatch.setattr(state, "listening", lambda port: False)
+    assert state.existing(tmp_path) is None and state.read(tmp_path) is None
+
+
+def test_a_stale_state_of_a_closed_window_lets_the_next_launch_start(tmp_path, monkeypatch,
+                                                                     capsys):
+    """The whole path a second click takes: a dead server's state is removed and a new
+    server starts, with state of its own that its stop removes."""
+    import socket
+
+    import waitress
+
+    with socket.socket() as probe:  # a port nothing listens on any more
+        probe.bind(("127.0.0.1", 0))
+        dead_port = probe.getsockname()[1]
+    (tmp_path / state.STATE).write_text(json.dumps({
+        "root": state.identity(tmp_path), "port": dead_port, "token": "a" * 43,
+        "pid": 2 ** 22 + 7}), encoding="utf-8")  # above every default pid limit: no process
+    saved = []
+
+    class Server:
+        effective_port = "8123"
+
+        def run(self):
+            saved.append(state.read(tmp_path))
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(waitress, "create_server", lambda *a, **k: Server())
+    monkeypatch.setattr(locations, "prepare", lambda: tmp_path)
+    assert gui_main.main(["--root", str(tmp_path), "--no-browser"]) == 0
+    assert saved[0]["port"] == 8123 and saved[0]["token"] != "a" * 43
+    assert state.read(tmp_path) is None
+
+
+def test_listening_tells_a_closed_port_from_an_open_one():
+    import socket
+
+    with socket.socket() as server:
+        server.bind(("127.0.0.1", 0))
+        server.listen()
+        port = server.getsockname()[1]
+        assert state.listening(port)
+    assert not state.listening(port)
 
 
 def test_second_gui_launch_reuses_verified_server(tmp_path, monkeypatch, capsys):
@@ -220,6 +274,107 @@ def test_windows_link_uses_encoded_com_script_and_argument_quoting(tmp_path, mon
     assert shortcut.create(tmp_path, root, run=run).suffix == ".lnk"
 
 
+def _xdg(answer: str, code: int = 0):
+    """A stand-in for `xdg-user-dir DESKTOP` printing `answer`."""
+    def run(command, **kwargs):
+        assert command == ["xdg-user-dir", "DESKTOP"]
+        return subprocess.CompletedProcess(command, code, stdout=answer + "\n", stderr="")
+    return run
+
+
+def test_linux_desktop_is_the_one_of_the_users_language(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    desktop = tmp_path / "Schreibtisch"
+    desktop.mkdir()
+    assert shortcut.default_directory(run=_xdg(str(desktop))) == desktop
+
+
+def test_linux_without_xdg_user_dir_uses_desktop(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    (tmp_path / "Desktop").mkdir()
+
+    def missing(command, **kwargs):
+        raise FileNotFoundError(command[0])
+
+    assert shortcut.default_directory(run=missing) == tmp_path / "Desktop"
+
+
+@pytest.mark.parametrize("answer", ["home", "missing"])
+def test_linux_with_no_desktop_folder_asks_for_one(tmp_path, monkeypatch, answer):
+    """No desktop set (xdg-user-dir answers the home folder) or none on disk: an error
+    naming --directory, not a launcher put somewhere the user would not look (owner,
+    2026-11-16)."""
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    folder = tmp_path if answer == "home" else tmp_path / "Desktop"
+    with pytest.raises(ValueError, match="--directory"):
+        shortcut.default_directory(run=_xdg(str(folder)))
+
+
+def test_shortcut_without_a_desktop_exits_2_and_says_why(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(shortcut.subprocess, "run", _xdg(str(tmp_path)))
+    assert shortcut.main([]) == 2
+    assert "give --directory" in capsys.readouterr().err
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_a_given_directory_never_asks_for_the_desktop(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys, "platform", "darwin")
+
+    def asked(**kwargs):
+        raise AssertionError("looked up the desktop")
+
+    monkeypatch.setattr(shortcut, "default_directory", asked)
+    assert shortcut.main(["--directory", str(tmp_path)]) == 0
+    assert (tmp_path / "Tutor.command").is_file()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="asks Windows itself for its desktop")
+def test_windows_desktop_is_the_known_folder():
+    """The value PowerShell's [Environment]::GetFolderPath('Desktop') gives, the INSTALL
+    text's workaround until 2026-11-16."""
+    done = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+                           "[Console]::OutputEncoding=[Text.Encoding]::UTF8; "
+                           "[Environment]::GetFolderPath('Desktop')"],
+                          capture_output=True, stdin=subprocess.DEVNULL, timeout=60)
+    assert shortcut.default_directory() == Path(done.stdout.decode("utf-8").strip())
+
+
+def test_help_lists_every_command_with_what_it_does(capsys):
+    """`tutor --help` used to list bare names ({test,doctor,gui,shortcut,python})."""
+    with pytest.raises(SystemExit) as done:
+        dispatcher.main(["--help"])
+    assert done.value.code == 0
+    out = capsys.readouterr().out
+    for name, purpose in dispatcher.COMMANDS.items():
+        assert re.search(rf"^\s+{name}\s+{re.escape(purpose)}$", out, re.MULTILINE)
+
+
+def test_every_command_the_dispatcher_runs_has_a_help_line(monkeypatch):
+    """A command added to main() without a COMMANDS line would be missing from --help."""
+    import inspect
+
+    runs = set(re.findall(r'args\[0\] == "(\w+)"', inspect.getsource(dispatcher.main)))
+    assert runs == set(dispatcher.COMMANDS)
+
+
+@pytest.mark.parametrize("argv", [[], ["bogus"]])
+def test_no_or_an_unknown_command_is_a_usage_error(argv, capsys):
+    with pytest.raises(SystemExit) as done:
+        dispatcher.main(argv)
+    assert done.value.code == 2 and "COMMAND" in capsys.readouterr().err
+
+
+def test_gui_help_names_the_command_users_type(capsys):
+    with pytest.raises(SystemExit):
+        gui_main.main(["--help"])
+    assert capsys.readouterr().out.startswith("usage: tutor gui ")
+
+
 def test_dispatcher_imports_gui_and_shortcut_lazily(monkeypatch):
     monkeypatch.setattr(gui_main, "main", lambda args: 17)
     monkeypatch.setattr(shortcut, "main", lambda args: 19)
@@ -245,3 +400,70 @@ def test_reachable_refuses_wrong_challenge_response(tmp_path, monkeypatch):
 
     monkeypatch.setattr(state, "build_opener", lambda *a: Opener())
     assert not state.reachable(tmp_path, {"port": 8000, "token": TOKEN})
+
+
+# --- opening the browser (WSL: through Windows' http handler, 2026-11-16) ------------------
+
+
+class Opened:
+    """Stand-ins for rundll32.exe's start and webbrowser.open, recording what each got."""
+
+    def __init__(self, monkeypatch, *, rundll32="/mnt/c/Windows/System32/rundll32.exe",
+                 found=True):
+        self.started, self.browsed = [], []
+        monkeypatch.setattr(gui_main.shutil, "which",
+                            lambda name: rundll32 if name == "rundll32.exe" else None)
+        monkeypatch.setattr(gui_main.subprocess, "Popen", self._popen)
+        monkeypatch.setattr(gui_main.webbrowser, "open", self._browse)
+        self.found = found
+
+    def _popen(self, command, **kwargs):
+        self.started.append(command)
+
+    def _browse(self, url):
+        self.browsed.append(url)
+        return self.found
+
+
+URL = "http://127.0.0.1:8123/?token=synthetic"
+
+
+def test_under_wsl_the_link_opens_in_windows_browser(monkeypatch, capsys):
+    """WSL's own webbrowser fell through to gio ("Operation not supported"); Windows'
+    browser reaches the server there, so Windows' http handler gets the link. Not
+    explorer.exe: given this link it opened the Documents folder (WSL, 2026-11-16)."""
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setenv("WSL_DISTRO_NAME", "Ubuntu")
+    opened = Opened(monkeypatch)
+    gui_main._open_browser(URL)
+    assert opened.started == [["/mnt/c/Windows/System32/rundll32.exe",
+                               "url.dll,FileProtocolHandler", URL]]
+    assert opened.browsed == []
+    assert capsys.readouterr().out == ""
+
+
+def test_wsl_without_windows_interop_tries_the_usual_way(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setenv("WSL_DISTRO_NAME", "Ubuntu")
+    opened = Opened(monkeypatch, rundll32=None)
+    gui_main._open_browser(URL)
+    assert opened.started == [] and opened.browsed == [URL]
+
+
+def test_plain_linux_never_runs_rundll32(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.delenv("WSL_DISTRO_NAME", raising=False)
+    # raising=False: Windows' os has no uname at all (Windows CI, 2026-11-16), and the code
+    # asks for it only on Linux, which this test pretends to be.
+    monkeypatch.setattr(gui_main.os, "uname",
+                        lambda: type("U", (), {"release": "7.0.0-34-generic"})(), raising=False)
+    opened = Opened(monkeypatch)
+    gui_main._open_browser(URL)
+    assert opened.started == [] and opened.browsed == [URL]
+
+
+def test_no_browser_found_says_to_open_the_link(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "platform", "darwin")
+    Opened(monkeypatch, found=False)
+    gui_main._open_browser(URL)
+    assert gui_main.NOT_OPENED in capsys.readouterr().out

@@ -1,4 +1,4 @@
-"""A thin client for OpenAI-compatible chat and embedding APIs (docs/design.md, [3] model
+"""A thin client for OpenAI-compatible chat and embedding APIs (docs/design/models.md, [3] model
 access), plus Anthropic's own Messages API (tutor/llm_anthropic.py, provider "anthropic").
 
 Standard library only. Models are named profiles in the workspace's workspace.toml, and
@@ -169,7 +169,7 @@ class Prompt(str):
     make: every OpenAI-shaped provider, the assistant's request files and their ids, the
     tests' fakes and the prompt pins see exactly the bytes a plain string would give. Only
     the anthropic provider looks at `parts`, to put a cache breakpoint after each shared
-    part (docs/design.md, "Prompt layout for caching"). Equal to its plain string."""
+    part (docs/design/generation.md, "Prompt layout for caching"). Equal to its plain string."""
 
     __slots__ = ("parts",)
 

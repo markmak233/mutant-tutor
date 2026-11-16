@@ -1,4 +1,4 @@
-"""Generation settings in one place (docs/design.md, "Generation settings").
+"""Generation settings in one place (docs/design/generation.md, "Generation settings").
 
 Every value of the pipeline worth tuning is a field below, with its default, a description
 and its range. Three sources fill them, later ones winning:

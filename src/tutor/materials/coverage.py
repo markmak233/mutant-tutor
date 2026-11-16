@@ -1,7 +1,7 @@
 """Drafting a course's coverage.md from its lectures: `python -m tutor.materials.coverage`.
 
 coverage.md is the table a batch plan chooses from: per lecture, one row per knowledge point
-with its slide range and status, and the plan picks `gap-code` rows (docs/design.md,
+with its slide range and status, and the plan picks `gap-code` rows (docs/design/roadmap.md,
 "Workspace coverage.md"). A course without one plans from slide titles alone. Here a model
 reads each cached lecture once and splits it into knowledge points, each with its pages and
 the kind of practice that fits it (owner, 2026-11-06). The result is a draft,

@@ -320,7 +320,12 @@ TEXT = ["b a c a", "a b", "c c a b", "d a b c", "e d a", "b e"]
 
 
 def load_job(tmp_path: Path, source: str, name: str):
-    """Write `source` to <tmp>/<module>.py and return its job class `name`."""
+    """Write `source` to <tmp>/<module>.py and return its job class `name`. Every job
+    imports mrjob, which only the [bigdata] extra installs: without it the test skips,
+    as C tests do without a compiler (a `.[dev,gen,gui]` install had 11 red tests,
+    WSL 2026-11-16)."""
+    pytest.importorskip("mrjob", reason="mrjob is in the bigdata extra: "
+                        "pip install -e \".[bigdata,dev]\"")
     module_name = f"job_{name.lower()}_{tmp_path.name}"
     path = tmp_path / f"{module_name}.py"
     path.write_text(source, encoding="utf-8")

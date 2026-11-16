@@ -129,7 +129,7 @@ def setup_gaps(course: Course, rows: list[LectureRow]) -> list[tuple[str, str | 
                        "copy another course's models."), "models", _("Models")))
     runner = data.get("isolation", {}).get("runner")
     if languages.is_c(data):
-        # C exercises are validated only in a container (docs/design.md, "C").
+        # C exercises are validated only in a container (docs/design/execution.md, "C").
         if runner != "container":
             gaps.append((_("A C course's tests run only in a container: choose it, and "
                            "build the test image."), "environment_view", _("Environment")))

@@ -1,4 +1,5 @@
-"""Model-written held-out candidates (roadmap 3b step 2; docs/design.md, "Independent checks").
+"""Model-written held-out candidates (roadmap 3b step 2; docs/design/validation.md, "Independent
+checks").
 
 The owner's own code only exists for exercises they have solved, and it follows the
 question, so it cannot show a question that misreads the slides. This module asks another
@@ -156,7 +157,7 @@ def gather(batch_dir: Path, exercise_id: str, workspace: Path) -> Inputs:
     metadata = json.loads((solution / "metadata.json").read_text(encoding="utf-8"))
     if language_of(metadata) != "python":
         # Its prompt and checks are Python's; validation/heldout.py still checks the
-        # owner's own C code (docs/design.md, "C", step 4b).
+        # owner's own C code (docs/design/execution.md, "C", step 4b).
         raise HeldOutWriteError(f"a {language_of(metadata)} exercise: the model writer "
                                 "supports Python exercises only so far")
     # The original skeleton, never exercises/<id>/student.py: that file may hold the

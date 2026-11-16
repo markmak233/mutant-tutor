@@ -4,7 +4,7 @@ The question lives in student.py's module docstring, the one source; question.md
 from it by code (no model), so the two never disagree. A C exercise keeps it in student.c's
 opening /* ... */ comment, in the Markdown layout (question_source). Two layouts:
 
-- Markdown (docs/design.md, "question.md format"; generated batches from 2026-10-31): the
+- Markdown (docs/design/validation.md, "question.md format"; generated batches from 2026-10-31): the
   docstring is already Markdown, a raw string so LaTeX keeps its backslashes, starting with
   "# <title>". Code adds what a model should not have to keep right: the line under the
   title (lecture, slides, mode, type, difficulty, from metadata.json), the contents line,

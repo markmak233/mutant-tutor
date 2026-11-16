@@ -2,6 +2,8 @@
 
 Each OS uses its own command format. No shell runs user arguments, and tests substitute
 the Windows COM writer. Native trust/click acceptance is separate from these file checks.
+Without --directory the launcher goes on the desktop the system shows (default_directory),
+not a guessed ~/Desktop.
 
 The GUI's server runs in the console window the launcher opens, and closing that window
 is how it stops (the pages have no Quit). On Windows the link starts that window
@@ -79,6 +81,76 @@ def _windows(path: Path, command: list[str], run) -> None:
             raise
 
 
+# Windows' id for the Desktop known folder (KNOWNFOLDERID FOLDERID_Desktop, from KnownFolders.h).
+FOLDERID_DESKTOP = "B4BFCC3A-DB2C-424C-B029-7FE99A87C641"
+
+
+def _windows_desktop() -> Path:
+    """The Desktop folder Windows shows, wherever it is: OneDrive's when its backup moved it
+    there, or another folder set in its Properties. ~/Desktop is then a stale or missing
+    folder, and a shortcut put in it is not seen (the walk-throughs of 2026-11-15/16, whose
+    INSTALL text had a workaround). The same answer as [Environment]::GetFolderPath('Desktop'),
+    without starting PowerShell or decoding its output, which a non-ASCII user name
+    would need to survive."""
+    import ctypes  # WinDLL exists only on Windows, so only here
+    import uuid
+    from ctypes import wintypes
+
+    class GUID(ctypes.Structure):
+        _fields_ = [("Data1", wintypes.DWORD), ("Data2", wintypes.WORD),
+                    ("Data3", wintypes.WORD), ("Data4", ctypes.c_ubyte * 8)]
+
+    folder_id = GUID.from_buffer_copy(uuid.UUID(FOLDERID_DESKTOP).bytes_le)
+    shell32 = ctypes.WinDLL("shell32")
+    ole32 = ctypes.WinDLL("ole32")
+    shell32.SHGetKnownFolderPath.argtypes = [ctypes.POINTER(GUID), wintypes.DWORD,
+                                             wintypes.HANDLE, ctypes.POINTER(ctypes.c_void_p)]
+    shell32.SHGetKnownFolderPath.restype = ctypes.c_long  # an HRESULT: 0 is success
+    ole32.CoTaskMemFree.argtypes = [ctypes.c_void_p]
+    found = ctypes.c_void_p()
+    result = shell32.SHGetKnownFolderPath(ctypes.byref(folder_id), 0, None, ctypes.byref(found))
+    try:
+        if result != 0 or not found.value:
+            raise ValueError("Windows did not say where the desktop is "
+                             f"(0x{result & 0xFFFFFFFF:08X}); give --directory FOLDER")
+        return Path(ctypes.wstring_at(found.value))
+    finally:
+        ole32.CoTaskMemFree(found)  # Windows allocated the text; freeing None is allowed
+
+
+def _linux_desktop(run) -> Path:
+    """The desktop folder of this user's language ("Schreibtisch", "桌面"), from
+    xdg-user-dir, which reads ~/.config/user-dirs.dirs; ~/Desktop without it. xdg-user-dir
+    answers the home folder itself when no desktop is set: a launcher there is on no desktop,
+    so that counts as none."""
+    home = Path.home()
+    try:
+        done = run(["xdg-user-dir", "DESKTOP"], capture_output=True, text=True,
+                   encoding="utf-8", errors="replace", stdin=subprocess.DEVNULL, timeout=10)
+        answer = done.stdout.strip() if done.returncode == 0 else ""
+    except (OSError, subprocess.TimeoutExpired):
+        answer = ""  # not installed (a minimal system): the usual name
+    desktop = Path(answer) if answer else home / "Desktop"
+    if desktop == home:
+        raise ValueError("this system has no desktop folder; give --directory FOLDER")
+    return desktop
+
+
+def default_directory(*, run=None) -> Path:
+    """Where `tutor shortcut` puts the launcher when no --directory is given: the desktop
+    this system shows. Linux with none is an error naming --directory (owner, 2026-11-16:
+    not a silent fallback to the applications menu, where the user would not look)."""
+    run = subprocess.run if run is None else run
+    if sys.platform == "win32":
+        return _windows_desktop()
+    if sys.platform == "darwin":
+        return Path.home() / "Desktop"  # Finder's desktop is always this folder
+    desktop = _linux_desktop(run)
+    if not desktop.is_dir():
+        raise ValueError(f"the desktop folder {desktop} does not exist; give --directory FOLDER")
+    return desktop
+
+
 def create(directory: Path, root: Path | None = None, *, run=None) -> Path:
     """Create only the requested file. --directory allows entirely disposable acceptance."""
     run = subprocess.run if run is None else run
@@ -113,10 +185,12 @@ def main(argv=None) -> int:
     """`tutor shortcut`: exit 0 with the path made, 2 with the reason it was not."""
     parser = argparse.ArgumentParser(prog="tutor shortcut", description=__doc__.split("\n")[0])
     parser.add_argument("--root", type=Path, help="folder containing the courses")
-    parser.add_argument("--directory", type=Path, default=Path.home() / "Desktop")
+    parser.add_argument("--directory", type=Path,
+                        help="where to put it (default: this system's desktop folder)")
     args = parser.parse_args(argv)
     try:
-        path = create(args.directory, args.root)
+        # Looked up only when needed: a given --directory never asks the system.
+        path = create(args.directory or default_directory(), args.root)
     except (OSError, ValueError, subprocess.TimeoutExpired) as error:
         print(f"shortcut: {error}", file=sys.stderr)
         return 2

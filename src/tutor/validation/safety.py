@@ -1,4 +1,4 @@
-"""Static safety check: read exercise code with `ast`, never run it (docs/design.md,
+"""Static safety check: read exercise code with `ast`, never run it (docs/design/execution.md,
 "Code execution safety", isolation layer A).
 
 Exercise code may be written by an LLM from material that carries hidden instructions, and

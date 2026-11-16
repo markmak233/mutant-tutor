@@ -1,4 +1,4 @@
-# The release package (docs/setup/install.md, "Release package"; docs/design.md, "Packaging
+# The release package (docs/setup/install.md, "Release package"; docs/design/packaging.md, "Packaging
 # and release"): by hand only, from the Actions tab ("Release", "Run workflow", pick the
 # branch). It runs the whole CI, builds the wheel once, installs that same wheel on Linux,
 # macOS and Windows, and only then keeps the zip as this run's artifact for 90 days. Nothing

@@ -1,4 +1,4 @@
-"""The agentic search route: a model looks for the pages itself (docs/design.md, "RAG").
+"""The agentic search route: a model looks for the pages itself (docs/design/rag.md, "RAG").
 
 The other routes rank pages for one fixed query. Here a model works like a person with a search
 box: it searches, looks at what came back, reads what seems promising, tries other words, and
@@ -21,7 +21,7 @@ Why this is an agent and graph/build.py is not: here the model picks the next st
 again, read, or stop) and the loop runs until it says so or the turns run out; in the
 generation graph code picks every next step. The bounds are what keep it safe and cheap:
 MAX_STEPS turns, SEARCH_RESULTS and MAX_READ per action, STEP_MAX_TOKENS per reply, and the
-scope check on every page id. Measured (design.md, "RAG"): about 4.8 turns, 4.6k tokens and
+scope check on every page id. Measured (docs/design/rag.md, "RAG"): about 4.8 turns, 4.6k tokens and
 14 s a query with GLM-5.3-Flash; not better than the hybrid ranking on the same queries, so
 generation does not use it.
 """

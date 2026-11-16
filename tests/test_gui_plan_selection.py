@@ -45,7 +45,8 @@ class Inputs(HTMLParser):
         if tag == "form":
             assert self.form is None, "nested forms would submit ambiguous authorization"
             self.form = attrs
-        if tag == "input" and attrs.get("type") == "checkbox":
+        # The selection's boxes only: the page has others (the delete box's "confirm").
+        if tag == "input" and attrs.get("type") == "checkbox" and attrs.get("name") == "item":
             self.checks[attrs["value"]] = attrs
 
     def handle_endtag(self, tag):

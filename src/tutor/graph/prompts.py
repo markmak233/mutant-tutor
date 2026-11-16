@@ -197,7 +197,7 @@ def system_prompt(conventions: str, oracle_interface: bool = False,
 
 
 # The batch mode's line in the item prompt: how much the question explains (decided
-# 2026-10-24; docs/design.md, "Two modes").
+# 2026-10-24; docs/design/validation.md, "Two modes").
 MODES = {
     "learn": "learn: the student is meeting the topic. The Concept section is the knowledge "
              "point's condensed lecture (see the rules); a debugging Symptom may name the "

@@ -3,7 +3,7 @@
 The [README](../README.md) says what this is and how to start. This page is the rest: how an
 exercise is checked and generated, the measured results, the retrieval comparison, where
 exercise code runs, the layout and the roadmap. Every decision, with the measurements behind
-it, is in [`design.md`](design.md).
+it, is in [`design/README.md`](design/README.md).
 
 ## Why validation comes first
 
@@ -43,7 +43,7 @@ VALID means the exercise passed these checks, not that it is proven correct. Rul
 against an oracle on random inputs, not all inputs; rule 3 only catches the mutants someone
 planted; the api check reads the source and can be dodged by dynamic code. Each rule removes
 a known way an exercise goes wrong, and the gaps that remain are listed in
-[`docs/design.md`](design.md).
+[`docs/design/validation.md`](design/validation.md).
 
 ## What an exercise looks like
 
@@ -81,7 +81,7 @@ plan (reads the course's coverage table) -> the owner selects items and approves
 ```
 
 The validator above is the only judge; the models only write. What makes the loop work,
-each added after a measured failure (details and numbers in [`docs/design.md`](design.md)):
+each added after a measured failure (details and numbers in [`docs/design/generation.md`](design/generation.md)):
 
 - **An independent oracle.** The generating model writes `oracle.py` only as an interface;
   a model from another provider fills it in from the question alone, never seeing the
@@ -113,7 +113,7 @@ the rest needed one or two repairs; with thinking on, 7 of 11, close to V4-Pro's
 about 60% of its time (3 min against 5 per exercise). The difference is reasoning, not model
 size: most failed first drafts had expected test values traced wrongly by hand. GLM-5.3 as
 the oracle wrote 19 of 19 usable oracles in 9 s each. Samples are small; the full table is in
-[`docs/design.md`](design.md) ("Week 7 with five arms").
+[`docs/design/generation.md`](design/generation.md) ("Week 7 with five arms").
 
 ## Does it need RAG?
 
@@ -153,7 +153,7 @@ The routes with a model find no more than those without. The labels are consecut
 which may favour adding neighbours, and they were not judged again. Questions spanning several
 lectures are harder: on 13 of them the best route, hybrid + neighbours, found 0.64 of the labelled
 pages within 4000 tokens. Generation never asks those. These results hold for this course only. The code stays in `src/tutor/retrieval/` for what was not tested, such as hints or a
-course with no labels; details are in [`docs/design.md`](design.md) ("RAG").
+course with no labels; details are in [`docs/design/rag.md`](design/rag.md) ("RAG").
 
 ## Results
 
@@ -192,7 +192,7 @@ What these numbers cannot show:
   two models ran on one week only, so the model table is a lead and no more. Lecture length alone moves
   the cost: 65k tokens per exercise on one course, 143k on the other with its long lecture (a reading of
   the logs, not a test). The full model comparison was not run, as 12 items separate only large
-  differences and [the week 7 arms](design.md) had already chosen a generator.
+  differences and [the week 7 arms](design/generation.md) had already chosen a generator.
 - **The mutant count proves little.** Rule 3 passes on every saved exercise by construction, and the
   same model writes the tests and the mutants.
 - **A held-out flag is a finding to read, not a proven defect.** The checks ran on one course only:
@@ -223,7 +223,7 @@ runner = "container"   # or "host"
   If Docker is not running or the image is missing, the command stops with an error and writes
   no verdict; it never falls back to the host. `python -m tutor.container status` says whether
   the image is ready. Validation takes about as long as on the host (measured in
-  [design.md](design.md), "Code execution safety").
+  [design/execution.md](design/execution.md), "Code execution safety").
 - **`host`**: a subprocess with a timeout, in a temporary directory, its whole process group
   killed afterwards. That keeps runs apart from each other and from the workspace, but it is
   **not a sandbox**: the code runs with your user's permissions and can read or write other
@@ -591,12 +591,12 @@ src/tutor/
 schemas/           the same format as JSON Schema files, exported from schema.py
 examples/          synthetic exercises (exercise/ for the learner, solution/ for the validator)
 tests/             unit tests; `-m spark` for end-to-end runs
-docs/design.md     every design decision, with the measurements behind it
+docs/design/       every design decision, with the measurements behind it (README.md: the index)
 ```
 
 ## Roadmap
 
-Phase numbers match `docs/design.md`.
+Phase numbers match `docs/design/roadmap.md`.
 
 - **1** ✅ Environment + validation harness, two synthetic examples
 - **2a** ✅ Harness extensions: shared test helpers, MRJob (inline and local Hadoop),
@@ -626,7 +626,7 @@ Phase numbers match `docs/design.md`.
   exercise page, attempts, the report, hints with C rules from the compiler and the
   sanitizers, held-out checks of the learner's own code); the first real batch, 5 exercises,
   came out 5 of 5 VALID, 4 of them after one repair round; then C++ and Java, each when a
-  course needs it (the order is in design.md, "Languages in the plan")
+  course needs it (the order is in design/execution.md, "Languages in the plan")
 - **7** ✅ Local GUI, built ahead of 6: a web app on the CLI's functions, localhost only;
   solving stays in the IDE. The pages, Open in VS Code, background tasks, generation with
   the plan approved in the page, lectures (PDFs, web pages, a whole folder to tick from), a

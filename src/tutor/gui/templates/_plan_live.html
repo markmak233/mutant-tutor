@@ -135,6 +135,17 @@
   <div class="actions">{{ action(url_for('continue_plan', name=course.folder, label=plan.label), _("Continue"), primary=True) }}</div>
   {% endif %}
 
+  {# A plan given up on goes with its draft folder, so its name is free again (owner,
+     2026-11-11; found when an unapproved w3 made the next one w3-1). Only while nothing
+     of it is in batches/ and no task of it runs (PlanView.can_delete); the box, then the
+     button, as the GUI's other removals. #}
+  {% if plan.can_delete %}
+  <form method="post" action="{{ url_for('delete_plan', name=course.folder, label=plan.label) }}" class="inline-form">
+    <label><input type="checkbox" name="confirm" value="1" required> {{ _("Delete this plan and its draft folder (%(folder)s); no exercise of it is in the course's batches", folder=plan.draft.name) }}</label>
+    <button type="submit" class="small">{{ _("Delete plan") }}</button>
+  </form>
+  {% endif %}
+
   {% if plan.task %}
   <details class="task-output"{% if running or plan.task.status != "done" %} open{% endif %}>
     <summary>{{ _("Output of") }} <a href="{{ url_for('task', name=course.folder, task_id=plan.task.id) }}">{{ plan.task.title }}</a>
