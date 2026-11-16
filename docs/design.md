@@ -3690,7 +3690,13 @@ mode is not done (see "Decisions not to do").
     SqliteSaver used here does not), has no win_arm64 wheel, and PyYAML has none for
     Python 3.11. Resolving for it with Python 3.12 and sqlite-vec excluded (`uv tool install
     --excludes`) works, but a course's `.venv` installs the same extras, so support waits
-    for a change of its own. Docker on Windows x64 (2026-11-16, `pytest -m docker` on the
+    for a change of its own. Decided (owner, 2026-11-16): not a native arm64 build, as
+    few people use Windows on ARM, but x64 Python under Windows' own x64 emulation
+    (Prism), installed with uv (`cpython-3.11-windows-x86_64`), so every win_amd64 wheel
+    applies as on an x64 PC and the code may need no change; only INSTALL-Windows.txt
+    gets an ARM paragraph. Containers stay Linux arm64 under Docker Desktop. To check in
+    a Windows 11 ARM VM (UTM on the owner's Mac) before it is written down as supported:
+    the install, the suite, a course, and whether Docker Desktop runs there. Docker on Windows x64 (2026-11-16, `pytest -m docker` on the
     owner's PC): every container-limit test and a container course's `doctor --smoke` pass;
     C runs sometimes hang (see "C", the AddressSanitizer issue; fixed with gcc 14 the same
     day).
