@@ -146,8 +146,9 @@ def _wake_docker(root: Path) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     """Start (or reuse) the GUI's server for one root; 2 when it cannot start."""
-    # The module docstring's second paragraph; argparse wraps it again.
-    parser = argparse.ArgumentParser(prog="python -m tutor.gui",
+    # The module docstring's second paragraph; argparse wraps it again. The name is the one
+    # an installed tool is run by (`python -m tutor.gui` still works in a checkout).
+    parser = argparse.ArgumentParser(prog="tutor gui",
                                      description=__doc__.split("\n\n")[1])
     parser.add_argument("--root", help="the folder that holds the course folders")
     parser.add_argument("--port", type=int, default=0, help="default: a free port")

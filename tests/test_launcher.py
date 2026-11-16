@@ -344,6 +344,37 @@ def test_windows_desktop_is_the_known_folder():
     assert shortcut.default_directory() == Path(done.stdout.decode("utf-8").strip())
 
 
+def test_help_lists_every_command_with_what_it_does(capsys):
+    """`tutor --help` used to list bare names ({test,doctor,gui,shortcut,python})."""
+    with pytest.raises(SystemExit) as done:
+        dispatcher.main(["--help"])
+    assert done.value.code == 0
+    out = capsys.readouterr().out
+    for name, purpose in dispatcher.COMMANDS.items():
+        assert re.search(rf"^\s+{name}\s+{re.escape(purpose)}$", out, re.MULTILINE)
+
+
+def test_every_command_the_dispatcher_runs_has_a_help_line(monkeypatch):
+    """A command added to main() without a COMMANDS line would be missing from --help."""
+    import inspect
+
+    runs = set(re.findall(r'args\[0\] == "(\w+)"', inspect.getsource(dispatcher.main)))
+    assert runs == set(dispatcher.COMMANDS)
+
+
+@pytest.mark.parametrize("argv", [[], ["bogus"]])
+def test_no_or_an_unknown_command_is_a_usage_error(argv, capsys):
+    with pytest.raises(SystemExit) as done:
+        dispatcher.main(argv)
+    assert done.value.code == 2 and "COMMAND" in capsys.readouterr().err
+
+
+def test_gui_help_names_the_command_users_type(capsys):
+    with pytest.raises(SystemExit):
+        gui_main.main(["--help"])
+    assert capsys.readouterr().out.startswith("usage: tutor gui ")
+
+
 def test_dispatcher_imports_gui_and_shortcut_lazily(monkeypatch):
     monkeypatch.setattr(gui_main, "main", lambda args: 17)
     monkeypatch.setattr(shortcut, "main", lambda args: 19)

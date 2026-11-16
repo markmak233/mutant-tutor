@@ -5,6 +5,16 @@ from __future__ import annotations
 import argparse
 import sys
 
+# What `tutor --help` says of each command, in the order it lists them. Kept here, not read
+# from the modules, so that help imports none of them (a GUI or Docker import is slow).
+COMMANDS = {
+    "gui": "start the pages in your browser (or open the running ones)",
+    "shortcut": "put a launcher for the pages on your desktop",
+    "doctor": "check what this computer and a course have and lack",
+    "test": "run one exercise's tests in the course's container",
+    "python": "list or install a Python for courses, through uv",
+}
+
 
 def main(argv: list[str] | None = None) -> int:
     """Each command owns its options and help; imports stay lazy for a small dispatcher."""
@@ -29,8 +39,14 @@ def main(argv: list[str] | None = None) -> int:
         from tutor.test_command import main as test_main
 
         return test_main(args[1:])
-    parser = argparse.ArgumentParser(prog="tutor", description="Local coding practice")
-    parser.add_argument("command", choices=("test", "doctor", "gui", "shortcut", "python"))
+    # No known command (or --help): argparse lists the commands with a line each, then
+    # exits 0 for --help or 2 with its usage for anything else.
+    parser = argparse.ArgumentParser(
+        prog="tutor", description="Local coding practice",
+        epilog="`tutor COMMAND --help` gives a command's own options.")
+    commands = parser.add_subparsers(dest="command", metavar="COMMAND", required=True)
+    for name, purpose in COMMANDS.items():
+        commands.add_parser(name, help=purpose)
     parser.parse_args(args)
     return 2
 
