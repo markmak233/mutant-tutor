@@ -144,6 +144,13 @@ container for isolation is fine; deploying the tool as a service is not.
   binary (no Go build). `.gitleaks.toml` extends the default rules with `home-directory-path`
   (`/Users/<name>/`, `/home/<name>/`), since default rules only know secrets. History was scanned
   clean on 2026-10-24; rescan with `gitleaks git .` after any history-sensitive change.
+- History is not rewritten (owner, 2026-10-26; main's ruleset blocks force pushes): course
+  details that early commits held and later ones removed stay there, as "someone reading
+  the history is acceptable, as long as it is not on a search engine's first page". Only
+  the current files are kept clean. The whole-history search before v0.1.0 (2026-11-16)
+  found one course's code and name, its setup guide's name and three tool versions in
+  seven commits of 10-23 to 10-25, all removed on 10-26; no lecture text, slide, exercise
+  or answer was ever committed.
   `.env.example` is marked `skip-worktree` locally so filled-in values never get staged.
 
 ## Repository layout
