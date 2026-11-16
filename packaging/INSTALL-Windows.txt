@@ -70,12 +70,9 @@ To start it with a double-click from now on, run once:
 
     tutor shortcut
 
-It puts a "Tutor" shortcut on your desktop. Opening it starts Tutor in a small
-window that stays minimised in the taskbar: closing that window stops Tutor.
-If the shortcut does not appear on the desktop you see (for example when the
-desktop is kept in OneDrive), give the desktop's real folder:
-
-    tutor shortcut --directory ([Environment]::GetFolderPath('Desktop'))
+It puts a "Tutor" shortcut on your desktop (also when OneDrive keeps your
+desktop). Opening it starts Tutor in a small window that stays minimised in
+the taskbar: closing that window stops Tutor.
 
 Your courses are kept in this folder:
 

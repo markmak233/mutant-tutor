@@ -70,10 +70,10 @@ To start it with a double-click from now on, run once:
 
     tutor shortcut
 
-It puts a "Tutor" launcher (tutor.desktop) in ~/Desktop. On Ubuntu's desktop,
-right-click it and choose "Allow Launching" before the first double-click. If
-you have no ~/Desktop folder (or it has another name in your language), say
-where to put it:
+It puts a "Tutor" launcher (Tutor.desktop) in your desktop folder, whatever
+its name in your language. On Ubuntu's desktop, right-click it and choose
+"Allow Launching" before the first double-click. If you have no desktop
+folder, it says so; then say where to put it:
 
     tutor shortcut --directory FOLDER
 

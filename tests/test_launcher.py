@@ -220,6 +220,76 @@ def test_windows_link_uses_encoded_com_script_and_argument_quoting(tmp_path, mon
     assert shortcut.create(tmp_path, root, run=run).suffix == ".lnk"
 
 
+def _xdg(answer: str, code: int = 0):
+    """A stand-in for `xdg-user-dir DESKTOP` printing `answer`."""
+    def run(command, **kwargs):
+        assert command == ["xdg-user-dir", "DESKTOP"]
+        return subprocess.CompletedProcess(command, code, stdout=answer + "\n", stderr="")
+    return run
+
+
+def test_linux_desktop_is_the_one_of_the_users_language(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    desktop = tmp_path / "Schreibtisch"
+    desktop.mkdir()
+    assert shortcut.default_directory(run=_xdg(str(desktop))) == desktop
+
+
+def test_linux_without_xdg_user_dir_uses_desktop(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    (tmp_path / "Desktop").mkdir()
+
+    def missing(command, **kwargs):
+        raise FileNotFoundError(command[0])
+
+    assert shortcut.default_directory(run=missing) == tmp_path / "Desktop"
+
+
+@pytest.mark.parametrize("answer", ["home", "missing"])
+def test_linux_with_no_desktop_folder_asks_for_one(tmp_path, monkeypatch, answer):
+    """No desktop set (xdg-user-dir answers the home folder) or none on disk: an error
+    naming --directory, not a launcher put somewhere the user would not look (owner,
+    2026-11-16)."""
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    folder = tmp_path if answer == "home" else tmp_path / "Desktop"
+    with pytest.raises(ValueError, match="--directory"):
+        shortcut.default_directory(run=_xdg(str(folder)))
+
+
+def test_shortcut_without_a_desktop_exits_2_and_says_why(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(shortcut.subprocess, "run", _xdg(str(tmp_path)))
+    assert shortcut.main([]) == 2
+    assert "give --directory" in capsys.readouterr().err
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_a_given_directory_never_asks_for_the_desktop(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys, "platform", "darwin")
+
+    def asked(**kwargs):
+        raise AssertionError("looked up the desktop")
+
+    monkeypatch.setattr(shortcut, "default_directory", asked)
+    assert shortcut.main(["--directory", str(tmp_path)]) == 0
+    assert (tmp_path / "Tutor.command").is_file()
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="asks Windows itself for its desktop")
+def test_windows_desktop_is_the_known_folder():
+    """The value PowerShell's [Environment]::GetFolderPath('Desktop') gives, the INSTALL
+    text's workaround until 2026-11-16."""
+    done = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command",
+                           "[Console]::OutputEncoding=[Text.Encoding]::UTF8; "
+                           "[Environment]::GetFolderPath('Desktop')"],
+                          capture_output=True, stdin=subprocess.DEVNULL, timeout=60)
+    assert shortcut.default_directory() == Path(done.stdout.decode("utf-8").strip())
+
+
 def test_dispatcher_imports_gui_and_shortcut_lazily(monkeypatch):
     monkeypatch.setattr(gui_main, "main", lambda args: 17)
     monkeypatch.setattr(shortcut, "main", lambda args: 19)

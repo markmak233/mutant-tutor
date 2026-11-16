@@ -3653,7 +3653,10 @@ mode is not done (see "Decisions not to do").
     Ubuntu in VMware Fusion (Docker Engine there needed the docker group and a new login),
     Windows 11 x64 in Windows Sandbox; their fixes are in the texts (no Notepad in Sandbox,
     OneDrive or translated desktops, `$env:` in PowerShell, a VM clock months behind
-    failing TLS, a new terminal after installing Docker). Windows on ARM is not supported:
+    failing TLS, a new terminal after installing Docker). Since 2026-11-16 `tutor shortcut`
+    finds the desktop itself (Windows' Desktop known folder; `xdg-user-dir DESKTOP` on
+    Linux, where no desktop folder is an error naming `--directory`, owner: not a silent
+    fallback to the applications menu), so the texts no longer give a workaround. Windows on ARM is not supported:
     sqlite-vec, which langgraph-checkpoint-sqlite 3 requires (only its vector store imports
     it; the SqliteSaver used here does not), has no win_arm64 wheel, and PyYAML has none for
     Python 3.11. Resolving for it with Python 3.12 and sqlite-vec excluded (`uv tool install
