@@ -385,7 +385,12 @@ The phases in order, the backlog and what is deferred. Part of the design record
       with a current recipe pointer and drift/staleness checks. Environment step 4 shows
       build time and actual course-venv/image differences inline, with metadata-only refresh
       and a link to full history; legacy base provenance stays unknown. A build snapshot is
-      not a permanent base pin. Browser acceptance is pending.
+      not a permanent base pin. Accepted in a browser 2026-11-17 (owner, on a C course with an
+      image, the server restarted first): the fragment loads after the page; a current record
+      with its build and record times on this machine's clock; the differences table (the
+      host's `gcc` is reported as the clang it is); Refresh ran as a task three times and
+      the recorded time followed; the history page; and no record block for a course that
+      tests on this machine.
    Then packaging and release (see "Deferred", "Packaging and release"), with `tutor doctor`
    (checks the tool, that Docker runs, the course's image, then validates one example in the
    course's runner as a smoke test, and says what to do next for each failure) and a fresh
