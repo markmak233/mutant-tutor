@@ -30,6 +30,7 @@ NOTICES = {
     "no-file-manager": ("bad", N_("No file manager command (xdg-open) was found.")),
     "failed": ("bad", N_("It could not be started.")),
     "tests-passed": ("ok", N_("Your tests passed in the course image; the attempt is recorded.")),
+    "hint-ready": ("ok", N_("The hint on your code is below.")),
     "found-allowed": ("ok", N_("Added to [safety]: the exercises may use what you ticked.")),
     "tests-host-course": ("bad", N_("This course runs its tests on the host: run pytest in the "
                                  "exercise folder from the course's terminal.")),
@@ -241,4 +242,5 @@ def waiting_for(course: courses.Course, task: tasks.Task) -> str:
               "build": N_("docker build, which may be downloading"),
               "validate": N_("the exercises' test runs"),
               after_checks.CHECK: N_("the exercises' test runs"),
+              "hint": N_("your tests, run in a temporary copy"),
               "read": N_("the lectures being read")}.get(kind, N_("the command")))

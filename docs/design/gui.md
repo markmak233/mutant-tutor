@@ -397,6 +397,23 @@ late; the adaptive review screens can be built with it.
   - A finished task goes back to the batch with a notice. The held-out check exits 1 when it
     flags something, so that task stays on its log, as a failed validation does. All three
     can be run again from a failed task: the two that call a model keep what is unchanged.
+- Hints on the exercise page (owner, 2026-11-18; a command only until then). The page has
+  two tabs, Question and Hints, each a page of its own (`/e/<id>/` and `/e/<id>/hints/`):
+  links, so no script is needed and a finished task can land on the Hints tab
+  (`gui/hints_page.py`).
+  - The exercise's `hints.md`: it sits in the exercise folder beside the question, so it is
+    the learner's side and the page may show it. What is not a numbered hint (the useful
+    functions) is shown; each "Hint N" is closed until opened, in learn and review alike, and
+    a review batch adds a line asking to try first. Rendered as the question is, raw HTML off.
+  - "Check my code" runs `python -m tutor.hint <exercise folder>` as a task: the learner's
+    tests in a temporary copy, not recorded as a run, the student file untouched; then a
+    rule, a known mistake, or the course's `hint` model. The page says where the code goes: to
+    no provider when the course names no `hint` model, else to the model it names, with a box
+    "without the model" (`--no-llm`). The mode's rule (a review batch is told only what goes
+    wrong) is the command's own.
+  - The latest hint is shown as the command printed it, as plain text; earlier ones are links
+    to their logs. Nothing of `solutions/` is read by the page: the command reads the mutants,
+    as it does from a terminal.
 - Solving stays in the IDE: "Open in VS Code" (step 2) runs `code <course folder> <student.py>`,
   the course folder and not the exercise's, since the course's `.vscode` settings put its venv
   in the terminal; VS Code reuses a window that has the folder open. `code` is looked up on

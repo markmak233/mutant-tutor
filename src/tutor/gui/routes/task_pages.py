@@ -18,7 +18,7 @@ from flask import (
     url_for,
 )
 
-from tutor.gui import after_checks, course_setup, courses, generation, tasks
+from tutor.gui import after_checks, course_setup, courses, generation, hints_page, tasks
 from tutor.gui.i18n import N_
 from tutor.gui.i18n import gettext_ as _
 from tutor.gui.routes.common import ENVIRONMENT_NOTICES, waiting_for
@@ -63,6 +63,10 @@ def return_to(course: courses.Course, task: tasks.Task) -> tuple[str, str, str |
     if kind == "learner-test" and isinstance(batch, str) and isinstance(exercise, str):
         return (url_for("exercise", name=name, batch=batch, exercise=exercise), exercise,
                 "tests-passed")
+    if kind == hints_page.HINT and isinstance(batch, str) and isinstance(exercise, str):
+        # Back to the Hints tab, where the hint is shown.
+        return (url_for("exercise_hints", name=name, batch=batch, exercise=exercise), exercise,
+                "hint-ready")
     if kind in ("check", "timing") and task.meta.get("from") == "providers":
         # Started from the Providers page (a shared model): back there, not to a course.
         notice = "models-checked" if kind == "check" else None
@@ -110,6 +114,8 @@ def again_url(course: courses.Course, task: tasks.Task) -> str | None:
     exercise = task.meta.get("exercise")
     if kind == "learner-test" and isinstance(batch, str) and isinstance(exercise, str):
         return url_for("test_exercise", name=name, batch=batch, exercise=exercise)
+    if kind == hints_page.HINT and isinstance(batch, str) and isinstance(exercise, str):
+        return url_for("hint_exercise", name=name, batch=batch, exercise=exercise)
     endpoint = {"read": "read_lectures", "vision": "transcribe_lectures",
                 "check": "check_models", "install": "install_packages",
                 "build": "build_image", "requires-draft": "draft_requires",

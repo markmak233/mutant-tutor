@@ -318,3 +318,10 @@ input[type="checkbox"] { accent-color: var(--accent); width: 1.05rem; height: 1.
 
 /* A row's own action (delete a language) on a line of its own, at the end side. */
 .inline-form.row-end { display: flex; justify-content: flex-end; margin: 0.3rem 0 0.5rem; }
+
+/* The exercise page's tabs: links to its two pages, the current one underlined. */
+.tabs { display: flex; gap: 1.25rem; border-block-end: 1px solid var(--line); margin: 1rem 0; }
+.tabs a { padding: 0.4rem 0; color: var(--muted); text-decoration: none; border-block-end: 2px solid transparent; margin-block-end: -1px; }
+.tabs a::after { content: none; }
+.tabs a.current { color: inherit; font-weight: 600; border-block-end-color: var(--accent); }
+.hint summary { font-weight: 600; }

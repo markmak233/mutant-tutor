@@ -14,6 +14,7 @@ from tutor.gui import (
     courses,
     environment,
     generation,
+    hints_page,
     lectures,
     plan_items,
     ratings,
@@ -87,6 +88,15 @@ def register(app: Flask) -> None:
     @app.get("/c/<name>/b/<batch>/e/<exercise>/")
     def exercise(name: str, batch: str, exercise: str):
         """One exercise: its question, its runs, and its rating once it has passed."""
+        return exercise_page(name, batch, exercise, "question")
+
+    @app.get("/c/<name>/b/<batch>/e/<exercise>/hints/")
+    def exercise_hints(name: str, batch: str, exercise: str):
+        """The same page on its Hints tab: a page of its own, so a link (and a finished
+        hint task) can land on it without a script."""
+        return exercise_page(name, batch, exercise, "hints")
+
+    def exercise_page(name: str, batch: str, exercise: str, tab: str):
         course, view, row, folder = exercise_or_404(name, batch, exercise)
         # The stored rating fills the form in, so changing it starts from what was given.
         rating = ratings.find(course.workspace.root, batch, exercise)
@@ -99,6 +109,13 @@ def register(app: Flask) -> None:
                 if t.meta.get("kind") == "learner-test" and t.meta.get("batch") == batch
                 and t.meta.get("exercise") == exercise]
         return render_template("exercise.html", course=course, batch=view, row=row,
+                               tab=tab,
+                               # The Hints tab (gui/hints_page.py): hints.md in its parts,
+                               # the hints given on the learner's code, and the model that
+                               # would read that code, if the course names one.
+                               hint_parts=hints_page.parts(course, batch, exercise),
+                               hints_given=hints_page.given(course, batch, exercise),
+                               hint_model=after_checks.role_model(course, "hint"),
                                question=rendering.question_html(text) if text else None,
                                attempts=courses.exercise_attempts(course, batch, exercise),
                                test_tasks=runs,
@@ -146,6 +163,22 @@ def register(app: Flask) -> None:
         command = [courses.task_python(course), "-m", "tutor", "test", str(folder)]
         return start_task(course, f"Run my tests: {row.id}", [command],
                           meta={"kind": "learner-test", "batch": batch, "exercise": exercise})
+
+    @app.post("/c/<name>/b/<batch>/e/<exercise>/hint")
+    def hint_exercise(name: str, batch: str, exercise: str):
+        """`python -m tutor.hint <exercise folder>` as a task: the learner's tests in a
+        temporary copy (not recorded as an attempt, the student file untouched), then a
+        rule, a known mistake, or the course's `hint` model. The box "without the model"
+        adds --no-llm, so the code goes to no provider."""
+        course, _, row, folder = exercise_or_404(name, batch, exercise)
+        back = url_for("exercise_hints", name=name, batch=batch, exercise=exercise)
+        if problem := courses.container_problem(course):
+            return redirect(f"{back}?notice={problem}", code=303)
+        command = [courses.task_python(course), "-m", "tutor.hint"]
+        if request.form.get("no_llm"):
+            command.append("--no-llm")
+        return start_task(course, f"Hint: {row.id}", [[*command, str(folder)]],
+                          meta={"kind": hints_page.HINT, "batch": batch, "exercise": exercise})
 
     # --- actions: POST only, each back to its page with a notice ----------------------------
 

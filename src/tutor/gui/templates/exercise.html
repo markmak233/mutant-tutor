@@ -55,7 +55,47 @@
   </form>
 </details>
 {% endif %}
-{% if question %}
+{# Two tabs, each a page of its own (owner, 2026-11-18: "like tabs to switch"): links, so
+   no script is needed, and a finished hint task can land on the Hints tab. #}
+<nav class="tabs" aria-label="{{ _('Parts of this exercise') }}">
+  <a href="{{ url_for('exercise', name=course.folder, batch=batch.name, exercise=row.id) }}"{% if tab == "question" %} class="current" aria-current="page"{% endif %}>{{ _("Question") }}</a>
+  <a href="{{ url_for('exercise_hints', name=course.folder, batch=batch.name, exercise=row.id) }}"{% if tab == "hints" %} class="current" aria-current="page"{% endif %}>{{ _("Hints") }}</a>
+</nav>
+{% if tab == "hints" %}
+{# hints.md, the learner's own file beside the question: what is not a numbered hint (the
+   useful functions) is shown, each hint stays closed until opened. Its text is generated,
+   so it is rendered as the question is (raw HTML off) and its titles are escaped. #}
+<h2>{{ _("This exercise's hints") }}</h2>
+{% if hint_parts is none %}<p class="muted">{{ _("This exercise has no hints.md.") }}</p>
+{% else %}
+<p class="muted">{{ _("From hints.md in the exercise folder. Each hint is more specific than the one before: open the next only when the last did not get you moving.") }}{% if batch.mode == "review" %} {{ _("This is a review batch: try on your own first.") }}{% endif %}</p>
+{% for part in hint_parts %}
+{% if part.closed %}<details class="review hint"><summary>{{ part.title }}</summary><article class="question" dir="ltr">{{ part.html }}</article></details>
+{% else %}<h3>{{ part.title }}</h3><article class="question" dir="ltr">{{ part.html }}</article>{% endif %}
+{% endfor %}
+{% endif %}
+{# A hint on the learner's code (python -m tutor.hint), as a task. The code goes to a
+   provider only when the course names a `hint` model, and the page says which. #}
+<h2>{{ _("A hint on your code") }}</h2>
+<p>{{ _("Runs your tests in a temporary copy, then names a known low-level mistake, or the known mistake your code fails like. It never gives the answer, does not change %(student)s and is not recorded as a run.", student=code_student) }}{% if batch.mode == "review" %} {{ _("In a review batch it says only what goes wrong.") }}{% endif %}</p>
+<form method="post" class="form" action="{{ url_for('hint_exercise', name=course.folder, batch=batch.name, exercise=row.id) }}">
+  {% if hint_model %}
+  <p class="muted">{{ _("If neither applies, your code goes to this course's hint model, %(model)s; the solution never does. Asking again without changing your code gives a more specific hint.", model=hint_model) }}</p>
+  <label class="check"><input type="checkbox" name="no_llm" value="1"> {{ _("Without the model: my code stays on this machine") }}</label>
+  {% else %}
+  <p class="muted">{{ _("This course names no hint model, so your code stays on this machine.") }}</p>
+  {% endif %}
+  <div class="actions"><button type="submit" class="primary">{{ _("Check my code") }}</button></div>
+</form>
+{% if hints_given %}
+{% set latest = hints_given[0] %}
+<h3>{{ _("Latest hint") }} <span class="muted">{{ latest.task.started }}</span> {{ chip(latest.task.status) }}</h3>
+{# What the command printed: plain text, escaped. #}
+<div class="log"><pre dir="ltr">{{ latest.text or _("(no output yet)") }}</pre></div>
+<p class="muted"><a href="{{ url_for('task', name=course.folder, task_id=latest.task.id) }}">{{ _("Its log") }}</a>{% if hints_given | length > 1 %} · {{ _("Earlier:") }}
+  {% for g in hints_given[1:] %}<a href="{{ url_for('task', name=course.folder, task_id=g.task.id) }}">{{ g.task.started }}</a>{{ " · " if not loop.last }}{% endfor %}{% endif %}</p>
+{% endif %}
+{% elif question %}
 {# Markdown rendered with raw HTML off (rendering.py); the only value marked safe.
    dir="ltr": the question is the model's text, in the language it was written in, not
    the pages' (owner, 2026-11-11: "the one exception: the question is not mirrored"). #}

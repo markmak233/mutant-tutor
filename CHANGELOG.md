@@ -6,6 +6,10 @@
   quality, the writing of held-out solutions and the held-out check as tasks, and shows each
   exercise's verdict: the judge's four letters, once you have rated the exercise yourself, and
   how many held-out checks were flagged. The reasons stay in each task's log.
+- **Hints in the GUI.** An exercise's page has a Hints tab: its `hints.md`, each hint closed
+  until you open it, and "Check my code", which runs your tests in a temporary copy and names
+  a known mistake, as `python -m tutor.hint` does. The page says whether your code goes to a
+  model.
 
 ## 0.1.0 (2026-11-17)
 

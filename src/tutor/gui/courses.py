@@ -9,7 +9,9 @@ time, exercise and result, never its `first_error`). Of
 `solutions/`, only verdicts: the yes or no in validation.json, the judge's four letters in
 quality.json, the count of flagged checks in heldout.json, and, through the progress code
 shared with the report, whether the student file still equals the skeleton; never the
-reference, tests, hints or mutants, nor a report's reasons, which matches the tutoring rule.
+reference, tests or mutants, nor a report's reasons, which matches the tutoring rule. The
+exercise's own hints.md is the learner's side (it sits beside the question): the Hints tab
+shows it, each hint closed until opened (gui/hints_page.py).
 Every name that comes from a URL goes through `_child`, so a request cannot reach a folder
 outside its course or any hidden one.
 """

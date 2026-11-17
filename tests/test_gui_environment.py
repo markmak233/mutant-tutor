@@ -764,6 +764,7 @@ def test_a_task_with_fresh_output_says_nothing_of_it(root, course):
     ({"kind": "judge", "batch": "w9"}, "/c/demo-course/b/w9/judge"),
     ({"kind": "heldout-write", "batch": "w9"}, "/c/demo-course/b/w9/heldout/write"),
     ({"kind": "heldout-check", "batch": "w9"}, "/c/demo-course/b/w9/heldout/check"),
+    ({"kind": "hint", "batch": "w9", "exercise": "ex"}, "/c/demo-course/b/w9/e/ex/hint"),
     ({"kind": "requires-draft"}, "/c/demo-course/environment/draft"),
     ({"kind": "coverage-draft"}, "/c/demo-course/coverage/draft"),
     ({"kind": "read"}, "/c/demo-course/lectures/read"),
