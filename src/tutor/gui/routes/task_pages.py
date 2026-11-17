@@ -18,7 +18,7 @@ from flask import (
     url_for,
 )
 
-from tutor.gui import course_setup, courses, generation, tasks
+from tutor.gui import after_checks, course_setup, courses, generation, tasks
 from tutor.gui.i18n import N_
 from tutor.gui.i18n import gettext_ as _
 from tutor.gui.routes.common import ENVIRONMENT_NOTICES, waiting_for
@@ -36,6 +36,15 @@ def task_or_404(name: str, task_id: str) -> tuple[courses.Course, tasks.Task]:
     return course, task
 
 
+# The checks after generation (gui/after_checks.py): a finished task's notice on the batch
+# page, and the action that starts it again. Each is safe to run twice: the two that call a
+# model keep what is unchanged without a call.
+AFTER_NOTICES = {after_checks.JUDGE: "judged", after_checks.WRITE: "heldout-written",
+                 after_checks.CHECK: "heldout-checked"}
+AFTER_ACTIONS = {after_checks.JUDGE: "judge_batch", after_checks.WRITE: "write_heldout",
+                 after_checks.CHECK: "check_heldout"}
+
+
 def return_to(course: courses.Course, task: tasks.Task) -> tuple[str, str, str | None] | None:
     """Where a task goes back to once it ends (owner, 2026-11-06): (page, its name, the
     notice for a task that succeeded), from the task's kind and names, through url_for,
@@ -47,6 +56,9 @@ def return_to(course: courses.Course, task: tasks.Task) -> tuple[str, str, str |
         return url_for("lecture_list", name=name), _("Lectures"), "lectures-read"
     if kind == "validate" and isinstance(batch, str):
         return url_for("batch", name=name, batch=batch), batch, "validated"
+    if kind in AFTER_NOTICES and isinstance(batch, str):
+        # The judge and the held-out check: back to the batch, whose columns they fill.
+        return url_for("batch", name=name, batch=batch), batch, AFTER_NOTICES[kind]
     exercise = task.meta.get("exercise")
     if kind == "learner-test" and isinstance(batch, str) and isinstance(exercise, str):
         return (url_for("exercise", name=name, batch=batch, exercise=exercise), exercise,
@@ -93,6 +105,8 @@ def again_url(course: courses.Course, task: tasks.Task) -> str | None:
     kind, name, batch = task.meta.get("kind"), course.folder, task.meta.get("batch")
     if kind == "validate" and isinstance(batch, str):
         return url_for("validate_batch", name=name, batch=batch)
+    if kind in AFTER_ACTIONS and isinstance(batch, str):
+        return url_for(AFTER_ACTIONS[kind], name=name, batch=batch)
     exercise = task.meta.get("exercise")
     if kind == "learner-test" and isinstance(batch, str) and isinstance(exercise, str):
         return url_for("test_exercise", name=name, batch=batch, exercise=exercise)

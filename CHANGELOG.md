@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- **Checks after generation in the GUI.** A batch's page starts the judge of teaching
+  quality, the writing of held-out solutions and the held-out check as tasks, and shows each
+  exercise's verdict: the judge's four letters, once you have rated the exercise yourself, and
+  how many held-out checks were flagged. The reasons stay in each task's log.
+
 ## 0.1.0 (2026-11-17)
 
 The first release: the whole loop, from a course's lectures to exercises solved in an IDE,

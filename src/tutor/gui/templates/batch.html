@@ -25,7 +25,8 @@
 {{ bar(batch.count("passed"), batch.exercises | length) }}
 <table>
   <thead><tr><th>{{ _("Exercise") }}</th><th>{{ _("Priority") }}</th><th>{{ _("Progress") }}</th>
-    <th class="num">{{ _("Runs to pass") }}</th><th>{{ _("Validated") }}</th></tr></thead>
+    <th class="num">{{ _("Runs to pass") }}</th><th>{{ _("Validated") }}</th>
+    <th>{{ _("Quality") }}</th><th>{{ _("Held-out") }}</th></tr></thead>
   <tbody>
   {% for row in batch.exercises %}
     <tr class="priority-{{ row.priority }}">
@@ -35,8 +36,51 @@
       <td>{{ chip(row.status, _(labels[row.status])) }}</td>
       <td class="num">{{ row.runs_to_pass or "" }}</td>
       <td>{% if row.valid is none %}<span class="muted">{{ _("no report") }}</span>{% elif row.valid %}{{ _("valid") }}{% else %}{{ chip("invalid", _("invalid")) }}{% endif %}</td>
+      {# The checks after generation (gui/after_checks.py): verdicts only, never a reason.
+         The judge's letters wait for the owner's own rating, which the judge is checked
+         against; until then the cell says only that it was judged. #}
+      {% set check = checks.get(row.id) %}
+      <td>{% if not check or check.quality is none %}<span class="muted">{{ _("not judged") }}</span>
+          {% elif not check.rated %}<span class="muted">{{ _("judged; shown once you rate it") }}</span>
+          {% elif "n" in check.quality %}{{ chip("invalid", check.quality) }} <span class="muted">{{ _("no on:") }} {% for point in check.failed_points %}{{ _(point) }}{% if not loop.last %}, {% endif %}{% endfor %}</span>
+          {% else %}<code>{{ check.quality }}</code> <span class="muted">{{ _("all four fine") }}</span>{% endif %}</td>
+      <td>{% if not check or check.held_out is none %}<span class="muted">{{ _("not run") }}</span>
+          {% elif check.held_out %}{{ chip("invalid", ngettext("%(num)s flagged", "%(num)s flagged", check.held_out)) }}
+          {% else %}{{ _("nothing flagged") }}{% endif %}</td>
     </tr>
   {% endfor %}
   </tbody>
 </table>
+{# The checks after generation, as tasks (owner, 2026-11-17; they were commands only). Each
+   button says which model it uses, since two of them spend tokens; a course that names no
+   such model gets a link to its Models page instead of a button. #}
+<h2 id="checks">{{ _("Checks after generation") }}</h2>
+<p class="muted">{{ _("Optional, and they only report: an exercise stays valid or not as the validator said. Their reasons are in each task's log.") }}</p>
+<h3>{{ _("Teaching quality") }}</h3>
+<p>{{ _("A model rates each exercise on four points, in this order: clear, fits the slides, taught so far, targets its knowledge point (y or n each).") }}
+  {{ _("Rate an exercise yourself first: the judge is checked against your ratings, so its verdict shows only for exercises you have rated.") }}</p>
+{% if c_course %}<p class="muted">{{ _("The judge reads Python exercises only so far.") }}</p>
+{% elif judge_model %}
+<div class="actions">{{ action(url_for('judge_batch', name=course.folder, batch=batch.name), _("Judge teaching quality")) }}
+  <span class="muted">{{ _("Uses %(model)s. An exercise judged before and unchanged costs nothing.", model=judge_model) }}</span></div>
+{% else %}<p class="muted">{{ _("This course names no judge model.") }} <a href="{{ url_for('models', name=course.folder) }}">{{ _("Choose one on the Models page") }}</a>.</p>
+{% endif %}
+{# What is on file, so a run's effect is plain: counts and the last run's log, no reason. #}
+<p>{% if check_counts.judged %}<strong>{{ _("Judged: %(done)s of %(all)s exercises.", done=check_counts.judged, all=check_counts.exercises) }}</strong>
+  {{ _("The Quality column above shows %(shown)s of them, the ones you have rated.", shown=check_counts.judged_shown) }}
+  {% else %}<span class="muted">{{ _("No exercise of this batch has been judged yet.") }}</span>{% endif %}
+  {% if last_judge %}<a href="{{ url_for('task', name=course.folder, task_id=last_judge) }}">{{ _("Log of the last judge run") }}</a>{% endif %}</p>
+<h3>{{ _("Held-out check") }}</h3>
+<p>{{ _("The exercises' own tests, run on code the generator never saw: your passing and failing student files, and solutions another model writes from the question and the slides alone.") }}</p>
+<div class="actions">
+  {% if heldout_model %}{{ action(url_for('write_heldout', name=course.folder, batch=batch.name), _("Write held-out solutions")) }}
+  <span class="muted">{{ _("Uses %(model)s; it writes files and runs nothing.", model=heldout_model) }}</span>{% endif %}
+  {{ action(url_for('check_heldout', name=course.folder, batch=batch.name), _("Run held-out check")) }}
+  <span class="muted">{{ _("No model: test runs only.") }}</span>
+</div>
+{% if not heldout_model %}<p class="muted">{{ _("This course names no held-out model, so the check uses your own student files only.") }} <a href="{{ url_for('models', name=course.folder) }}">{{ _("Choose one on the Models page") }}</a>.</p>{% endif %}
+<p>{% if check_counts.checked %}<strong>{{ _("Checked: %(done)s of %(all)s exercises, %(flagged)s flagged in all.", done=check_counts.checked, all=check_counts.exercises, flagged=check_counts.flagged) }}</strong>
+  {% if check_counts.flagged %}{{ _("A flag is for you to read: the log says which check and why. It does not make an exercise invalid.") }}{% endif %}
+  {% else %}<span class="muted">{{ _("The held-out check has not run on this batch yet.") }}</span>{% endif %}
+  {% if last_heldout %}<a href="{{ url_for('task', name=course.folder, task_id=last_heldout) }}">{{ _("Log of the last held-out check") }}</a>{% endif %}</p>
 {% endblock %}

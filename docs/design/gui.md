@@ -371,6 +371,32 @@ late; the adaptive review screens can be built with it.
   generation with the preferences box, approving the batch plan there (step 4),
   browse batches with status from `validation.json`, progress from `attempts.jsonl`, mode and
   sources from `manifest.json`, coverage from `coverage.md`.
+- Checks after generation, on the batch page (owner, 2026-11-17; commands only until then):
+  "Judge teaching quality" (`python -m tutor.judge <batch>`), "Write held-out solutions"
+  (`tutor.heldout_writer`) and "Run held-out check" (`tutor.validation.heldout`), each a task
+  on the whole batch (`gui/after_checks.py`, `routes/checks.py`). The held-out check is two
+  buttons as it is two steps: writing spends tokens and runs nothing, checking runs tests and
+  calls no model, and the owner's own student files are held-out material without the first.
+  - A button that calls a model says which one. A course that names no such role gets a link
+    to its Models page and no button (the rule under "Models": the GUI does not read `.env`,
+    so it cannot tell whether a fallback exists). The judge is not offered for a C course: its
+    prompt and calibration are Python's.
+  - The table gains two columns, verdicts only: the judge's four letters and how many checks
+    the held-out run flagged. The reasons (the judge's evidence, a check's output) quote the
+    question, the reference and test output, so they stay in the task's log; of `solutions/`
+    a page still reads verdicts and nothing else.
+  - The judge's letters show only for an exercise the owner has rated: the ratings are what
+    the judge is calibrated against, and a rating given after reading its verdict would only
+    agree with it. Before that the cell says "judged; shown once you rate it". The judge
+    task's log does show the verdicts, so the page says to rate first.
+  - What a run did is said beside its button (owner, 2026-11-17: the first click's effect was
+    not plain to see): how many exercises are judged and how many of those verdicts show, how
+    many the held-out check ran on and flagged, and a link to the last run's log. A cell with
+    an n names the points answered no ("no on: clear"), which is still a verdict. A held-out
+    flag is something to read, not an invalid exercise, and the line says so.
+  - A finished task goes back to the batch with a notice. The held-out check exits 1 when it
+    flags something, so that task stays on its log, as a failed validation does. All three
+    can be run again from a failed task: the two that call a model keep what is unchanged.
 - Solving stays in the IDE: "Open in VS Code" (step 2) runs `code <course folder> <student.py>`,
   the course folder and not the exercise's, since the course's `.vscode` settings put its venv
   in the terminal; VS Code reuses a window that has the folder open. `code` is looked up on

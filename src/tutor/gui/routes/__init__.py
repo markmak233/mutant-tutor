@@ -10,6 +10,7 @@ from __future__ import annotations
 from flask import Flask
 
 from tutor.gui.routes import (
+    checks,
     coverage,
     doctor,
     environment,
@@ -31,5 +32,5 @@ def register_all(app: Flask) -> None:
     """Register each page area once; all templates use these unprefixed endpoints."""
     for module in (pages, task_pages, plans, lectures, new_course, providers, models, environment,
                    doctor, coverage, host_setup, image_records, python_downloads,
-                   language):
+                   language, checks):
         module.register(app)

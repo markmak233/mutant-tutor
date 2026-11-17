@@ -761,6 +761,9 @@ def test_a_task_with_fresh_output_says_nothing_of_it(root, course):
 @pytest.mark.parametrize("meta, action", [
     ({"kind": "install"}, "/c/demo-course/environment/install"),
     ({"kind": "validate", "batch": "w9"}, "/c/demo-course/b/w9/validate"),
+    ({"kind": "judge", "batch": "w9"}, "/c/demo-course/b/w9/judge"),
+    ({"kind": "heldout-write", "batch": "w9"}, "/c/demo-course/b/w9/heldout/write"),
+    ({"kind": "heldout-check", "batch": "w9"}, "/c/demo-course/b/w9/heldout/check"),
     ({"kind": "requires-draft"}, "/c/demo-course/environment/draft"),
     ({"kind": "coverage-draft"}, "/c/demo-course/coverage/draft"),
     ({"kind": "read"}, "/c/demo-course/lectures/read"),

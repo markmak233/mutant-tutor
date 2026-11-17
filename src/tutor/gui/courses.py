@@ -6,10 +6,12 @@ workspace (config.load_workspace: not inside a git repository, names a course).
 
 Only the learner's side is read: `exercises/`, the manifest and the attempt log (each run's
 time, exercise and result, never its `first_error`). Of
-`solutions/`, only the yes or no in validation.json and, through the progress code shared with
-the report, whether the student file still equals the skeleton; never the reference, tests, hints or
-mutants, which matches the tutoring rule. Every name that comes from a URL goes through
-`_child`, so a request cannot reach a folder outside its course or any hidden one.
+`solutions/`, only verdicts: the yes or no in validation.json, the judge's four letters in
+quality.json, the count of flagged checks in heldout.json, and, through the progress code
+shared with the report, whether the student file still equals the skeleton; never the
+reference, tests, hints or mutants, nor a report's reasons, which matches the tutoring rule.
+Every name that comes from a URL goes through `_child`, so a request cannot reach a folder
+outside its course or any hidden one.
 """
 
 from __future__ import annotations
@@ -296,6 +298,31 @@ def _valid(batch_dir: Path, exercise: str) -> bool | None:
     data = _read_json(folder / "validation.json") if folder else None
     valid = data.get("valid") if data else None
     return valid if isinstance(valid, bool) else None
+
+
+def batch_dir(course: Course, batch: str) -> Path | None:
+    """The batch's folder, to hand to a command that takes a whole batch (the judge, the
+    held-out check); None when the course has no such batch."""
+    return _child(course.workspace.root / "batches", batch)
+
+
+def quality_letters(batch_dir: Path, exercise: str) -> str | None:
+    """The judge's verdict in quality.json as its four letters ("yyny": clear, fits, taught,
+    targets), or None when the exercise was not judged. Only the letters: the evidence beside
+    them quotes the question and the reference, and stays in the judge task's log."""
+    folder = _child(batch_dir / "solutions", exercise)
+    data = _read_json(folder / "quality.json") if folder else None
+    letters = data.get("letters") if data else None
+    return letters if isinstance(letters, str) and re.fullmatch("[yn]{4}", letters) else None
+
+
+def heldout_flagged(batch_dir: Path, exercise: str) -> int | None:
+    """How many checks heldout.json flagged for the exercise (0: none), or None when the
+    held-out check has not run on it. Only the count: a check's detail can quote test output."""
+    folder = _child(batch_dir / "solutions", exercise)
+    data = _read_json(folder / "heldout.json") if folder else None
+    flagged = data.get("flagged") if data else None
+    return flagged if isinstance(flagged, int) and not isinstance(flagged, bool) else None
 
 
 def _mode(batch_dir: Path) -> str:

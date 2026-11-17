@@ -11,7 +11,7 @@ from __future__ import annotations
 from flask import abort, current_app, redirect, url_for
 
 from tutor.eval import report
-from tutor.gui import courses, environment, generation, launch, lectures, tasks
+from tutor.gui import after_checks, courses, environment, generation, launch, lectures, tasks
 from tutor.gui.i18n import N_
 from tutor.gui.i18n import gettext_ as _
 
@@ -126,6 +126,17 @@ NOTICES.update({
                                      "its Models page.")),
     "lectures-read": ("ok", N_("Finished: the table shows what the cache holds now.")),
     "validated": ("ok", N_("Validation finished: every exercise passed it.")),
+    "judged": ("ok", N_("The judge has finished. The Quality column shows its verdict for each "
+                        "exercise you have rated; the task's log has its reasons.")),
+    "heldout-written": ("ok", N_("Held-out solutions are written. Run the held-out check to "
+                                 "try them against the tests.")),
+    "heldout-checked": ("ok", N_("The held-out check flagged nothing.")),
+    "no-judge-model": ("bad", N_("Nothing was started: this course names no judge model. Choose "
+                                 "one on its Models page.")),
+    "no-heldout-model": ("bad", N_("Nothing was started: this course names no held-out model. "
+                                   "Choose one on its Models page.")),
+    "judge-python-only": ("bad", N_("Nothing was started: the judge reads Python exercises "
+                                    "only so far.")),
     "models-checked": ("ok", N_("Every model answered the check.")),
     "installed": ("ok", N_("Installed into .venv: step 2's check below is fresh.")),
     "image-built": ("ok", N_("The test image is built and checked: step 4 below.")),
@@ -217,10 +228,17 @@ def waiting_for(course: courses.Course, task: tasks.Task) -> str:
                 % {"model": environment.setup_model(course) or "?"})
     if kind == "vision":
         return _("the vision model, %(model)s") % {"model": lectures.vision_model(course) or "?"}
+    if kind == after_checks.JUDGE:
+        return (_("the judge model, %(model)s")
+                % {"model": after_checks.role_model(course, "judge") or "?"})
+    if kind == after_checks.WRITE:
+        return (_("the held-out model, %(model)s")
+                % {"model": after_checks.role_model(course, "heldout") or "?"})
     return _({"check": N_("the models being checked"),
               "timing": N_("the model being measured, about sixteen calls"),
               "install": N_("pip, which may be downloading"),
               "create": N_("pip, which may be downloading"),
               "build": N_("docker build, which may be downloading"),
               "validate": N_("the exercises' test runs"),
+              after_checks.CHECK: N_("the exercises' test runs"),
               "read": N_("the lectures being read")}.get(kind, N_("the command")))

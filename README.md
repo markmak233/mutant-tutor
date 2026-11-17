@@ -101,7 +101,7 @@ What exists today, and what does not yet, so that nothing planned reads as built
 |---|---|---|
 | Validation | the five rules and the static API check above | |
 | Generation | plan, approve, generate, validate, repair; Python (plain, PySpark, MRJob) and C | C++ and Java, when a course needs them |
-| Checks after generation | held-out solutions, a judge of teaching quality (command line) | as buttons on a batch's page |
+| Checks after generation | held-out solutions, a judge of teaching quality; commands, and buttons on a batch's page | |
 | Practice | exercises in VS Code, attempts recorded, hints (command line), `tutor test` in the container | hints in the GUI |
 | Retrieval | measured against the whole lecture, which stayed | |
 | Install | uv and a wheel, `tutor gui`, `shortcut`, `doctor`; macOS, Linux (x64, arm64), Windows x64 | Windows on ARM, through x64 emulation |

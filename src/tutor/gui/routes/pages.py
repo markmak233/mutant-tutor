@@ -9,6 +9,7 @@ from __future__ import annotations
 from flask import Flask, abort, redirect, render_template, request, url_for
 
 from tutor.gui import (
+    after_checks,
     course_setup,
     courses,
     environment,
@@ -68,9 +69,20 @@ def register(app: Flask) -> None:
     def batch(name: str, batch: str):
         """One batch's exercises, and the plan items that did not become one."""
         course, view = batch_or_404(name, batch)
+        # The checks after generation (gui/after_checks.py): each exercise's verdicts, what
+        # the batch has on file, the last run of each (for its log) and the models used.
+        checks = after_checks.verdicts(course, batch, [r.id for r in view.exercises])
         return render_template("batch.html", course=course, batch=view, labels=STATUS_LABELS,
                                missing=plan_items.not_succeeded(course, batch),
-                               plan_label=generation.plan_label(course, batch))
+                               plan_label=generation.plan_label(course, batch),
+                               checks=checks, check_counts=after_checks.counts(checks),
+                               last_judge=after_checks.last_task(course, batch,
+                                                                 after_checks.JUDGE),
+                               last_heldout=after_checks.last_task(course, batch,
+                                                                   after_checks.CHECK),
+                               judge_model=after_checks.role_model(course, "judge"),
+                               heldout_model=after_checks.role_model(course, "heldout"),
+                               c_course=environment.is_c_course(course))
 
     @app.get("/c/<name>/b/<batch>/e/<exercise>/")
     def exercise(name: str, batch: str, exercise: str):
