@@ -339,6 +339,90 @@ answers are right and cite the right pages. Start from hybrid + neighbours, whic
 found 0.90 across the course. The generation test's warning may carry over, as less context brought
 more misstatements; that is untested for answers.
 
+Exercises that draw on several lectures (owner, 2026-11-17; measured, not yet in the pipeline).
+A review exercise may combine knowledge points taught in different lectures, but a plan item
+names one lecture and generation sends only that one, so the other sources are out of view. The
+comparisons above had one lecture per exercise; this one asks what the prompt should hold when
+an exercise has two or three sources. Run as the 11-03 test was: a private script replaced the
+context step and `graph/` did not change. The records stay in the private workspace's
+`experiments/`.
+
+- Setup. One review plan of 12 items, each with 2-3 sources (lecture, slide range, point),
+  written by the plan model from `coverage.md` and the page titles, checked and frozen by the
+  owner before any arm ran. The same items, pipeline, models (Sonnet 5.5 generating and
+  judging) and prompt words in every arm; the item's notes list every source. A sample exam was
+  kept unread as the test set until the choice was frozen.
+- Prompt layout, for the cache and alike in every arm: the example exercise first (shared by
+  every item of its framework, in every arm), then one block per lecture, then the item; the
+  first call of each shared prefix ran before the calls that read it. No two items share all
+  their pages, so the pipeline's order (pages first) would have shared almost nothing. Absolute
+  numbers are therefore not comparable with the tables above.
+
+| Arm | Course material in the prompt | Characters per item | VALID at first try | Tokens per item | Input from the cache |
+|---|---|---|---|---|---|
+| A | every source's lecture, whole | 58,004 | 7 | 98,331 | 40% |
+| B | every source's labelled pages | 6,373 | 7 | 62,226 | 65% |
+| C | B, two pages either side, and the lecture's page titles as an outline | 16,303 | 9 | 63,620 | 55% |
+| D | the coverage table as a map, then B | 30,425 | 9 | 69,281 | 58% |
+| E | no labels: hybrid + neighbours searches the course per point, 1000 tokens each | 8,504 | 9 | 56,963 | 53% |
+| F | no pages: the coverage rows of the sources' lectures | 3,062 | 11 | 45,312 | 69% |
+
+- Reading the table. Of 12 items, so a difference of two is noise. Every arm ended with 12
+  saved exercises (three items stopped at a second repair on an invalid key of the repair
+  model's provider and were generated again; the first-try column is from the original runs).
+  Two Spark items failed their first validation on timeouts in five or six arms each, with up to
+  nine items validating at once, and one passed at once when run nearly alone: load, by that one
+  observation. Arm E found 83% of the labelled pages.
+- The judge did not separate the arms: it passed all 72 exercises on all four points (it is the
+  generating model, and read every source's lecture whole in each arm). A second call asked
+  whether solving the exercise needs each planned point: 11 of 12 in A-E, 10 in F, the shared
+  miss being the plan's fault.
+- A blind reading did. Three items drawn at random, six versions each under shuffled letters,
+  read apart by the owner and by Claude against the slides. No version contradicts the slides.
+  A and C lead for both readers (Claude's mean rank: A 2.0, C 2.0, B 3.0, D 4.0, E 4.0,
+  F 6.0); on the two items read independently, both readers' top three are the same versions.
+  F is last each time: it cannot say where a point is taught (6 of its 12 exercises record no
+  page numbers), and one of its questions states what "the slides allow" without having seen
+  them, which also made it recognisable. The references do not differ by arm (comments 36-40%
+  of lines, 5.1-5.9 steps on average): how finely one is worked varies between two runs of an
+  item, not with the material.
+- Choice (owner): **C** for an exercise with several sources. It reads as well as the whole
+  lectures, takes about a third fewer tokens per item, and stays far from `context_chars`,
+  which whole lectures come close to (this course's three longest together take 98% of it). F is ruled out: validity does not measure
+  faithfulness, and the arm that saw no page was the most often valid and the cheapest. A
+  stays the reference to compare against.
+- Cost: $22.97 for the six arms by the call log (55% of the input read from the cache; $25.51
+  uncached, as output is most of the cost), $2.81 for the judge and the second call (70% of the
+  judge's input from the cache). The provider's console agreed with the call logs to a cent.
+
+The test set, a sample exam read only after the choice was frozen, with labels (points, lecture,
+pages per coding question) written from the paper before any route ran:
+
+- Questions of unknown source, one of the cases the routes were kept for. With a coding
+  question's own words as the query, the model-free routes find 0.03-0.09 of its labelled pages
+  within 2000 tokens across the course (0.12-0.18 within 4000), against 0.80-0.90 with a
+  knowledge point as the query in the final table above. The labels are small enough to fit, so
+  the budget is not the limit: an exam question describes a scenario, the pages that teach its
+  method use the method's words, and the routes land on practice-problem slides, which are
+  worded like the question. That finds a similar problem, a use of its own, not the teaching
+  pages.
+- A model that names the points first closes most of the gap: the plan model, reading each
+  question with `coverage.md` and the page titles, named sources that cover 53%, 95%, 100% and
+  38% of the labelled pages (the best model-free route within 4000 tokens: 0%, 19%, 33%, 25%).
+  The four exercises planned that way and generated with arm C's context were all VALID at the
+  first try. So a question of unknown source goes through the plan step, not through a search
+  on its wording.
+- The paper against the tool. Under half of its marks are coding, written by hand as a design
+  in words and pseudocode, with minor errors accepted; the rest is worked by hand or asks for
+  concepts. It combines points within one topic, never across topics as the dev plan did. The
+  owner makes questions of the paper's kinds in chat; "No exam mode" (README.md, "Decisions not
+  to do") stands, since nothing here could validate them.
+
+Limits: 12 items and 4 exam questions, one course, each arm run once; the judge had no power, and
+the reading that separated the arms covered three items by two readers, one of whom knew the
+design; the plan model's labels are taken as given in A-D; the exam labels are one person's.
+What entering the pipeline needs is in roadmap.md, "Backlog".
+
 ## Evaluation metrics (the results table)
 
 Decided 2026-11-05 (owner), for phase 5's light version. The numbers are in `docs/details.md`,

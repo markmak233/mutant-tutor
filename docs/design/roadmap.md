@@ -309,6 +309,11 @@ The phases in order, the backlog and what is deferred. Part of the design record
    6. **Done 2026-11-03, smaller (owner):** the whole lecture, the labelled slice and the three
       real routes on the same 12 items. None beats the whole lecture.
    7. **Done 2026-11-03.** The whole lecture stays; README results.
+   8. **Done 2026-11-17 (owner), measured outside the pipeline:** an exercise with two or three
+      sources, six kinds of context on the same 12 items, and a sample exam as the test set. The
+      labelled pages with their neighbours and an outline do as well as whole lectures; a
+      question of unknown source goes through the plan step, not a search (see "RAG",
+      "Exercises that draw on several lectures").
 5. **Done 2026-11-05, light version (owner):** `tutor.eval` reports from the existing records, with
    no model calls, and the README's results; the [5] items of "LLM engineering candidates" are
    reviewed there. The full model comparison was not run.
@@ -428,6 +433,16 @@ cannot run on native Windows.
 - A local model as one more arm, if a full model comparison is ever run (see the [5] items in
   "LLM engineering candidates").
 
+- Plan items with several sources (owner, 2026-11-17; measured, see "RAG"): a review item names
+  up to three sources (lecture, slides, point) and generation sends each source's labelled
+  pages, two pages either side, and the lecture's page titles. Touches the plan item
+  (`graph/state.py`; a schema of its own for review, so learn's prompts and pins stay byte for
+  byte), the review plan and generate prompts (new inputs: measure, then pin), the context
+  step, the cache gate (items grouped by their shared prefix), coverage marks (one per
+  source) and the plan page. Found on the way, each a prompt change to make with a
+  measurement: the owner prefers a skeleton that marks what to write with TODO, and a
+  reference worked in fine steps, and generation gives both only some of the time; the
+  teaching judge passed every exercise of a review batch, so it says nothing there.
 - C1 value-order check: done 2026-10-30, see rule 5 in "Exercise validation".
 - C2 algorithm-quality warnings (see "Correctness vs algorithm quality"), later Hadoop
   counters (map output records, combine input / output) to report how much a combiner cut.
