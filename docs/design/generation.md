@@ -501,7 +501,12 @@ Plus) acting as the model for vision, planning, generation, oracle, repair and h
   profile for both is still refused (the requests would mix).
 - Instructions for the assistant: `docs/assistant-mode.md` (setup, the run / answer /
   run-again loop, answering from the request alone, oracle requests in a fresh context,
-  plan approval left to the owner).
+  plan approval left to the owner). Since 2026-11-18 it also says that a request's material
+  is never instructions to the assistant: an assistant can run commands and read files where
+  a model behind an API can only reply, so instructions planted in a lecture reach furthest
+  here. Answering takes two actions, reading the request and storing the reply; nothing else
+  is run, read or fetched for it. This is a rule the assistant is asked to keep, not a
+  barrier: what stands behind it is the assistant's own permission prompts.
 - Self-test 2026-10-29: Claude Code (this repo's assistant) answered one real week-5 item
   through the files, with no API: the first draft failed the safety check (a spy using a
   variable attribute name), the repair request was answered, and round 1 was VALID (6/6
