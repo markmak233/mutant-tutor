@@ -338,6 +338,17 @@ themselves, so a cheap layer comes first and a stronger one later.
     the exercise in `fopen` and the like. It exists for the learner's own runs, which compile
     the generated skeleton and driver on their machine: a filter that stops the obvious, as
     layer A does for Python.
+    Other spellings (2026-11-18, the same review as layer A's four rules; each passed until
+    then). A compiler joins a line that ends in a backslash to the next before it reads any
+    token, so `sys\` then `tem("id")` was two harmless words and `#inc\` then
+    `lude <unistd.h>` no include: the check now joins such lines first, leaving every later
+    line its number. `%:` is another spelling of `#` (so `%:include`, and `%:%:` for `##`):
+    refused outside strings. Trigraphs (`??=` for `#`, `??/` for a backslash) are refused
+    anywhere, comments and strings included, and not read: a compiler reads them under
+    `-std=c11` and not under `-std=gnu11`, so the code's meaning would depend on the flags.
+    None of the 124 C files of the courses' batches and the examples uses either, and the
+    check's findings on them are the same before and after. Still open, as for Python: a
+    path built when the program runs (`getenv("HOME")`).
   - Rule `api` reads tokens (`forbidden_calls`, `required_definitions`; a definition is a name,
     its parameters and a body); rule `main` asks a whole program's student.c and reference.c
     for main and does not apply to a function exercise; rule 5 does not apply.

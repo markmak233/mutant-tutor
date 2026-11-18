@@ -12,13 +12,19 @@ Two uses, as for Python (safety.py and api.py):
   2. no inline assembly, and no `##` token pasting, which builds names this check cannot see;
   3. none of SYSTEM_NAMES (processes, the shell, sockets, loading code, raw system calls):
      a header check alone misses a function the code declares itself;
-  4. no literal path that starts with "/" or "~" or contains ".." in a file-opening call.
+  4. no literal path that starts with "/" or "~" or contains ".." in a file-opening call;
+  5. no other spelling of what the rules above look for: no trigraph (`??=` is `#`, `??/` a
+     backslash) and no digraph `%:` (also `#`, and `%:%:` is `##`). Until 2026-11-18
+     `%:include <unistd.h>` was not seen as an include.
 - find_violations and defines, the C part of rule `api`: forbidden calls and required
   definitions on the reference.
 
 Both work on tokens, with comments and the contents of string and character literals left
-out, so a word in a comment or a printed message is not a use. No preprocessor runs: a macro
-can still hide a name (the reason `##` is refused), so this is a filter, not a proof.
+out, so a word in a comment or a printed message is not a use. Lines are joined first where
+one ends in a backslash, as a compiler does before it reads any token (`spliced`): until
+2026-11-18 a name cut in two that way (`sys\` then `tem`) was read as two harmless words.
+No preprocessor runs: a macro can still hide a name (the reason `##` is refused), so this
+is a filter, not a proof.
 """
 
 from __future__ import annotations
@@ -55,26 +61,54 @@ _TOKEN = re.compile(r"""
     | (?P<char>'(?:\\.|[^'\\\n])*')
     | (?P<name>[A-Za-z_]\w*)
     | (?P<paste>\#\#)
+    | (?P<digraph>%:)
     | (?P<newline>\n)
     | (?P<other>\S)
     | \s
 """, re.VERBOSE | re.DOTALL)
+# A backslash that ends a line (gcc also takes one followed by spaces, with a warning).
+_SPLICE = re.compile(r"\\[ \t]*\r?$")
+# The nine trigraphs. A compiler reads them only in a strict ISO mode (`-std=c11`, the
+# course default, does; `-std=gnu11` does not), so what the code means would depend on the
+# flags: they are refused instead of read.
+_TRIGRAPH = re.compile(r"\?\?[=/'()!<>-]")
 _INCLUDE = re.compile(r"#\s*(include|include_next|import|embed)\b(.*)")
 _INCLUDE_NAME = re.compile(r'^(?:<([A-Za-z0-9_./+-]+)>|"([^"]+)")$')
 
 
 @dataclass(frozen=True)
 class Token:
-    kind: str  # "name", "string", "char", "paste" or "other" (one punctuation character)
+    kind: str  # "name", "string", "char", "paste", "digraph" or "other" (one punctuation
+    #            character)
     text: str
     line: int
+
+
+def spliced(source: str) -> str:
+    """`source` with every line that ends in a backslash joined to the next, which is what
+    a C compiler does before anything else reads the text (translation phase 2), inside
+    names, strings, comments and directives alike. As many empty lines follow a joined line
+    as it took in, so every later line keeps its number."""
+    lines = source.split("\n")
+    out = []
+    i = 0
+    while i < len(lines):
+        text, taken = lines[i], 0
+        while _SPLICE.search(text) and i + 1 < len(lines):
+            i += 1
+            taken += 1
+            text = _SPLICE.sub("", text) + lines[i]
+        out.append(text)
+        out.extend([""] * taken)
+        i += 1
+    return "\n".join(out)
 
 
 def tokens(source: str) -> list[Token]:
     """The tokens of `source` that matter here, each with its line, without comments."""
     found = []
     line = 1
-    for match in _TOKEN.finditer(source):
+    for match in _TOKEN.finditer(spliced(source)):
         kind = match.lastgroup
         if kind and kind not in ("comment", "newline"):
             found.append(Token(kind, match.group(), line))
@@ -86,7 +120,7 @@ def without_comments(source: str) -> str:
     """`source` with every comment replaced by spaces, its newlines kept, so line numbers
     stay; a "//" inside a string literal is not a comment."""
     parts = []
-    for match in _TOKEN.finditer(source):
+    for match in _TOKEN.finditer(spliced(source)):
         text = match.group()
         parts.append(re.sub(r"[^\n]", " ", text) if match.lastgroup == "comment" else text)
     return "".join(parts)
@@ -94,19 +128,10 @@ def without_comments(source: str) -> str:
 
 def directives(source: str) -> list[tuple[int, str]]:
     """(line, text) of every preprocessor directive, comments removed and continued lines
-    (a backslash at the end) joined."""
-    lines = without_comments(source).split("\n")
-    found = []
-    i = 0
-    while i < len(lines):
-        start, text = i, lines[i]
-        while text.endswith("\\") and i + 1 < len(lines):
-            i += 1
-            text = text[:-1] + " " + lines[i]
-        if text.lstrip().startswith("#"):
-            found.append((start + 1, text.strip()))
-        i += 1
-    return found
+    (a backslash at the end) joined: without_comments has joined them already."""
+    return [(number, text.strip())
+            for number, text in enumerate(without_comments(source).split("\n"), start=1)
+            if text.lstrip().startswith("#")]
 
 
 def find_hazards(source: str, headers: Collection[str], local_files: Collection[str]) -> list[str]:
@@ -114,6 +139,12 @@ def find_hazards(source: str, headers: Collection[str], local_files: Collection[
     `headers`: the allowed <...> headers; `local_files`: the names an `#include "..."` may
     give, the exercise's own files."""
     found = []
+    # Rule 5, on the text as written: a trigraph anywhere, a comment or a string included,
+    # since `??/` at a line's end would join lines only under some compiler flags.
+    for number, text in enumerate(source.split("\n"), start=1):
+        found += [f"line {number}: the trigraph {m.group()} is not allowed (it is another "
+                  "spelling of a character, read only under some compiler flags)"
+                  for m in _TRIGRAPH.finditer(text)]
     for line, text in directives(source):
         include = _INCLUDE.match(text)
         if include:
@@ -124,6 +155,9 @@ def find_hazards(source: str, headers: Collection[str], local_files: Collection[
         if tok.kind == "paste":
             found.append(f"line {tok.line}: token pasting (##) is not allowed: it builds names "
                          "this check cannot see")
+        elif tok.kind == "digraph":
+            found.append(f"line {tok.line}: the digraph %: is not allowed (it is another "
+                         "spelling of #, which this check would not see)")
         elif tok.kind == "name" and tok.text in ASM_NAMES:
             found.append(f"line {tok.line}: inline assembly ({tok.text}) is not allowed")
         elif tok.kind == "name" and tok.text in SYSTEM_NAMES:

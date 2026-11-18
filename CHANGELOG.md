@@ -15,7 +15,9 @@
   its environment. A container run never had them.
 - **A stricter static safety check.** Exercise code may use only the test kit of `tutor`,
   only a few attributes of `pytest`, and no module reached through another (`pathlib.os`)
-  or through PySpark's JVM handles (`sc._jvm`). Existing exercises are unaffected.
+  or through PySpark's JVM handles (`sc._jvm`). The C check reads a name split over two
+  lines as one and refuses trigraphs and the digraph for `#`. Existing exercises are
+  unaffected.
 
 ## 0.1.0 (2026-11-17)
 

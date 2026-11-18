@@ -11,6 +11,7 @@ from tutor.validation.csource import (
     directives,
     find_hazards,
     find_violations,
+    spliced,
     tokens,
 )
 
@@ -163,6 +164,39 @@ def test_defines_finds_functions_at_file_level_only():
               "    return 0;\n}\n"
               "static int pick(int k) { return k; }\n")
     assert defines(source) == {"main", "pick"}
+
+
+# --- other spellings: joined lines, digraphs, trigraphs -------------------------------------
+
+
+@pytest.mark.parametrize(("source", "message"), [
+    # A compiler joins a line ending in a backslash to the next before it reads any token.
+    ('int main(void) { sys\\\ntem("id"); }\n', "line 1: system is not allowed"),
+    ('int main(void) { sys\\  \ntem("id"); }\n', "line 1: system is not allowed"),
+    ("#inc\\\nlude <unistd.h>\n", "line 1: #include <unistd.h> is not allowed"),
+    # %: is #, so %:%: is the token pasting the check refuses, and %:include an include.
+    ("%:include <unistd.h>\n", "line 1: the digraph %: is not allowed"),
+    ('#define C(a, b) a%:%:b\nint main(void) { C(sys, tem)("id"); }\n',
+     "line 1: the digraph %: is not allowed"),
+    # ??= is #, ??/ a backslash, but only under some compiler flags: refused, not read.
+    ("??=include <unistd.h>\n", "line 1: the trigraph ??= is not allowed"),
+    ('int main(void) { sys??/\ntem("id"); }\n', "line 1: the trigraph ??/ is not allowed"),
+    ("// a comment ??/\nint x;\n", "line 1: the trigraph ??/ is not allowed"),
+])
+def test_another_spelling_does_not_get_past_the_rules(source, message):
+    assert any(found.startswith(message) for found in hazards(source)), hazards(source)
+
+
+def test_ordinary_continued_macros_and_percent_signs_in_strings_pass():
+    source = ('#include <stdio.h>\n#define SQUARE(x) \\\n    ((x) * (x))\n'
+              'int main(void) { printf("%d%%: done\\n", SQUARE(2)); return 4 % 3; }\n')
+    assert hazards(source) == []
+
+
+def test_joined_lines_leave_every_later_line_its_number():
+    source = '#define A \\\n  1\nint main(void) { system("x"); }\n'
+    assert spliced(source).count("\n") == source.count("\n")
+    assert hazards(source)[0].startswith("line 3: system is not allowed")
 
 
 def test_tokens_and_directives_leave_comments_out():
