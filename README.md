@@ -28,9 +28,9 @@ and is built as an AI engineering portfolio project.
 - **Hints that never show the answer.** `python -m tutor.hint` runs your tests and names a
   known mistake, or the planted mutant your code fails like.
 - **Your models.** Any OpenAI-compatible model, or Claude through its own API, local or
-  cloud, one per role (plan, generate, repair, oracle, ...); the GUI fills a model's settings from the public
-  [models.dev](https://models.dev) list. With no API key, a coding assistant on a
-  subscription can answer instead ([assistant mode](docs/assistant-mode.md)).
+  cloud, one per role (plan, generate, repair, oracle, ...); the GUI fills a model's settings
+  from the public [models.dev](https://models.dev) list. With no API key, a coding assistant
+  on a subscription can answer instead ([assistant mode](docs/assistant-mode.md)).
 - **Generated code kept apart.** Each test run can start a fresh Docker container with no
   network and no view of your files ([where code runs](docs/details.md#where-exercise-code-runs)).
 - **No retrieval needed, by measurement.** Hybrid RAG, an agent and a concept index were
@@ -55,47 +55,35 @@ tutor gui
 ```
 
 The GUI manages courses, lectures, the models and keys every course shares (each course
-chooses which model does what), and the environment, then plans and approves a batch.
-It listens on 127.0.0.1 with a launch token; a second launch reuses its verified server. `tutor shortcut` creates a local desktop launcher. See
-[installation and fresh-machine prerequisites](docs/setup/install.md), including the
-explicit option to let uv download Python. Docker is needed for container courses;
-host big-data runs also need [Java/Hadoop](docs/setup/bigdata.md).
+chooses which model does what), and the environment, then plans and approves a batch. It
+listens on 127.0.0.1 with a launch token; a second launch reuses the running server, and
+`tutor shortcut` creates a desktop launcher. See
+[installation and fresh-machine prerequisites](docs/setup/install.md). Docker is needed for
+container courses; host big-data runs also need [Java/Hadoop](docs/setup/bigdata.md).
 
-For a course set to the container, run `tutor test` from an exercise folder (or
-`python -m tutor test`). It shows live output and records attempts on the host, with a
-300-second limit (`--timeout SECONDS` to change it). The host needs the tool, Docker with
-Linux containers and an IDE; Java, Hadoop and gcc can stay in the course image. Ordinary
-`pytest` remains available for host debugging and needs the host's libraries/toolchain.
-See [the command options](docs/details.md#testing-your-work-in-the-course-image).
+For a course set to the container, run `tutor test` in an exercise folder: live output,
+attempts recorded on the host, and Java, Hadoop or gcc can stay in the course image
+([options](docs/details.md#testing-your-work-in-the-course-image)). Ordinary `pytest` still
+works, with the host's own libraries.
 
-## Check your setup
-
-Run `tutor doctor` (or `python -m tutor doctor`) in a course or pass its folder. It checks
-the tool, Docker, the course venv, host requirements or its test image, and gives a next
-step for each problem. Add `--smoke` to validate one shipped example on a temporary copy.
-Default checks never install, load `.env`, call a model or change the course.
-See [checks and exit codes](docs/details.md#checking-your-setup).
-
-For optional model advice, first review `tutor doctor --preview-advice --failure failure.log`,
-then use `--advise` instead of `--preview-advice` to send that selected record and environment
-facts to your doctor profile. Suggestions remain unverified. See the same guide for model
-configuration and explicit `--env-file` credentials; no fix is installed or applied.
+`tutor doctor` checks the tool, Docker, the course venv and its requirements or test image,
+and gives a next step for each problem. By default it never installs, loads `.env`, calls a
+model or changes the course; advice from a model is optional and previewed before anything
+is sent ([checks and exit codes](docs/details.md#checking-your-setup)).
 
 ## Intended use
 
-The aim is to help students understand their course topics better: turn the lecture
-material you study from into exercises you can run, check and learn from at your own
-pace: exercises are generated from the slides and checked by the validator before you
-see them. The material and the exercises stay on your own machine, in a per-course workspace
-outside any git repository (the repository holds code only); only LLM calls (the slides'
-text and images, the generated code, and your code when you ask a model for a hint) leave
-it. This is a personal project, not affiliated with any university or course, and it is
-provided as is (see [LICENSE](LICENSE)).
+The aim is to help students understand their course topics better: the lecture material
+you study from becomes exercises you can run, check and learn from at your own pace. The
+material and the exercises stay on your own machine, in a per-course workspace outside any
+git repository (the repository holds code only); only LLM calls (the slides' text and
+images, the generated code, and your code when you ask a model for a hint) leave it. This is
+a personal project, not affiliated with any university or course, and it is provided as is
+(see [LICENSE](LICENSE)).
 
 ## Status
 
-What exists today, and what does not yet, so that nothing planned reads as built
-([changes](CHANGELOG.md)):
+What exists today and what does not yet ([changes](CHANGELOG.md)):
 
 | Part | Built | Planned |
 |---|---|---|
