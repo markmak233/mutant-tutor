@@ -433,8 +433,6 @@ design is, and share the Hadoop counters). Since 2026-11-02 2b and C2 wait until
 learner's code, so reaching the learner would go through `tutor.hint`; and the Hadoop counters
 cannot run on native Windows.
 
-- Batch API for whole-batch generation, once a cloud provider is used (see the [3] review in
-  "LLM engineering candidates").
 - A local model as one more arm, if a full model comparison is ever run (see the [5] items in
   "LLM engineering candidates").
 

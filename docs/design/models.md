@@ -185,7 +185,8 @@ deterministic judge, hybrid RAG with recall@k, the phase 5 metrics, the hint lea
   output (JSON for the plan, metadata and manifest; if one large JSON with every code file
   fails often on local models, code files come as separate outputs and are assembled and
   checked in code; format failures counted apart from validation failures), plan approval,
-  and the preference chat (CLI first). Batch API: backlog until a cloud provider is used.
+  and the preference chat (CLI first). Batch API: backlog until a cloud provider is used;
+  decided against on 2026-11-18 (README.md, "Decisions not to do").
   Isolation and vision transcription: decided separately (see their items).
 - [3] Revisit isolation: phase 3 runs LLM-generated code, and the runner is not a sandbox
   (see "Code execution safety"). Decide whether validation of generated batches moves into

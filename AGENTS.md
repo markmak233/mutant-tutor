@@ -101,6 +101,11 @@ deliberate, not gaps to report.
   that failed) gets a fix path in the page, not a fix made by hand outside it.
 - The server listens on 127.0.0.1 only, with a token per launch, and never loads `.env` into its
   environment: VS Code and its terminals, started from it, would inherit the keys.
+- `docs/images/` holds screenshots of the courses, batch, exercise (Question and Hints tabs)
+  and lectures pages. A change to how one of them looks, the stylesheet included, makes its
+  screenshot stale: say so in the plan, and have it retaken on the demo courses only, in a
+  courses folder of their own, so that no real course or user name shows
+  (docs/design/README.md, the `examples/lectures/` entry). The owner takes the picture.
 
 ## Lessons from past mistakes
 

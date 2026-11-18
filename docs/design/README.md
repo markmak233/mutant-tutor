@@ -247,6 +247,16 @@ gaps. Each was decided by the owner; change one only with the owner.
 - No courses whose work is built and run in a device emulator or an IDE of its own (Android
   Studio and the like; owner, 2026-11-07). Their builds, emulators and UI tests are outside
   what a test run in a container can check, so they are outside this project.
+- No Batch API for generating a batch (owner, 2026-11-18; a backlog item since 2026-10-28,
+  "once a cloud provider is used"). A provider's batch endpoint takes requests that nobody
+  waits for at about half price and answers within hours. Not worth building here: one
+  course's batches cost little to begin with; the prompts are already laid out for the
+  prompt cache (55 to 70% of the input read from it in the 2026-11-17 runs); assistant
+  mode costs nothing; and an exercise is a chain (draft, oracle, validate, repair, validate again),
+  of which only the first drafts and the oracles are independent, so each repair round
+  would wait for a batch of its own and a batch of exercises would take hours instead of
+  minutes. To look at again only for work that is large and that nobody waits for, such as
+  drafting coverage again for every lecture or a judge calibration.
 
 ## Open questions
 
