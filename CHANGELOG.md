@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- **Handwritten slides and outlined formulas are read.** A PDF page whose words are drawn
+  (handwriting from a tablet, or formulas and pseudocode stored as outlines) now goes to the
+  vision model like an image page; before, only its few typed words were read. Such pages
+  of a course already read show as pending until the next vision run; other pages are
+  untouched.
 - **A release can have its own page.** The manual Release workflow takes a "publish" box:
   ticked, the zip it has just tested becomes a GitHub Release for the version's tag, with
   this file's section for that version as its text. Off by default; still never PyPI.

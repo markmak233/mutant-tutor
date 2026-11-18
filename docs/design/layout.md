@@ -273,6 +273,40 @@ instead of the original files.
   and a page with images but no text layer at all (a scan) always needs vision: three
   different full-page scans in one box counted as decoration and left their pages empty
   (outside review, 2026-10-29; the 462 lecture pages were flagged exactly as before).
+- Words that are drawn, not written (`materials/pdf.py`, owner's question 2026-11-18: "what
+  about handwritten slides?"). Letters stored as filled outlines (the formulas and
+  pseudocode of some slide tools) and handwriting from a tablet are path objects: not in
+  the text layer and not images, so the rule above did not see them and such a page was
+  read as its few typed words, with nothing saying so. Found by reading the owner's files:
+  a handwritten course had 49 of 384 pages marked, and a course in use had none of 425,
+  though every formula in it is an outline (one page read as 56 characters shows two whole
+  algorithms). Measured without a model on five courses' lectures, 4,669 pages, each
+  candidate checked by eye on contact sheets with the text layer washed in green:
+  - curve segments per page, alone or per text character: catches the handwriting, but a
+    page with a little outlined maths among much text has a low ratio and is missed, and a
+    plain count marks diagram pages (29% of one course's pages hold 200 or more);
+  - the count of letter-sized filled shapes: 77 pages of that course marked, all grid
+    cells, dots and label boxes with every word readable;
+  - the count of their KINDS (chosen): a kind is a shape's segment count, curve count and
+    box to half a point, so a letter, a cell or a dot drawn again is the same kind.
+    Outlined letters are an alphabet and pen strokes are all different; a diagram repeats
+    one or two. With letter-sized = at most 24 points and at least 16 kinds: 302 of the
+    335 unmarked handwritten pages newly marked (the rest mostly near-empty title pages),
+    91 of the outlined course, 0 and 0 in the two courses whose curves are diagrams, 0 in
+    typed notes, 5 textbook pages whose figures have outlined labels. At 12 kinds: 303,
+    106, 3, 0, 0, 6.
+  Only filled shapes with a curve count (straight ones are arrow heads and table cells),
+  and sizes are read in the coordinates a shape is written in, which inside a form (a
+  slide on a handout page) are the slide's own. The kinds go into the page's hash only on
+  a page the rule marks, so every other page keeps its cache entry and a newly marked one
+  is read again as pending. Known limits: a page with only a few outlined symbols stays
+  unmarked (a whole page to the vision model for two variable names was not worth it);
+  ink stored as open pen strokes is not counted (none was at hand); the two numbers come
+  from these five courses.
+  What the vision model makes of handwriting was tried on three pages only (the prompt
+  unchanged, written for slides): every sentence, definition and line of pseudocode came
+  back right where the text layer was garbage; a diagram's arrows and a struck-out number
+  were partly wrong.
 - Transcription (`materials/vision.py`): a flagged page is rendered to PNG and sent with its
   text layer; the prompt asks for code, pseudocode and commands verbatim in fenced blocks
   (pseudocode tagged `text`, symbols such as ← ∈ kept), diagrams as structured text, tables

@@ -8,7 +8,7 @@ import pytest
 
 from tutor.materials import cache
 from tutor.materials.__main__ import main
-from tutor.materials.pdf import read_pdf, render_png
+from tutor.materials.pdf import DRAWN_SHAPES, DRAWN_SIZE, read_pdf, render_png
 from tutor.materials.vision import (
     PROMPT,
     PROMPT_VERSION,
@@ -23,8 +23,8 @@ LOGO = ("Red", 400, 330, 300, 100)  # 8% of the page, clear of text: flagged unl
 
 def make_pdf(path: Path, pages: list[dict]) -> Path:
     """A 720x540 PDF. Each page: "lines" of text, an optional "footer", "placed" text as
-    (x, y, text), and "images" as (name, x, y, width, height). Enough PDF for pypdfium2,
-    nothing more."""
+    (x, y, text), "images" as (name, x, y, width, height), and "paths" as content-stream
+    operators (see blob). Enough PDF for pypdfium2, nothing more."""
     objects = [
         b"<< /Type /Catalog /Pages 2 0 R >>",
         b"",  # the page tree, filled in below
@@ -42,6 +42,7 @@ def make_pdf(path: Path, pages: list[dict]) -> Path:
         ops += [f"BT /F1 10 Tf {x} {y} Td ({text}) Tj ET" for x, y, text in page.get("placed", [])]
         ops += [f"q {w} 0 0 {h} {x} {y} cm /{name} Do Q" for name, x, y, w, h in
                 page.get("images", [])]
+        ops += page.get("paths", [])
         content = "\n".join(ops).encode()
         objects.append(b"<< /Length %d >>\nstream\n" % len(content) + content + b"\nendstream")
         objects.append(
@@ -62,6 +63,20 @@ def make_pdf(path: Path, pages: list[dict]) -> Path:
         len(objects) + 1, xref)
     path.write_bytes(bytes(out))
     return path
+
+
+def blob(x: float, y: float, width: float, height: float, paint: str = "f") -> str:
+    """A closed shape of two curves, `width` by `height`, with its left end at (x, y):
+    filled ("f"), as a letter stored as an outline is, or only drawn with a pen ("S")."""
+    top, bottom, right = y + height / 2, y - height / 2, x + width
+    return (f"{x} {y} m {x} {top} {right} {top} {right} {y} c "
+            f"{right} {bottom} {x} {bottom} {x} {y} c {paint}")
+
+
+def letters(count: int, paint: str = "f", size: float = 6.0) -> list[str]:
+    """`count` shapes in a row, each one point wider than the one before: as many kinds."""
+    return [blob(40 + 30 * (i % 20), 400 - 40 * (i // 20), size + i, 8, paint)
+            for i in range(count)]
 
 
 def lecture(path, third_page_image="Blue", second_page_line="Map then reduce"):
@@ -122,6 +137,59 @@ def test_scanned_pages_without_a_text_layer_need_vision(tmp_path):
     """The same full-page image on every page, and no text: there is nothing else to read."""
     pdf = make_pdf(tmp_path / "l.pdf", [{"images": [("Red", 0, 0, 720, 540)]}] * 4)
     assert [p.needs_vision for p in read_pdf(pdf)] == [True] * 4
+
+
+def test_words_drawn_as_outlines_need_vision(tmp_path):
+    # A formula or a handwritten page: many different letter-sized filled shapes, which are
+    # neither text nor images. The typed title alone would otherwise pass for the page.
+    pages = read_pdf(make_pdf(tmp_path / "a.pdf", [
+        {"lines": ["Scoring"], "paths": letters(DRAWN_SHAPES)},
+        {"lines": ["Scoring"], "paths": letters(DRAWN_SHAPES - 1)},
+        {"lines": ["Scoring"]},
+    ]))
+    assert [p.needs_vision for p in pages] == [True, False, False]
+    assert [p.text for p in pages] == ["Scoring"] * 3
+
+
+def test_a_diagrams_shapes_are_not_drawn_words(tmp_path):
+    same = [blob(40 + 12 * (i % 40), 400 - 12 * (i // 40), 8, 8) for i in range(120)]
+    pages = read_pdf(make_pdf(tmp_path / "a.pdf", [
+        {"lines": ["A grid"], "paths": same},  # one kind, drawn 120 times: cells, dots
+        {"lines": ["Boxes"], "paths": letters(30, size=DRAWN_SIZE + 1)},  # larger than a letter
+        {"lines": ["Lines"], "paths": letters(30, paint="S")},  # not filled: a pen's lines
+        {"lines": ["Ticks"],  # straight-sided, no curve: arrow heads, table cells
+         "paths": [f"{40 + 20 * i} 300 m {46 + 20 * i + i} 300 l {43 + 20 * i} 306 l f"
+                   for i in range(30)]},
+    ]))
+    assert not any(p.needs_vision for p in pages)
+
+
+def test_the_hash_changes_only_for_a_page_of_drawn_words(tmp_path):
+    def hashes(name, *paths):
+        pages = [{"lines": ["Scoring"], "paths": list(shapes)} for shapes in paths]
+        return [p.content_hash for p in read_pdf(make_pdf(tmp_path / name, pages))]
+
+    plain, few, drawn, other = hashes("a.pdf", [], letters(DRAWN_SHAPES - 1),
+                                      letters(DRAWN_SHAPES), letters(DRAWN_SHAPES + 3))
+    # Below the mark the shapes are not in the hash: a diagram page keeps its cache entry.
+    assert few == plain
+    # A page of drawn words has another hash, and other drawings give another one again.
+    assert len({plain, drawn, other}) == 3
+
+
+def test_a_cached_text_page_found_to_be_drawn_is_read_again(tmp_path):
+    # The cache from before this rule holds the page as "text", under the hash of its typed
+    # words alone. The page's hash is now another one, so it is read again and waits for
+    # the vision model; the page beside it is left alone.
+    before = read_pdf(make_pdf(tmp_path / "before.pdf", [{"lines": ["Scoring"]},
+                                                         {"lines": ["Summary"]}]))
+    old = {e.number: e for e in cache.update(before, {})[0]}
+    assert [old[n].read for n in (1, 2)] == ["text", "text"]
+    now = read_pdf(make_pdf(tmp_path / "now.pdf", [
+        {"lines": ["Scoring"], "paths": letters(DRAWN_SHAPES)}, {"lines": ["Summary"]}]))
+    entries, read_now = cache.update(now, old)
+    assert [e.read for e in entries] == ["pending", "text"]
+    assert read_now == 1
 
 
 def test_hash_follows_text_and_image_data(tmp_path):

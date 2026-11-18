@@ -11,10 +11,26 @@ words the text layer already has. Measured on the first
 course's lectures: a 25% threshold missed a slide of three small code screenshots; 5%
 without the text rule also flagged every section-divider slide; 5% with it caught every
 code and pseudocode image checked by eye and flagged 162 of 462 pages.
+
+A page also needs the vision model when its words are drawn, not written: letters stored
+as filled outlines (formulas and pseudocode from some slide tools) and handwriting from a
+tablet are path objects, so they are neither in the text layer nor images, and such a page
+used to be read as its few typed words with nothing saying so. What tells them from a
+diagram is variety: outlined letters and pen strokes come in many shapes, while a grid's
+cells, a plot's dots or a list's bullets repeat one or two. So the letter-sized filled
+shapes that hold a curve are counted by kind (DRAWN_SIZE, DRAWN_SHAPES). Measured on five
+courses' lectures, 4,669 pages: at 16 kinds the rule newly marked 302 of 335 unmarked
+handwritten pages (the rest mostly near-empty title pages) and 91 pages of a course whose
+every formula is an outline, none in two courses whose curves are diagrams, none in typed
+notes, and 5 textbook pages whose figures have outlined labels. Counting the shapes
+instead of their kinds marked 77 diagram pages whose text was all readable. Not caught: a
+page with only a few outlined symbols, and ink stored as open pen strokes (none was at
+hand to measure).
 """
 
 from __future__ import annotations
 
+import ctypes
 import hashlib
 import io
 import re
@@ -30,6 +46,10 @@ REPEATED_SHARE = 0.30
 # A page whose content images cover at least this share of it goes to the vision model.
 VISION_SHARE = 0.05
 TEXT_ON_IMAGE = 5  # characters on top of an image that make it a text effect
+# A filled path with a curve whose box is at most this long (points) is letter-sized.
+DRAWN_SIZE = 24.0
+# A page with at least this many kinds of letter-sized shapes holds drawn words.
+DRAWN_SHAPES = 16
 # Bottom shares of the page searched for the label, lowest first. A number in the slide's
 # body can reach a wide band ("Step size: 2" above the footer 6.10), so the lowest band
 # holding a number decides.
@@ -43,7 +63,9 @@ class Page:
     label: str | None  # e.g. "2.31", None if the footer has no number
     text: str
     needs_vision: bool
-    content_hash: str  # of the text and the images' raw data, not of a rendering
+    # Of the text, the images' raw data and, on a page of drawn words, its shapes' kinds;
+    # not of a rendering.
+    content_hash: str
 
 
 @dataclass(frozen=True)
@@ -53,6 +75,8 @@ class _Raw:
     area: float
     boxes: list[tuple[tuple[int, int, int, int], str, float]]  # rounded box, image hash, area
     image_data: bytes
+    # The kinds of letter-sized shapes, sorted, when there are DRAWN_SHAPES or more; else ().
+    drawn: tuple[tuple[int, int, int, int], ...]
 
 
 def read_pdf(path: Path) -> list[Page]:
@@ -67,11 +91,16 @@ def read_pdf(path: Path) -> list[Page]:
     pages = []
     for number, raw in enumerate(raws, 1):
         image_area = sum(area for box, h, area in raw.boxes if (box, h) not in repeated)
-        digest = hashlib.sha256(raw.text.encode() + raw.image_data).hexdigest()[:16]
+        # The shapes are part of the hash only on a page of drawn words: every other page
+        # keeps the hash it had, so its cache entry stands, while a page this rule newly
+        # marks gets a new hash and is read again (as pending, until a vision run).
+        shapes = repr(raw.drawn).encode() if raw.drawn else b""
+        digest = hashlib.sha256(raw.text.encode() + raw.image_data + shapes).hexdigest()[:16]
         # A page with images and no text layer at all (a scan) has nothing else to read.
         scanned = bool(raw.boxes) and not raw.text
         pages.append(Page(number, raw.label, raw.text,
-                          scanned or image_area / raw.area >= VISION_SHARE, digest))
+                          scanned or bool(raw.drawn)
+                          or image_area / raw.area >= VISION_SHARE, digest))
     return pages
 
 
@@ -106,6 +135,33 @@ def _find_label(textpage, width: float, height: float, number: int) -> str | Non
     return None
 
 
+def _drawn_shapes(page) -> tuple[tuple[int, int, int, int], ...]:
+    """The kinds of letter-sized filled shapes on the page that hold a curve, sorted, when
+    there are at least DRAWN_SHAPES of them (outlined letters, handwriting); else ().
+
+    A kind is a shape's segment count, its curve count, and its box's width and height to
+    half a point: the same letter, cell or dot drawn again is the same kind. Sizes are
+    taken in the coordinates the shape is written in; inside a form (a slide placed on a
+    handout page) they are the slide's own, which is where a letter has a letter's size."""
+    fill, stroke = ctypes.c_int(), ctypes.c_int()
+    kinds: set[tuple[int, int, int, int]] = set()
+    for obj in page.get_objects(filter=[pdfium_c.FPDF_PAGEOBJ_PATH], max_depth=3):
+        pdfium_c.FPDFPath_GetDrawMode(obj.raw, fill, stroke)
+        if fill.value == 0:
+            continue  # not filled: a line, a frame, an open pen stroke
+        left, bottom, right, top = obj.get_bounds()
+        width, height = right - left, top - bottom
+        if max(width, height) > DRAWN_SIZE:
+            continue  # larger than a letter: a diagram's shape
+        segments = pdfium_c.FPDFPath_CountSegments(obj.raw)
+        curves = sum(
+            pdfium_c.FPDFPathSegment_GetType(pdfium_c.FPDFPath_GetPathSegment(obj.raw, i))
+            == pdfium_c.FPDF_SEGMENT_BEZIERTO for i in range(max(segments, 0)))
+        if curves:  # straight-sided small shapes are arrow heads, ticks and table cells
+            kinds.add((segments, curves, round(width * 2), round(height * 2)))
+    return tuple(sorted(kinds)) if len(kinds) >= DRAWN_SHAPES else ()
+
+
 def _read_page(page, number: int) -> _Raw:
     width, height = page.get_size()
     textpage = page.get_textpage()
@@ -134,4 +190,4 @@ def _read_page(page, number: int) -> _Raw:
                       hashlib.sha256(image_data).hexdigest()[:16],
                       abs(right - left) * abs(top - bottom)))
         data += image_data
-    return _Raw(text, label, width * height, boxes, data)
+    return _Raw(text, label, width * height, boxes, data, _drawn_shapes(page))
