@@ -4,7 +4,8 @@
 
 - **Lectures for demo courses.** `examples/lectures/` holds two short synthetic workshops
   (plain Python, five weeks; C, three weeks) to try the tool on without a course of your
-  own. Every piece of code in them is run by a test against the output it shows.
+  own. Every piece of code in them is run by a test against the output it shows. The README
+  and `docs/details.md` now show the GUI on these courses, and the pipeline as a diagram.
 - **Checks after generation in the GUI.** A batch's page starts the judge of teaching
   quality, the writing of held-out solutions and the held-out check as tasks, and shows each
   exercise's verdict: the judge's four letters, once you have rated the exercise yourself, and

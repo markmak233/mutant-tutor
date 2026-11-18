@@ -8,11 +8,20 @@ see it**: the reference solution passes its tests, the empty skeleton fails them
 planted bug (a mutant) is caught, and the reference agrees with an oracle written from the
 question alone. No LLM judges whether an exercise is correct.
 
+![A batch in the local GUI: six generated exercises, each validated, four solved](docs/images/batch.png)
+
 Everything runs on your machine. A local web GUI takes a course's lectures (PDFs or saved web
-pages), its models and its environment; a LangGraph pipeline plans a batch, which you approve,
-then generates, validates and repairs each exercise; the exercises land as folders you open
-in VS Code. Courses in Python (plain Python, PySpark, MRJob) and, newly, C, whose first
-real batch came out 5 of 5 VALID; C++ and Java are planned.
+pages), its models and its environment; a LangGraph pipeline does the rest, and the exercises
+land as folders you open in VS Code:
+
+```mermaid
+flowchart LR
+    L[Lectures] --> P[Plan] --> A{You approve} --> G[Generate] --> V{Validate} -- VALID --> E[Exercise folder]
+    V -- invalid --> R[Repair] --> V
+```
+
+Courses in Python (plain Python, PySpark, MRJob) and, newly, C, whose first real batch came out
+5 of 5 VALID; C++ and Java are planned.
 
 It started as revision for a big data management course (none of its material is included)
 and is built as an AI engineering portfolio project.
@@ -42,7 +51,8 @@ and is built as an AI engineering portfolio project.
 You open `student.py`: the question in its docstring, a skeleton below. You run
 `test_student.py`, and open `hints.md` only when stuck. What the validator needs (reference,
 mutants, oracle) sits in a separate `solution/` folder. Seven synthetic examples, two of them
-in C, are in [`examples/`](examples/).
+in C, are in [`examples/`](examples/), with lectures for two
+[demo courses](docs/details.md#try-it-on-the-demo-courses).
 
 ## Quick start
 
@@ -61,25 +71,19 @@ listens on 127.0.0.1 with a launch token; a second launch reuses the running ser
 [installation and fresh-machine prerequisites](docs/setup/install.md). Docker is needed for
 container courses; host big-data runs also need [Java/Hadoop](docs/setup/bigdata.md).
 
-For a course set to the container, run `tutor test` in an exercise folder: live output,
-attempts recorded on the host, and Java, Hadoop or gcc can stay in the course image
-([options](docs/details.md#testing-your-work-in-the-course-image)). Ordinary `pytest` still
-works, with the host's own libraries.
-
-`tutor doctor` checks the tool, Docker, the course venv and its requirements or test image,
-and gives a next step for each problem. By default it never installs, loads `.env`, calls a
-model or changes the course; advice from a model is optional and previewed before anything
-is sent ([checks and exit codes](docs/details.md#checking-your-setup)).
+In an exercise folder, `tutor test` runs your tests in the course's container, so Java,
+Hadoop or gcc can stay in the image ([options](docs/details.md#testing-your-work-in-the-course-image));
+ordinary `pytest` still works. `tutor doctor` checks the setup and gives a next step for each
+problem, changing nothing by default ([checks](docs/details.md#checking-your-setup)).
 
 ## Intended use
 
 The aim is to help students understand their course topics better: the lecture material
-you study from becomes exercises you can run, check and learn from at your own pace. The
-material and the exercises stay on your own machine, in a per-course workspace outside any
-git repository (the repository holds code only); only LLM calls (the slides' text and
-images, the generated code, and your code when you ask a model for a hint) leave it. This is
-a personal project, not affiliated with any university or course, and it is provided as is
-(see [LICENSE](LICENSE)).
+you study from becomes exercises you can run, check and learn from at your own pace. It and
+the exercises stay on your machine, in a per-course workspace outside any git repository;
+only LLM calls (the slides' text and images, the generated code, and your code when you ask
+a model for a hint) leave it. A personal project, not affiliated with any university or
+course, provided as is (see [LICENSE](LICENSE)).
 
 ## Status
 

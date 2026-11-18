@@ -52,6 +52,13 @@ below. `test_student.py` is run, not read; `hints.md` (useful functions with sma
 then three levels of hints) is opened only when stuck. Everything the validator needs
 (reference, skeleton, mutants, oracle, metadata) sits in a separate `solution/` folder.
 
+The same question on the exercise's page in the GUI, for a Python exercise and a C one (both
+from the [demo courses](#try-it-on-the-demo-courses)):
+
+![A Python exercise's page: its state, the learner's rating, the question](images/exercise-python.png)
+
+![A C exercise's page, with the button that runs the tests in the course's container](images/exercise-c.png)
+
 Two interfaces, mixed in every batch:
 
 - **Function-level**: write `f(rdd) -> rdd`. Algorithm only, quick to start.
@@ -70,9 +77,6 @@ is too small, or whose loop reads one past the end, is caught by the sanitizer e
 output happens to be right. C is validated only in a container (`pytest -m docker` runs these
 two).
 
-To try the whole path without a course of your own, [`examples/lectures/`](../examples/lectures/)
-holds two short synthetic workshops as HTML lectures: plain Python (five weeks) and C (three
-weeks).
 
 ## How exercises are generated
 
@@ -118,6 +122,34 @@ about 60% of its time (3 min against 5 per exercise). The difference is reasonin
 size: most failed first drafts had expected test values traced wrongly by hand. GLM-5.3 as
 the oracle wrote 19 of 19 usable oracles in 9 s each. Samples are small; the full table is in
 [`docs/design/generation.md`](design/generation.md) ("Week 7 with five arms").
+
+## Try it on the demo courses
+
+[`examples/lectures/`](../examples/lectures/) holds the lectures of two short synthetic
+workshops, written for this repository: plain Python (five weeks) and C (three weeks). They
+are the courses in every screenshot here, so the whole path can be shown, and tried, without
+a course of your own.
+
+1. `tutor gui`, then "New course" for each workshop. The C one declares C and the container
+   on its Environment page, which proposes the flags the lectures compile with.
+2. Upload the workshop's `.html` files on the Lectures page; their text is read at once, at
+   no cost.
+
+   ![The Lectures page: five lectures, each read as eight sections](images/lectures.png)
+
+3. Plan a batch, approve the plan, and let it generate. With no API key, a coding assistant
+   answers the model calls ([assistant mode](assistant-mode.md)).
+
+One batch of six exercises was generated for each course from weeks 1 to 3 this way, with
+Claude Code in assistant mode writing the plan and the exercises, and the oracles in a fresh
+context that saw only the question. All 12 came out VALID on the first draft, the C ones
+checked in the container under the sanitizers. That is one run on lectures written to be
+easy to draw exercises from, by the same model family: a check that the path works end to
+end, not a measurement like those in [Results](#results). The runs and ratings the
+screenshots show were made for them, by running each exercise's reference or one of its
+mutants as the learner's code.
+
+![The courses page: both demo courses, their progress and their latest runs](images/home.png)
 
 ## Does it need RAG?
 
@@ -554,6 +586,11 @@ The hint command runs your tests in a temporary copy, then names a known low-lev
 (a TODO left, full-width punctuation, an RDD used like a list, output as tuples, ...) or,
 when your tests fail exactly as one of the exercise's planted mutants does, that mistake;
 it never shows the reference.
+
+The exercise's page has the same on its Hints tab: `hints.md`, each hint closed until opened,
+and "Check my code".
+
+![The Hints tab of an exercise: useful functions first, on other data than the exercise's](images/hints.png)
 
 ## Layout
 

@@ -101,7 +101,9 @@ container for isolation is fine; deploying the tool as a service is not.
   and a public walk-through have a course to show. A test runs every piece of code in them
   against the output they show (C on this machine's compiler, with the sanitizers).
   Exercises generated from them stay in the workspace all the same; a screenshot of one
-  may be published.
+  may be published. Screenshots live in `docs/images/` and are taken only on these demo
+  courses, in a courses folder of their own (`tutor gui --root`), so that no page lists a
+  real course and no path names the user (owner, 2026-11-18).
 - Safety net: pre-commit + gitleaks, `.claude/settings.json` deny rules, project-only API key with usage limit.
   Remember `.gitignore` does not remove files already in git history.
 - gitleaks runs as a pre-commit `local` / `system` hook on staged changes, using the brew-installed
