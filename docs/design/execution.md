@@ -127,6 +127,28 @@ themselves, so a cheap layer comes first and a stronger one later.
     `workspace.toml` `[safety] allow_imports`, found by walking up from the exercise. Only
     the owner edits `workspace.toml` and generation never writes it, so generated code
     (whose metadata an LLM writes) cannot widen its own allowlist.
+  - Four more rules (2026-11-18, from a review that tried the check against a lecture
+    carrying instructions; each line below passed until then, measured with
+    `find_hazards`). Of `tutor`, only the test kit (`tutor.testkit`, `tutor.testkit_c`) and
+    the names it defines itself, read from its source with `ast`: the whole package was on
+    the allowlist, so `from tutor.execution import subprocess` handed over any module one
+    of its files imports, and `from tutor import config, llm` the way to the keys. Of
+    `pytest`, only `approx`, `fixture`, `raises`, `mark`, `param`, `fail`, `skip` and
+    `warns`: `pytest.importorskip("subprocess")` imports any module without an import
+    statement. No attribute on any object, and no name imported from another module, called
+    `os`, `_os`, `sys`, `_sys`, `subprocess`, `importlib`, `builtins`, `modules`, `system`,
+    `popen`, `Popen` or `import_module`: the standard library's modules import `os`
+    themselves, so `pathlib.os.system(...)`, `os.path.os`, `from tempfile import _os` and
+    `from pathlib import os` needed no forbidden import. No py4j handle (`_jvm`, `_jsc`,
+    `_gateway`, `_jsparkSession`, `_jdf`, `_jrdd`, `_jconf`): `sc._jvm` reaches every Java
+    class, `Runtime.exec` included. The first two are allowlists, as what exercises use of
+    both is small; the last two name what is known to be dangerous, since an exercise's own
+    attribute names are without limit. Counted before the change: of 3769 `.py` files in two
+    courses' batches and the examples, none uses anything these rules refuse (the kit
+    modules and `approx`, `fixture`, `raises`, `mark` are all they use). The generation
+    prompt does not state them; a draft that breaks one is INVALID and goes to repair.
+    Still open, and not closable by reading code: a path built when the code runs
+    (`Path(os.environ["HOME"]) / ".ssh"`), and any name the lists do not hold.
   - It is the only layer that also covers the learner's own `pytest test_student.py`,
     which runs generated tests outside the validator. Python is too dynamic for a static
     check to prove code safe: it is a filter that stops the obvious, not a sandbox.

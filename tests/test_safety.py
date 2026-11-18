@@ -10,6 +10,7 @@ from tutor.validation.safety import (
     allowed_imports,
     config_files,
     find_hazards,
+    kit_names,
     workspace_allow_imports,
 )
 
@@ -54,6 +55,30 @@ EXAMPLES = Path(__file__).resolve().parents[1] / "examples"
         ("class J(MRJob):\n    def mapper_cmd(self):\n        return 'cat'",
          "defining mapper_cmd is not allowed"),
         ("MRStep(reducer_cmd='sort')", "reducer_cmd= is not allowed"),
+        # 7 of tutor, only the test kit and the names it defines
+        ("from tutor.execution import subprocess", "import of 'tutor.execution' is not allowed"),
+        ("from tutor import config, llm", "import of 'tutor.llm' is not allowed"),
+        ("import tutor\ntutor.llm", "import of 'tutor' is not allowed"),
+        ("from tutor.testkit import os", "tutor.testkit.os is not allowed"),
+        ("from tutor.testkit import *", "tutor.testkit.* is not allowed"),
+        ("from tutor import testkit\ntestkit.load_env()", "tutor.testkit.load_env is not"),
+        ("import tutor.testkit\ntutor.testkit.sys.exit()", "tutor.testkit.sys is not allowed"),
+        ("import tutor.testkit_c as c\nc.subprocess.run(['id'])",
+         "tutor.testkit_c.subprocess is not allowed"),
+        # 8 pytest's attributes
+        ("import pytest\npytest.importorskip('subprocess')", "pytest.importorskip is not"),
+        ("import pytest as pt\npt.main(['-p', 'x'])", "pytest.main is not allowed"),
+        ("from pytest import importorskip", "pytest.importorskip is not allowed"),
+        # 9 a module handed on by another, a process started by name
+        ("import pathlib\npathlib.os.system('id')", "attribute os is not allowed"),
+        ("import os\nos.path.os.system('id')", "attribute system is not allowed"),
+        ("from tempfile import _os", "import of _os from 'tempfile' is not allowed"),
+        ("from pathlib import os", "import of os from 'pathlib' is not allowed"),
+        ("import pathlib\ngetattr(pathlib, 'os')", "getattr(..., 'os') is not allowed"),
+        # 10 py4j handles
+        ("sc._jvm.java.lang.Runtime.getRuntime().exec('id')", "attribute _jvm is not allowed"),
+        ("spark._jsparkSession", "attribute _jsparkSession is not allowed"),
+        ("getattr(sc, '_gateway')", "getattr(..., '_gateway') is not allowed"),
     ],
 )
 def test_each_rule_reports_the_line_and_the_reason(source, expected):
@@ -86,6 +111,39 @@ def test_what_exercises_really_use_passes():
         "    Job.run(sys.argv[1:])\n"
     )
     assert find_hazards(source, MRJOB) == []
+
+
+def test_the_kit_and_pytest_as_exercises_use_them_pass():
+    """Rules 7 and 8 are allowlists, so what tests really write must stay allowed: the kit
+    under each way of importing it, and the pytest attributes counted in the exercises."""
+    source = (
+        "import pytest\n"
+        "import pytest as pt\n"
+        "from pytest import approx, raises\n"
+        "import tutor.testkit\n"
+        "import tutor.testkit_c as kit_c\n"
+        "from tutor import testkit\n"
+        "from tutor.testkit import assert_output, read_output, run_program, write_inputs\n"
+        "from tutor.testkit_c import build\n"
+        "@pytest.fixture\n"
+        "def program():\n"
+        "    return kit_c.build('student.c')\n"
+        "@pt.mark.parametrize('n', [1, 2])\n"
+        "def test_it(n, tmp_path):\n"
+        "    assert n == pytest.approx(n) and testkit.partitions() > 0\n"
+        "    assert tutor.testkit.ORDERS\n"
+        "    with pytest.raises(ValueError):\n"
+        "        pytest.fail('no')\n"
+    )
+    assert find_hazards(source, MRJOB) == []
+
+
+def test_kit_names_are_what_the_kit_defines_not_what_it_imports():
+    names = kit_names("tutor.testkit")
+    assert {"write_inputs", "assert_output", "run_mrjob", "ORDERS"} <= names
+    # Its own imports and its private helpers are not offered to exercise code.
+    assert not names & {"os", "sys", "re", "load_env", "Path", "_hadoop_bin"}
+    assert "subprocess" not in kit_names("tutor.testkit_c")
 
 
 def test_only_a_functions_own_binding_hides_a_builtin():

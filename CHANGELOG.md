@@ -13,6 +13,9 @@
 - **Keys stay out of test runs on the host.** Exercise code that runs on this machine (a
   course without the container, and your own `pytest`) no longer finds the models' keys in
   its environment. A container run never had them.
+- **A stricter static safety check.** Exercise code may use only the test kit of `tutor`,
+  only a few attributes of `pytest`, and no module reached through another (`pathlib.os`)
+  or through PySpark's JVM handles (`sc._jvm`). Existing exercises are unaffected.
 
 ## 0.1.0 (2026-11-17)
 
