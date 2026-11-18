@@ -23,6 +23,21 @@ whole process group is killed on timeout and after every run, because PySpark st
 under pytest that would otherwise be orphaned (a test covers this, and fails if only the parent
 is killed). This is isolation, not a sandbox: the child can still touch other files and the network.
 
+Credentials stay out of a host run's environment (2026-11-18, found in a review of what a
+lecture carrying instructions could reach). The validator and the generation pipeline load
+`.env`, the models' keys included, and until then a host run inherited all of it, while layer
+A lets exercise code read `os.environ`. The child now gets the environment without every
+variable named like a credential (KEY, TOKEN, SECRET, PASSWORD, CREDENTIAL or APIKEY as a
+whole part of the name; `runtime_env.without_credentials`) and without those a profile or a
+provider card of the run's course names in `api_key_env`. A denylist, not the allowlist the
+doctor's probes use: Spark, Hadoop and a C toolchain read variables no fixed list covers
+(JAVA_HOME, HADOOP_HOME, SPARK_*, CC), and a missing one would turn a valid exercise into an
+ERROR. The learner's own pytest is covered the same way: the attempts plugin and the Hadoop
+runner in testkit load `.env` without its credentials (`load_env(credentials=False)`). What
+this does not cover: a key the learner exported in the shell before running pytest, and the
+`.env` file itself, which code on the host can still open by its path. The container, which
+gets nothing of the host's environment or files, remains the boundary.
+
 On Windows (native support decided 2026-10-31, owner: one code base for macOS, Linux and
 Windows, platform branches kept to a few functions) there are no process groups, and
 walking the parent-pid tree (`taskkill /T`) misses a JVM whose parent pytest has already

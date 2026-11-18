@@ -48,6 +48,31 @@ def test_files_are_copied_under_the_given_names(tmp_path):
     assert result.outcome is Outcome.PASSED
 
 
+def test_host_run_does_not_see_credentials(tmp_path, monkeypatch):
+    """The validator's own process holds the models' keys (it loads `.env`); the code it
+    runs on the host must not: generated tests may read os.environ. One variable named like
+    a credential, one that only the course's profile names as one, and one the run needs."""
+    (tmp_path / "workspace.toml").write_text(
+        'course = "demo"\n[isolation]\nrunner = "host"\n'
+        '[llm.profiles.own]\nprovider = "deepseek"\nmodel = "m"\napi_key_env = "ODD_NAME"\n',
+        encoding="utf-8")
+    monkeypatch.setenv("DEMO_API_KEY", "sk-test-not-a-real-key")
+    monkeypatch.setenv("ODD_NAME", "sk-test-not-a-real-key")
+    monkeypatch.setenv("DEMO_HOME", "kept")
+    test = write(
+        tmp_path / "test_env.py",
+        "import os\n\ndef test_env():\n"
+        "    assert 'DEMO_API_KEY' not in os.environ\n"
+        "    assert 'ODD_NAME' not in os.environ\n"
+        "    assert os.environ['DEMO_HOME'] == 'kept'\n",
+    )
+
+    result = run_pytest({"test_env.py": test})
+
+    assert result.outcome is Outcome.PASSED, result.output
+    assert os.environ["DEMO_API_KEY"]  # only the child's copy lost it
+
+
 def test_extra_env_reaches_the_tests(tmp_path):
     """`env` adds variables for one run only; this is how rule 5 sets TUTOR_PARTITIONS."""
     test = write(

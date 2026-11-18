@@ -109,3 +109,16 @@ def test_load_env_does_not_override_existing(tmp_path, monkeypatch):
     assert os.environ["TUTOR_A"] == "from file"
     assert os.environ["TUTOR_B"] == "from shell"
     monkeypatch.delenv("TUTOR_A")
+
+
+def test_load_env_can_leave_credentials_out(tmp_path):
+    """The learner's pytest loads `.env` for WORKSPACE_DIR and JAVA_HOME; a model's key in
+    the same file stays out of that process, where generated tests could read it."""
+    env_file = tmp_path / ".env"
+    env_file.write_text("JAVA_HOME=/java\nDEMO_API_KEY=sk-test-not-a-real-key\n",
+                        encoding="utf-8")
+    target: dict[str, str] = {}
+
+    load_env(env_file, environ=target, credentials=False)
+
+    assert target == {"JAVA_HOME": "/java"}

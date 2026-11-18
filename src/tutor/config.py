@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from tutor import package_bounds
+from tutor.runtime_env import secret_name
 
 WORKSPACE_FILE = "workspace.toml"
 
@@ -57,12 +58,18 @@ class Workspace:
         return self.root / "attempts"
 
 
-def load_env(path: Path | None = None, *, environ: MutableMapping[str, str] | None = None) -> None:
+def load_env(path: Path | None = None, *, environ: MutableMapping[str, str] | None = None,
+             credentials: bool = True) -> None:
     """Load KEY=VALUE lines from `.env` (default: current directory) into os.environ.
 
     Variables already set in the environment win, so a shell export overrides `.env`.
     An explicit target mapping lets an opt-in caller read credentials without changing
     the process environment inherited by tools it launches.
+
+    `credentials=False` skips every variable named like a credential
+    (runtime_env.secret_name): for a process that runs exercise code and calls no model, the
+    learner's own pytest (attempts, testkit). It needs WORKSPACE_DIR, JAVA_HOME and the
+    like from `.env`, and must not hold a model's key where generated tests can read it.
     """
     target = os.environ if environ is None else environ
     path = Path(".env") if path is None else path
@@ -73,6 +80,8 @@ def load_env(path: Path | None = None, *, environ: MutableMapping[str, str] | No
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, value = line.split("=", 1)
+        if not credentials and secret_name(key.strip()):
+            continue
         # setdefault: only fill in variables the shell has not set already.
         target.setdefault(key.strip(), value.strip().strip("'\""))
 

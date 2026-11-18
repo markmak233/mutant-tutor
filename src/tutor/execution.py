@@ -32,6 +32,7 @@ from tutor.attempt_transport import EVENT_FILE, EXPORT_ENV, LearnerData, read_ev
 from tutor.container import ContainerError, image_for, image_problem, run_command
 from tutor.image_recipe import runner_uid
 from tutor.processes import ContainerRun, ProcessTree, remove_run_tmp, stream_output
+from tutor.runtime_env import key_names, without_credentials
 
 DEFAULT_TIMEOUT_S = 30.0
 REPORT_FILE = "tutor-pytest-report.xml"  # pytest's JUnit XML, written inside the temp dir
@@ -173,7 +174,8 @@ def run_pytest(
             result = _run_in_container(image, workdir, timeout_s, env or {},
                                        learner=learner, on_output=on_output)
         else:
-            result = _run_in(workdir, timeout_s, env or {}, on_output=on_output)
+            result = _run_in(workdir, timeout_s, env or {}, on_output=on_output,
+                             sources=files.values())
         if learner:
             try:
                 events = read_events(workdir / EVENT_FILE, partial=bool(result.stop_reason))
@@ -202,7 +204,8 @@ def run_script(
         workdir = _copy_in(files, Path(tmp))
         if image:
             return _run_in_container(image, workdir, timeout_s, env or {}, script)
-        return _run_in(workdir, timeout_s, env or {}, [sys.executable, script])
+        return _run_in(workdir, timeout_s, env or {}, [sys.executable, script],
+                       sources=files.values())
 
 
 def _copy_in(files: Mapping[str, Path], workdir: Path) -> Path:
@@ -270,10 +273,18 @@ def _is_link(path: Path) -> bool:
 def _run_in(workdir: Path, timeout_s: float, extra_env: Mapping[str, str],
             script: list[str] | None = None, *,
             on_output: Callable[[str], None] | None = None,
-            base_env: Mapping[str, str] | None = None) -> RunResult:
+            base_env: Mapping[str, str] | None = None,
+            sources: Iterable[Path] = ()) -> RunResult:
     """Run pytest in `workdir`, or the command `script` (a Python file run directly).
     `timeout_s` is scaled by timeout_factor() here, so every caller (validation, hints,
-    held-out checks) keeps stating the limit an exercise needs on macOS or Linux."""
+    held-out checks) keeps stating the limit an exercise needs on macOS or Linux.
+
+    The child gets this process's environment without its credentials (`sources`: the
+    files the run was copied from, whose course may name a key's variable). The validator
+    and the generation pipeline load `.env`, keys included, and the code run here may be a
+    model's, written from material that can carry instructions; the static check lets it
+    read `os.environ`. `base_env`, when given, is the whole environment as the caller made
+    it (the doctor's probe, already without credentials)."""
     timeout_s *= timeout_factor()
     # sys.executable: the project venv, so student code can import pyspark and mrjob.
     cmd = script or [sys.executable, *_PYTEST_ARGS]
@@ -289,8 +300,10 @@ def _run_in(workdir: Path, timeout_s: float, extra_env: Mapping[str, str],
     # second it starts: Spark runs started in the same second (parallel validation) shared
     # one file, and one of them hung until the timeout (3 of 30 runs; 0 of 48 with this).
     run_tmp = tempfile.mkdtemp(prefix="tutor-tmp-")
+    inherited = (without_credentials(os.environ, key_names(sources)) if base_env is None
+                 else base_env)
     env = {
-        **(os.environ if base_env is None else base_env),
+        **inherited,
         "PYTHONDONTWRITEBYTECODE": "1",
         "PYSPARK_PYTHON": sys.executable,
         "PYTHONIOENCODING": "utf-8",

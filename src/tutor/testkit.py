@@ -329,7 +329,8 @@ def _run_job(job_cls, args: list[str], conf: dict) -> None:
 def _hadoop_bin() -> Path:
     # Exercise tests run from a workspace folder, where the repo's .env is not in the current
     # directory, so load it from the repo; variables exported in the shell still win.
-    load_env(Path(__file__).resolve().parents[2] / ".env")
+    # Without the keys: the job is the exercise's code, which may read os.environ.
+    load_env(Path(__file__).resolve().parents[2] / ".env", credentials=False)
     hadoop = Path(os.environ.get("HADOOP_HOME", "")) / "bin" / "hadoop"
     if not os.environ.get("HADOOP_HOME") or not hadoop.is_file():
         raise RuntimeError("runner='hadoop' needs HADOOP_HOME (a Hadoop 3.3 install) in .env")

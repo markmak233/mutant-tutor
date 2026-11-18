@@ -12,15 +12,12 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from urllib.parse import quote, quote_plus, urlsplit, urlunsplit
 
-# Names are inspected, not printed; include common credential spellings plus the actual
-# selected profile value even when its environment variable has an unusual name.
-_SECRET = re.compile(r"(?:^|_)(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIALS?|APIKEY)(?:_|$)"
-                     r"|^(?:AUTHORIZATION|DOCKER_AUTH_CONFIG)$", re.IGNORECASE)
+from tutor.runtime_env import SECRET_NAME, secret_name
 
-
-def secret_name(name: str) -> bool:
-    """Whether a variable is named like a credential (the rule the redactor uses)."""
-    return bool(_SECRET.search(name))
+# Which variable names hold a credential: the rule lives in runtime_env, which also uses it
+# to keep credentials out of test runs. The redactor adds the selected profile's actual
+# value, so a key under an unusual variable name is still hidden.
+_SECRET = SECRET_NAME
 
 
 _ANSI = re.compile(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1b]*(?:\x07|\x1b\\))")

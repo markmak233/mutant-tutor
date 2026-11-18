@@ -10,6 +10,9 @@
   until you open it, and "Check my code", which runs your tests in a temporary copy and names
   a known mistake, as `python -m tutor.hint` does. The page says whether your code goes to a
   model.
+- **Keys stay out of test runs on the host.** Exercise code that runs on this machine (a
+  course without the container, and your own `pytest`) no longer finds the models' keys in
+  its environment. A container run never had them.
 
 ## 0.1.0 (2026-11-17)
 

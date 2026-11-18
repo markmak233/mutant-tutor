@@ -153,7 +153,8 @@ def _write(duration_s: float, interrupted: bool = False) -> None:
         return
     # Tests run from a workspace folder, so the repo's .env is loaded by path. An installed
     # tool has no such file; workspace_of finds its courses from the test files instead.
-    load_env(Path(__file__).resolve().parents[2] / ".env")
+    # Without the keys: this process ran the exercise's tests and calls no model.
+    load_env(Path(__file__).resolve().parents[2] / ".env", credentials=False)
     raw = os.environ.get("WORKSPACE_DIR")
     named = Path(raw).expanduser().resolve() if raw else None
     # Add test files up per course and exercise: pytest started higher up may run several
