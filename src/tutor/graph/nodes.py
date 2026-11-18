@@ -201,38 +201,71 @@ def retrieve_context(state: ItemState, deps: Deps) -> ItemState:
     transcribed and the text layer stands in; partial: cut off) stops the item, naming the
     pages: a formula or diagram may be missing, and no test can show the question is
     faithful to the slide. The item's pages run from its first slide's PDF page to its
-    last, so a page without a footer between them counts; in a lecture without footers
-    every page does. Such pages elsewhere in the lecture are left out."""
+    last, so a page without a footer between them counts. Such pages elsewhere in the
+    lecture are left out. A lecture that prints no slide numbers is cited by PDF page
+    ("p.12-p.13"), and its items' pages are checked the same way; before 2026-11-18 such a
+    lecture was sent whole with nothing checked, whatever range the plan wrote."""
     item = state["item"]
     path = cache.lecture_cache(deps.workspace, item.lecture)
     entries = sorted(cache.load(path).values(), key=lambda e: e.number)
     if not entries:
         raise FileNotFoundError(f"no cached pages for {item.lecture}: run python -m "
                                 f"tutor.materials --vision lectures")
-    # The item's own pages: those whose slide footer falls in its range ("4.15-4.24").
-    low, high = _slide_range(item.slides)
-    slides = [e for e in entries if e.label and low <= _slide(e.label) <= high]
-    if not slides and all(len(_slide(e.label)) == 1 for e in entries if e.label):
-        # Footers that are single numbers ("17") against a range the plan model wrote with
-        # the lecture's number in front ("4.7-4.9", after the prompt's example; the
-        # deep-learning course, 2026-11-11: five items of a week found no page): the last
-        # number of each end is the footer meant. A lecture whose footers carry a dot (the
-        # Spark course's "4.15") is not here.
-        low, high = low[-1:], high[-1:]
-        slides = [e for e in entries if e.label and low <= _slide(e.label) <= high]
-    too_long = sum(len(e.body) for e in entries) > deps.context_chars
-    # A lecture without slide footers cannot be checked, only sent whole.
-    if not slides and (too_long or any(e.label for e in entries)):
-        raise ValueError(f"no page of {item.lecture} has a slide footer in {item.slides}")
-    pages = ([e for e in entries if slides[0].number <= e.number <= slides[-1].number]
-             if slides else entries)
+    span = _page_span(entries, item.slides)
+    if span is None:
+        what = ("has a slide footer in" if any(e.label for e in entries)
+                else "prints no slide numbers and has no PDF page in")
+        raise ValueError(f"no page of {item.lecture} {what} {item.slides}")
+    pages = [e for e in entries if span[0] <= e.number <= span[1]]
     if unread := [e.number for e in pages if e.read in UNREAD]:
         raise ValueError(f"{item.lecture} pages {unread} (slides {item.slides}) are not fully "
                          f"read: run python -m tutor.materials --vision lectures")
     # Whole lecture when it fits (the model sees what comes before and after); else only
     # the item's pages. Unread pages elsewhere are left out rather than sent half-read.
+    too_long = sum(len(e.body) for e in entries) > deps.context_chars
     chosen = pages if too_long else [e for e in entries if e.read not in UNREAD]
     return {"context": "\n\n".join(_section(e) for e in chosen)}
+
+
+def _page_span(entries: list[cache.Entry], slides: str) -> tuple[int, int] | None:
+    """The first and last PDF page a plan item's `slides` names, None when it names none.
+
+    Each end of the range is a slide footer ("4.15") or a PDF page ("p.13", the way a page
+    without a printed number is cited: materials/cache.page_ref). In a lecture that prints
+    slide numbers, a footer end is looked up among the footers; in one that prints none,
+    every page's number is its PDF page, so "12-13" there means p.12-p.13."""
+    low_text, _, high_text = slides.partition("-")
+    high_text = high_text or low_text  # a single slide is a range of one
+    first, last = _pdf_page(low_text), _pdf_page(high_text)
+    if first is None or last is None:
+        printed = any(e.label for e in entries)
+        # Each page that has a number, with that number as a tuple (4.15 -> (4, 15)).
+        keyed = [(e.number, _slide(e.label) if printed else (e.number,))
+                 for e in entries if e.label or not printed]
+        # An end given as a PDF page bounds nothing here: () is below every footer, and
+        # an infinite number above.
+        low = _slide(low_text) if first is None else ()
+        high = _slide(high_text) if last is None else (float("inf"),)
+        found = [number for number, key in keyed if low <= key <= high]
+        if not found and all(len(key) == 1 for _, key in keyed):
+            # Numbers that are single ("17") against a range the plan model wrote with the
+            # lecture's number in front ("4.7-4.9", after the prompt's example; the
+            # deep-learning course, 2026-11-11: five items of a week found no page): the
+            # last number of each end is the one meant. A lecture whose footers carry a
+            # dot (the Spark course's "4.15") is not here.
+            found = [number for number, key in keyed if low[-1:] <= key <= high[-1:]]
+        if not found:
+            return None
+        first = found[0] if first is None else first
+        last = found[-1] if last is None else last
+    numbers = {e.number for e in entries}
+    return (first, last) if first in numbers and last in numbers and first <= last else None
+
+
+def _pdf_page(end: str) -> int | None:
+    """"p.13" -> 13; None for a slide footer."""
+    found = re.fullmatch(r"\s*p\.(\d+)\s*", end)
+    return int(found.group(1)) if found else None
 
 
 def _section(e: cache.Entry) -> str:
@@ -244,12 +277,6 @@ def _section(e: cache.Entry) -> str:
 def _slide(label: str) -> tuple[int, ...]:
     """"4.15" -> (4, 15): compared as numbers, so 4.9 < 4.15, unlike the strings."""
     return tuple(int(part) for part in re.findall(r"\d+", label))
-
-
-def _slide_range(slides: str) -> tuple[tuple[int, ...], tuple[int, ...]]:
-    """"4.15-4.24" -> ((4, 15), (4, 24)); a single slide is a range of one."""
-    low, _, high = slides.partition("-")
-    return _slide(low), _slide(high or low)
 
 
 # --- generate / repair ------------------------------------------------------------------

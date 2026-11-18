@@ -126,6 +126,20 @@ METADATA = {"source": {"lecture": "Lecture 2", "slides": "2.4-2.5"},
             "type": "implementation", "difficulty": "easy"}
 
 
+@pytest.mark.parametrize("slides, shown", [
+    ("p.12-p.13", "PDF pages 12-13"),  # a lecture that prints no slide numbers
+    ("p.4", "PDF pages 4"),
+    ("p.16, p.15", "PDF pages 16, 15"),
+    ("p.1-1.3", "slides p.1-1.3"),  # a footer in it: slides, as written
+    ("2.4-2.5", "slides 2.4-2.5"),
+])
+def test_pdf_pages_are_not_called_slides_under_the_title(tmp_path, slides, shown):
+    metadata = {**METADATA, "source": {"lecture": "Lecture 2", "slides": slides}}
+    write_question(MARKDOWN, tmp_path, location=tmp_path, metadata=metadata, mode="learn")
+    md = (tmp_path / "question.md").read_text(encoding="utf-8")
+    assert f"> **Lecture 2** · {shown} · learn mode" in md
+
+
 def test_the_markdown_layout_gets_its_frame_from_code(tmp_path):
     write_question(MARKDOWN, tmp_path, location=tmp_path, metadata=METADATA, mode="learn")
     md = (tmp_path / "question.md").read_text(encoding="utf-8")

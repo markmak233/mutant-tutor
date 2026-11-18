@@ -273,6 +273,19 @@ instead of the original files.
   and a page with images but no text layer at all (a scan) always needs vision: three
   different full-page scans in one box counted as decoration and left their pages empty
   (outside review, 2026-10-29; the 462 lecture pages were flagged exactly as before).
+- Slide numbers or PDF pages (`materials/pdf.py`, `materials/cache.page_ref`; owner,
+  2026-11-18). A page is cited by the slide number printed on it ("4.15"), else by its PDF
+  page written "p.13": the "p." marks a number as ours, not the lecture's, in coverage
+  rows, plan items, the question's line under its title ("PDF pages 12-13") and the GUI
+  (the Lectures page's "Cited by" column, the plan page). A lecture's footers count only
+  when at least half its pages carry one; below that every label is dropped. Found on
+  handwritten notes: a page's text layer there is noise, a number in it at the foot of
+  the page was read as a footer ("888" on one page of fourteen), and with one footer in
+  the lecture every plan item had to hit it or stop. Measured on 89 lectures of five
+  courses: each has footers on at least 90% of its pages, in order, or on at most one
+  page; in the three courses that print slide numbers (1,713 PDF pages read again) no
+  label changed. Limit: no lecture sat between the two, so the half is a guess for one
+  that prints numbers on some pages only.
 - Words that are drawn, not written (`materials/pdf.py`, owner's question 2026-11-18: "what
   about handwritten slides?"). Letters stored as filled outlines (the formulas and
   pseudocode of some slide tools) and handwriting from a tablet are path objects: not in

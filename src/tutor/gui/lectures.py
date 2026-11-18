@@ -69,6 +69,9 @@ class LectureRow:
     name: str  # the lecture's file name, e.g. "L4.pdf" or "notes 4.html"
     pages: int  # pages in the cache (a web page's sections); 0: not read yet
     waiting: int  # image pages waiting for the vision model
+    # Whether its pages carry slide numbers of their own; if not, they are cited by PDF
+    # page ("p.13"). Meaningless until the lecture is read.
+    numbered: bool = True
 
     @property
     def read(self) -> bool:
@@ -89,7 +92,8 @@ def lecture_rows(course: Course) -> list[LectureRow]:
     for path in files:
         entries = cache.load(cache.cache_path(course.workspace.root, path, folder)).values()
         rows.append(LectureRow(path.name, len(entries),
-                               sum(e.read in ("pending", "partial") for e in entries)))
+                               sum(e.read in ("pending", "partial") for e in entries),
+                               cache.prints_slide_numbers(entries)))
     return rows
 
 

@@ -26,6 +26,14 @@ notes, and 5 textbook pages whose figures have outlined labels. Counting the sha
 instead of their kinds marked 77 diagram pages whose text was all readable. Not caught: a
 page with only a few outlined symbols, and ink stored as open pen strokes (none was at
 hand to measure).
+
+A lecture's footers count only when at least FOOTER_SHARE of its pages carry one; below
+that, every label is dropped and the lecture's pages are cited by PDF page ("p.13",
+materials/cache.page_ref). A handwritten page's text layer is noise, and a number in it
+that happens to sit at the foot of the page was taken for a slide number ("888" on one page
+of fourteen), which then stopped every plan item of that lecture whose range missed it.
+Measured on 89 lectures of five courses: each has footers on at least 90% of its pages or
+on at most one page, nothing between.
 """
 
 from __future__ import annotations
@@ -55,12 +63,15 @@ DRAWN_SHAPES = 16
 # holding a number decides.
 FOOTER_BANDS = (0.03, 0.05, 0.07, 0.09, 0.12)
 LABEL = re.compile(r"^\d+(\.\d+)*$")  # "2.31", "12"
+# A lecture prints slide numbers when at least this share of its pages has a footer number.
+FOOTER_SHARE = 0.5
 
 
 @dataclass(frozen=True)
 class Page:
     number: int  # 1-based PDF page
-    label: str | None  # e.g. "2.31", None if the footer has no number
+    # e.g. "2.31"; None if the footer has no number, or the lecture prints too few to count
+    label: str | None
     text: str
     needs_vision: bool
     # Of the text, the images' raw data and, on a page of drawn words, its shapes' kinds;
@@ -88,6 +99,8 @@ def read_pdf(path: Path) -> list[Page]:
     # The same image at the same place: three scanned pages share a box, not an image.
     counts = Counter(key for raw in raws for key in {(b, h) for b, h, _ in raw.boxes})
     repeated = {k for k, n in counts.items() if n >= max(3, REPEATED_SHARE * len(raws))}
+    # Footers on a few pages only are stray numbers, not slide numbers: none is kept.
+    printed = sum(raw.label is not None for raw in raws) >= FOOTER_SHARE * len(raws)
     pages = []
     for number, raw in enumerate(raws, 1):
         image_area = sum(area for box, h, area in raw.boxes if (box, h) not in repeated)
@@ -98,7 +111,7 @@ def read_pdf(path: Path) -> list[Page]:
         digest = hashlib.sha256(raw.text.encode() + raw.image_data + shapes).hexdigest()[:16]
         # A page with images and no text layer at all (a scan) has nothing else to read.
         scanned = bool(raw.boxes) and not raw.text
-        pages.append(Page(number, raw.label, raw.text,
+        pages.append(Page(number, raw.label if printed else None, raw.text,
                           scanned or bool(raw.drawn)
                           or image_area / raw.area >= VISION_SHARE, digest))
     return pages

@@ -288,7 +288,13 @@ late; the adaptive review screens can be built with it.
     `max_tokens_no_thinking` (16k) with room; 100, or a limit of PDF pages / 5 (about 48
     for four 60-page lectures), would be cut off.
 - Lectures and new courses (step 5, owner, 2026-11-06). A course's Lectures page lists each
-  PDF with what the cache holds (not read, read, image pages waiting). Uploads: PDFs only,
+  PDF with what the cache holds (not read, read, image pages waiting) and, since
+  2026-11-18, what its pages are cited by: its own slide numbers, or PDF pages when it
+  prints none (layout.md, "Slide numbers or PDF pages"). That column changed the page, so
+  `docs/images/lectures.png` is to be retaken on the demo courses. Checked by fetching the
+  pages from a running server on a scratch copy of a course (the Lectures table and a
+  waiting plan's row, "PDF pages 7-9"); it is a column and a label, no new action, and no
+  click was made. Uploads: PDFs only,
   checked by their first bytes; 100 MB each and 500 MB a request; the name kept as given
   (spaces, brackets, any letters) unless it holds a separator or a character Windows or a
   glob reserves, with ".pdf" in lower case, as the cache and the plan find lectures by that
@@ -460,7 +466,8 @@ late; the adaptive review screens can be built with it.
   - Measured on the private test course with GLM-5.3-Flash (free): 20 lectures, 80k tokens
     in and 13.5k out, 276 points (65 gap-code, 46 gap-tracing, 3 gap-design, 145 concept,
     17 n/a), none dropped, a page or two uncovered in 5 lectures. Its PDFs have no slide
-    footers, so its ranges are PDF pages; generation sends such a lecture whole anyway.
+    footers, so its ranges are PDF pages; generation sent such a lecture whole (until
+    2026-11-18: generation.md, the "p.12-p.13" paragraph).
     Using the draft is the owner's click. Checked by a click in Chrome on a scratch course:
     use, then add a second lecture after a hand-written line, which stayed.
   - coverage as data (owner, 2026-11-09 the idea, 2026-11-10 "do it now, it is the same

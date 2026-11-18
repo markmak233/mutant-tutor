@@ -356,9 +356,24 @@ def _run_section(lines: list[str]) -> tuple[list[str], list[str]]:
     return commands, notes
 
 
+# A range whose every end is a PDF page: "p.13", "p.12-p.13", "p.16, p.15".
+_PDF_PAGES = re.compile(r"p\.\d+(\s*[-,]\s*p\.\d+)*")
+
+
+def pdf_pages_only(slides: str) -> str | None:
+    """"p.12-p.13" -> "12-13": the pages of a range that names PDF pages only, for showing
+    it as "PDF pages 12-13" instead of "slides p.12-p.13". None for a range with a slide
+    footer in it, which is shown as slides. "p.N" is how a page without a printed slide
+    number is cited (materials/cache.page_ref); it lives here, not there, because this
+    module also runs where the PDF reader is not installed."""
+    slides = slides.strip()
+    return slides.replace("p.", "") if _PDF_PAGES.fullmatch(slides) else None
+
+
 def _under_title(metadata: dict | None, mode: str | None) -> str:
     """"> **Lecture 3** · slides 3.10-3.14 · learn mode · implementation · medium";
-    whatever is known of it. "" when nothing is."""
+    whatever is known of it. "" when nothing is. "PDF pages 12-13" in place of the slides
+    for an exercise from a lecture that prints no slide numbers."""
     metadata = metadata or {}
     source = metadata.get("source")
     parts = []
@@ -366,7 +381,10 @@ def _under_title(metadata: dict | None, mode: str | None) -> str:
         if source.get("lecture"):
             parts.append(f"**{source['lecture']}**")
         if source.get("slides"):
-            parts.append(f"slides {source['slides']}")
+            # "p.12-p.13" cites PDF pages (the lecture prints no slide numbers): say so,
+            # so nobody looks for a slide 12 on the page.
+            pages = pdf_pages_only(str(source["slides"]))
+            parts.append(f"PDF pages {pages}" if pages else f"slides {source['slides']}")
     if mode:
         parts.append(f"{mode} mode")
     parts += [str(metadata[key]) for key in ("type", "difficulty") if metadata.get(key)]

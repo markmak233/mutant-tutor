@@ -420,3 +420,18 @@ def test_an_assistant_is_asked_for_every_image_page_in_one_run(tmp_path, monkeyp
     entries = cache.load(cache.lecture_cache(tmp_path, "l"))
     assert [e.read for e in entries.values()] == ["vision", "vision"]
     assert entries[1].model == "claude-code: claude-code"
+
+
+def test_a_few_stray_footers_are_not_slide_numbers(tmp_path):
+    """A handwritten page's text layer is noise, and a number in it at the foot of the page
+    was read as a slide number ("888" on one page of fourteen); a plan item whose range
+    missed it then found no page. Footers count when at least half the pages carry one."""
+    stray = make_pdf(tmp_path / "stray.pdf", [
+        {"lines": ["one"]}, {"lines": ["two"]}, {"lines": ["three"], "footer": "888"},
+        {"lines": ["four"]}, {"lines": ["five"]}])
+    assert [p.label for p in read_pdf(stray)] == [None] * 5
+    # A title page and an appendix without a footer do not cost the others theirs.
+    printed = make_pdf(tmp_path / "printed.pdf", [
+        {"lines": ["title"]}, {"lines": ["two"], "footer": "1.2"},
+        {"lines": ["three"], "footer": "1.3"}, {"lines": ["appendix"]}])
+    assert [p.label for p in read_pdf(printed)] == [None, "1.2", "1.3", None]

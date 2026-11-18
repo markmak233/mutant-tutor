@@ -372,9 +372,21 @@ Design approved 2026-10-28 (owner):
   memory) comes before slicing. A page of the item's slides that is `pending` or `partial`
   stops the item with its page numbers (a formula or diagram may be missing, and no test
   can show the question is faithful to the slide); the item's pages run from its first
-  slide's PDF page to its last, footer or not, and in a lecture without footers every page
-  is the item's. Such pages elsewhere are left out. Slides
+  slide's PDF page to its last, footer or not. Such pages elsewhere are left out. Slides
   the lecture has no footer for stop the item too (both from an outside review, 2026-10-29).
+  A lecture that prints no slide numbers is cited by PDF page, written "p.12-p.13" (owner,
+  2026-11-18: "by page number, and show which numbers are the slides' and which are
+  ours"; the reader's rule is in layout.md, "Slide numbers or PDF pages"). Before, the
+  plan's page list read "slide ?" on every line of such a lecture, the plan model made a
+  range up ("1.14-1.15"), and the lecture went whole with no page checked, so an exercise
+  never matched its coverage row (written "p.4-p.5" all along). Now the list gives "p.N"
+  where the footer goes, the plan check takes either form at each end of a range, and the
+  item's pages are found and checked like any other's; bare numbers in such a lecture are
+  PDF pages too, so the older ranges still resolve. Nothing pinned changed: the plan's
+  system prompt is as it was, and for a lecture that prints slide numbers the list is the
+  same byte for byte (a page without a footer there keeps its "?"). Checked on the test
+  course made from handwritten notes: a plan with "p.7-p.9" passed the check and resolved
+  to pages 7 to 9; "888" and "p.20" found none.
 - Every generated batch mixes function-level and file-level exercises (see "Exercise interfaces").
 
 ## Hand-calculation exercises

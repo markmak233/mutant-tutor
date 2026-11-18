@@ -406,6 +406,21 @@ def test_the_page_lists_lectures_and_the_paid_button(root):
     assert "Transcribe 2 image pages" in page and "seer (glm: glm-5.3-flash)" in page
 
 
+def test_the_page_says_whose_numbers_a_lecture_is_cited_by(root):
+    """A lecture that prints no slide numbers is cited by PDF page ("p.13"): the page says
+    which numbers are the lecture's own and which are ours (owner, 2026-11-18)."""
+    course_root = root / "demo-course"
+    (course_root / "lectures" / "L3.pdf").write_bytes(PDF)
+    _write(course_root / "cache" / "lectures" / "L3.pdf.md",
+           "# L3.pdf\n\n## p.1\n<!-- read: text · hash: h1 -->\nwritten by hand\n")
+    rows = {r.name: r for r in lectures.lecture_rows(courses.get_course(root, "demo-course"))}
+    assert rows["L1.pdf"].numbered and not rows["L3.pdf"].numbered
+
+    page = _browser(root).get("/c/demo-course/lectures/", base_url=BASE).get_data(as_text=True)
+    assert page.count("its slide numbers") == 2  # L1 and L2
+    assert page.count("it prints no slide numbers") == 1  # L3
+
+
 def test_an_upload_reads_only_the_new_files(root, started):
     response = post(_browser(root), "/c/demo-course/lectures/upload",
                     {"lectures": [(io.BytesIO(PDF), "L4.pdf"), (io.BytesIO(PDF), "L5.pdf")]})

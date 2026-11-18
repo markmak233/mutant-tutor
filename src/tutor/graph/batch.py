@@ -23,6 +23,9 @@ from tutor.materials import cache, coverage_store
 from tutor.schema import Manifest, SourceRef
 
 REPO = Path(__file__).resolve().parents[3]  # for the manifest's git commit
+# A plan item's `slides`: one page or a range, each end a slide footer ("4.15") or a PDF
+# page ("p.13": materials/cache.page_ref).
+SLIDES = re.compile(r"(p\.\d+|\d+(\.\d+)*)(-(p\.\d+|\d+(\.\d+)*))?")
 PLAN_RETRIES = 2  # extra plan calls when the plan breaks a rule checked here
 # On a hand-calculation exercise a failing test's traceback and summary print the answer. In
 # the batch folder, written by code: the validator's temp dirs never read it, and a model's
@@ -164,8 +167,10 @@ def blocking_problems(items: list[PlanItem], lectures: list[str],
     found += [f"id {i!r} already exists in another batch" for i in ids if i in existing]
     found += [f"{i.id}: lecture {i.lecture!r} is not one of {lectures}"
               for i in items if i.lecture not in lectures]
-    found += [f"{i.id}: slides {i.slides!r} is not a range of slide footers like 4.15-4.24"
-              for i in items if not re.fullmatch(r"\d+(\.\d+)*(-\d+(\.\d+)*)?", i.slides)]
+    # Each end is a slide footer ("4.15") or a PDF page ("p.13", a page with no footer).
+    found += [f"{i.id}: slides {i.slides!r} is not a range of slide footers like 4.15-4.24 "
+              f"(or of PDF pages, p.12-p.13, where the lecture prints no slide numbers)"
+              for i in items if not SLIDES.fullmatch(i.slides)]
     return found
 
 
@@ -244,13 +249,22 @@ def _model_names(deps: Deps) -> str:
 
 
 def page_titles(workspace: Path, lecture: str) -> str:
-    """One line per cached page: PDF page, slide footer and its first line of text."""
+    """One line per cached page: PDF page, slide footer and its first line of text.
+
+    A lecture that prints no slide numbers lists each page's "p.N" where the footer goes,
+    so the plan model has a range to write ("p.12-p.13") and the item's pages can be
+    found; it used to read "slide ?" there, and the model made a range up. A page without
+    a footer in a lecture that prints them keeps its "?": that list reads as it always
+    did, byte for byte (the plan prompt is pinned, and those lectures were measured)."""
     path = cache.lecture_cache(workspace, lecture)
+    entries = sorted(cache.load(path).values(), key=lambda e: e.number)
+    printed = cache.prints_slide_numbers(entries)
     lines = [f"{lecture}:"]
-    for e in sorted(cache.load(path).values(), key=lambda e: e.number):
+    for e in entries:
         title = next((t for t in (line.strip().strip("#").strip() for line in e.body.splitlines())
                       if t and t != e.label and not re.fullmatch(r"[\d.]+", t)), "")
-        lines.append(f"  p.{e.number} · slide {e.label or '?'}: {title[:80]}")
+        footer = e.label or ("?" if printed else cache.page_ref(e))
+        lines.append(f"  p.{e.number} · slide {footer}: {title[:80]}")
     return "\n".join(lines)
 
 

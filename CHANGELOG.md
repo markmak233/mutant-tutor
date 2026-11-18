@@ -7,6 +7,12 @@
   vision model like an image page; before, only its few typed words were read. Such pages
   of a course already read show as pending until the next vision run; other pages are
   untouched.
+- **Lectures without slide numbers are cited by PDF page.** Handwritten notes and handouts
+  that print no slide number are now planned and checked by page, written `p.12-p.13`; the
+  Lectures page says for each lecture whether it is cited by its own slide numbers or by
+  PDF pages, and a question's header says "PDF pages 12-13". Before, the plan had no range
+  to write for such a lecture, and a stray number at the foot of one page could stop its
+  exercises. Lectures that print slide numbers are untouched.
 - **A release can have its own page.** The manual Release workflow takes a "publish" box:
   ticked, the zip it has just tested becomes a GitHub Release for the version's tag, with
   this file's section for that version as its text. Off by default; still never PyPI.

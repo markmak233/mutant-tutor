@@ -677,6 +677,63 @@ def test_plan_problems_are_found_by_code():
     assert "a: lecture 'L9' is not one of ['L1']" in found
 
 
+def _unnumbered_lecture(workspace, pending=()):
+    """L1 as six pages without a slide number, the pages in `pending` waiting for vision."""
+    path = cache.cache_path(workspace, workspace / "lectures" / "L1.pdf")
+    entries = [cache.Entry(n, None, "pending" if n in pending else "text", f"h{n}",
+                           f"page {n} text") for n in range(1, 7)]
+    cache.save(path, cache.render("L1.pdf", entries))
+
+
+@pytest.mark.parametrize("slides", [
+    "p.2-p.3",  # as the page list gives them for such a lecture
+    "2-3",  # bare numbers there are PDF pages too
+    "1.2-1.3",  # an older plan's made-up range: the last number of each end
+])
+def test_a_lecture_without_slide_numbers_is_cited_by_pdf_page(workspace, slides):
+    """Such a lecture used to be sent whole with no page checked, whatever the range said
+    (the handwritten course, 2026-11-18). Its items now have pages of their own: only an
+    unread page among them stops the item."""
+    _unnumbered_lecture(workspace, pending=(5,))
+    item = ITEM.model_copy(update={"slides": slides})
+    sliced = nodes.retrieve_context({"item": item}, deps(workspace, None, context_chars=10))
+    assert [x for x in sliced["context"].splitlines() if x.startswith("##")] == [
+        "## p.2", "## p.3"]
+    # The whole lecture when it fits, without the page still waiting for the vision model.
+    whole = nodes.retrieve_context({"item": item}, deps(workspace, None))["context"]
+    assert "page 6 text" in whole and "page 5 text" not in whole
+
+
+def test_a_pdf_page_the_lecture_does_not_have_stops_the_item(workspace):
+    _unnumbered_lecture(workspace)
+    for slides in ("p.9", "p.5-p.9", "p.4-p.2", "888"):
+        item = ITEM.model_copy(update={"slides": slides})
+        with pytest.raises(ValueError, match="prints no slide numbers and has no PDF page"):
+            nodes.retrieve_context({"item": item}, deps(workspace, None))
+    _unnumbered_lecture(workspace, pending=(3,))
+    item = ITEM.model_copy(update={"slides": "p.2-p.3"})
+    with pytest.raises(ValueError, match=r"L1 pages \[3\] \(slides p.2-p.3\) are not fully"):
+        nodes.retrieve_context({"item": item}, deps(workspace, None))
+
+
+@pytest.mark.parametrize("slides, pages", [
+    ("p.1-1.3", [1, 2, 3]),  # from the title page, which has no footer, to slide 1.3
+    ("1.2-p.4", [2, 3, 4]),  # to a page after the last footer
+    ("p.1", [1]),
+])
+def test_a_range_may_mix_slide_footers_and_pdf_pages(workspace, slides, pages):
+    """A page without a footer in a lecture that prints them is cited "p.N" (a coverage
+    row may start on the title page)."""
+    path = cache.cache_path(workspace, workspace / "lectures" / "L1.pdf")
+    entries = [cache.Entry(n, {2: "1.2", 3: "1.3"}.get(n), "text", f"h{n}", f"page {n} text")
+               for n in range(1, 5)]
+    cache.save(path, cache.render("L1.pdf", entries))
+    item = ITEM.model_copy(update={"slides": slides})
+    sliced = nodes.retrieve_context({"item": item}, deps(workspace, None, context_chars=10))
+    assert [int(x.split()[1][2:]) for x in sliced["context"].splitlines()
+            if x.startswith("##")] == pages
+
+
 def test_a_plan_breaking_the_rules_is_asked_for_again_with_the_problems(workspace):
     model = BatchModel(plan_json("a", lecture="L9"), plan_json("a"))
     update = batch.plan_batch({"lectures": ["L1"], "count": 1}, deps(workspace, model))
@@ -692,6 +749,35 @@ def test_page_titles_skip_the_footer_line(workspace):
                cache.render("L4.pdf", entries))
     assert batch.page_titles(workspace, "L4").splitlines()[1] == (
         "  p.13 · slide 6.7: A Made-Up Title")
+
+
+def test_page_titles_give_pdf_pages_for_a_lecture_without_slide_numbers(workspace):
+    """The plan model needs a range to write: "slide ?" on every line left it to make one
+    up. A page without a footer in a lecture that prints them keeps its "?", so that list
+    reads as it did before (the plan prompt's input for the measured courses)."""
+    folder = workspace / "lectures"
+    cache.save(cache.cache_path(workspace, folder / "L5.pdf"), cache.render("L5.pdf", [
+        cache.Entry(1, None, "text", "h1", "Made-Up Notes"),
+        cache.Entry(2, None, "vision", "h2", "# A Drawn Heading\nwords")]))
+    assert batch.page_titles(workspace, "L5").splitlines()[1:] == [
+        "  p.1 · slide p.1: Made-Up Notes", "  p.2 · slide p.2: A Drawn Heading"]
+    cache.save(cache.cache_path(workspace, folder / "L6.pdf"), cache.render("L6.pdf", [
+        cache.Entry(1, None, "text", "h1", "A Title Page"),
+        cache.Entry(2, "6.2", "text", "h2", "6.2\nA Topic")]))
+    assert batch.page_titles(workspace, "L6").splitlines()[1:] == [
+        "  p.1 · slide ?: A Title Page", "  p.2 · slide 6.2: A Topic"]
+
+
+@pytest.mark.parametrize("slides, fine", [
+    ("4.15-4.24", True), ("17", True), ("p.13", True), ("p.12-p.13", True),
+    ("p.1-1.3", True), ("pp.3", False), ("p.x", False), ("12 to 13", False), ("?", False),
+])
+def test_a_plans_slides_are_footers_or_pdf_pages(slides, fine):
+    item = PlanItem.model_validate({**json.loads(plan_json("a"))["items"][0], "slides": slides})
+    problems = batch.blocking_problems([item], [item.lecture], [])
+    assert (problems == []) is fine
+    if not fine:
+        assert "is not a range of slide footers" in problems[0]
 
 
 def test_the_owner_may_edit_the_plan_before_approving():

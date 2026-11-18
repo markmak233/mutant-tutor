@@ -50,12 +50,14 @@
 {% endif %}
 {% if rows %}
 <table>
-  <thead><tr><th>{{ _("Lecture") }}</th><th class="num">{{ _("Pages read") }}</th><th>{{ _("State") }}</th></tr></thead>
+  <thead><tr><th>{{ _("Lecture") }}</th><th class="num">{{ _("Pages read") }}</th><th>{{ _("Cited by") }}</th><th>{{ _("State") }}</th></tr></thead>
   <tbody>
   {% for row in rows %}
     <tr>
       <td>{{ row.name }}</td>
       <td class="num">{{ row.pages or "" }}{% if row.pages and row.web_page %} <span class="muted">{{ _("sections") }}</span>{% endif %}</td>
+      {# Whose numbers the pages are cited by: the lecture's own, or ours (owner, 2026-11-18). #}
+      <td>{% if not row.read %}{% elif row.numbered %}{{ _("its slide numbers") }}{% else %}{{ _("PDF pages") }} <span class="muted">{{ _("it prints no slide numbers") }}</span>{% endif %}</td>
       <td>{% if not row.read %}{{ chip("not read", _("not read")) }}{% elif row.waiting %}{{ chip("image pages waiting", ngettext("%(num)s image page waiting", "%(num)s image pages waiting", row.waiting)) }}{% else %}{{ chip("read", _("read")) }}{% endif %}</td>
     </tr>
   {% endfor %}

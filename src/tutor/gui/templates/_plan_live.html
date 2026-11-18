@@ -60,7 +60,7 @@
           {% if status.can_retry and not busy and not plan.selection_error %}<form method="post" action="{{ url_for('retry_item', name=course.folder, label=plan.label) }}" class="action"><input type="hidden" name="item" value="{{ item.id }}"><button type="submit">{{ _("Try again") }}</button></form>
           {% if status.cut_off_rounds %}<form method="post" action="{{ url_for('retry_item', name=course.folder, label=plan.label) }}" class="action"><input type="hidden" name="item" value="{{ item.id }}"><input type="hidden" name="cap" value="{{ retry_cap }}"><button type="submit">{{ _("Try again with a %(cap)s output cap", cap="{:,}".format(retry_cap)) }}</button></form>{% endif %}
           {% elif status.can_retry %}<div class="muted">{{ _("\"Try again\" comes back when this plan's task ends.") }}</div>{% endif %}{% endif %}</td>{% endif %}
-        <td>{{ item.lecture }}<div class="muted">{{ _("slides %(range)s", range=item.slides) }}</div></td>
+        <td>{{ item.lecture }}<div class="muted">{% set pages = item.slides | pdf_pages_only %}{% if pages %}{{ _("PDF pages %(range)s", range=pages) }}{% else %}{{ _("slides %(range)s", range=item.slides) }}{% endif %}</div></td>
         <td>{{ item.knowledge_point }}
           {% if item.notes %}<div class="muted">{{ _("Checks: %(text)s", text=item.notes) }}</div>{% endif %}
           {% if item.reason %}<div class="muted">{{ _("Why: %(text)s", text=item.reason) }}</div>{% endif %}</td>

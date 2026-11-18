@@ -112,6 +112,21 @@ def lecture_caches(workspace: Path) -> list[Path]:
     return sorted(p for p in folder.glob("*.md") if lecture_name(p)) if folder.is_dir() else []
 
 
+def page_ref(entry: Entry) -> str:
+    """How a page is cited: the slide number printed on it ("4.15"), else "p.13", its PDF
+    page. The "p." is the mark that the number is ours, not the lecture's: coverage rows,
+    plan items and the GUI all write a page this way (docs/design/layout.md, "Reading
+    files")."""
+    return entry.label or f"p.{entry.number}"
+
+
+def prints_slide_numbers(entries) -> bool:
+    """Whether the lecture's pages carry slide numbers of their own. The reader keeps
+    footers only for a lecture that prints them on most pages (materials/pdf.py), so one
+    label is enough to tell."""
+    return any(e.label for e in entries)
+
+
 def update(pages: list[Page], old: dict[int, Entry], transcribe: Transcriber | None = None,
            model: str | None = None, today: str | None = None,
            prompt: str | None = None) -> tuple[list[Entry], int]:
