@@ -18,6 +18,10 @@ GitHub Actions, `.github/workflows/ci.yml` (decided 2026-10-26, before going pub
   "Packaging and release"), not on every `dev` push: each step is already checked
   locally with `pytest` and `ruff check .`, and the badge then shows the state of `main`,
   the branch visitors see.
+- Every job runs with a read-only token (`contents: read`), in `ci.yml` and `release.yml`
+  alike. One exception since 2026-11-18: `release.yml`'s `publish` job, which runs only when
+  the owner ticks that input, has `contents: write` to create the GitHub Release page (see
+  "Packaging and release").
 - `test`: Python 3.11, 3.12, 3.13 and 3.14, `ruff check .` and the fast `pytest`. The first
   run also had 3.12, which failed on mrjob's `distutils` import (see "Environment"), and the
   owner dropped it (2026-10-26). Brought back with 3.13 and 3.14 (owner, 2026-11-08): the

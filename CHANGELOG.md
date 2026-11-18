@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **A release can have its own page.** The manual Release workflow takes a "publish" box:
+  ticked, the zip it has just tested becomes a GitHub Release for the version's tag, with
+  this file's section for that version as its text. Off by default; still never PyPI.
 - **Lectures for demo courses.** `examples/lectures/` holds two short synthetic workshops
   (plain Python, five weeks; C, three weeks) to try the tool on without a course of your
   own. Every piece of code in them is run by a test against the output it shows. The README

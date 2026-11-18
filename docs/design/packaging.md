@@ -111,6 +111,24 @@ Installing the tool, the release package and its workflow. Part of the design re
     merge had passed its PR and failed on main before. Release run 43876271241: 17 jobs
     green, the zip `tutor-0.1.0-1891f31` holding `tutor-0.1.0/` with the wheel (0.1.0,
     315 files) and the three INSTALL texts. `constraints.txt` is CI's 3.11 freeze.
+  - A GitHub Release page, optional (owner, 2026-11-18; replaces "no GitHub Release for now"
+    above, while "no PyPI" stands): v0.1.0 had its tag and its zip, but the zip was a run's
+    artifact, behind a login and gone after 90 days, so a visitor had nothing to download.
+    `release.yml` takes an input, `publish`, off by default: ticked, a last job turns the
+    zip the run has just accepted into a release for the tag `v<version>`, its text the
+    changelog's section for that version (`tools/release_notes.py`, refused when the
+    section is missing or empty). Still by hand: starting the run, ticking the box, and
+    the tag with its push. The job never makes a tag (`gh release create --verify-tag`) and
+    stops unless the tag points at the run's own commit, so the page cannot offer a
+    package built from other code than the tag names; an existing release of the tag makes
+    it fail, so a published page is never replaced. It is the only job in CI with
+    `contents: write`; every other job, the whole of `ci.yml` included, keeps the
+    read-only token, and it uses the runner's own `gh`, no third-party action. v0.1.0
+    itself cannot go through it (its tag names a commit from before this job): the owner
+    made that page by hand the same day, with that run's zip and the changelog's section.
+    Checked with actionlint 1.7.7, its tag check tried against the
+    real remote (an annotated tag, a missing tag), its notes and zip steps run locally;
+    its first real run is the next release.
   - One click (the owner's aim, 2026-11-05; installation acceptance still pending): one install
     line gets `uv`, which fetches the Python it needs and installs the tool (`uv tool install`,
     the same job as `pipx`, without needing Python first). `tutor gui` starts the server and

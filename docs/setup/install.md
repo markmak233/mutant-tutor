@@ -84,8 +84,8 @@ uv is optional: manually installed Pythons remain discoverable.
 
 A release is one zip handed to the user directly: the wheel and the per-system
 instructions in [`packaging/`](../../packaging/) (`INSTALL-macOS.txt`, `INSTALL-Linux.txt`,
-`INSTALL-Windows.txt`), which the user follows by hand. Nothing is published (no GitHub
-Release, no PyPI) and there is no install script.
+`INSTALL-Windows.txt`), which the user follows by hand. It is never published to PyPI and
+there is no install script; a GitHub Release page for it is optional (below).
 
 The usual way is the manual Release workflow
 ([`.github/workflows/release.yml`](../../.github/workflows/release.yml)): on GitHub, open
@@ -96,6 +96,14 @@ zip as the run's artifact, `tutor-VERSION-COMMIT` (the commit's first 7 characte
 run's page for 90 days. Downloading it needs a GitHub login; inside is the `tutor-VERSION`
 folder to hand over. GitHub shows the button only once the workflow file is on the default
 branch.
+
+To also publish the zip as a GitHub Release page, which anyone can download from without a
+login: first create and push the tag `v<version>` on the commit to release, then run the
+workflow on that commit (pick the tag where it asks for the branch) with "publish" ticked.
+The page's text is that version's section of `CHANGELOG.md`, so move the "Unreleased"
+entries under a `## <version> (<date>)` heading before tagging. The run stops, publishing
+nothing, when the tag is missing, points at another commit or already has a release, or
+when the changelog has no section for the version.
 
 By hand, from a clean checkout:
 

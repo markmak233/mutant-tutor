@@ -1,14 +1,22 @@
 # The release package (docs/setup/install.md, "Release package"; docs/design/packaging.md, "Packaging
 # and release"): by hand only, from the Actions tab ("Release", "Run workflow", pick the
 # branch). It runs the whole CI, builds the wheel once, installs that same wheel on Linux,
-# macOS and Windows, and only then keeps the zip as this run's artifact for 90 days. Nothing
-# is published: no GitHub Release, no PyPI. GitHub offers the button only once this file is
-# on the default branch.
+# macOS and Windows, and only then keeps the zip as this run's artifact for 90 days.
+# With "publish" ticked, the same zip also becomes a GitHub Release page for the tag
+# v<version>, which must exist already and point at this run's commit: the tag stays the
+# owner's own step. Never PyPI. GitHub offers the button only once this file is on the
+# default branch.
 name: Release
 
 on:
   workflow_dispatch:
+    inputs:
+      publish:
+        description: "Also publish a GitHub Release page for the tag v<version> (the tag must exist and point at this commit)"
+        type: boolean
+        default: false
 
+# Read-only for every job; the publish job alone asks for more, below.
 permissions:
   contents: read
 
@@ -109,3 +117,54 @@ jobs:
           path: release/
           retention-days: 90
           if-no-files-found: error
+
+  # Only when "publish" is ticked: the zip above as a GitHub Release page, with the
+  # changelog's section for this version as its text. The one job that may write to the
+  # repository, and only to create the release: it never creates or moves a tag.
+  publish:
+    if: ${{ inputs.publish }}
+    needs: [build, bundle]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.build.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v5  # for CHANGELOG.md and tools/release_notes.py
+      # The page must show the code the tag names. A lightweight tag's line gives the
+      # commit; an annotated tag's "^{}" line gives the commit it points at.
+      - name: Check that the tag v<version> exists and points at this commit
+        run: |
+          tag="v$VERSION"
+          lines="$(git ls-remote --tags origin "refs/tags/$tag" "refs/tags/$tag^{}")"
+          commit="$(printf '%s\n' "$lines" | awk 'END { print $1 }')"
+          if [ -z "$commit" ]; then
+            echo "::error::the tag $tag does not exist: create and push it first"
+            exit 1
+          fi
+          if [ "$commit" != "$GITHUB_SHA" ]; then
+            echo "::error::the tag $tag points at $commit, this run is at $GITHUB_SHA: run the workflow on the tag's commit"
+            exit 1
+          fi
+      - name: Write the release notes from CHANGELOG.md
+        run: python3 tools/release_notes.py "$VERSION" > "$RUNNER_TEMP/notes.md"
+      - id: name
+        run: echo "short=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+      # The bundle job's artifact: the tutor-VERSION folder that was just accepted.
+      - uses: actions/download-artifact@v7
+        with:
+          name: tutor-${{ needs.build.outputs.version }}-${{ steps.name.outputs.short }}
+          path: release
+      - name: Zip the tutor-VERSION folder
+        run: |
+          cd release
+          zip -r "$RUNNER_TEMP/tutor-$VERSION.zip" "tutor-$VERSION"
+          unzip -l "$RUNNER_TEMP/tutor-$VERSION.zip"
+      # --verify-tag: never create a tag here. An existing release of this tag makes the
+      # command fail, so a published page is never replaced.
+      - name: Publish the GitHub Release
+        run: |
+          gh release create "v$VERSION" "$RUNNER_TEMP/tutor-$VERSION.zip" \
+            --verify-tag --title "v$VERSION" --notes-file "$RUNNER_TEMP/notes.md"
