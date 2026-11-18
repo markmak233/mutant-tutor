@@ -124,7 +124,10 @@ smartCodingReview/                       # public repo (the `tutor/` above), cod
 │   ├── station-monthly-df/              # DataFrame: groupBy/agg, orderBy, one CSV file, parameter
 │   ├── station-condition-share/         # MRJob on Hadoop: order inversion, --jobconf tau
 │   ├── station-above-average-c/         # C, a whole program: standard input -> output and exit status
-│   └── station-drop-low-c/              # C, a function and a given driver.c: an array changed in place
+│   ├── station-drop-low-c/              # C, a function and a given driver.c: an array changed in place
+│   └── lectures/                        # synthetic lectures for demo courses, as HTML:
+│       ├── python-workshop/             #   five weeks of plain Python
+│       └── c-workshop/                  #   three weeks of C
 └── tests/
     ├── test_env.py                      # P1, runs envcheck for the current workspace
     └── test_validation.py               # P1, runs the validator on examples/

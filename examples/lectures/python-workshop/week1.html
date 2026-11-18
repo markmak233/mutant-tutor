@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Python workshop, week 1: values, strings, lists, loops</title>
+<style>
+body { max-width: 46em; margin: 2em auto; padding: 0 1em; font-family: sans-serif; line-height: 1.5; }
+pre { background: #f3f3f3; padding: 0.6em 0.8em; overflow-x: auto; }
+pre.output { background: none; border-left: 3px solid #999; }
+pre.output::before { content: "Output"; display: block; font-family: sans-serif; font-size: 0.8em; color: #666; }
+</style>
+</head>
+<body>
+<main>
+<h1>Python workshop, week 1: values, strings, lists, loops</h1>
+
+<h2>Values and types</h2>
+<p>In these notes, the block right after a piece of code shows what that code prints, or the last line of the error it raises.</p>
+<p>Every value in Python has a type, and the type decides what an operator does. The four
+types of this week are <code>int</code> (whole numbers), <code>float</code> (numbers with a
+fractional part), <code>str</code> (text) and <code>bool</code> (<code>True</code> or
+<code>False</code>).</p>
+<pre><code class="language-python">print(7 + 2)
+print(7 / 2)
+print(7 // 2)
+print(7 % 2)
+print(type(7), type(7.0), type("7"), type(True))</code></pre>
+<pre class="output">9
+3.5
+3
+1
+&lt;class 'int'&gt; &lt;class 'float'&gt; &lt;class 'str'&gt; &lt;class 'bool'&gt;</pre>
+<ul>
+<li><code>/</code> always gives a float, even when the division is exact.</li>
+<li><code>//</code> is floor division: it drops the fractional part.</li>
+<li><code>%</code> is the remainder; <code>n % 2 == 0</code> tests whether <code>n</code> is even.</li>
+</ul>
+<p>Text that looks like a number is still text. Convert it before doing arithmetic:</p>
+<pre><code class="language-python">print(int("12") + 1)
+print(str(12) + "1")
+print(float("2.5") * 2)</code></pre>
+<pre class="output">13
+121
+5.0</pre>
+<p><code>+</code> adds two numbers and joins two strings; it refuses one of each.</p>
+
+<h2>Names and assignment</h2>
+<p>An assignment makes a name refer to a value. The right-hand side is evaluated first, then
+the name is bound to the result, so a name may appear on both sides.</p>
+<pre><code class="language-python">distance = 12.5
+climb = 640
+distance = distance + 3
+climb += 60
+print(distance, climb)</code></pre>
+<pre class="output">15.5 700</pre>
+<p><code>climb += 60</code> is short for <code>climb = climb + 60</code>. A single
+<code>=</code> assigns; a double <code>==</code> compares.</p>
+
+<h2>Strings</h2>
+<p>A string is a sequence of characters. Positions start at 0, and a negative position counts
+from the end. A slice <code>text[start:stop]</code> takes the characters from
+<code>start</code> up to, but not including, <code>stop</code>.</p>
+<pre><code class="language-python">name = "  Blue Ridge Loop \n"
+clean = name.strip()
+print(clean)
+print(clean.lower())
+print(len(clean))
+print(clean[0], clean[-1])
+print(clean[5:10])</code></pre>
+<pre class="output">Blue Ridge Loop
+blue ridge loop
+15
+B p
+Ridge</pre>
+<p><code>strip()</code> removes spaces and line ends from both ends. <code>split()</code> cuts
+a string into a list of words, <code>join()</code> puts a list of strings back together, and
+an f-string places values inside text.</p>
+<pre><code class="language-python">words = clean.split()
+print(words)
+print("-".join(words))
+print(f"{clean}: {len(words)} words")</code></pre>
+<pre class="output">['Blue', 'Ridge', 'Loop']
+Blue-Ridge-Loop
+Blue Ridge Loop: 3 words</pre>
+<p>Strings are immutable: no method changes a string in place. <code>strip()</code> and
+<code>lower()</code> return a new string, which is why the result was stored in
+<code>clean</code>. Assigning to one character is an error:</p>
+<pre><code class="language-python raises">clean[0] = "b"</code></pre>
+<pre class="output">TypeError: 'str' object does not support item assignment</pre>
+
+<h2>Lists</h2>
+<p>A list holds values in order. It is indexed and sliced like a string, but it is mutable:
+<code>append</code> adds an item at the end, and an item can be replaced by assignment.</p>
+<pre><code class="language-python">climbs = [640, 120, 880]
+climbs.append(300)
+print(climbs)
+print(len(climbs), climbs[0], climbs[-1])
+print(climbs[1:3])
+climbs[1] = 150
+print(climbs)</code></pre>
+<pre class="output">[640, 120, 880, 300]
+4 640 300
+[120, 880]
+[640, 150, 880, 300]</pre>
+<p>Assigning a list to a second name does not copy it: both names refer to the same list. A
+full slice <code>climbs[:]</code> makes a new list with the same items.</p>
+<pre><code class="language-python">same = climbs
+copy = climbs[:]
+same.append(50)
+print(climbs)
+print(copy)</code></pre>
+<pre class="output">[640, 150, 880, 300, 50]
+[640, 150, 880, 300]</pre>
+<p>The last valid position of a list of 5 items is 4. Reading past it is an error:</p>
+<pre><code class="language-python raises">print(climbs[5])</code></pre>
+<pre class="output">IndexError: list index out of range</pre>
+
+<h2>for loops</h2>
+<p>A <code>for</code> loop runs its indented body once for each item of a sequence. The loop
+variable takes each item in turn.</p>
+<pre><code class="language-python">for climb in [640, 150, 880]:
+    print(climb * 2)</code></pre>
+<pre class="output">1280
+300
+1760</pre>
+<p><code>range(n)</code> gives the numbers 0 to n - 1. <code>range(start, stop, step)</code>
+starts at <code>start</code> and stops before <code>stop</code>.</p>
+<pre><code class="language-python">for i in range(3):
+    print(i)
+print(list(range(2, 10, 3)))</code></pre>
+<pre class="output">0
+1
+2
+[2, 5, 8]</pre>
+<p>When the position is needed as well as the item, <code>enumerate</code> gives both. Loop
+over the items themselves whenever the position is not needed.</p>
+<pre><code class="language-python">trails = ["Loop", "Ridge", "Falls"]
+for number, trail in enumerate(trails, start=1):
+    print(number, trail)</code></pre>
+<pre class="output">1 Loop
+2 Ridge
+3 Falls</pre>
+
+<h2>Conditions</h2>
+<p><code>if</code>, <code>elif</code> and <code>else</code> choose one branch. The conditions
+are tested from the top, and only the first true one runs, so their order matters.</p>
+<pre><code class="language-python">climb = 880
+if climb &gt;= 800:
+    grade = "hard"
+elif climb &gt;= 300:
+    grade = "moderate"
+else:
+    grade = "easy"
+print(grade)</code></pre>
+<pre class="output">hard</pre>
+<p>Comparisons can be chained, and <code>and</code>, <code>or</code>, <code>not</code> combine
+them. Any value can be used as a condition: zero, an empty string and an empty list count as
+false, everything else as true.</p>
+<pre><code class="language-python">print(300 &lt;= climb &lt; 800)
+print(climb &gt; 800 and grade == "hard")
+print(not trails)
+print(bool(""), bool("0"), bool(0), bool([0]))</code></pre>
+<pre class="output">False
+True
+False
+False True False True</pre>
+<p><code>"0"</code> is a string with one character and <code>[0]</code> is a list with one
+item, so both are true.</p>
+
+<h2>Accumulating a result</h2>
+<p>Most loops build one result from many items. The pattern is always the same: give the
+result a starting value before the loop, update it inside the loop, use it after the loop.</p>
+<pre><code class="language-python">climbs = [640, 150, 880, 300]
+total = 0
+hard = 0
+highest = climbs[0]
+for climb in climbs:
+    total += climb
+    if climb &gt;= 800:
+        hard += 1
+    if climb &gt; highest:
+        highest = climb
+print(total, hard, highest)
+print(total / len(climbs))</code></pre>
+<pre class="output">1970 1 880
+492.5</pre>
+<ul>
+<li>A sum and a count start at 0.</li>
+<li>A maximum starts at the first item, not at 0: with only negative values, 0 would be wrong.</li>
+<li>An average divides by the number of items, so an empty list must be handled before it.</li>
+</ul>
+<p>A <code>while</code> loop repeats as long as its condition is true. Use it when the number
+of repetitions is not known in advance.</p>
+<pre><code class="language-python">remaining = 1000
+days = 0
+while remaining &gt; 0:
+    remaining -= 300
+    days += 1
+print(days, remaining)</code></pre>
+<pre class="output">4 -200</pre>
+
+<h2>Common mistakes</h2>
+<p><strong>Converting text that is not a whole number.</strong> <code>int</code> accepts only
+digits (and a sign); convert with <code>float</code> first when a fractional part is
+possible.</p>
+<pre><code class="language-python raises">int("3.5")</code></pre>
+<pre class="output">ValueError: invalid literal for int() with base 10: '3.5'</pre>
+<p><strong>Off by one.</strong> <code>range(1, 5)</code> stops before 5, as a slice does.</p>
+<pre><code class="language-python">print(list(range(1, 5)))</code></pre>
+<pre class="output">[1, 2, 3, 4]</pre>
+<p><strong>Changing a list while looping over it.</strong> Removing an item moves the later
+ones one place forward, and the loop then skips the item that took the removed one's place.
+Here the second 2 survives:</p>
+<pre><code class="language-python">values = [1, 2, 2, 3]
+for value in values:
+    if value == 2:
+        values.remove(value)
+print(values)</code></pre>
+<pre class="output">[1, 2, 3]</pre>
+<p>Build a new list of the items to keep instead:</p>
+<pre><code class="language-python">values = [1, 2, 2, 3]
+kept = []
+for value in values:
+    if value != 2:
+        kept.append(value)
+print(kept)</code></pre>
+<pre class="output">[1, 3]</pre>
+</main>
+</body>
+</html>

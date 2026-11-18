@@ -70,6 +70,10 @@ is too small, or whose loop reads one past the end, is caught by the sanitizer e
 output happens to be right. C is validated only in a container (`pytest -m docker` runs these
 two).
 
+To try the whole path without a course of your own, [`examples/lectures/`](../examples/lectures/)
+holds two short synthetic workshops as HTML lectures: plain Python (five weeks) and C (three
+weeks).
+
 ## How exercises are generated
 
 ```

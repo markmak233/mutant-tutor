@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Python workshop, week 5: classes and modules</title>
+<style>
+body { max-width: 46em; margin: 2em auto; padding: 0 1em; font-family: sans-serif; line-height: 1.5; }
+pre { background: #f3f3f3; padding: 0.6em 0.8em; overflow-x: auto; }
+pre.output, pre.input { background: none; border-left: 3px solid #999; }
+pre.output::before, pre.input::before { display: block; font-family: sans-serif; font-size: 0.8em; color: #666; }
+pre.output::before { content: "Output"; }
+pre.input::before { content: "Input"; }
+pre.output.stderr::before { content: "Error output, exit status 1"; }
+</style>
+</head>
+<body>
+<main>
+<h1>Python workshop, week 5: classes and modules</h1>
+
+<h2>A class</h2>
+<p>In these notes, the block right after a piece of code shows what that code prints, or the last
+line of the error it raises.</p>
+<p>A class describes a kind of object: the data each object holds and what can be done with it.
+<code>__init__</code> runs when an object is created and stores the arguments as attributes of
+<code>self</code>, the object being made.</p>
+<pre><code class="language-python">class Trail:
+    def __init__(self, name, km, climb):
+        self.name = name
+        self.km = km
+        self.climb = climb
+
+
+loop = Trail("Loop", 12.5, 640)
+falls = Trail("Falls", 7.0, 300)
+print(loop.name, falls.km)
+loop.climb += 60
+print(loop.climb, falls.climb)</code></pre>
+<pre class="output">Loop 7.0
+700 300</pre>
+<ul>
+<li><code>Trail("Loop", 12.5, 640)</code> creates an object and calls <code>__init__</code> with it
+as <code>self</code>.</li>
+<li>Each object has its own attributes: changing <code>loop.climb</code> leaves
+<code>falls.climb</code> alone.</li>
+<li>Compared with a dictionary, a misspelt attribute is an error where it is read, and the class
+says in one place what a trail has.</li>
+</ul>
+
+<h2>Methods</h2>
+<p>A method is a function defined in the class. Its first parameter is <code>self</code>; the call
+<code>ridge.steepness()</code> passes <code>ridge</code> as <code>self</code>. A method may
+compute something from the attributes, or change them.</p>
+<pre><code class="language-python">class Trail:
+    def __init__(self, name, km, climb):
+        self.name = name
+        self.km = km
+        self.climb = climb
+
+    def steepness(self):
+        return self.climb / (self.km * 1000)
+
+    def is_hard(self, limit=800):
+        return self.climb &gt;= limit
+
+    def extend(self, km):
+        self.km += km
+
+
+ridge = Trail("Ridge", 5.5, 880)
+print(round(ridge.steepness(), 2), ridge.is_hard(), ridge.is_hard(limit=900))
+ridge.extend(1.5)
+print(ridge.km)</code></pre>
+<pre class="output">0.16 True False
+7.0</pre>
+<ul>
+<li>Inside a method, the object's data is always reached through <code>self</code>.</li>
+<li><code>steepness</code> and <code>is_hard</code> return an answer and change nothing;
+<code>extend</code> changes the object and returns nothing. Keep the two kinds apart.</li>
+</ul>
+
+<h2>Printing and comparing objects</h2>
+<p>Two objects made with the same values are still two objects, and <code>==</code> between them is
+false unless the class says what equal means:</p>
+<pre><code class="language-python">a = Trail("Loop", 12.5, 640)
+b = Trail("Loop", 12.5, 640)
+print(a == b, a == a)</code></pre>
+<pre class="output">False True</pre>
+<p><code>__eq__</code> defines <code>==</code>, and <code>__repr__</code> gives the text shown when
+the object is printed or sits in a printed list.</p>
+<pre><code class="language-python">class Trail:
+    def __init__(self, name, km, climb):
+        self.name = name
+        self.km = km
+        self.climb = climb
+
+    def __repr__(self):
+        return f"Trail({self.name!r}, {self.km}, {self.climb})"
+
+    def __eq__(self, other):
+        return (self.name, self.km, self.climb) == (other.name, other.km, other.climb)
+
+
+a = Trail("Loop", 12.5, 640)
+b = Trail("Loop", 12.5, 640)
+print(a)
+print(a == b, [a, b])</code></pre>
+<pre class="output">Trail('Loop', 12.5, 640)
+True [Trail('Loop', 12.5, 640), Trail('Loop', 12.5, 640)]</pre>
+<p>Comparing tuples of the attributes compares them all at once. <code>!r</code> in an f-string
+shows a string with its quotes.</p>
+
+<h2>Objects in collections</h2>
+<p>Objects go into lists and dictionaries like any value, and everything from the earlier weeks
+applies, with an attribute where a key or a position was.</p>
+<pre><code class="language-python">trails = [Trail("Loop", 12.5, 640), Trail("Falls", 7.0, 300), Trail("Ridge", 5.5, 880)]
+by_climb = sorted(trails, key=lambda trail: trail.climb, reverse=True)
+print([trail.name for trail in by_climb])
+by_name = {trail.name: trail for trail in trails}
+print(by_name["Falls"].km)
+print(sum(trail.km for trail in trails))</code></pre>
+<pre class="output">['Ridge', 'Loop', 'Falls']
+7.0
+25.0</pre>
+<p>A list or dictionary holds references to the objects, not copies: changing an object through one
+of them is seen through the other.</p>
+<pre><code class="language-python">by_name["Falls"].km = 8.0
+print(trails[1].km)</code></pre>
+<pre class="output">8.0</pre>
+
+<h2>Data classes</h2>
+<p>A class that mostly holds data can be written as a data class: list the fields with their types,
+and <code>__init__</code>, <code>__repr__</code> and <code>__eq__</code> are written for you.</p>
+<pre><code class="language-python">from dataclasses import dataclass, field
+
+
+@dataclass
+class Trip:
+    walker: str
+    trail: str
+    km: float
+    notes: list = field(default_factory=list)
+
+
+first = Trip("ana", "Loop", 12.5)
+second = Trip("ana", "Loop", 12.5)
+print(first)
+print(first == second)
+first.notes.append("muddy")
+print(first.notes, second.notes)</code></pre>
+<pre class="output">Trip(walker='ana', trail='Loop', km=12.5, notes=[])
+True
+['muddy'] []</pre>
+<ul>
+<li>The types document the fields; Python does not check them when the program runs.</li>
+<li>A field with a default may be left out when the object is created.</li>
+<li>A default that is a list must be given as <code>field(default_factory=list)</code>, which makes
+a new list for each object: the same reason as for a function's default in week 2.</li>
+</ul>
+
+<h2>A class that owns a collection</h2>
+<p>A class is most useful when it keeps a collection consistent: every change goes through a method
+that checks it, and the questions asked of the data are methods too.</p>
+<pre><code class="language-python">class TripLog:
+    def __init__(self):
+        self.trips = []
+
+    def add(self, walker, trail, km):
+        if km &lt;= 0:
+            raise ValueError(f"km must be positive, got {km}")
+        self.trips.append(Trip(walker, trail, km))
+
+    def total_for(self, walker):
+        return sum(trip.km for trip in self.trips if trip.walker == walker)
+
+    def ranking(self):
+        totals = {}
+        for trip in self.trips:
+            totals[trip.walker] = totals.get(trip.walker, 0) + trip.km
+        return sorted(totals.items(), key=lambda pair: (-pair[1], pair[0]))
+
+
+log = TripLog()
+log.add("ana", "Loop", 12)
+log.add("ben", "Falls", 7)
+log.add("ana", "Ridge", 5)
+print(log.total_for("ana"), log.total_for("dee"))
+print(log.ranking())</code></pre>
+<pre class="output">17 0
+[('ana', 17), ('ben', 7)]</pre>
+<pre><code class="language-python raises">log.add("cy", "Loop", 0)</code></pre>
+<pre class="output">ValueError: km must be positive, got 0</pre>
+<p>The refused trip was not stored: the check comes before the <code>append</code>. A walker with
+no trips has a total of 0, not an error.</p>
+
+<h2>Modules</h2>
+<p>A module is a file of Python code, and <code>import</code> makes its names available. The
+standard library comes with Python; <code>math</code> and <code>collections</code> are two of
+its modules.</p>
+<pre><code class="language-python">import math
+from collections import Counter, defaultdict
+
+print(math.sqrt(16), math.ceil(7.2), math.floor(7.8))
+print(Counter(["ana", "ben", "ana"]).most_common(1))
+groups = defaultdict(list)
+for walker, km in [("ana", 12), ("ben", 7), ("ana", 5)]:
+    groups[walker].append(km)
+print(dict(groups))</code></pre>
+<pre class="output">4.0 8 7
+[('ana', 2)]
+{'ana': [12, 5], 'ben': [7]}</pre>
+<ul>
+<li><code>import math</code> gives the module, used as <code>math.sqrt</code>; <code>from
+collections import Counter</code> gives the name itself.</li>
+<li><code>Counter</code> is the counting pattern of week 2 ready made;
+<code>defaultdict(list)</code> is the grouping pattern: a missing key starts as an empty list.</li>
+</ul>
+<p>Your own file is a module too. Code at its top level runs when the file is imported, so keep
+there only definitions, and start the program under this test, which is true only when the file
+is run directly:</p>
+<pre><code class="language-python fragment">def main():
+    log = TripLog()
+    log.add("ana", "Loop", 12)
+    print(log.ranking())
+
+
+if __name__ == "__main__":
+    main()</code></pre>
+
+<h2>Common mistakes</h2>
+<p>**Forgetting <code>self.</code>** A name assigned without it is a local variable of the method
+and is gone when the method returns:</p>
+<pre><code class="language-python raises">class Tally:
+    def __init__(self):
+        count = 0
+
+
+Tally().count</code></pre>
+<pre class="output">AttributeError: 'Tally' object has no attribute 'count'</pre>
+<p><strong>A list defined in the class body.</strong> It belongs to the class and is shared by
+every object. Create it in <code>__init__</code> instead:</p>
+<pre><code class="language-python">class Walker:
+    trips = []
+
+    def __init__(self, name):
+        self.name = name
+
+
+ana = Walker("ana")
+ben = Walker("ben")
+ana.trips.append("Loop")
+print(ben.trips)</code></pre>
+<pre class="output">['Loop']</pre>
+<p><strong>A method without its parentheses.</strong> <code>log.ranking</code> is the method
+itself; only <code>log.ranking()</code> calls it:</p>
+<pre><code class="language-python">print(callable(log.ranking), type(log.ranking()).__name__)</code></pre>
+<pre class="output">True list</pre>
+<p>**Comparing objects of a class without <code>__eq__</code>.** As shown above, <code>==</code> is
+then true only for the very same object; a test that compares a result with an expected object
+needs <code>__eq__</code>, or a data class.</p>
+</main>
+</body>
+</html>

@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>C workshop, week 1: programs, types, loops, functions</title>
+<style>
+body { max-width: 46em; margin: 2em auto; padding: 0 1em; font-family: sans-serif; line-height: 1.5; }
+pre { background: #f3f3f3; padding: 0.6em 0.8em; overflow-x: auto; }
+pre.output, pre.input { background: none; border-left: 3px solid #999; }
+pre.output::before, pre.input::before { display: block; font-family: sans-serif; font-size: 0.8em; color: #666; }
+pre.output::before { content: "Output"; }
+pre.input::before { content: "Input"; }
+pre.output.stderr::before { content: "Error output, exit status 1"; }
+</style>
+</head>
+<body>
+<main>
+<h1>C workshop, week 1: programs, types, loops, functions</h1>
+
+<h2>A first program</h2>
+<p>In these notes, each complete program is followed by what it prints. When a program reads input,
+the input is shown first. A piece of code without <code>main</code> is a fragment: it shows one
+point and is not a whole program.</p>
+<p>A C program is text in a <code>.c</code> file. A compiler turns it into a program the machine
+can run. Running it starts at the function <code>main</code>.</p>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+int main(void) {
+    printf("Hello, trail!\n");
+    return 0;
+}</code></pre>
+<pre class="output">Hello, trail!</pre>
+<ul>
+<li><code>#include &lt;stdio.h&gt;</code> tells the compiler about <code>printf</code> and the other
+input and output functions.</li>
+<li>Every statement ends with <code>;</code>, and <code>{ }</code> group the statements of a
+function.</li>
+<li><code>printf</code> adds no line break of its own: <code>\n</code> is the line break.</li>
+<li><code>return 0;</code> in <code>main</code> is the program's exit status. 0 means success; any
+other value tells whoever ran the program that it failed.</li>
+</ul>
+<p>Compile and run it in a terminal:</p>
+<pre><code class="language-sh">gcc -Wall -std=c11 -o hello hello.c
+./hello</code></pre>
+<p><code>-Wall</code> turns on the usual warnings and <code>-std=c11</code> chooses the version of
+the language. Treat every warning as a mistake to fix: in C a warning is very often a real bug.</p>
+
+<h2>Variables and types</h2>
+<p>A variable has a type, fixed when it is declared. The three types of this week are
+<code>int</code> (whole numbers), <code>double</code> (numbers with a fractional part) and
+<code>char</code> (one character). <code>printf</code> needs a format that matches each value's
+type.</p>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+int main(void) {
+    int climb = 640;
+    double distance = 12.5;
+    char grade = 'B';
+    printf("%d m\n", climb);
+    printf("%f km\n", distance);
+    printf("%.1f km, grade %c\n", distance, grade);
+    return 0;
+}</code></pre>
+<pre class="output">640 m
+12.500000 km
+12.5 km, grade B</pre>
+<ul>
+<li><code>%d</code> prints an <code>int</code>, <code>%f</code> a <code>double</code> with six
+decimals, <code>%.1f</code> a <code>double</code> with one decimal, <code>%c</code> a
+<code>char</code>.</li>
+<li>A character is written in single quotes (<code>'B'</code>), a string in double quotes
+(<code>"B"</code>). They are different types.</li>
+<li>A variable declared without a value does not start at 0: it holds whatever was in memory. Give
+every variable a value before reading it.</li>
+</ul>
+
+<h2>Arithmetic</h2>
+<p>The type of the operands decides what an operator does. Dividing two <code>int</code> values
+gives an <code>int</code>: the fractional part is dropped.</p>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+int main(void) {
+    int total = 7;
+    int count = 2;
+    printf("%d\n", total / count);
+    printf("%d\n", total % count);
+    printf("%.2f\n", (double)total / count);
+    printf("%.2f\n", (double)(total / count));
+    printf("%c %d\n", 'a' + 1, 'a' + 1);
+    return 0;
+}</code></pre>
+<pre class="output">3
+1
+3.50
+3.00
+b 98</pre>
+<ul>
+<li><code>%</code> is the remainder of an integer division.</li>
+<li><code>(double)total</code> is a cast: it converts the value before the division, so the division
+is done on <code>double</code> values.</li>
+<li>Casting the result is too late: <code>(double)(total / count)</code> divides the integers first
+and converts 3.</li>
+<li>A <code>char</code> is a small integer, the character's code, so arithmetic works on it.</li>
+</ul>
+
+<h2>Conditions</h2>
+<p><code>if</code>, <code>else if</code> and <code>else</code> choose one branch. The conditions
+are tested from the top and only the first true one runs.</p>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+int main(void) {
+    int climb = 880;
+    if (climb &gt;= 800) {
+        printf("hard\n");
+    } else if (climb &gt;= 300) {
+        printf("moderate\n");
+    } else {
+        printf("easy\n");
+    }
+    printf("%d %d\n", climb &gt; 800 &amp;&amp; climb &lt; 900, climb &lt; 300 || climb == 880);
+    printf("%d\n", !climb);
+    return 0;
+}</code></pre>
+<pre class="output">hard
+1 1
+0</pre>
+<p>A comparison gives the <code>int</code> 1 when true and 0 when false, and any value can be a
+condition: 0 is false, everything else is true. <code>&amp;&amp;</code> is and, <code>||</code>
+is or, <code>!</code> is not.</p>
+<p><code>=</code> assigns and <code>==</code> compares. This fragment compiles, and its branch
+always runs:</p>
+<pre><code class="language-c fragment">if (climb = 300) {      /* assigns 300 to climb, then tests 300: true */
+    printf("moderate\n");
+}</code></pre>
+<p><code>-Wall</code> warns about it. Always write the braces, even around one statement: without
+them only the first statement belongs to the <code>if</code>.</p>
+
+<h2>Loops</h2>
+<p><code>for</code> is the loop for counting: a start, a condition tested before each round, and a
+step done after each round. <code>while</code> repeats as long as its condition is true.
+<code>break</code> leaves the loop; <code>continue</code> goes straight to the next round.</p>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+int main(void) {
+    int sum = 0;
+    for (int i = 1; i &lt;= 5; i++) {
+        sum += i;
+    }
+    printf("%d\n", sum);
+
+    int remaining = 1000;
+    int days = 0;
+    while (remaining &gt; 0) {
+        remaining -= 300;
+        days++;
+    }
+    printf("%d %d\n", days, remaining);
+
+    for (int i = 0; i &lt; 10; i++) {
+        if (i % 2 == 0) {
+            continue;
+        }
+        if (i &gt; 6) {
+            break;
+        }
+        printf("%d ", i);
+    }
+    printf("\n");
+    return 0;
+}</code></pre>
+<pre class="output">15
+4 -200
+1 3 5</pre>
+<ul>
+<li>A result built by a loop gets its starting value before the loop: a sum and a count start at 0.</li>
+<li><code>i++</code> adds 1 to <code>i</code>, and <code>sum += i</code> adds <code>i</code> to
+<code>sum</code>.</li>
+<li>To go over n items numbered from 0, write <code>for (int i = 0; i &lt; n; i++)</code>: with
+<code>&lt;=</code> the loop runs once too often.</li>
+</ul>
+
+<h2>Functions</h2>
+<p>A function has a return type, a name and typed parameters. The compiler reads the file from the
+top, so a function used before its definition needs a declaration (a prototype) first: its first
+line followed by <code>;</code>.</p>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+double pace(double km, double hours);
+void show(int climb);
+
+int main(void) {
+    printf("%.2f\n", pace(12.5, 3));
+    show(880);
+    show(120);
+    return 0;
+}
+
+double pace(double km, double hours) {
+    return km / hours;
+}
+
+void show(int climb) {
+    if (climb &gt;= 800) {
+        printf("%d: hard\n", climb);
+        return;
+    }
+    printf("%d: not hard\n", climb);
+}</code></pre>
+<pre class="output">4.17
+880: hard
+120: not hard</pre>
+<p>A <code>void</code> function returns nothing. Arguments are passed by value: the function gets a
+copy, and changing the copy does not change the caller's variable.</p>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+void add_break(int minutes) {
+    minutes += 15;
+    printf("inside: %d\n", minutes);
+}
+
+int main(void) {
+    int minutes = 90;
+    add_break(minutes);
+    printf("after: %d\n", minutes);
+    return 0;
+}</code></pre>
+<pre class="output">inside: 105
+after: 90</pre>
+<p>To give a result back, return it.</p>
+
+<h2>Reading input</h2>
+<p><code>scanf</code> reads values from standard input. <code>"%d"</code> reads one whole number,
+skipping spaces and line breaks before it, and stores it where <code>&amp;km</code> points: the
+<code>&amp;</code> gives <code>scanf</code> the variable's address, so it can fill the variable
+in (week 2 explains addresses). <code>scanf</code> returns how many values it stored, so the
+loop below ends when the input does, or at the first thing that is not a number.</p>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+int main(void) {
+    int km;
+    int total = 0;
+    int count = 0;
+    while (scanf("%d", &amp;km) == 1) {
+        total += km;
+        count++;
+    }
+    if (count == 0) {
+        printf("no trips\n");
+        return 0;
+    }
+    printf("%d trips, %d km, average %.1f\n", count, total, (double)total / count);
+    return 0;
+}</code></pre>
+<pre class="input">12 7
+6</pre>
+<pre class="output">3 trips, 25 km, average 8.3</pre>
+<ul>
+<li>Always test what <code>scanf</code> returns. When it stores nothing, the variable keeps its old
+value, or no value at all.</li>
+<li>The empty input is handled before the division: dividing by a count of 0 is an error.</li>
+</ul>
+
+<h2>Common mistakes</h2>
+<p><strong>Integer division where a fraction was meant.</strong> Both operands are
+<code>int</code>, so the division gives 0 before the result is stored in a <code>double</code>:</p>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+int main(void) {
+    double share = 1 / 4;
+    double fixed = 1.0 / 4;
+    printf("%.2f %.2f\n", share, fixed);
+    return 0;
+}</code></pre>
+<pre class="output">0.00 0.25</pre>
+<p>**A missing <code>&amp;</code> in <code>scanf</code>.** <code>scanf</code> then takes the
+variable's value for an address and writes somewhere it must not:</p>
+<pre><code class="language-c fragment">scanf("%d", km);        /* wrong: must be &amp;km */</code></pre>
+<p><strong>One round too many.</strong> An array of n items has positions 0 to n - 1:</p>
+<pre><code class="language-c fragment">for (int i = 0; i &lt;= n; i++) {      /* wrong: must be i &lt; n */
+    total += values[i];
+}</code></pre>
+<p><strong>Missing braces.</strong> The indentation means nothing to the compiler; the second line
+below runs whatever <code>climb</code> is:</p>
+<pre><code class="language-c fragment">if (climb &gt;= 800)
+    printf("hard\n");
+    printf("take water\n");</code></pre>
+<p><strong>A function that does not return on every path.</strong> A function declared to return a
+value must reach a <code>return</code> whatever its arguments are; <code>-Wall</code> warns when
+one path has none.</p>
+</main>
+</body>
+</html>

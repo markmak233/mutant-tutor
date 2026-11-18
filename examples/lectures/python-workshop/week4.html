@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Python workshop, week 4: sets, nested data, text</title>
+<style>
+body { max-width: 46em; margin: 2em auto; padding: 0 1em; font-family: sans-serif; line-height: 1.5; }
+pre { background: #f3f3f3; padding: 0.6em 0.8em; overflow-x: auto; }
+pre.output, pre.input { background: none; border-left: 3px solid #999; }
+pre.output::before, pre.input::before { display: block; font-family: sans-serif; font-size: 0.8em; color: #666; }
+pre.output::before { content: "Output"; }
+pre.input::before { content: "Input"; }
+pre.output.stderr::before { content: "Error output, exit status 1"; }
+</style>
+</head>
+<body>
+<main>
+<h1>Python workshop, week 4: sets, nested data, text</h1>
+
+<h2>Sets</h2>
+<p>In these notes, the block right after a piece of code shows what that code prints, or the last
+line of the error it raises.</p>
+<p>A set holds each value at most once and has no order. Use one to remove duplicates and to ask
+quickly whether a value has been seen.</p>
+<pre><code class="language-python">walkers = ["ana", "ben", "ana", "cy", "ben"]
+unique = set(walkers)
+print(len(walkers), len(unique))
+print("ana" in unique, "dee" in unique)
+unique.add("dee")
+unique.add("ana")
+print(sorted(unique))</code></pre>
+<pre class="output">5 3
+True False
+['ana', 'ben', 'cy', 'dee']</pre>
+<p>Adding a value that is already there changes nothing. A set prints in no particular order, so
+sort it before showing it. To keep the first of each value in its original order, use a set next
+to a list:</p>
+<pre><code class="language-python">seen = set()
+first_visits = []
+for walker in walkers:
+    if walker not in seen:
+        seen.add(walker)
+        first_visits.append(walker)
+print(first_visits)</code></pre>
+<pre class="output">['ana', 'ben', 'cy']</pre>
+
+<h2>Set operations</h2>
+<p>Two sets combine as in mathematics: <code>|</code> is the union (in either), <code>&amp;</code>
+the intersection (in both), <code>-</code> the difference (in the first but not the second).
+<code>&lt;=</code> tests whether every item of the first is in the second.</p>
+<pre><code class="language-python">saturday = {"ana", "ben", "cy"}
+sunday = {"ben", "cy", "dee"}
+print(sorted(saturday | sunday))
+print(sorted(saturday &amp; sunday))
+print(sorted(saturday - sunday))
+print(saturday &lt;= {"ana", "ben", "cy", "dee"})</code></pre>
+<pre class="output">['ana', 'ben', 'cy', 'dee']
+['ben', 'cy']
+['ana']
+True</pre>
+<p>Each operation returns a new set and leaves both operands as they were. The difference is not
+symmetric: <code>sunday - saturday</code> is the set with <code>dee</code> only.</p>
+
+<h2>Lists of dictionaries</h2>
+<p>Records with named fields are often kept as a list of dictionaries, the shape that data read
+from a file usually has. Reach a value step by step: the list's position, then the key, then
+inside that value.</p>
+<pre><code class="language-python">trails = [
+    {"name": "Loop", "km": 12.5, "tags": ["forest", "river"]},
+    {"name": "Falls", "km": 7.0, "tags": ["river"]},
+    {"name": "Ridge", "km": 5.5, "tags": []},
+]
+print(trails[1]["name"])
+print(trails[0]["tags"][-1])
+for trail in trails:
+    print(trail["name"], len(trail["tags"]))</code></pre>
+<pre class="output">Falls
+river
+Loop 2
+Falls 1
+Ridge 0</pre>
+<p>A comprehension picks one field from the records that pass a test:</p>
+<pre><code class="language-python">long_ones = [trail["name"] for trail in trails if trail["km"] &gt; 6]
+print(long_ones)</code></pre>
+<pre class="output">['Loop', 'Falls']</pre>
+
+<h2>Nested summaries</h2>
+<p>Grouping by two things gives a dictionary whose values are dictionaries. <code>setdefault</code>
+gives the inner dictionary, creating it the first time a walker is seen; the inner one is then
+counted into as usual.</p>
+<pre><code class="language-python">log = [("ana", "Loop", 12), ("ben", "Falls", 7), ("ana", "Falls", 7), ("ana", "Loop", 12)]
+summary = {}
+for walker, trail, km in log:
+    per_trail = summary.setdefault(walker, {})
+    per_trail[trail] = per_trail.get(trail, 0) + km
+print(summary)
+print(summary["ana"]["Loop"])</code></pre>
+<pre class="output">{'ana': {'Loop': 24, 'Falls': 7}, 'ben': {'Falls': 7}}
+24</pre>
+<p>A record that belongs to several groups is added to each of them. A trail without tags appears
+in no group:</p>
+<pre><code class="language-python">by_tag = {}
+for trail in trails:
+    for tag in trail["tags"]:
+        by_tag.setdefault(tag, []).append(trail["name"])
+print(by_tag)</code></pre>
+<pre class="output">{'forest': ['Loop'], 'river': ['Loop', 'Falls']}</pre>
+
+<h2>Processing text</h2>
+<p>Counting words needs the text made uniform first: one case, and no punctuation stuck to a word.
+<code>strip</code> with an argument removes those characters from both ends of a string, not
+from its middle.</p>
+<pre><code class="language-python">note = "Steep, but short. Steep climbs are short climbs!"
+words = []
+for raw in note.lower().split():
+    word = raw.strip(".,!?")
+    if word:
+        words.append(word)
+print(words)</code></pre>
+<pre class="output">['steep', 'but', 'short', 'steep', 'climbs', 'are', 'short', 'climbs']</pre>
+<pre><code class="language-python">counts = {}
+for word in words:
+    counts[word] = counts.get(word, 0) + 1
+top = sorted(counts.items(), key=lambda pair: (-pair[1], pair[0]))
+print(top[:3])</code></pre>
+<pre class="output">[('climbs', 2), ('short', 2), ('steep', 2)]</pre>
+<p>Three words tie at 2, so the second part of the key, the word itself, decides their order. Other
+string methods that return a new string or an answer:</p>
+<pre><code class="language-python">print("Blue Ridge".replace("Blue", "Red"))
+print("Blue Ridge".startswith("Blue"), "Blue Ridge".find("Ridge"), "Blue Ridge".find("Loop"))</code></pre>
+<pre class="output">Red Ridge
+True 5 -1</pre>
+
+<h2>Formatting output</h2>
+<p>Inside an f-string, a format follows the value after a colon: a width, an alignment
+(<code>&lt;</code> left, <code>&gt;</code> right), a number of decimals. Exercises that print a
+report are checked character by character, so the format matters.</p>
+<pre><code class="language-python">for name, km in [("Loop", 12.5), ("Falls", 7.0)]:
+    print(f"{name:&lt;6}|{km:&gt;6.1f}|")
+print(f"{1234567:,}")
+print(f"{0.256:.1%}")
+print(f"{7:03d}")
+print(round(2.675, 1), f"{2.675:.1f}", round(7.0))</code></pre>
+<pre class="output">Loop  |  12.5|
+Falls |   7.0|
+1,234,567
+25.6%
+007
+2.7 2.7 7</pre>
+<ul>
+<li><code>:&lt;6</code> pads on the right to 6 characters; <code>:&gt;6.1f</code> is one decimal,
+padded on the left to 6.</li>
+<li><code>:,</code> adds thousands separators, <code>:.1%</code> multiplies by 100 and adds the
+sign, <code>:03d</code> pads a whole number with zeros.</li>
+<li><code>round(x, 1)</code> gives a number; a format gives text. Round only when showing a result,
+never in the middle of a calculation.</li>
+</ul>
+
+<h2>Asking questions of a collection</h2>
+<p><code>max</code> and <code>min</code> take a <code>key</code> as <code>sorted</code> does, and
+return the item itself, not the key. <code>sum</code>, <code>any</code> and <code>all</code>
+take a generator expression: a comprehension without brackets that builds no list.</p>
+<pre><code class="language-python">print(max(trails, key=lambda trail: trail["km"])["name"])
+print(min(trails, key=lambda trail: len(trail["tags"]))["name"])
+print(sum(trail["km"] for trail in trails))
+print(any(trail["km"] &gt; 12 for trail in trails))
+print(all(trail["tags"] for trail in trails))
+print(max([], default=0))</code></pre>
+<pre class="output">Loop
+Ridge
+25.0
+True
+False
+0</pre>
+<ul>
+<li><code>any</code> is true when at least one item is true, <code>all</code> when none is false.
+Ridge has an empty list of tags, which counts as false.</li>
+<li><code>max</code> and <code>min</code> of an empty collection are an error unless
+<code>default</code> is given; <code>sum</code> of nothing is 0.</li>
+<li>When several items share the largest key, <code>max</code> returns the first of them.</li>
+</ul>
+
+<h2>Common mistakes</h2>
+<p><strong>Empty braces are a dictionary.</strong> The empty set is written <code>set()</code>.</p>
+<pre><code class="language-python">print(type({}), type(set()), type({1}))</code></pre>
+<pre class="output">&lt;class 'dict'&gt; &lt;class 'set'&gt; &lt;class 'set'&gt;</pre>
+<p><strong>A set has no positions.</strong></p>
+<pre><code class="language-python raises">unique[0]</code></pre>
+<pre class="output">TypeError: 'set' object is not subscriptable</pre>
+<p><strong>Rows that are the same list.</strong> <code>*</code> repeats a reference to one inner
+list, so changing one row changes all of them. Build each row in a comprehension:</p>
+<pre><code class="language-python">grid = [[0] * 3] * 2
+grid[0][0] = 9
+print(grid)
+fixed = [[0] * 3 for _ in range(2)]
+fixed[0][0] = 9
+print(fixed)</code></pre>
+<pre class="output">[[9, 0, 0], [9, 0, 0]]
+[[9, 0, 0], [0, 0, 0]]</pre>
+<p><strong>Removing from a dictionary while looping over it.</strong></p>
+<pre><code class="language-python raises">totals = {"ana": 31, "ben": 7, "cy": 12}
+for walker in totals:
+    if totals[walker] &lt; 10:
+        del totals[walker]</code></pre>
+<pre class="output">RuntimeError: dictionary changed size during iteration</pre>
+<p>Build a new dictionary of what to keep:</p>
+<pre><code class="language-python">totals = {"ana": 31, "ben": 7, "cy": 12}
+totals = {walker: km for walker, km in totals.items() if km &gt;= 10}
+print(totals)</code></pre>
+<pre class="output">{'ana': 31, 'cy': 12}</pre>
+</main>
+</body>
+</html>

@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Python workshop, week 3: files, errors, a small program</title>
+<style>
+body { max-width: 46em; margin: 2em auto; padding: 0 1em; font-family: sans-serif; line-height: 1.5; }
+pre { background: #f3f3f3; padding: 0.6em 0.8em; overflow-x: auto; }
+pre.output { background: none; border-left: 3px solid #999; }
+pre.output::before { content: "Output"; display: block; font-family: sans-serif; font-size: 0.8em; color: #666; }
+</style>
+</head>
+<body>
+<main>
+<h1>Python workshop, week 3: files, errors, a small program</h1>
+
+<h2>Reading a text file</h2>
+<p>In these notes, the block right after a piece of code shows what that code prints, or the last line of the error it raises.</p>
+<p>First a file to read. <code>open</code> with mode <code>"w"</code> creates the file (or
+empties an existing one), and <code>with</code> closes it when the block ends, even after an
+error. Always name the encoding: the default differs between systems.</p>
+<pre><code class="language-python">lines = ["walker,trail,km", "ana,Loop,12", "ben,Falls,7", "ana,Ridge,5"]
+with open("trips.csv", "w", encoding="utf-8") as f:
+    f.write("\n".join(lines) + "\n")</code></pre>
+<p>A file opened for reading is a sequence of lines. Each line still ends with its line
+break:</p>
+<pre><code class="language-python">with open("trips.csv", encoding="utf-8") as f:
+    for line in f:
+        print(repr(line))</code></pre>
+<pre class="output">'walker,trail,km\n'
+'ana,Loop,12\n'
+'ben,Falls,7\n'
+'ana,Ridge,5\n'</pre>
+<p><code>strip()</code> removes it:</p>
+<pre><code class="language-python">with open("trips.csv", encoding="utf-8") as f:
+    rows = [line.strip() for line in f]
+print(rows)</code></pre>
+<pre class="output">['walker,trail,km', 'ana,Loop,12', 'ben,Falls,7', 'ana,Ridge,5']</pre>
+
+<h2>Parsing lines into records</h2>
+<p>A line is one string. <code>split(",")</code> cuts it into fields, which are strings too,
+so a number must be converted. The first row here is a header and is skipped with a slice.</p>
+<pre><code class="language-python">trips = []
+for row in rows[1:]:
+    walker, trail, km = row.split(",")
+    trips.append((walker, trail, int(km)))
+print(trips)</code></pre>
+<pre class="output">[('ana', 'Loop', 12), ('ben', 'Falls', 7), ('ana', 'Ridge', 5)]</pre>
+<p>Real files have blank lines, often one at the end. A blank line splits into one empty
+field, and unpacking it into three names fails, so skip it first:</p>
+<pre><code class="language-python">text = "ana,Loop,12\n\nben,Falls,7\n"
+for line in text.splitlines():
+    if not line.strip():
+        continue
+    print(line.split(","))</code></pre>
+<pre class="output">['ana', 'Loop', '12']
+['ben', 'Falls', '7']</pre>
+
+<h2>Handling errors</h2>
+<p>An operation that cannot finish raises an exception, and the program stops unless the
+exception is handled. <code>try</code> runs a block; <code>except</code> names the kind of
+error to handle and what to do instead.</p>
+<pre><code class="language-python">def to_km(text):
+    try:
+        return int(text)
+    except ValueError:
+        return None
+
+print(to_km("12"), to_km("twelve"), to_km(""))</code></pre>
+<pre class="output">12 None None</pre>
+<p>A missing file raises <code>FileNotFoundError</code>:</p>
+<pre><code class="language-python">try:
+    with open("missing.csv", encoding="utf-8") as f:
+        data = f.read()
+except FileNotFoundError:
+    print("no such file")</code></pre>
+<pre class="output">no such file</pre>
+<ul>
+<li>Name the exception you expect. A bare <code>except:</code> also hides typing mistakes in
+your own code, such as a misspelt name.</li>
+<li>Keep the <code>try</code> block small: only the lines that can raise the error you
+handle.</li>
+</ul>
+
+<h2>Raising errors</h2>
+<p>A function that is given bad input should say so, not return a wrong answer.
+<code>raise</code> stops the function with an exception, and the message tells the caller
+what was wrong.</p>
+<pre><code class="language-python">def parse_trip(row):
+    parts = row.split(",")
+    if len(parts) != 3:
+        raise ValueError(f"expected 3 fields, got {len(parts)}: {row!r}")
+    walker, trail, km = parts
+    return walker, trail, int(km)
+
+print(parse_trip("ana,Loop,12"))</code></pre>
+<pre class="output">('ana', 'Loop', 12)</pre>
+<pre><code class="language-python raises">parse_trip("ana,Loop")</code></pre>
+<pre class="output">ValueError: expected 3 fields, got 2: 'ana,Loop'</pre>
+<p>The caller decides what a bad row means. Here bad rows are set aside and the rest are
+kept; <code>int("x")</code> raises <code>ValueError</code> as well, so one handler covers both
+kinds of bad row.</p>
+<pre><code class="language-python">good = []
+bad = []
+for row in ["ana,Loop,12", "ana,Loop", "ben,Falls,x"]:
+    try:
+        good.append(parse_trip(row))
+    except ValueError:
+        bad.append(row)
+print(good)
+print(bad)</code></pre>
+<pre class="output">[('ana', 'Loop', 12)]
+['ana,Loop', 'ben,Falls,x']</pre>
+
+<h2>Writing a file</h2>
+<p><code>write</code> takes one string and adds no line break of its own, so each line ends
+with <code>"\n"</code>. Numbers are converted to text, here by an f-string. Sorting the keys
+makes the file the same on every run.</p>
+<pre><code class="language-python">totals = {"ben": 7, "ana": 17}
+with open("totals.csv", "w", encoding="utf-8") as f:
+    f.write("walker,km\n")
+    for walker in sorted(totals):
+        f.write(f"{walker},{totals[walker]}\n")
+
+with open("totals.csv", encoding="utf-8") as f:
+    print(f.read(), end="")</code></pre>
+<pre class="output">walker,km
+ana,17
+ben,7</pre>
+<p>Mode <code>"w"</code> replaces the file's content; mode <code>"a"</code> adds to its end.</p>
+
+<h2>A small program in three functions</h2>
+<p>The three weeks together: read records from a file, group them in a dictionary, and
+report them in a fixed order. Each step is one function that takes its input as a parameter
+and returns its result, so each can be checked on its own.</p>
+<pre><code class="language-python">def read_trips(path):
+    trips = []
+    with open(path, encoding="utf-8") as f:
+        next(f, None)
+        for line in f:
+            if line.strip():
+                trips.append(parse_trip(line.strip()))
+    return trips
+
+
+def km_per_walker(trips):
+    totals = {}
+    for walker, _trail, km in trips:
+        totals[walker] = totals.get(walker, 0) + km
+    return totals
+
+
+def report(totals):
+    ranked = sorted(totals.items(), key=lambda pair: (-pair[1], pair[0]))
+    return [f"{walker}: {km} km" for walker, km in ranked]
+
+
+for line in report(km_per_walker(read_trips("trips.csv"))):
+    print(line)</code></pre>
+<pre class="output">ana: 17 km
+ben: 7 km</pre>
+<ul>
+<li><code>next(f, None)</code> reads the header line and throws it away; the
+<code>None</code> keeps an empty file from raising an error.</li>
+<li>Only <code>read_trips</code> touches a file. The other two work on plain lists and
+dictionaries, so they can be tried with a few values typed by hand.</li>
+<li><code>report</code> returns lines instead of printing them: the caller may print them,
+write them to a file or compare them.</li>
+</ul>
+
+<h2>Checking your functions</h2>
+<p><code>assert</code> states what must be true and raises <code>AssertionError</code> when
+it is not. A few asserts on small inputs find most mistakes. Choose the cases a function is
+most likely to get wrong: no input at all, a key seen twice, a tie.</p>
+<pre><code class="language-python">assert km_per_walker([]) == {}
+assert km_per_walker([("ana", "Loop", 12), ("ana", "Ridge", 5)]) == {"ana": 17}
+assert report({"cy": 5, "ana": 5}) == ["ana: 5 km", "cy: 5 km"]
+print("all checks passed")</code></pre>
+<pre class="output">all checks passed</pre>
+<p>A failing check stops the program at that line:</p>
+<pre><code class="language-python raises">assert report({}) == ["nobody"]</code></pre>
+<pre class="output">AssertionError</pre>
+
+<h2>Common mistakes</h2>
+<p><strong>Forgetting to convert.</strong> Fields read from a file are strings. Strings are
+joined by <code>+</code> and compared character by character, so <code>"9"</code> comes
+after <code>"12"</code>.</p>
+<pre><code class="language-python">print("12" + "5", int("12") + int("5"))
+print("9" &lt; "12", 9 &lt; 12)</code></pre>
+<pre class="output">125 17
+False True</pre>
+<p><strong>Reading a file twice.</strong> A file is read from front to back once. After the
+first pass nothing is left; keep the lines in a list if they are needed again.</p>
+<pre><code class="language-python">with open("trips.csv", encoding="utf-8") as f:
+    first = f.readlines()
+    second = f.readlines()
+print(len(first), len(second))</code></pre>
+<pre class="output">4 0</pre>
+<p><strong>Printing instead of returning.</strong> A function whose result is needed later
+must return it; see week 2, "Functions".</p>
+</main>
+</body>
+</html>

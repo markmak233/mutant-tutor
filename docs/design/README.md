@@ -95,6 +95,13 @@ container for isolation is fine; deploying the tool as a service is not.
   variables already exported in the shell win. Run commands from the repo root.
 - Public demo corpus for RAG: Apache Spark documentation (Apache 2.0). Same code, different data source.
 - Exercises generated from lectures are private by default; only hand-written synthetic examples go in `examples/`.
+  `examples/lectures/` holds synthetic lectures (owner, 2026-11-18): two short workshops
+  (plain Python, five weeks; C, three weeks) written for the repository by a model and read
+  by the owner, no course's material, under the repository's licence, so that screenshots
+  and a public walk-through have a course to show. A test runs every piece of code in them
+  against the output they show (C on this machine's compiler, with the sanitizers).
+  Exercises generated from them stay in the workspace all the same; a screenshot of one
+  may be published.
 - Safety net: pre-commit + gitleaks, `.claude/settings.json` deny rules, project-only API key with usage limit.
   Remember `.gitignore` does not remove files already in git history.
 - gitleaks runs as a pre-commit `local` / `system` hook on staged changes, using the brew-installed

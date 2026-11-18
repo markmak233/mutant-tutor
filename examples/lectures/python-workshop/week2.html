@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Python workshop, week 2: dictionaries, functions, sorting</title>
+<style>
+body { max-width: 46em; margin: 2em auto; padding: 0 1em; font-family: sans-serif; line-height: 1.5; }
+pre { background: #f3f3f3; padding: 0.6em 0.8em; overflow-x: auto; }
+pre.output { background: none; border-left: 3px solid #999; }
+pre.output::before { content: "Output"; display: block; font-family: sans-serif; font-size: 0.8em; color: #666; }
+</style>
+</head>
+<body>
+<main>
+<h1>Python workshop, week 2: dictionaries, functions, sorting</h1>
+
+<h2>Tuples and unpacking</h2>
+<p>In these notes, the block right after a piece of code shows what that code prints, or the last line of the error it raises.</p>
+<p>A tuple is a fixed group of values, written with commas and usually parentheses. It is
+the natural shape for one record: a trail's name, its length in km and its climb in metres.
+Unpacking gives each part a name in one assignment.</p>
+<pre><code class="language-python">trip = ("Loop", 12.5, 640)
+name, distance, climb = trip
+print(name, climb)
+print(trip[1])</code></pre>
+<pre class="output">Loop 640
+12.5</pre>
+<p>Unpacking also works in a loop over a list of tuples, which reads better than indexing:</p>
+<pre><code class="language-python">pairs = [("Loop", 640), ("Falls", 300)]
+for name, climb in pairs:
+    print(f"{name} climbs {climb} m")</code></pre>
+<pre class="output">Loop climbs 640 m
+Falls climbs 300 m</pre>
+<p>A tuple is immutable, like a string:</p>
+<pre><code class="language-python raises">trip[2] = 700</code></pre>
+<pre class="output">TypeError: 'tuple' object does not support item assignment</pre>
+
+<h2>Dictionaries</h2>
+<p>A dictionary maps keys to values. Looking a key up does not depend on how many keys there
+are, which is why a dictionary, not a list, is used to find something by name.</p>
+<pre><code class="language-python">climbs = {"Loop": 640, "Falls": 300}
+climbs["Ridge"] = 880
+print(climbs["Loop"])
+print(len(climbs))
+print("Falls" in climbs, 300 in climbs)
+print(climbs.get("Summit"))
+print(climbs.get("Summit", 0))</code></pre>
+<pre class="output">640
+3
+True False
+None
+0</pre>
+<ul>
+<li><code>in</code> tests the keys, never the values.</li>
+<li><code>get(key)</code> gives <code>None</code> for a missing key, and
+<code>get(key, default)</code> gives the default.</li>
+<li>Square brackets with a missing key are an error:</li>
+</ul>
+<pre><code class="language-python raises">climbs["Summit"]</code></pre>
+<pre class="output">KeyError: 'Summit'</pre>
+
+<h2>Counting and grouping</h2>
+<p>Two patterns cover most uses of a dictionary. <strong>Counting</strong>: the value is a
+number that grows each time the key is seen. <code>get(key, 0)</code> supplies the 0 the
+first time.</p>
+<pre><code class="language-python">walkers = ["ana", "ben", "ana", "cy", "ana", "ben"]
+counts = {}
+for walker in walkers:
+    counts[walker] = counts.get(walker, 0) + 1
+print(counts)</code></pre>
+<pre class="output">{'ana': 3, 'ben': 2, 'cy': 1}</pre>
+<p><strong>Grouping</strong>: the value is a list that collects every item with that key.
+<code>setdefault(key, [])</code> gives the key's list, creating an empty one the first time.</p>
+<pre><code class="language-python">log = [("ana", 12), ("ben", 7), ("ana", 5), ("ben", 9)]
+by_walker = {}
+for walker, km in log:
+    by_walker.setdefault(walker, []).append(km)
+print(by_walker)</code></pre>
+<pre class="output">{'ana': [12, 5], 'ben': [7, 9]}</pre>
+<p>A dictionary keeps its keys in the order they were first inserted.</p>
+
+<h2>Looping over a dictionary</h2>
+<p><code>items()</code> gives each key with its value, as pairs to unpack. Looping over the
+dictionary itself gives the keys only, and <code>values()</code> the values only.</p>
+<pre><code class="language-python">for walker, kms in by_walker.items():
+    print(walker, sum(kms), max(kms))</code></pre>
+<pre class="output">ana 17 12
+ben 16 9</pre>
+<pre><code class="language-python">print(list(counts))
+print(sorted(counts.values()))</code></pre>
+<pre class="output">['ana', 'ben', 'cy']
+[1, 2, 3]</pre>
+<p><code>sum</code>, <code>max</code>, <code>min</code> and <code>len</code> take a whole list,
+so a summary of one group needs no loop of its own.</p>
+
+<h2>Functions</h2>
+<p>A function names a piece of work. Its parameters receive the caller's values, and
+<code>return</code> hands a result back to the caller.</p>
+<pre><code class="language-python">def average(values):
+    return sum(values) / len(values)
+
+print(average([12, 5]))</code></pre>
+<pre class="output">8.5</pre>
+<p>Returning is not printing. A function that only prints gives its caller
+<code>None</code>, so its result cannot be stored, compared or tested:</p>
+<pre><code class="language-python">def show_average(values):
+    print(sum(values) / len(values))
+
+result = show_average([12, 5])
+print(result)</code></pre>
+<pre class="output">8.5
+None</pre>
+<p><code>return</code> also ends the function at once, so a chain of tests needs no
+<code>else</code>:</p>
+<pre><code class="language-python">def grade(climb):
+    if climb &gt;= 800:
+        return "hard"
+    if climb &gt;= 300:
+        return "moderate"
+    return "easy"
+
+print(grade(880), grade(300), grade(299))</code></pre>
+<pre class="output">hard moderate easy</pre>
+
+<h2>Default and keyword arguments</h2>
+<p>A parameter with a default may be left out by the caller. Arguments can also be given by
+name, in any order.</p>
+<pre><code class="language-python">def pace(km, hours, digits=1):
+    return round(km / hours, digits)
+
+print(pace(12.5, 3))
+print(pace(12.5, 3, 3))
+print(pace(hours=3, km=12.5, digits=0))</code></pre>
+<pre class="output">4.2
+4.167
+4.0</pre>
+<p>A default is created once, when the function is defined, not at each call. A list used as
+a default is therefore shared by every call that leaves the argument out:</p>
+<pre><code class="language-python">def add_trip(name, trips=[]):
+    trips.append(name)
+    return trips
+
+print(add_trip("Loop"))
+print(add_trip("Falls"))</code></pre>
+<pre class="output">['Loop']
+['Loop', 'Falls']</pre>
+<p>Use <code>None</code> as the default and make the list inside the function:</p>
+<pre><code class="language-python">def add_trip(name, trips=None):
+    if trips is None:
+        trips = []
+    trips.append(name)
+    return trips
+
+print(add_trip("Loop"))
+print(add_trip("Falls"))</code></pre>
+<pre class="output">['Loop']
+['Falls']</pre>
+
+<h2>Comprehensions</h2>
+<p>A comprehension builds a list (or a dictionary) from a loop written in one expression:
+the value to keep, then the loop, then an optional condition.</p>
+<pre><code class="language-python">kms = [12, 7, 5, 9]
+print([km * 1000 for km in kms])
+print([km for km in kms if km &gt;= 7])
+print({walker: sum(group) for walker, group in by_walker.items()})</code></pre>
+<pre class="output">[12000, 7000, 5000, 9000]
+[12, 7, 9]
+{'ana': 17, 'ben': 16}</pre>
+<p>The second line is the same as starting with an empty list and appending inside an
+<code>if</code> inside a <code>for</code>. Use a comprehension when the body is one
+expression; keep the ordinary loop when it needs several steps.</p>
+
+<h2>Sorting</h2>
+<p><code>sorted</code> returns a new list in increasing order and leaves its argument alone.
+<code>key</code> names what to compare, and <code>reverse=True</code> gives decreasing
+order.</p>
+<pre><code class="language-python">totals = {"cy": 17, "ben": 16, "ana": 17}
+print(sorted(totals))
+print(sorted(totals.items(), key=lambda pair: pair[1], reverse=True))
+print(sorted(totals.items(), key=lambda pair: (-pair[1], pair[0])))</code></pre>
+<pre class="output">['ana', 'ben', 'cy']
+[('cy', 17), ('ana', 17), ('ben', 16)]
+[('ana', 17), ('cy', 17), ('ben', 16)]</pre>
+<ul>
+<li>Sorting is stable: items whose keys are equal stay in their original order. In the second
+line <code>cy</code> and <code>ana</code> tie at 17, so they stay as the dictionary had them.</li>
+<li>To decide ties, sort by a tuple. <code>(-pair[1], pair[0])</code> means: largest total
+first, and among equal totals the name in alphabetical order.</li>
+</ul>
+<p>A list's own <code>sort()</code> method sorts in place and returns <code>None</code>;
+storing its result is a common mistake.</p>
+<pre><code class="language-python">kms = [12, 7, 5, 9]
+ordered = sorted(kms)
+print(ordered, kms)
+kms.sort()
+print(kms)
+print(kms.sort())</code></pre>
+<pre class="output">[5, 7, 9, 12] [12, 7, 5, 9]
+[5, 7, 9, 12]
+None</pre>
+</main>
+</body>
+</html>

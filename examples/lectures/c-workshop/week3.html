@@ -1,0 +1,339 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>C workshop, week 3: structs, memory, a small program</title>
+<style>
+body { max-width: 46em; margin: 2em auto; padding: 0 1em; font-family: sans-serif; line-height: 1.5; }
+pre { background: #f3f3f3; padding: 0.6em 0.8em; overflow-x: auto; }
+pre.output, pre.input { background: none; border-left: 3px solid #999; }
+pre.output::before, pre.input::before { display: block; font-family: sans-serif; font-size: 0.8em; color: #666; }
+pre.output::before { content: "Output"; }
+pre.input::before { content: "Input"; }
+pre.output.stderr::before { content: "Error output, exit status 1"; }
+</style>
+</head>
+<body>
+<main>
+<h1>C workshop, week 3: structs, memory, a small program</h1>
+
+<h2>Structs</h2>
+<p>In these notes, each complete program is followed by what it prints. When a program reads input,
+the input is shown first. A piece of code without <code>main</code> is a fragment: it shows one
+point and is not a whole program.</p>
+<p>A struct groups values of different types under one name. <code>typedef</code> gives the struct
+type a short name, and <code>.</code> reaches a field.</p>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+typedef struct {
+    char name[16];
+    double km;
+    int climb;
+} Trail;
+
+int main(void) {
+    Trail loop = {"Loop", 12.5, 640};
+    Trail trails[2] = {{"Falls", 7.0, 300}, {"Ridge", 5.5, 880}};
+    loop.climb += 60;
+    printf("%s: %.1f km, %d m\n", loop.name, loop.km, loop.climb);
+    int total = 0;
+    for (int i = 0; i &lt; 2; i++) {
+        total += trails[i].climb;
+    }
+    printf("%d\n", total);
+    Trail copy = loop;
+    copy.km = 1.0;
+    printf("%.1f %.1f\n", loop.km, copy.km);
+    return 0;
+}</code></pre>
+<pre class="output">Loop: 12.5 km, 700 m
+1180
+12.5 1.0</pre>
+<ul>
+<li>The values in <code>{ }</code> fill the fields in the order they are declared.</li>
+<li>An array of structs keeps each record's fields together: <code>trails[i].climb</code>.</li>
+<li>Assigning a struct copies all of it, the array inside included; the copy is independent of the
+original.</li>
+</ul>
+
+<h2>Structs and pointers</h2>
+<p>A struct passed to a function is copied, like any argument. Passing its address avoids the copy
+and lets the function change the caller's struct. <code>p-&gt;field</code> reaches a field
+through a pointer; it is short for <code>(*p).field</code>.</p>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+typedef struct {
+    char name[16];
+    double km;
+    int climb;
+} Trail;
+
+void raise_climb(Trail *trail, int metres) {
+    trail-&gt;climb += metres;
+}
+
+double steepness(const Trail *trail) {
+    return trail-&gt;climb / (trail-&gt;km * 1000.0);
+}
+
+int main(void) {
+    Trail ridge = {"Ridge", 5.5, 880};
+    raise_climb(&amp;ridge, 20);
+    printf("%d\n", ridge.climb);
+    printf("%.2f\n", steepness(&amp;ridge));
+    return 0;
+}</code></pre>
+<pre class="output">900
+0.16</pre>
+<ul>
+<li>Use <code>.</code> on a struct and <code>-&gt;</code> on a pointer to a struct.</li>
+<li><code>const Trail *</code> says the function only reads the struct.</li>
+<li>Had <code>raise_climb</code> taken a <code>Trail</code>, it would have changed its own copy and
+<code>ridge.climb</code> would still be 880.</li>
+</ul>
+
+<h2>malloc and free</h2>
+<p>A local array has a size fixed in the code and disappears when its function returns.
+<code>malloc</code> asks for a block of memory of a size chosen while the program runs; the
+block stays until <code>free</code> gives it back.</p>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+
+int main(void) {
+    int n = 4;
+    int *kms = malloc(n * sizeof(int));
+    if (kms == NULL) {
+        return 1;
+    }
+    for (int i = 0; i &lt; n; i++) {
+        kms[i] = (i + 1) * 5;
+    }
+    printf("%d %d\n", kms[0], kms[n - 1]);
+    free(kms);
+    return 0;
+}</code></pre>
+<pre class="output">5 20</pre>
+<ul>
+<li><code>malloc</code> takes a number of bytes: the number of items times <code>sizeof</code> one
+item.</li>
+<li>It returns <code>NULL</code> when no memory is left; test before using the block.</li>
+<li>The block's contents are not set to 0. Write an item before reading it.</li>
+<li>Each block is freed exactly once. After <code>free</code>, the pointer still holds the old
+address, and the block must not be used through it.</li>
+</ul>
+
+<h2>A growing array</h2>
+<p>When the number of values is not known in advance, start with a small block and make it larger
+when it is full. <code>realloc</code> gives a block of the new size with the old contents,
+possibly at another address.</p>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+
+int main(void) {
+    int capacity = 2;
+    int count = 0;
+    int *values = malloc(capacity * sizeof(int));
+    if (values == NULL) {
+        return 1;
+    }
+    int value;
+    while (scanf("%d", &amp;value) == 1) {
+        if (count == capacity) {
+            capacity *= 2;
+            int *bigger = realloc(values, capacity * sizeof(int));
+            if (bigger == NULL) {
+                free(values);
+                return 1;
+            }
+            values = bigger;
+        }
+        values[count] = value;
+        count++;
+    }
+    printf("%d values, capacity %d\n", count, capacity);
+    if (count &gt; 0) {
+        printf("last: %d\n", values[count - 1]);
+    }
+    free(values);
+    return 0;
+}</code></pre>
+<pre class="input">12 7 5 9 3</pre>
+<pre class="output">5 values, capacity 8
+last: 3</pre>
+<ul>
+<li>Two numbers describe the array: <code>count</code>, how many items are in use, and
+<code>capacity</code>, how many fit.</li>
+<li>The result of <code>realloc</code> goes into a second pointer first. When it fails it returns
+<code>NULL</code> and the old block is still there, to be freed.</li>
+<li>Doubling the capacity keeps the number of <code>realloc</code> calls small: 5 values needed two.</li>
+</ul>
+
+<h2>Memory errors</h2>
+<p>Mistakes with memory do not always show: the program may run and print the right answer. The
+four below are the common ones.</p>
+<pre><code class="language-c fragment">int *a = malloc(3 * sizeof(int));
+a[3] = 1;                   /* past the end of the block */
+free(a);
+printf("%d\n", a[0]);       /* used after free */
+free(a);                    /* freed twice */
+
+int *b = malloc(10 * sizeof(int));
+b = malloc(20 * sizeof(int));   /* a leak: the first block can never be freed */
+free(b);</code></pre>
+<p>The compiler can add checks that stop the program at the faulty line:</p>
+<pre><code class="language-sh">gcc -Wall -std=c11 -g -fsanitize=address,undefined -o trips trips.c</code></pre>
+<ul>
+<li>AddressSanitizer reports <code>heap-buffer-overflow</code> for a read or write outside a block,
+<code>heap-use-after-free</code>, and <code>attempting double-free</code>, each with the file
+and line (<code>-g</code> adds the line numbers).</li>
+<li>On Linux it also lists, when the program ends, the blocks that were never freed: <code>detected
+memory leaks</code>.</li>
+<li>UndefinedBehaviorSanitizer reports, among others, a position outside a local array and a
+division by zero, as <code>runtime error</code>.</li>
+</ul>
+<p>A program is correct only when it runs clean under these checks, not merely when its output
+looks right.</p>
+
+<h2>Reading lines</h2>
+<p><code>fgets</code> reads one line into an array, never more than the size given, and keeps the
+line break. <code>sscanf</code> then reads values out of that line, as <code>scanf</code> does
+from the input. Reading line by line means a bad line spoils only itself.</p>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;string.h&gt;
+
+int main(void) {
+    char line[64];
+    while (fgets(line, sizeof(line), stdin) != NULL) {
+        line[strcspn(line, "\n")] = '\0';
+        char walker[16];
+        int km;
+        if (sscanf(line, "%15s %d", walker, &amp;km) != 2) {
+            printf("skipped: [%s]\n", line);
+            continue;
+        }
+        printf("%s walked %d km\n", walker, km);
+    }
+    return 0;
+}</code></pre>
+<pre class="input">ana 12
+ben seven
+
+cy 5</pre>
+<pre class="output">ana walked 12 km
+skipped: [ben seven]
+skipped: []
+cy walked 5 km</pre>
+<ul>
+<li><code>fgets</code> returns <code>NULL</code> at the end of the input.</li>
+<li><code>strcspn(line, "\n")</code> is the position of the line break, or of the final
+<code>'\0'</code> when there is none; writing <code>'\0'</code> there removes the line break.</li>
+<li><code>%15s</code> reads one word of at most 15 characters, which with the <code>'\0'</code>
+fills the 16 bytes of <code>walker</code>. A plain <code>%s</code> would write past the array on
+a long word.</li>
+<li><code>sscanf</code> returns how many values it stored: anything but 2 here is a bad line.</li>
+</ul>
+
+<h2>A small program</h2>
+<p>The three weeks together: read <code>walker km</code> pairs, keep one total per walker in an
+array of structs, and print the walkers by total, largest first.</p>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+#include &lt;string.h&gt;
+
+#define MAX_WALKERS 100
+
+typedef struct {
+    char name[16];
+    int km;
+} Walker;
+
+int find(const Walker walkers[], int n, const char *name) {
+    for (int i = 0; i &lt; n; i++) {
+        if (strcmp(walkers[i].name, name) == 0) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+int by_km_then_name(const void *a, const void *b) {
+    const Walker *x = a;
+    const Walker *y = b;
+    if (x-&gt;km != y-&gt;km) {
+        return y-&gt;km &gt; x-&gt;km ? 1 : -1;
+    }
+    return strcmp(x-&gt;name, y-&gt;name);
+}
+
+int main(void) {
+    Walker walkers[MAX_WALKERS];
+    int n = 0;
+    char name[16];
+    int km;
+    while (scanf("%15s %d", name, &amp;km) == 2) {
+        int i = find(walkers, n, name);
+        if (i == -1) {
+            if (n == MAX_WALKERS) {
+                fprintf(stderr, "too many walkers\n");
+                return 1;
+            }
+            i = n;
+            strcpy(walkers[i].name, name);
+            walkers[i].km = 0;
+            n++;
+        }
+        walkers[i].km += km;
+    }
+    qsort(walkers, n, sizeof(Walker), by_km_then_name);
+    for (int i = 0; i &lt; n; i++) {
+        printf("%s: %d km\n", walkers[i].name, walkers[i].km);
+    }
+    return 0;
+}</code></pre>
+<pre class="input">ana 12
+ben 7
+cy 17
+ana 5</pre>
+<pre class="output">ana: 17 km
+cy: 17 km
+ben: 7 km</pre>
+<ul>
+<li><code>find</code> returns the walker's position, or -1 when the name is new: a value no position
+can have.</li>
+<li><code>qsort</code> sorts any array, given the number of items, one item's size and a function
+that compares two items: negative when the first goes first, positive when it goes last, 0 when
+they are equal.</li>
+<li>Equal totals are ordered by name, so the output is the same on every run; <code>qsort</code>
+alone promises no order between equal items.</li>
+</ul>
+
+<h2>Exit status and error messages</h2>
+<p>A program reports failure in two ways: a message on standard error, written with
+<code>fprintf(stderr, ...)</code>, and a non-zero exit status. Results go to standard output
+only, so that another program can read them without the messages.</p>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;stdlib.h&gt;
+
+int main(void) {
+    int count;
+    if (scanf("%d", &amp;count) != 1 || count &lt;= 0) {
+        fprintf(stderr, "error: expected a positive count\n");
+        return EXIT_FAILURE;
+    }
+    printf("%d trips\n", count);
+    return EXIT_SUCCESS;
+}</code></pre>
+<pre class="input">3</pre>
+<pre class="output">3 trips</pre>
+<p>With an input that is not a positive number, the program prints nothing on standard output:</p>
+<pre class="input">none</pre>
+<pre class="output stderr">error: expected a positive count</pre>
+<ul>
+<li><code>EXIT_SUCCESS</code> is 0 and <code>EXIT_FAILURE</code> is 1 on the usual systems; both
+come from <code>stdlib.h</code>.</li>
+<li>Check the input before using it, and stop early: the rest of the program can then rely on it.</li>
+<li>On every path out of the program, free what was allocated and return the right status.</li>
+</ul>
+</main>
+</body>
+</html>

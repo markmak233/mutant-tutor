@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>C workshop, week 2: arrays, strings, pointers</title>
+<style>
+body { max-width: 46em; margin: 2em auto; padding: 0 1em; font-family: sans-serif; line-height: 1.5; }
+pre { background: #f3f3f3; padding: 0.6em 0.8em; overflow-x: auto; }
+pre.output, pre.input { background: none; border-left: 3px solid #999; }
+pre.output::before, pre.input::before { display: block; font-family: sans-serif; font-size: 0.8em; color: #666; }
+pre.output::before { content: "Output"; }
+pre.input::before { content: "Input"; }
+pre.output.stderr::before { content: "Error output, exit status 1"; }
+</style>
+</head>
+<body>
+<main>
+<h1>C workshop, week 2: arrays, strings, pointers</h1>
+
+<h2>Arrays</h2>
+<p>In these notes, each complete program is followed by what it prints. When a program reads input,
+the input is shown first. A piece of code without <code>main</code> is a fragment: it shows one
+point and is not a whole program.</p>
+<p>An array holds a fixed number of values of one type, side by side in memory. Positions start at
+0.</p>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+int main(void) {
+    int climbs[4] = {640, 150, 880, 300};
+    int n = sizeof(climbs) / sizeof(climbs[0]);
+    int total = 0;
+    int highest = climbs[0];
+    for (int i = 0; i &lt; n; i++) {
+        total += climbs[i];
+        if (climbs[i] &gt; highest) {
+            highest = climbs[i];
+        }
+    }
+    printf("%d items, total %d, highest %d\n", n, total, highest);
+    climbs[1] = 200;
+    printf("%d\n", climbs[1]);
+    return 0;
+}</code></pre>
+<pre class="output">4 items, total 1970, highest 880
+200</pre>
+<ul>
+<li>The size is part of the declaration and never changes.</li>
+<li>The valid positions of <code>climbs</code> are 0 to 3. C does not check a position:
+<code>climbs[4]</code> reads or writes memory that belongs to something else. That is undefined
+behaviour: the program may crash, print nonsense, or seem to work.</li>
+<li><code>sizeof(climbs) / sizeof(climbs[0])</code> is the number of items: the array's size in
+bytes divided by one item's. It works only where the array is declared.</li>
+<li>A maximum starts at the first item, not at 0: with only negative values 0 would be wrong.</li>
+</ul>
+
+<h2>Arrays and functions</h2>
+<p>A function that takes an array receives where the array starts, not a copy of it, and nothing
+about its length. So the length is passed as well, and a change the function makes is a change
+to the caller's array.</p>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+int sum(const int values[], int n) {
+    int total = 0;
+    for (int i = 0; i &lt; n; i++) {
+        total += values[i];
+    }
+    return total;
+}
+
+void double_all(int values[], int n) {
+    for (int i = 0; i &lt; n; i++) {
+        values[i] *= 2;
+    }
+}
+
+int main(void) {
+    int kms[3] = {12, 7, 5};
+    printf("%d\n", sum(kms, 3));
+    double_all(kms, 3);
+    printf("%d %d %d\n", kms[0], kms[1], kms[2]);
+    printf("%d\n", sum(kms, 0));
+    return 0;
+}</code></pre>
+<pre class="output">24
+24 14 10
+0</pre>
+<ul>
+<li><code>const</code> in <code>sum</code> is a promise not to change the items; the compiler
+refuses an assignment to <code>values[i]</code> there.</li>
+<li>Inside a function, <code>sizeof(values)</code> is the size of an address, not of the array: the
+number of items cannot be worked out, only passed.</li>
+<li>With <code>n</code> equal to 0 the loop does not run and the sum is 0: a function should give a
+sensible answer for an empty array.</li>
+</ul>
+
+<h2>Strings</h2>
+<p>C has no string type. A string is an array of <code>char</code> that ends with the character
+<code>'\0'</code>, whose code is 0. Every string function finds the end by looking for it.</p>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+int main(void) {
+    char name[] = "Ridge";
+    int length = 0;
+    while (name[length] != '\0') {
+        length++;
+    }
+    printf("%s has %d letters\n", name, length);
+    printf("%d bytes\n", (int)sizeof(name));
+    name[0] = 'r';
+    printf("%s\n", name);
+    return 0;
+}</code></pre>
+<pre class="output">Ridge has 5 letters
+6 bytes
+ridge</pre>
+<ul>
+<li><code>"Ridge"</code> takes 6 bytes: five letters and the <code>'\0'</code>. An array for a
+string of n letters needs n + 1 items.</li>
+<li><code>%s</code> prints characters up to the <code>'\0'</code>. Without one, it goes on past the
+end of the array.</li>
+<li>The characters of an array can be changed one by one, as any array's items.</li>
+</ul>
+
+<h2>String functions</h2>
+<p><code>string.h</code> declares the usual operations. None of them makes room: the destination
+array must already be large enough.</p>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+#include &lt;string.h&gt;
+
+int main(void) {
+    char trail[16];
+    strcpy(trail, "Falls");
+    printf("%d\n", (int)strlen(trail));
+    printf("%d %d\n", strcmp(trail, "Falls") == 0, strcmp(trail, "Loop") &lt; 0);
+    char label[32];
+    snprintf(label, sizeof(label), "%s: %d m", trail, 300);
+    printf("%s\n", label);
+    return 0;
+}</code></pre>
+<pre class="output">5
+1 1
+Falls: 300 m</pre>
+<ul>
+<li><code>strlen</code> counts the characters before the <code>'\0'</code>.</li>
+<li><code>strcmp</code> returns 0 when two strings are equal, a negative number when the first comes
+earlier in dictionary order, a positive one when it comes later. Two strings are never compared
+with <code>==</code>: that compares where they are stored.</li>
+<li><code>strcpy</code> copies a string with its <code>'\0'</code> and does not check the room.
+Copying a string longer than the destination writes past its end.</li>
+<li><code>snprintf</code> works like <code>printf</code> into an array and never writes more than
+the size it is given.</li>
+</ul>
+
+<h2>Pointers</h2>
+<p>Every variable is stored at an address. A pointer is a variable that holds an address.
+<code>&amp;x</code> is the address of <code>x</code>; <code>*p</code> is the variable that
+<code>p</code> points to.</p>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+int main(void) {
+    int climb = 640;
+    int *p = &amp;climb;
+    printf("%d\n", *p);
+    *p = 700;
+    printf("%d\n", climb);
+    int other = 120;
+    p = &amp;other;
+    *p += 1;
+    printf("%d %d\n", climb, other);
+    return 0;
+}</code></pre>
+<pre class="output">640
+700
+700 121</pre>
+<ul>
+<li><code>int *p</code> declares a pointer to an <code>int</code>.</li>
+<li>Assigning to <code>*p</code> changes the variable pointed to; assigning to <code>p</code> makes
+it point to another variable.</li>
+<li><code>NULL</code> is the pointer that points to nothing. Using <code>*p</code> when
+<code>p</code> is <code>NULL</code>, or when <code>p</code> was never given a value, is
+undefined behaviour, usually a crash.</li>
+</ul>
+
+<h2>Pointers as parameters</h2>
+<p>Arguments are copies, so a function cannot change a caller's variable through its value. Given
+the variable's address, it can. This is also how a function gives back more than one result.</p>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+void swap(int *a, int *b) {
+    int old = *a;
+    *a = *b;
+    *b = old;
+}
+
+void lowest_highest(const int values[], int n, int *lowest, int *highest) {
+    *lowest = values[0];
+    *highest = values[0];
+    for (int i = 1; i &lt; n; i++) {
+        if (values[i] &lt; *lowest) {
+            *lowest = values[i];
+        }
+        if (values[i] &gt; *highest) {
+            *highest = values[i];
+        }
+    }
+}
+
+int main(void) {
+    int x = 3;
+    int y = 8;
+    swap(&amp;x, &amp;y);
+    printf("%d %d\n", x, y);
+    int climbs[4] = {640, 150, 880, 300};
+    int low;
+    int high;
+    lowest_highest(climbs, 4, &amp;low, &amp;high);
+    printf("%d %d\n", low, high);
+    return 0;
+}</code></pre>
+<pre class="output">8 3
+150 880</pre>
+<p>The caller writes <code>&amp;x</code> to pass an address, and the function writes
+<code>*a</code> to reach the variable. This is why <code>scanf</code> takes
+<code>&amp;km</code>: it stores what it read into the caller's variable.</p>
+
+<h2>Pointers and arrays</h2>
+<p>An array's name, used as a value, is a pointer to its first item. Adding 1 to a pointer moves it
+by one item, whatever the item's size, and <code>a[i]</code> means the same as <code>*(a +
+i)</code>. A string can therefore be walked with a pointer until the <code>'\0'</code>.</p>
+<pre><code class="language-c">#include &lt;stdio.h&gt;
+
+int count_char(const char *text, char wanted) {
+    int count = 0;
+    for (const char *p = text; *p != '\0'; p++) {
+        if (*p == wanted) {
+            count++;
+        }
+    }
+    return count;
+}
+
+int main(void) {
+    int kms[3] = {12, 7, 5};
+    int *p = kms;
+    printf("%d %d\n", *p, *(p + 2));
+    printf("%d\n", p[1] == kms[1]);
+    printf("%d\n", count_char("blue ridge loop", 'e'));
+    return 0;
+}</code></pre>
+<pre class="output">12 5
+1
+2</pre>
+<ul>
+<li><code>int values[]</code> and <code>int *values</code> mean the same as a parameter.</li>
+<li><code>const char *text</code> is a pointer through which the characters may be read but not
+changed; a function that only reads a string should say so.</li>
+</ul>
+
+<h2>Common mistakes</h2>
+<p>Each fragment below compiles, some with a warning, and may even seem to work on one machine. All
+are undefined behaviour. Week 3 shows a tool that stops the program where it happens.</p>
+<p><strong>Past the end of an array.</strong></p>
+<pre><code class="language-c fragment">int kms[3];
+kms[3] = 0;                 /* the last valid position is 2 */</code></pre>
+<p><strong>No room for the end of the string.</strong></p>
+<pre><code class="language-c fragment">char name[5];
+strcpy(name, "Ridge");      /* needs 6 bytes */</code></pre>
+<p><strong>Returning the address of a local variable.</strong> The array is gone when the function
+returns:</p>
+<pre><code class="language-c fragment">char *make_label(void) {
+    char label[16] = "Loop";
+    return label;
+}</code></pre>
+<p>**Comparing strings with <code>==</code>.** This compares two addresses and is false even when
+the letters are the same:</p>
+<pre><code class="language-c fragment">if (name == "Loop") {       /* wrong: strcmp(name, "Loop") == 0 */
+    count++;
+}</code></pre>
+<p><strong>A pointer that points nowhere.</strong></p>
+<pre><code class="language-c fragment">int *p;
+*p = 5;                     /* p was never given an address */</code></pre>
+</main>
+</body>
+</html>
