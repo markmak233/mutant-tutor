@@ -13,6 +13,10 @@
   PDF pages, and a question's header says "PDF pages 12-13". Before, the plan had no range
   to write for such a lecture, and a stray number at the foot of one page could stop its
   exercises. Lectures that print slide numbers are untouched.
+- **A failed image build says why.** When Docker cannot get a course image's base (a
+  network timeout, a proxy), the build's log now shows Docker's own last lines, with
+  credentials and paths taken out, and where to look next. Before, it said only "base
+  snapshot build failed".
 - **A release can have its own page.** The manual Release workflow takes a "publish" box:
   ticked, the zip it has just tested becomes a GitHub Release for the version's tag, with
   this file's section for that version as its text. Off by default; still never PyPI.

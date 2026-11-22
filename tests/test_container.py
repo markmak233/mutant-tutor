@@ -321,7 +321,8 @@ def test_a_build_sends_the_recipe_with_no_context_checks_inside_and_drops_older_
 
 def test_a_failed_build_stops_there_and_keeps_the_older_image(tmp_path):
     docker = FakeDocker(fail={"build"}, images="tutor-run-demo:0123456789ab\n")
-    with pytest.raises(ContainerError, match="build failed"):
+    # FakeDocker fails every build, so the base snapshot is the one that stops it.
+    with pytest.raises(ContainerError, match="could not get the base image"):
         build(workspace(tmp_path), docker, say=lambda text: None)
     assert "image ls" not in docker.verbs()
     removed = [c[-1] for c in docker.commands if c[1:3] == ["image", "rm"]]

@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import subprocess
 
 import pytest
 import test_container as support
@@ -80,6 +81,41 @@ def test_snapshot_is_cleaned_when_the_caller_is_interrupted():
     docker = support.FakeDocker()
     with pytest.raises(KeyboardInterrupt), image_build.snapshot("FROM python:3.11\n", docker):
         raise KeyboardInterrupt
+    assert docker.commands[-1][:3] == ["docker", "image", "rm"]
+
+
+def test_a_failed_base_pull_shows_dockers_own_error_without_credentials(monkeypatch):
+    # Found 2026-11-22: a pull that timed out showed only "base snapshot build failed".
+    # Docker's last lines now follow, with a proxy's password, a token's query and a
+    # credential variable's value taken out; the temporary tag is still removed.
+    monkeypatch.setenv("REGISTRY_TOKEN", "fake-registry-value")
+    stderr = "\n".join([
+        "#1 [internal] load build definition from Dockerfile",
+        "#3 ERROR: failed to fetch anonymous token: Get "
+        '"https://auth.docker.io/token?scope=repository%3Alibrary%2Fpython%3Apull": '
+        "net/http: TLS handshake timeout",
+        "proxyconnect tcp: dial http://alice:pa55word@proxy.example:8080/ failed",
+        "using fake-registry-value",
+        "",
+    ])
+
+    class Failing(support.FakeDocker):
+        def __call__(self, command, **kwargs):
+            done = super().__call__(command, **kwargs)
+            if command[1] == "build":
+                return subprocess.CompletedProcess(command, 1, "", stderr)
+            return done
+
+    docker = Failing()
+    with pytest.raises(ContainerError) as raised:
+        with image_build.snapshot("FROM python:3.11\n", docker):
+            pass
+    message = str(raised.value)
+    assert "could not get the base image python:3.11 ready" in message
+    assert "TLS handshake timeout" in message
+    assert "docker pull python:3.11" in message
+    for hidden in ("pa55word", "alice", "scope=", "fake-registry-value"):
+        assert hidden not in message
     assert docker.commands[-1][:3] == ["docker", "image", "rm"]
 
 
